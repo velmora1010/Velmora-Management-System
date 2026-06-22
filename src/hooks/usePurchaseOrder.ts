@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { Vendor, POFormState, POUIState } from '../types';
 
 // Sub-hooks for responsibility isolation
@@ -63,7 +64,7 @@ export const usePurchaseOrder = () => {
 
     try {
       const { data, error } = await supabase
-        .from('purchase_orders_rows')
+        .from(SUPABASE_TABLES.purchaseOrders)
         .select('po_number')
         .order('created_at', { ascending: false })
         .limit(1);

@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import type { MainTask, SubTask } from '../../types';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export const useMainTasks = () => {
   const [mainTasks, setMainTasks] = useState<MainTask[]>([]);
@@ -12,9 +13,9 @@ export const useMainTasks = () => {
     setIsLoading(true);
     setError('');
     try {
-      console.log('Loading main_tasks...');
+      console.log('Loading', SUPABASE_TABLES.mainTasks, '...');
       const { data: mDataResult, error: mError } = await supabase
-        .from('main_tasks')
+        .from(SUPABASE_TABLES.mainTasks)
         .select('*')
         .order('created_at', { ascending: false });
 
@@ -25,7 +26,7 @@ export const useMainTasks = () => {
         if (fallback) mData = JSON.parse(fallback);
         else throw mError;
       }
-      console.log('Loaded main_tasks:', mData?.length);
+      console.log("Loaded table:", SUPABASE_TABLES.mainTasks, mData?.length, mError);
       
       console.log('Loading sub_tasks_rows...');
       const { data: sDataResult, error: sError } = await supabase
@@ -39,7 +40,7 @@ export const useMainTasks = () => {
         if (fallback) sData = JSON.parse(fallback);
         else throw sError;
       }
-      console.log('Loaded sub_tasks_rows:', sData?.length);
+      console.log("Loaded table: sub_tasks_rows", sData?.length, sError);
 
       setMainTasks(mData || []);
       setSubTasks(sData || []);
@@ -58,7 +59,7 @@ export const useMainTasks = () => {
     try {
       // 1. Insert Main Task
       const { data: mainTask, error: mainError } = await supabase
-        .from('main_tasks')
+        .from(SUPABASE_TABLES.mainTasks)
         .insert([{ task_title: title, status: 'active' }])
         .select()
         .single();
@@ -98,7 +99,7 @@ export const useMainTasks = () => {
     try {
       // Cascade delete is usually handled by DB, but we can do it manually just in case
       await supabase.from('sub_tasks_rows').delete().eq('main_task_id', mainTaskId);
-      const { error } = await supabase.from('main_tasks').delete().eq('id', mainTaskId);
+      const { error } = await supabase.from(SUPABASE_TABLES.mainTasks).delete().eq('id', mainTaskId);
       if (error) throw error;
       
       await fetchMainTasks();

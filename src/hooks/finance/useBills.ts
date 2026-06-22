@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export interface FinanceBill {
   id?: string;
@@ -28,9 +29,9 @@ export const useBills = () => {
   const fetchBills = useCallback(async () => {
     setError(null);
     try {
-      console.log('Loading finance_bills_rows...');
+      console.log('Loading', SUPABASE_TABLES.financeBills, '...');
       let { data: fetchResult, error: fetchError } = await supabase
-        .from('finance_bills_rows')
+        .from(SUPABASE_TABLES.financeBills)
         .select('*')
         .eq('status', 'active')
         .order('created_at', { ascending: false });
@@ -38,7 +39,7 @@ export const useBills = () => {
       // Fallback if status column doesn't exist
       if (fetchError && fetchError.code === '42703') {
         const retry = await supabase
-          .from('finance_bills_rows')
+          .from(SUPABASE_TABLES.financeBills)
           .select('*')
           .order('created_at', { ascending: false });
         fetchResult = retry.data;
@@ -46,13 +47,14 @@ export const useBills = () => {
       }
 
       let data = fetchResult;
+      console.log("Loaded table:", SUPABASE_TABLES.financeBills, data?.length, fetchError);
+
       if (fetchError) {
         console.error('finance_bills_rows fetch error:', fetchError.message);
         const fallback = localStorage.getItem('finance_bills');
         if (fallback) data = JSON.parse(fallback);
         else throw fetchError;
       }
-      console.log('Loaded finance_bills_rows:', data?.length);
       
       // Filter out archived manually just in case
       const activeBills = (data || []).filter(b => b.status !== 'archived');
@@ -84,7 +86,7 @@ export const useBills = () => {
   const addBill = async (billData: FinanceBill) => {
     try {
       const { data, error } = await supabase
-        .from('finance_bills_rows')
+        .from(SUPABASE_TABLES.financeBills)
         .insert([{ ...billData, status: 'active' }])
         .select()
         .single();
@@ -101,7 +103,7 @@ export const useBills = () => {
   const updateBill = async (id: string, updates: Partial<FinanceBill>) => {
     try {
       const { data, error } = await supabase
-        .from('finance_bills_rows')
+        .from(SUPABASE_TABLES.financeBills)
         .update(updates)
         .eq('id', id)
         .select()
@@ -112,7 +114,7 @@ export const useBills = () => {
         const retryUpdates = { ...updates };
         delete retryUpdates.bill_status;
         const retry = await supabase
-          .from('finance_bills_rows')
+          .from(SUPABASE_TABLES.financeBills)
           .update(retryUpdates)
           .eq('id', id)
           .select()

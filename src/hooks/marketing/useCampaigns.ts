@@ -30,14 +30,14 @@ export const useCampaigns = () => {
       if (isMounted.current) {
         // Normalize campaign_name to be a string just in case it was saved as an object
         const normalizedData = (data || []).map((c: any) => {
-          let name = c.campaign_name;
+          let name = c.campaign_name || c.name || c.title || 'Untitled Campaign';
           if (name && typeof name === 'object') {
-            name = name.name || name.campaign_name || JSON.stringify(name);
+            name = name.campaign_name || name.name || name.title || JSON.stringify(name);
           }
-          if (!name && typeof c.name === 'string') {
-            name = c.name;
+          if (name === '[object Object]') {
+             name = c.name || c.title || 'Untitled Campaign';
           }
-          return { ...c, campaign_name: name || 'Unnamed Campaign' };
+          return { ...c, campaign_name: name };
         });
         setCampaigns((normalizedData as Campaign[]) || []);
       }

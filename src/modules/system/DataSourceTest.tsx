@@ -10,6 +10,7 @@ import {
   getLocalCounts,
 } from '../../services/migrationService';
 import type { MigrationReport } from '../../services/migrationService';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export const DataSourceTest = () => {
   const [isTesting, setIsTesting] = useState(false);
@@ -24,16 +25,7 @@ export const DataSourceTest = () => {
     localCounts?: any;
   } | null>(null);
 
-  const tablesToTest = [
-    'raw_material_barcodes',
-    'product_barcodes',
-    'combo_boxes',
-    'qc_barcodes',
-    'finance_categories_rows',
-    'finance_bills_rows',
-    'expenses_row',
-    'campaigns_rows'
-  ];
+  const tablesToTest = Object.values(SUPABASE_TABLES);
 
   const runTest = async () => {
     setIsTesting(true);

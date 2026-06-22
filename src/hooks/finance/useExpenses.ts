@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export interface FinanceExpense {
   id?: string;
@@ -27,9 +28,9 @@ export const useExpenses = () => {
   const fetchExpenses = useCallback(async () => {
     setError(null);
     try {
-      console.log('Loading expenses_row...');
+      console.log('Loading', SUPABASE_TABLES.expenses, '...');
       let { data: fetchResult, error: fetchError } = await supabase
-        .from('expenses_row')
+        .from(SUPABASE_TABLES.expenses)
         .select('*')
         .eq('status', 'active')
         .order('created_at', { ascending: false });
@@ -37,7 +38,7 @@ export const useExpenses = () => {
       // Fallback if status column doesn't exist
       if (fetchError && fetchError.code === '42703') {
         const retry = await supabase
-          .from('expenses_row')
+          .from(SUPABASE_TABLES.expenses)
           .select('*')
           .order('created_at', { ascending: false });
         fetchResult = retry.data;
@@ -45,13 +46,14 @@ export const useExpenses = () => {
       }
 
       let data = fetchResult;
+      console.log("Loaded table:", SUPABASE_TABLES.expenses, data?.length, fetchError);
+
       if (fetchError) {
         console.error('expenses_row fetch error:', fetchError.message);
         const fallback = localStorage.getItem('expenses');
         if (fallback) data = JSON.parse(fallback);
         else throw fetchError;
       }
-      console.log('Loaded expenses_row:', data?.length);
       
       const activeExpenses = (data || []).filter(e => e.status !== 'archived');
       setExpenses(activeExpenses);
@@ -82,7 +84,7 @@ export const useExpenses = () => {
   const addExpense = async (expenseData: FinanceExpense) => {
     try {
       const { data, error } = await supabase
-        .from('expenses_row')
+        .from(SUPABASE_TABLES.expenses)
         .insert([{ ...expenseData, status: 'active' }])
         .select()
         .single();
@@ -99,7 +101,7 @@ export const useExpenses = () => {
   const updateExpense = async (id: string, updates: Partial<FinanceExpense>) => {
     try {
       const { data, error } = await supabase
-        .from('expenses_row')
+        .from(SUPABASE_TABLES.expenses)
         .update(updates)
         .eq('id', id)
         .select()

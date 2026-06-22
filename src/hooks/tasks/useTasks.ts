@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import type { Task } from '../../types';
 import { useAuth } from '../useAuth';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export const useTasks = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -14,8 +15,9 @@ export const useTasks = () => {
     setError('');
     try {
       // First fetch tasks
+      console.log('Loading', SUPABASE_TABLES.tasks, '...');
       const { data: tasksData, error: tasksError } = await supabase
-        .from('Task_row')
+        .from(SUPABASE_TABLES.tasks)
         .select('*')
         .neq('status', 'archived')
         .order('created_at', { ascending: false });
@@ -28,10 +30,13 @@ export const useTasks = () => {
         if (fallback) baseTasks = JSON.parse(fallback);
         else throw tasksError;
       }
+      
+      console.log("Loaded table:", SUPABASE_TABLES.tasks, baseTasks?.length, tasksError);
 
       // Then fetch all related task items
+      console.log('Loading', SUPABASE_TABLES.taskItems, '...');
       const { data: itemsData, error: itemsError } = await supabase
-        .from('Task_item_rows')
+        .from(SUPABASE_TABLES.taskItems)
         .select('*');
 
       let baseItems = itemsData;
@@ -41,6 +46,8 @@ export const useTasks = () => {
         const fallback = localStorage.getItem('task_items');
         if (fallback) baseItems = JSON.parse(fallback);
       }
+      
+      console.log("Loaded table:", SUPABASE_TABLES.taskItems, baseItems?.length, itemsError);
 
       // Map snake_case to camelCase
       const mappedTasks = (baseTasks || []).map((t: any) => ({
@@ -81,7 +88,7 @@ export const useTasks = () => {
     try {
       // 1. Insert Task
       const { data: newTask, error: taskError } = await supabase
-        .from('Task_row')
+        .from(SUPABASE_TABLES.tasks)
         .insert([{
           ...taskPayload,
           status: 'pending',
@@ -95,7 +102,7 @@ export const useTasks = () => {
       // 2. If selectedSubTaskTitle is provided, we need to fetch main_task and its sub_tasks
       if (selectedSubTaskTitle) {
         const { data: mainTaskData, error: mainError } = await supabase
-          .from('main_tasks')
+          .from(SUPABASE_TABLES.mainTasks)
           .select('id')
           .eq('task_title', selectedSubTaskTitle)
           .single();
@@ -115,7 +122,7 @@ export const useTasks = () => {
             }));
             
             const { error: insertItemsError } = await supabase
-              .from('Task_item_rows')
+              .from(SUPABASE_TABLES.taskItems)
               .insert(itemsPayload);
               
             if (insertItemsError) throw insertItemsError;
@@ -138,7 +145,7 @@ export const useTasks = () => {
   const updateTaskStatus = async (taskId: string, newStatus: string) => {
     try {
       const { error } = await supabase
-        .from('Task_row')
+        .from(SUPABASE_TABLES.tasks)
         .update({ status: newStatus })
         .eq('id', taskId);
         
@@ -154,7 +161,7 @@ export const useTasks = () => {
   const toggleTaskItem = async (itemId: string, completed: boolean) => {
     try {
       const { error } = await supabase
-        .from('Task_item_rows')
+        .from(SUPABASE_TABLES.taskItems)
         .update({ is_completed: completed })
         .eq('id', itemId);
         
@@ -170,7 +177,7 @@ export const useTasks = () => {
   const archiveTask = async (taskId: string) => {
     try {
       const { error } = await supabase
-        .from('Task_row')
+        .from(SUPABASE_TABLES.tasks)
         .update({ status: 'archived' })
         .eq('id', taskId);
         

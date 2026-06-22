@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import type { CampaignInfluencer, InfluencerBargainHistory } from '../../types';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export const useCampaignInfluencers = (campaignId?: string) => {
   const [influencers, setInfluencers] = useState<CampaignInfluencer[]>([]);
@@ -14,14 +15,17 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     setIsLoading(true);
     setError(null);
     try {
+      console.log('Loading', SUPABASE_TABLES.influencersInfo, '...');
       const { data: infData, error: infError } = await supabase
-        .from('influencers_info_rows')
+        .from(SUPABASE_TABLES.influencersInfo)
         .select('*')
         .eq('campaign_id', campaignId)
         .order('created_at', { ascending: false });
 
       if (infError) throw infError;
       
+      console.log('Loaded table:', SUPABASE_TABLES.influencersInfo, infData?.length, infError);
+
       const infoList = infData || [];
       const influencerIds = infoList.map(inf => inf.id);
 
@@ -35,17 +39,17 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           { data: performanceData },
           { data: dispatchData }
         ] = await Promise.all([
-          supabase.from('influencer_platform_rows').select('*').in('influencer_id', influencerIds),
-          supabase.from('influencer_pricing_rows').select('*').in('influencer_id', influencerIds),
-          supabase.from('influencer_product_rows').select('*').in('influencer_id', influencerIds),
-          supabase.from('influencer_brand_performance_rows').select('*').in('influencer_id', influencerIds),
-          supabase.from('influencer_dispatch_rows').select('*').in('influencer_id', influencerIds).eq('campaign_id', campaignId)
+          supabase.from(SUPABASE_TABLES.influencerPlatform).select('*').in('influencer_id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerPricing).select('*').in('influencer_id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerProduct).select('*').in('influencer_id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerBrandPerformance).select('*').in('influencer_id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('influencer_id', influencerIds).eq('campaign_id', campaignId)
         ]);
 
         let bargainData: InfluencerBargainHistory[] = [];
         if (pricingData && pricingData.length > 0) {
           const pricingIds = pricingData.map(p => p.id);
-          const { data: bData } = await supabase.from('influencer_bargain_history_rows').select('*').in('pricing_id', pricingIds);
+          const { data: bData } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).select('*').in('pricing_id', pricingIds);
           bargainData = bData || [];
         }
 
@@ -93,7 +97,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           influencerData.name.split(' ').map(w => w[0]?.toUpperCase() || '').join('').substring(0, 3).toUpperCase() : 'INF';
         
         const { data: existingCodes, error: codeErr } = await supabase
-          .from('influencers_info_rows')
+          .from(SUPABASE_TABLES.influencersInfo)
           .select('code')
           .eq('campaign_id', campaignId)
           .ilike('code', `${prefix}%`);
@@ -115,7 +119,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
         // 2. Insert into influencers_info
         const { data: newInfo, error: insertInfoErr } = await supabase
-          .from('influencers_info_rows')
+          .from(SUPABASE_TABLES.influencersInfo)
           .insert([{
             campaign_id: campaignId,
             code: newCode,
@@ -149,14 +153,14 @@ export const useCampaignInfluencers = (campaignId?: string) => {
               ...p,
               influencer_id: newInfluencerId
             }));
-            const { error: platErr } = await supabase.from('influencer_platform_rows').insert(platformsToInsert);
+            const { error: platErr } = await supabase.from(SUPABASE_TABLES.influencerPlatform).insert(platformsToInsert);
             if (platErr) throw platErr;
           }
 
           // 4. Pricing
           if (influencerData.pricing) {
             const { data: newPricing, error: priceErr } = await supabase
-              .from('influencer_pricing_rows')
+              .from(SUPABASE_TABLES.influencerPricing)
               .insert([{
                 influencer_id: newInfluencerId,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -186,7 +190,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
                 creator_request: b.creator_request,
                 brand_request: b.brand_request
               }));
-              const { error: bargainErr } = await supabase.from('influencer_bargain_history_rows').insert(bargainsToInsert);
+              const { error: bargainErr } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).insert(bargainsToInsert);
               if (bargainErr) throw bargainErr;
             }
           }
@@ -199,7 +203,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
               ...p,
               influencer_id: newInfluencerId
             }));
-            const { error: prodErr } = await supabase.from('influencer_product_rows').insert(productsToInsert);
+            const { error: prodErr } = await supabase.from(SUPABASE_TABLES.influencerProduct).insert(productsToInsert);
             if (prodErr) throw prodErr;
           }
 
@@ -211,12 +215,12 @@ export const useCampaignInfluencers = (campaignId?: string) => {
               ...p,
               influencer_id: newInfluencerId
             }));
-            const { error: perfErr } = await supabase.from('influencer_brand_performance_rows').insert(perfsToInsert);
+            const { error: perfErr } = await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).insert(perfsToInsert);
             if (perfErr) throw perfErr;
           }
         } catch (innerErr) {
           console.error("Error copying related data, rolling back:", innerErr);
-          await supabase.from('influencers_info_rows').delete().eq('id', newInfluencerId);
+          await supabase.from(SUPABASE_TABLES.influencersInfo).delete().eq('id', newInfluencerId);
           throw innerErr;
         }
 
@@ -239,7 +243,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     try {
       // 1. Update basic info
       const { error: updateInfoErr } = await supabase
-        .from('influencers_info_rows')
+        .from(SUPABASE_TABLES.influencersInfo)
         .update({
           name: influencerData.name,
           influencer_name: influencerData.influencer_name,
@@ -258,17 +262,17 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       if (updateInfoErr) throw updateInfoErr;
 
       // 2. Delete existing relational data safely
-      await supabase.from('influencer_platform_rows').delete().eq('influencer_id', id);
+      await supabase.from(SUPABASE_TABLES.influencerPlatform).delete().eq('influencer_id', id);
       
-      const { data: oldPricing } = await supabase.from('influencer_pricing_rows').select('id').eq('influencer_id', id);
+      const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', id);
       if (oldPricing && oldPricing.length > 0) {
         const oldPricingIds = oldPricing.map(p => p.id);
-        await supabase.from('influencer_bargain_history_rows').delete().in('pricing_id', oldPricingIds);
+        await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
       }
       
-      await supabase.from('influencer_pricing_rows').delete().eq('influencer_id', id);
-      await supabase.from('influencer_product_rows').delete().eq('influencer_id', id);
-      await supabase.from('influencer_brand_performance_rows').delete().eq('influencer_id', id);
+      await supabase.from(SUPABASE_TABLES.influencerPricing).delete().eq('influencer_id', id);
+      await supabase.from(SUPABASE_TABLES.influencerProduct).delete().eq('influencer_id', id);
+      await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).delete().eq('influencer_id', id);
 
       let newPricingId: string | null = null;
 
@@ -281,14 +285,14 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           id: undefined, // remove old ids
           influencer_id: id
         }));
-        const { error: platErr } = await supabase.from('influencer_platform_rows').insert(platformsToInsert);
+        const { error: platErr } = await supabase.from(SUPABASE_TABLES.influencerPlatform).insert(platformsToInsert);
         if (platErr) throw platErr;
       }
 
       // 4. Pricing
       if (influencerData.pricing) {
         const { data: newPricing, error: priceErr } = await supabase
-          .from('influencer_pricing_rows')
+          .from(SUPABASE_TABLES.influencerPricing)
           .insert([{
             influencer_id: id,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -318,7 +322,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             creator_request: b.creator_request,
             brand_request: b.brand_request
           }));
-          const { error: bargainErr } = await supabase.from('influencer_bargain_history_rows').insert(bargainsToInsert);
+          const { error: bargainErr } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).insert(bargainsToInsert);
           if (bargainErr) throw bargainErr;
         }
       }
@@ -332,7 +336,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           id: undefined,
           influencer_id: id
         }));
-        const { error: prodErr } = await supabase.from('influencer_product_rows').insert(productsToInsert);
+        const { error: prodErr } = await supabase.from(SUPABASE_TABLES.influencerProduct).insert(productsToInsert);
         if (prodErr) throw prodErr;
       }
 
@@ -345,7 +349,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           id: undefined,
           influencer_id: id
         }));
-        const { error: perfErr } = await supabase.from('influencer_brand_performance_rows').insert(perfsToInsert);
+        const { error: perfErr } = await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).insert(perfsToInsert);
         if (perfErr) throw perfErr;
       }
 
@@ -365,7 +369,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     setError(null);
     try {
       const { error } = await supabase
-        .from('influencers_info_rows')
+        .from(SUPABASE_TABLES.influencersInfo)
         .update({ is_archived: isArchived })
         .eq('id', id);
       if (error) throw error;

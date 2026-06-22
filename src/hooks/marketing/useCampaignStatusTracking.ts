@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export interface StatusTrackingRecord {
   id: string;
@@ -87,12 +88,15 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
     setError(null);
     try {
       // Step 1: Fetch from influencer_status_tracking
+      console.log('Loading', SUPABASE_TABLES.influencerStatus, '...');
       const { data: trackingData, error: trackingError } = await supabase
-        .from('influencer_status_tracking')
+        .from(SUPABASE_TABLES.influencerStatus)
         .select('*')
         .eq('campaign_id', campaignId);
         
       if (trackingError) throw trackingError;
+      
+      console.log('Loaded table:', SUPABASE_TABLES.influencerStatus, trackingData?.length, trackingError);
       
       const records = (trackingData || []) as StatusTrackingRecord[];
       
@@ -100,7 +104,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         // Step 2: Fetch dispatch details to join
         const dispatchIds = [...new Set(records.map(r => r.dispatch_id).filter(Boolean))];
         const { data: dispatchData, error: dispatchError } = await supabase
-          .from('influencer_dispatch_details')
+          .from(SUPABASE_TABLES.influencerDispatch)
           .select('*')
           .in('id', dispatchIds);
           
@@ -109,7 +113,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         // Step 3: Fetch influencer info to join
         const influencerIds = [...new Set(records.map(r => r.influencer_id).filter(Boolean))];
         const { data: infoData, error: infoError } = await supabase
-          .from('influencers_info')
+          .from(SUPABASE_TABLES.influencersInfo)
           .select('id, name, profile_file_url, code')
           .in('id', influencerIds);
           
@@ -117,7 +121,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
 
         // Step 4: Fetch pricing info to join
         const { data: pricingData, error: pricingError } = await supabase
-          .from('influencer_pricing')
+          .from(SUPABASE_TABLES.influencerPricing)
           .select('influencer_id, final_price')
           .in('influencer_id', influencerIds);
           
@@ -190,7 +194,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
   const saveMilestone = async (trackingId: string, updates: Partial<StatusTrackingRecord>) => {
     try {
       const { error } = await supabase
-        .from('influencer_status_tracking')
+        .from(SUPABASE_TABLES.influencerStatus)
         .update(updates)
         .eq('id', trackingId);
         

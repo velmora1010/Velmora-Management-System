@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import type { POHeaderPayload, POProductPayload, POFormState, POUIState } from '../../types';
 import type { PurchaseOrderDocumentProps } from '../../services/pdf/pdfTemplates';
 import type { POValidation } from './usePOValidation';
@@ -86,7 +87,7 @@ export const usePOSave = (
       const headerPayload = prepareHeaderPayload();
 
       const { data: headerData, error: headerErr } = await supabase
-        .from('purchase_orders_rows')
+        .from(SUPABASE_TABLES.purchaseOrders)
         .insert([headerPayload])
         .select('id')
         .single();
@@ -103,7 +104,7 @@ export const usePOSave = (
       }
 
       const { error: productsErr } = await supabase
-        .from('purchase_order_products_rows')
+        .from(SUPABASE_TABLES.purchaseOrderProducts)
         .insert(productPayloads);
 
       if (productsErr) {
@@ -130,7 +131,7 @@ export const usePOSave = (
       await generatePONumber();
       
       // Fire-and-forget audit log
-      logAction('CREATE', 'purchase_orders_rows', purchaseOrderId, {
+      logAction('CREATE', SUPABASE_TABLES.purchaseOrders, purchaseOrderId, {
         po_number: headerPayload.po_number,
         subtotal: headerPayload.subtotal,
         vendor_name: headerPayload.vendor_name

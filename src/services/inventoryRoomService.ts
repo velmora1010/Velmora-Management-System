@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { SUPABASE_TABLES } from '../config/supabaseTables';
 
 export const inventoryRoomService = {
   async getInventoryIn() {
@@ -14,7 +15,9 @@ export const inventoryRoomService = {
   },
 
   async getProductionBatches() {
-    const { data, error } = await supabase.from('production_batches').select('*').order('created_at', { ascending: false });
+    console.log("Loading", SUPABASE_TABLES.productionBatches, "...");
+    const { data, error } = await supabase.from(SUPABASE_TABLES.productionBatches).select('*').order('created_at', { ascending: false });
+    console.log("Loaded table:", SUPABASE_TABLES.productionBatches, data?.length, error);
     if (error) throw error;
     return data;
   },

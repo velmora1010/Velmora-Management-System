@@ -1,5 +1,6 @@
 import { mockInitialState } from '../data/mockInventoryData';
 import { supabase } from '../lib/supabase';
+import { SUPABASE_TABLES } from '../config/supabaseTables';
 import toast from 'react-hot-toast';
 
 
@@ -243,7 +244,9 @@ private init() {
   // 1. Raw Materials
   async getRawMaterialBarcodes(): Promise<any[]> {
     try {
-      const { data, error } = await supabase.from('raw_material_barcodes').select('*');
+      console.log("Loading", SUPABASE_TABLES.rawMaterialBarcodes, "...");
+      const { data, error } = await supabase.from(SUPABASE_TABLES.rawMaterialBarcodes).select('*');
+      console.log("Loaded table:", SUPABASE_TABLES.rawMaterialBarcodes, data?.length, error);
       if (!error && data && data.length > 0) {
         return data.map((item: any) => ({
           ...item,
@@ -261,7 +264,9 @@ private init() {
   }
 
   async getRawMaterialBarcodesFromSupabase(): Promise<any[]> {
-    const { data, error } = await supabase.from('raw_material_barcodes').select('*');
+    console.log("Loading", SUPABASE_TABLES.rawMaterialBarcodes, "...");
+    const { data, error } = await supabase.from(SUPABASE_TABLES.rawMaterialBarcodes).select('*');
+    console.log("Loaded table:", SUPABASE_TABLES.rawMaterialBarcodes, data?.length, error);
     if (error) throw error;
     return data || [];
   }
@@ -283,7 +288,9 @@ private init() {
 
   // 2. Products
   async getProductBarcodesFromSupabase(): Promise<any[]> {
-    const { data, error } = await supabase.from('product_barcodes').select('*');
+    console.log("Loading", SUPABASE_TABLES.productBarcodes, "...");
+    const { data, error } = await supabase.from(SUPABASE_TABLES.productBarcodes).select('*');
+    console.log("Loaded table:", SUPABASE_TABLES.productBarcodes, data?.length, error);
     if (error) throw error;
     return data || [];
   }
@@ -305,7 +312,9 @@ private init() {
 
   // 3. Combo Boxes
   async getComboBoxesFromSupabase(): Promise<any[]> {
-    const { data, error } = await supabase.from('combo_boxes').select('*');
+    console.log("Loading", SUPABASE_TABLES.comboBoxes, "...");
+    const { data, error } = await supabase.from(SUPABASE_TABLES.comboBoxes).select('*');
+    console.log("Loaded table:", SUPABASE_TABLES.comboBoxes, data?.length, error);
     if (error) throw error;
     return data || [];
   }
@@ -327,7 +336,9 @@ private init() {
 
   // 4. QC Barcodes
   async getQCBarcodesFromSupabase(): Promise<any[]> {
-    const { data, error } = await supabase.from('qc_barcodes').select('*');
+    console.log("Loading", SUPABASE_TABLES.qcBarcodes, "...");
+    const { data, error } = await supabase.from(SUPABASE_TABLES.qcBarcodes).select('*');
+    console.log("Loaded table:", SUPABASE_TABLES.qcBarcodes, data?.length, error);
     if (error) throw error;
     return data || [];
   }
@@ -394,7 +405,7 @@ private init() {
   // Barcode specific aliases (since batches ARE the barcodes mostly)
   async getBarcodes() {
     try {
-      const { data, error } = await supabase.from('raw_material_barcodes').select('*');
+      const { data, error } = await supabase.from(SUPABASE_TABLES.rawMaterialBarcodes).select('*');
       if (!error && data && data.length > 0) {
         return data.map((item: any) => ({
           ...item,
@@ -636,7 +647,7 @@ private init() {
 
   async getProductBarcodes() {
     try {
-      const { data, error } = await supabase.from('product_barcodes').select('*');
+      const { data, error } = await supabase.from(SUPABASE_TABLES.productBarcodes).select('*');
       if (!error && data && data.length > 0) {
         return data.map((item: any) => ({
           ...item,
@@ -667,7 +678,7 @@ private init() {
   // ---- QUALITY CHECK BARCODES ----
   async getQCBarcodes() {
     try {
-      const { data, error } = await supabase.from('qc_barcodes').select('*');
+      const { data, error } = await supabase.from(SUPABASE_TABLES.qcBarcodes).select('*');
       if (!error && data && data.length > 0) {
         return data.map((item: any) => ({
           ...item,
@@ -978,7 +989,7 @@ private init() {
   
   async getComboBoxes() {
     try {
-      const { data, error } = await supabase.from('combo_boxes').select('*');
+      const { data, error } = await supabase.from(SUPABASE_TABLES.comboBoxes).select('*');
       if (!error && data && data.length > 0) {
         return data.map((item: any) => ({
           ...item,
@@ -2036,7 +2047,7 @@ async processBarcodeScan(params: {
            throw new Error(`Box already has enough ${pCode} (${alreadyPackedOfThisType}/${requiredMatch.requiredQty}).`);
         }
         
-        const fullBarcodes = this.getProductBarcodes();
+        const fullBarcodes = await this.getProductBarcodes();
         const bIndex = fullBarcodes.findIndex((b: any) => getMasterBarcode(b) === mBar);
         if (bIndex !== -1) {
             fullBarcodes[bIndex].currentStage = 'PACKED_IN_COMBO';
@@ -2144,7 +2155,7 @@ async processBarcodeScan(params: {
     return { success: true, message: successMessage, stage: nextStage, item: record };
   }
 
-  packProductIntoComboBox({ comboBoxBarcode, productBarcode, addedBy }: any) {
+  async packProductIntoComboBox({ comboBoxBarcode, productBarcode, addedBy }: any) {
     try {
       const normalizeProductCode = (item: any) => {
         const name = String(item.productName || item.product_name || "").toLowerCase();
@@ -2171,7 +2182,7 @@ async processBarcodeScan(params: {
         return { success: false, message: "This product is already packed in this combo box." };
       }
 
-      const products = this.getProductBarcodes();
+      const products = await this.getProductBarcodes();
       const prodIndex = products.findIndex((p: any) => getMasterBarcode(p) === mBar);
       if (prodIndex === -1) return { success: false, message: "Product barcode not found." };
       const product = products[prodIndex];
@@ -2232,8 +2243,8 @@ async processBarcodeScan(params: {
     }
   }
 
-  getComboAvailableProductStock() {
-    const products = this.getProductBarcodes();
+  async getComboAvailableProductStock() {
+    const products = await this.getProductBarcodes();
 
     const normalizeProductCode = (item: any) => {
       const code = String(item.productCode || item.variantCode || "").toUpperCase();

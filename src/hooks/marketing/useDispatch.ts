@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export interface DispatchPayload {
   influencer_id: string;
@@ -77,7 +78,7 @@ export const useDispatch = () => {
       };
 
       const { data: insertedDispatch, error: dispatchError } = await supabase
-        .from('influencer_dispatch_details')
+        .from(SUPABASE_TABLES.influencerDispatch)
         .insert([finalPayload])
         .select()
         .single();
@@ -99,7 +100,7 @@ export const useDispatch = () => {
       };
 
       const { error: trackingError } = await supabase
-        .from('influencer_status_tracking')
+        .from(SUPABASE_TABLES.influencerStatus)
         .insert([trackingPayload]);
 
       if (trackingError) {

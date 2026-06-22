@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export interface DispatchDetails {
   id: string;
@@ -46,13 +47,16 @@ export const useCampaignDispatch = (campaignId?: string) => {
     try {
       // Phase 1 Audit: Exact query from script.js 
       // script.js fetched from influencer_dispatch_details eq campaign_id
+      console.log('Loading', SUPABASE_TABLES.influencerDispatch, '...');
       const { data: dispatchData, error: dispatchError } = await supabase
-        .from('influencer_dispatch_details')
+        .from(SUPABASE_TABLES.influencerDispatch)
         .select('*')
         .eq('campaign_id', campaignId)
         .order('created_at', { ascending: false });
 
       if (dispatchError) throw dispatchError;
+      
+      console.log('Loaded table:', SUPABASE_TABLES.influencerDispatch, dispatchData?.length, dispatchError);
       
       const records = (dispatchData || []) as DispatchDetails[];
 
@@ -60,7 +64,7 @@ export const useCampaignDispatch = (campaignId?: string) => {
         // Fetch influencer info like original script.js
         const influencerIds = [...new Set(records.map(r => r.influencer_id))];
         const { data: infoData, error: infoError } = await supabase
-          .from('influencers_info')
+          .from(SUPABASE_TABLES.influencersInfo)
           .select('id, name, profile_file_url, code')
           .in('id', influencerIds);
           

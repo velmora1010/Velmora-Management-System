@@ -1,8 +1,11 @@
 import { supabase } from '../lib/supabase';
+import { SUPABASE_TABLES } from '../config/supabaseTables';
 
 export const productionService = {
   async getProductionBatches() {
-    const { data, error } = await supabase.from('production_batches').select('*');
+    console.log("Loading", SUPABASE_TABLES.productionBatches, "...");
+    const { data, error } = await supabase.from(SUPABASE_TABLES.productionBatches).select('*');
+    console.log("Loaded table:", SUPABASE_TABLES.productionBatches, data?.length, error);
     if (error) throw error;
     return data;
   },
@@ -26,7 +29,7 @@ export const productionService = {
   ) {
     // 1. Insert/Update Production Batch
     const { error: batchError } = await supabase
-      .from('production_batches')
+      .from(SUPABASE_TABLES.productionBatches)
       .upsert(batchData, { onConflict: 'production_batch_id' });
     if (batchError) throw batchError;
 
