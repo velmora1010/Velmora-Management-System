@@ -27,8 +27,9 @@ export const useExpenses = () => {
   const fetchExpenses = useCallback(async () => {
     setError(null);
     try {
-      let { data, error: fetchError } = await supabase
-        .from('expenses')
+      console.log('Loading expenses_row...');
+      let { data: fetchResult, error: fetchError } = await supabase
+        .from('expenses_row')
         .select('*')
         .eq('status', 'active')
         .order('created_at', { ascending: false });
@@ -36,14 +37,21 @@ export const useExpenses = () => {
       // Fallback if status column doesn't exist
       if (fetchError && fetchError.code === '42703') {
         const retry = await supabase
-          .from('expenses')
+          .from('expenses_row')
           .select('*')
           .order('created_at', { ascending: false });
-        data = retry.data;
+        fetchResult = retry.data;
         fetchError = retry.error;
       }
 
-      if (fetchError) throw fetchError;
+      let data = fetchResult;
+      if (fetchError) {
+        console.error('expenses_row fetch error:', fetchError.message);
+        const fallback = localStorage.getItem('expenses');
+        if (fallback) data = JSON.parse(fallback);
+        else throw fetchError;
+      }
+      console.log('Loaded expenses_row:', data?.length);
       
       const activeExpenses = (data || []).filter(e => e.status !== 'archived');
       setExpenses(activeExpenses);
@@ -74,7 +82,7 @@ export const useExpenses = () => {
   const addExpense = async (expenseData: FinanceExpense) => {
     try {
       const { data, error } = await supabase
-        .from('expenses')
+        .from('expenses_row')
         .insert([{ ...expenseData, status: 'active' }])
         .select()
         .single();
@@ -91,7 +99,7 @@ export const useExpenses = () => {
   const updateExpense = async (id: string, updates: Partial<FinanceExpense>) => {
     try {
       const { data, error } = await supabase
-        .from('expenses')
+        .from('expenses_row')
         .update(updates)
         .eq('id', id)
         .select()

@@ -63,7 +63,7 @@ export const usePurchaseOrder = () => {
 
     try {
       const { data, error } = await supabase
-        .from('purchase_orders')
+        .from('purchase_orders_rows')
         .select('po_number')
         .order('created_at', { ascending: false })
         .limit(1);

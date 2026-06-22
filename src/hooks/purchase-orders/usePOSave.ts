@@ -86,7 +86,7 @@ export const usePOSave = (
       const headerPayload = prepareHeaderPayload();
 
       const { data: headerData, error: headerErr } = await supabase
-        .from('purchase_orders')
+        .from('purchase_orders_rows')
         .insert([headerPayload])
         .select('id')
         .single();
@@ -103,7 +103,7 @@ export const usePOSave = (
       }
 
       const { error: productsErr } = await supabase
-        .from('purchase_order_products')
+        .from('purchase_order_products_rows')
         .insert(productPayloads);
 
       if (productsErr) {
@@ -130,7 +130,7 @@ export const usePOSave = (
       await generatePONumber();
       
       // Fire-and-forget audit log
-      logAction('CREATE', 'purchase_orders', purchaseOrderId, {
+      logAction('CREATE', 'purchase_orders_rows', purchaseOrderId, {
         po_number: headerPayload.po_number,
         subtotal: headerPayload.subtotal,
         vendor_name: headerPayload.vendor_name

@@ -17,14 +17,24 @@ export const useFinanceCategories = () => {
   const fetchCategories = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('finance_categories')
+      console.log('Loading finance_categories_rows...');
+      const { data: fetchResult, error } = await supabase
+        .from('finance_categories_rows')
         .select('*')
         .neq('status', 'archived')
         .order('main')
         .order('sub1')
         .order('sub2');
       
+      let data = fetchResult;
+      if (error) {
+        console.error('finance_categories_rows fetch error:', error.message);
+        const fallback = localStorage.getItem('finance_categories');
+        if (fallback) data = JSON.parse(fallback);
+        else throw error;
+      }
+      
+      console.log('Loaded finance_categories_rows:', data?.length);
       if (!error && data) {
         setCategories(data.map(r => ({
           id: r.id,
@@ -56,13 +66,13 @@ export const useFinanceCategories = () => {
   const cascadeUpdates = async (oldRow: FinanceCategoryRow, newCat: Partial<FinanceCategoryRow>) => {
     try {
       if (oldRow.main && newCat.main && oldRow.main !== newCat.main) {
-        await supabase.from('finance_categories').update({ main: newCat.main }).eq('main', oldRow.main);
+        await supabase.from('finance_categories_rows').update({ main: newCat.main }).eq('main', oldRow.main);
       }
       if (oldRow.sub1 && newCat.sub1 && oldRow.sub1 !== newCat.sub1) {
-        await supabase.from('finance_categories').update({ sub1: newCat.sub1 }).eq('main', oldRow.main).eq('sub1', oldRow.sub1);
+        await supabase.from('finance_categories_rows').update({ sub1: newCat.sub1 }).eq('main', oldRow.main).eq('sub1', oldRow.sub1);
       }
       if (oldRow.sub2 && newCat.sub2 && oldRow.sub2 !== newCat.sub2) {
-        await supabase.from('finance_categories').update({ sub2: newCat.sub2 }).eq('main', oldRow.main).eq('sub1', oldRow.sub1).eq('sub2', oldRow.sub2);
+        await supabase.from('finance_categories_rows').update({ sub2: newCat.sub2 }).eq('main', oldRow.main).eq('sub1', oldRow.sub1).eq('sub2', oldRow.sub2);
       }
     } catch (e) {
       console.error('Cascade update failed', e);
@@ -81,23 +91,23 @@ export const useFinanceCategories = () => {
     
     if (id) {
       const oldRow = categories.find(c => c.id === id);
-      await supabase.from('finance_categories').update(dbPayload).eq('id', id);
+      await supabase.from('finance_categories_rows').update(dbPayload).eq('id', id);
       if (oldRow) await cascadeUpdates(oldRow, payload);
     } else {
-      await supabase.from('finance_categories').insert([dbPayload]);
+      await supabase.from('finance_categories_rows').insert([dbPayload]);
     }
   };
 
   // Batch Saves for Add Another workflow
   const addMainCategories = async (names: string[]) => {
     const payloads = names.map(n => ({ main: n, status: 'active' }));
-    await supabase.from('finance_categories').insert(payloads);
+    await supabase.from('finance_categories_rows').insert(payloads);
     await fetchCategories();
   };
 
   const addSub1Categories = async (main: string, names: string[]) => {
     const payloads = names.map(n => ({ main, sub1: n, status: 'active' }));
-    await supabase.from('finance_categories').insert(payloads);
+    await supabase.from('finance_categories_rows').insert(payloads);
     await fetchCategories();
   };
 
@@ -105,7 +115,7 @@ export const useFinanceCategories = () => {
     const ref = categories.find(c => c.sub1 === sub1);
     const main = ref ? ref.main : null;
     const payloads = names.map(n => ({ main, sub1, sub2: n, status: 'active' }));
-    await supabase.from('finance_categories').insert(payloads);
+    await supabase.from('finance_categories_rows').insert(payloads);
     await fetchCategories();
   };
 
@@ -114,12 +124,12 @@ export const useFinanceCategories = () => {
     const main = ref ? ref.main : null;
     const sub1 = ref ? ref.sub1 : null;
     const payloads = names.map(n => ({ main, sub1, sub2, sub_sub_sub_category: n, status: 'active' }));
-    await supabase.from('finance_categories').insert(payloads);
+    await supabase.from('finance_categories_rows').insert(payloads);
     await fetchCategories();
   };
 
   const archiveCategory = async (id: string) => {
-    await supabase.from('finance_categories').update({ status: 'archived' }).eq('id', id);
+    await supabase.from('finance_categories_rows').update({ status: 'archived' }).eq('id', id);
     await fetchCategories();
   };
 

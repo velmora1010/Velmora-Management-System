@@ -19,22 +19,27 @@ export const useTaskCategories = (initialMain?: string, initialSub1?: string, in
     const loadCategories = async () => {
       setIsLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('finance_categories')
-          .select('main, sub1, sub2, sub3, sub_sub_sub_category')
+        console.log(`Loading task_categories_rows...`);
+        const { data: fetchResult, error } = await supabase
+          .from('task_categories_rows')
+          .select('*')
           .eq('status', 'active');
 
+        let data = fetchResult;
+
         if (error) {
-          console.error('Task categories Supabase error:', error);
-          throw error;
+          console.error('task_categories_rows fetch error:', error.message);
+          const fallback = localStorage.getItem('task_categories');
+          if (fallback) data = JSON.parse(fallback);
+          else throw error;
         }
-        
 
         if (!data || data.length === 0) {
           return;
         }
 
-        const mains = [...new Set(data.map((c) => c.main as string).filter(Boolean))].sort();
+        console.log(`Loaded task_categories_rows:`, data.length);
+        const mains = [...new Set(data.map((c: any) => c.main as string).filter(Boolean))].sort();
 
         const sub1: Record<string, string[]> = {};
         const sub2: Record<string, string[]> = {};

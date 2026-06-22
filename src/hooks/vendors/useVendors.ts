@@ -11,13 +11,22 @@ export const useVendors = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const { data, error: fetchError } = await supabase
-        .from('vendors')
+      console.log('Loading Vendors_row...');
+      const { data: fetchResult, error: fetchError } = await supabase
+        .from('Vendors_row')
         .select('*')
         .neq('status', 'archived')
         .order('created_at', { ascending: false });
 
-      if (fetchError) throw fetchError;
+      let data = fetchResult;
+      if (fetchError) {
+        console.error('Vendors_row fetch error:', fetchError.message);
+        const fallback = localStorage.getItem('vendors');
+        if (fallback) data = JSON.parse(fallback);
+        else throw fetchError;
+      }
+      
+      console.log('Loaded Vendors_row:', data?.length);
       setVendors(data as Vendor[] || []);
     } catch (err: unknown) {
       console.error('Error fetching vendors:', err);
@@ -35,7 +44,7 @@ export const useVendors = () => {
       if (vendorData.id) {
         // Update existing
         const { error: updateError } = await supabase
-          .from('vendors')
+          .from('Vendors_row')
           .update(vendorData)
           .eq('id', vendorData.id);
 
@@ -43,7 +52,7 @@ export const useVendors = () => {
       } else {
         // Insert new
         const { error: insertError } = await supabase
-          .from('vendors')
+          .from('Vendors_row')
           .insert([{
             ...vendorData,
             status: 'active'
@@ -68,7 +77,7 @@ export const useVendors = () => {
     setError(null);
     try {
       const { error: archiveError } = await supabase
-        .from('vendors')
+        .from('Vendors_row')
         .update({ status: 'archived' })
         .eq('id', id);
 

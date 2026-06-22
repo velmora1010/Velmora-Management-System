@@ -11,17 +11,35 @@ export const useCampaigns = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from('influencer_create_campaigns')
+      console.log('Loading campaigns_rows...');
+      let { data: fetchResult, error: fetchError } = await supabase
+        .from('campaigns_rows')
         .select('*')
         .order('created_at', { ascending: false });
-        
 
-      if (error) throw error;
+      let data = fetchResult;
+      if (fetchError) {
+        console.error('campaigns_rows fetch error:', fetchError.message);
+        const fallback = localStorage.getItem('campaigns');
+        if (fallback) data = JSON.parse(fallback);
+        else throw fetchError;
+      }
+      
+      console.log('Loaded campaigns_rows:', data?.length);
       
       if (isMounted.current) {
-        setCampaigns((data as Campaign[]) || []);
-      } else {
+        // Normalize campaign_name to be a string just in case it was saved as an object
+        const normalizedData = (data || []).map((c: any) => {
+          let name = c.campaign_name;
+          if (name && typeof name === 'object') {
+            name = name.name || name.campaign_name || JSON.stringify(name);
+          }
+          if (!name && typeof c.name === 'string') {
+            name = c.name;
+          }
+          return { ...c, campaign_name: name || 'Unnamed Campaign' };
+        });
+        setCampaigns((normalizedData as Campaign[]) || []);
       }
     } catch (err: unknown) {
       console.error('[useCampaigns] Error fetching campaigns:', err);
@@ -46,7 +64,7 @@ export const useCampaigns = () => {
 
   const addCampaign = async (campaignData: Partial<Campaign>) => {
     const { data, error } = await supabase
-      .from('influencer_create_campaigns')
+      .from('campaigns_rows')
       .insert([campaignData])
       .select();
     
@@ -63,7 +81,7 @@ export const useCampaigns = () => {
 
   const updateCampaign = async (id: string, campaignData: Partial<Campaign>) => {
     const { data, error } = await supabase
-      .from('influencer_create_campaigns')
+      .from('campaigns_rows')
       .update(campaignData)
       .eq('id', id)
       .select();
@@ -77,7 +95,7 @@ export const useCampaigns = () => {
 
   const deleteCampaign = async (id: string) => {
     const { error } = await supabase
-      .from('influencer_create_campaigns')
+      .from('campaigns_rows')
       .delete()
       .eq('id', id);
     

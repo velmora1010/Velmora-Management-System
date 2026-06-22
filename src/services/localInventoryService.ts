@@ -241,7 +241,22 @@ private init() {
   // ---- NEW SUPABASE HYBRID GETTERS ----
 
   // 1. Raw Materials
-  getRawMaterialBarcodes(): any[] {
+  async getRawMaterialBarcodes(): Promise<any[]> {
+    try {
+      const { data, error } = await supabase.from('raw_material_barcodes').select('*');
+      if (!error && data && data.length > 0) {
+        return data.map((item: any) => ({
+          ...item,
+          barcodeNumber: item.barcode,
+          displayBarcode: item.barcode,
+          materialName: item.material_name,
+          batchNo: item.batch_no,
+          currentStage: item.current_stage
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
     return this.getList('raw_material_barcodes');
   }
 
@@ -378,6 +393,22 @@ private init() {
 
   // Barcode specific aliases (since batches ARE the barcodes mostly)
   async getBarcodes() {
+    try {
+      const { data, error } = await supabase.from('raw_material_barcodes').select('*');
+      if (!error && data && data.length > 0) {
+        return data.map((item: any) => ({
+          ...item,
+          serial_number: item.barcode,
+          barcodeNumber: item.barcode,
+          displayBarcode: item.barcode,
+          material_name: item.material_name,
+          batch_id: item.batch_no,
+          currentStage: item.current_stage
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
     return this.getList('inventory_batches')
       .filter(b => !!b.barcode_data)
       .map(b => ({ ...b, currentStage: b.currentStage || 'READY_FOR_FIRST_SCAN' }));
@@ -603,7 +634,28 @@ private init() {
     return Array.from(map.values());
   }
 
-  getProductBarcodes() {
+  async getProductBarcodes() {
+    try {
+      const { data, error } = await supabase.from('product_barcodes').select('*');
+      if (!error && data && data.length > 0) {
+        return data.map((item: any) => ({
+          ...item,
+          barcodeNumber: item.barcode,
+          displayBarcode: item.barcode,
+          barcode: item.barcode,
+          code: item.barcode,
+          productName: item.product_name,
+          productCode: item.product_code,
+          batchId: item.batch_id,
+          microBatchNo: item.micro_batch_no,
+          currentStage: item.current_stage,
+          producedBy: item.produced_by,
+          labeledBy: item.labeled_by
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
     try {
       const data = JSON.parse(localStorage.getItem("finished_product_barcodes") || "[]");
       return Array.isArray(data) ? data : [];
@@ -613,7 +665,27 @@ private init() {
   }
 
   // ---- QUALITY CHECK BARCODES ----
-  getQCBarcodes() {
+  async getQCBarcodes() {
+    try {
+      const { data, error } = await supabase.from('qc_barcodes').select('*');
+      if (!error && data && data.length > 0) {
+        return data.map((item: any) => ({
+          ...item,
+          qcBarcode: item.qc_barcode,
+          displayBarcode: item.qc_barcode,
+          barcodeNumber: item.qc_barcode,
+          barcode: item.qc_barcode,
+          productName: item.product_name,
+          productCode: item.product_code,
+          batchId: item.batch_id,
+          microBatchNo: item.micro_batch_no,
+          productBarcodes: item.product_barcodes,
+          currentStage: item.current_stage
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
     try {
       const data = JSON.parse(localStorage.getItem("quality_check_barcodes") || "[]");
       return Array.isArray(data) ? data : [];
@@ -626,8 +698,8 @@ private init() {
     localStorage.setItem("quality_check_barcodes", JSON.stringify(Array.isArray(data) ? data : []));
   }
 
-  addQCBarcode(record: any) {
-    const existing = this.getQCBarcodes();
+  async addQCBarcode(record: any) {
+    const existing = await this.getQCBarcodes();
     const barcodeValue = record.qcBarcode || record.displayBarcode || record.barcodeNumber || record.barcode;
 
     const existingQC = existing.find((qc: any) =>
@@ -654,14 +726,14 @@ private init() {
     return newRecord;
   }
 
-  updateQCBarcode(updatedRecord: any) {
+  async updateQCBarcode(updatedRecord: any) {
     const barcodeValue =
       updatedRecord.qcBarcode ||
       updatedRecord.displayBarcode ||
       updatedRecord.barcodeNumber ||
       updatedRecord.barcode;
 
-    const existing = this.getQCBarcodes();
+    const existing = await this.getQCBarcodes();
 
     const updated = existing.map((item: any) => {
       const itemBarcode = item.qcBarcode || item.displayBarcode || item.barcodeNumber || item.barcode;
@@ -672,8 +744,8 @@ private init() {
     return updatedRecord;
   }
 
-  deleteQCBarcode(barcodeValue: string) {
-    const data = this.getQCBarcodes();
+  async deleteQCBarcode(barcodeValue: string) {
+    const data = await this.getQCBarcodes();
     const updated = data.filter((item: any) => {
       const value =
         item.qcBarcode ||
@@ -904,7 +976,23 @@ private init() {
 
   // ---- COMBO BOXES ----
   
-  getComboBoxes() {
+  async getComboBoxes() {
+    try {
+      const { data, error } = await supabase.from('combo_boxes').select('*');
+      if (!error && data && data.length > 0) {
+        return data.map((item: any) => ({
+          ...item,
+          comboBoxBarcode: item.combo_box_barcode,
+          displayBarcode: item.combo_box_barcode,
+          comboName: item.combo_name,
+          comboType: item.combo_type,
+          packedItems: item.packed_items,
+          currentStage: item.current_stage
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
     try {
       const data = JSON.parse(localStorage.getItem("combo_boxes") || "[]");
       return Array.isArray(data) ? data : [];
@@ -1038,7 +1126,8 @@ private init() {
   }
 
   async getAllComboBarcodes() {
-    const comboBoxes = this.getList('combo_boxes').map((b: any) => ({ 
+    const boxes = await this.getComboBoxes();
+    const comboBoxes = boxes.map((b: any) => ({ 
       ...b, 
       type: 'COMBO_BOX',
       currentStage: b.currentStage || 'READY_FOR_FIRST_SCAN' 
