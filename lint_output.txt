@@ -1,0 +1,66 @@
+
+> velmora-react@0.0.0 lint
+> eslint .
+
+
+D:\Velmora Business Management\velmora-react\src\hooks\useCategories.ts
+   1:20  error  'useEffect' is defined but never used               @typescript-eslint/no-unused-vars
+  23:22  error  'setMasterData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+D:\Velmora Business Management\velmora-react\src\modules\vendors\VendorForm.tsx
+   35:7   error    Error: Cannot access variable before it is declared
+
+`loadVendor` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+D:\Velmora Business Management\velmora-react\src\modules\vendors\VendorForm.tsx:35:7
+  33 |   useEffect(() => {
+  34 |     if (vendorId) {
+> 35 |       loadVendor();
+     |       ^^^^^^^^^^ `loadVendor` accessed before it is declared
+  36 |     }
+  37 |   }, [vendorId]);
+  38 |
+
+D:\Velmora Business Management\velmora-react\src\modules\vendors\VendorForm.tsx:39:3
+  37 |   }, [vendorId]);
+  38 |
+> 39 |   const loadVendor = async () => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 40 |     try {
+     | ^^^^^^^^^
+> 41 |       const { data, error } = await supabase
+     …
+     | ^^^^^^^^^
+> 59 |     }
+     | ^^^^^^^^^
+> 60 |   };
+     | ^^^^^ `loadVendor` is declared here
+  61 |
+  62 |   const handleProductSelectionChange = (selectedNames: string[]) => {
+  63 |     // Add new ones  react-hooks/immutability
+   37:6   warning  React Hook useEffect has a missing dependency: 'loadVendor'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                react-hooks/exhaustive-deps
+   56:19  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-explicit-any
+  137:19  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-explicit-any
+
+D:\Velmora Business Management\velmora-react\src\modules\vendors\VendorList.tsx
+  12:42  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-explicit-any
+  27:19  error  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-explicit-any
+  36:5   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+D:\Velmora Business Management\velmora-react\src\modules\vendors\VendorList.tsx:36:5
+  34 |
+  35 |   useEffect(() => {
+> 36 |     fetchVendors();
+     |     ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  37 |   }, []);
+  38 |
+  39 |   return (  react-hooks/set-state-in-effect
+
+✖ 9 problems (8 errors, 1 warning)
+

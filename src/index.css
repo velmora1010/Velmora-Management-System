@@ -1,0 +1,49 @@
+@import "tailwindcss";
+@config "../tailwind.config.ts";
+
+@layer base {
+  :root {
+    --bg-color: #ffffff;
+    --sidebar-bg: #F6F7FB;
+    --text-main: #2F3443;
+    --text-muted: #8A90A2;
+    --primary-color: #7B8CFF;
+    --active-gradient: linear-gradient(90deg, #7B8CFF, #9FA8FF);
+    --card-bg: #e5e7eb;
+    --card-hover: #d1d5db;
+    --btn-bg: #7B8CFF;
+    --btn-text: #ffffff;
+    --btn-hover: #60a5fa;
+    --border-color: #cbd5e1;
+    --shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.05);
+    --hover-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    --transition: all 0.2s ease;
+  }
+
+  [data-theme="dark"] {
+    --bg-color: #0d1117;
+    --sidebar-bg: #161b22;
+    --text-main: #f8fafc;
+    --text-muted: #8b949e;
+    --primary-color: #7B8CFF;
+    --card-bg: #1e293b;
+    --card-hover: #334155;
+    --btn-bg: #7B8CFF;
+    --btn-text: #ffffff;
+    --btn-hover: #9FA8FF;
+    --border-color: #30363d;
+    --shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+    --hover-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+  }
+
+  * {
+    border-color: var(--border-color);
+  }
+  
+  body {
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    transition: color 0.3s ease, background-color 0.3s ease;
+  }
+}

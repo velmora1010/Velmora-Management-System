@@ -1,0 +1,33 @@
+
+> velmora-react@0.0.0 lint
+> eslint .
+
+
+D:\Velmora Business Management\velmora-react\src\components\procurement\ProcurementProductTable.tsx
+   2:24  error  'calculateRowSubtotal' is defined but never used  @typescript-eslint/no-unused-vars
+   2:46  error  'calculateRowGST' is defined but never used       @typescript-eslint/no-unused-vars
+  45:45  error  Unexpected any. Specify a different type          @typescript-eslint/no-explicit-any
+
+D:\Velmora Business Management\velmora-react\src\components\procurement\PurchaseCategorySelector.tsx
+  2:10  error  'useCategories' is defined but never used  @typescript-eslint/no-unused-vars
+
+D:\Velmora Business Management\velmora-react\src\components\procurement\VendorSelector.tsx
+   6:45  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  11:57  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+D:\Velmora Business Management\velmora-react\src\hooks\usePurchaseOrder.ts
+  19:21  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+D:\Velmora Business Management\velmora-react\src\hooks\usePurchaseOrder.ts:19:21
+  17 |     vendorId: '',
+  18 |     vendorName: '',
+> 19 |     poNumber: `PO-${Date.now().toString().slice(-6)}`, // Temporary shell logic
+     |                     ^^^^^^^^^^ Cannot call impure function
+  20 |     date: new Date().toISOString().split('T')[0],
+  21 |     paymentMode: '',
+  22 |     initiatedBy: '',  react-hooks/purity
+
+✖ 7 problems (7 errors, 0 warnings)
+
