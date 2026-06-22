@@ -38,28 +38,31 @@ export const migrateRawMaterials = async (): Promise<MigrationReport> => {
 
   for (const item of items) {
     try {
-      const barcodeValue = item.barcodeNumber || item.displayBarcode || item.barcode || item.code || item.id;
+      const barcodeValue = item.barcodeNumber || item.displayBarcode || item.barcode || item.code;
       if (!barcodeValue) {
         report.failed++;
         report.errors.push(`Missing barcode for RM: ${JSON.stringify(item)}`);
         continue;
       }
       
-      const { data: existing } = await supabase
+      const { data: existing, error: existError } = await supabase
         .from('raw_material_barcodes')
         .select('barcode')
         .eq('barcode', barcodeValue)
         .limit(1);
+
+      if (existError) throw existError;
 
       if (existing && existing.length > 0) {
         report.skipped++;
         continue;
       }
 
-      // We preserve the full item payload in Supabase, but add explicitly mapped fields based on user request.
       const payload = {
-        ...item,
-        barcode: barcodeValue
+        barcode: barcodeValue,
+        material_name: item.materialName || '',
+        batch_no: item.batchNo || '',
+        current_stage: item.currentStage || 'Incoming'
       };
 
       const { error } = await supabase.from('raw_material_barcodes').insert(payload);
@@ -67,7 +70,7 @@ export const migrateRawMaterials = async (): Promise<MigrationReport> => {
       report.migrated++;
     } catch (err: any) {
       report.failed++;
-      report.errors.push(err.message);
+      report.errors.push(err.message || String(err));
     }
   }
   return report;
@@ -79,18 +82,20 @@ export const migrateProducts = async (): Promise<MigrationReport> => {
 
   for (const item of items) {
     try {
-      const barcodeValue = item.barcodeNumber || item.displayBarcode || item.barcode || item.code || item.id;
+      const barcodeValue = item.barcodeNumber || item.displayBarcode || item.barcode || item.code;
       if (!barcodeValue) {
         report.failed++;
         report.errors.push(`Missing barcode for Product: ${JSON.stringify(item)}`);
         continue;
       }
       
-      const { data: existing } = await supabase
+      const { data: existing, error: existError } = await supabase
         .from('product_barcodes')
         .select('barcode')
         .eq('barcode', barcodeValue)
         .limit(1);
+
+      if (existError) throw existError;
 
       if (existing && existing.length > 0) {
         report.skipped++;
@@ -98,8 +103,14 @@ export const migrateProducts = async (): Promise<MigrationReport> => {
       }
 
       const payload = {
-        ...item,
-        barcode: barcodeValue
+        barcode: barcodeValue,
+        product_name: item.productName || '',
+        product_code: item.productCode || '',
+        batch_id: item.batchId || '',
+        micro_batch_no: item.microBatchNo || '',
+        current_stage: item.currentStage || 'Production',
+        produced_by: item.producedBy || null,
+        labeled_by: item.labeledBy || null
       };
 
       const { error } = await supabase.from('product_barcodes').insert(payload);
@@ -107,7 +118,7 @@ export const migrateProducts = async (): Promise<MigrationReport> => {
       report.migrated++;
     } catch (err: any) {
       report.failed++;
-      report.errors.push(err.message);
+      report.errors.push(err.message || String(err));
     }
   }
   return report;
@@ -119,18 +130,20 @@ export const migrateComboBoxes = async (): Promise<MigrationReport> => {
 
   for (const item of items) {
     try {
-      const barcodeValue = item.comboBoxBarcode || item.displayBarcode || item.barcodeNumber || item.id;
+      const barcodeValue = item.comboBoxBarcode || item.displayBarcode || item.barcodeNumber;
       if (!barcodeValue) {
         report.failed++;
         report.errors.push(`Missing combo barcode for Combo: ${JSON.stringify(item)}`);
         continue;
       }
       
-      const { data: existing } = await supabase
+      const { data: existing, error: existError } = await supabase
         .from('combo_boxes')
         .select('combo_box_barcode')
         .eq('combo_box_barcode', barcodeValue)
         .limit(1);
+
+      if (existError) throw existError;
 
       if (existing && existing.length > 0) {
         report.skipped++;
@@ -138,8 +151,11 @@ export const migrateComboBoxes = async (): Promise<MigrationReport> => {
       }
 
       const payload = {
-        ...item,
-        combo_box_barcode: barcodeValue
+        combo_box_barcode: barcodeValue,
+        combo_name: item.comboName || '',
+        combo_type: item.comboType || '',
+        packed_items: item.packedItems || [],
+        current_stage: item.currentStage || 'Packed'
       };
 
       const { error } = await supabase.from('combo_boxes').insert(payload);
@@ -147,7 +163,7 @@ export const migrateComboBoxes = async (): Promise<MigrationReport> => {
       report.migrated++;
     } catch (err: any) {
       report.failed++;
-      report.errors.push(err.message);
+      report.errors.push(err.message || String(err));
     }
   }
   return report;
@@ -159,18 +175,20 @@ export const migrateQCBarcodes = async (): Promise<MigrationReport> => {
 
   for (const item of items) {
     try {
-      const barcodeValue = item.qcBarcode || item.displayBarcode || item.barcodeNumber || item.id;
+      const barcodeValue = item.qcBarcode || item.displayBarcode || item.barcodeNumber;
       if (!barcodeValue) {
         report.failed++;
         report.errors.push(`Missing qc barcode for QC: ${JSON.stringify(item)}`);
         continue;
       }
       
-      const { data: existing } = await supabase
+      const { data: existing, error: existError } = await supabase
         .from('qc_barcodes')
         .select('qc_barcode')
         .eq('qc_barcode', barcodeValue)
         .limit(1);
+
+      if (existError) throw existError;
 
       if (existing && existing.length > 0) {
         report.skipped++;
@@ -178,8 +196,13 @@ export const migrateQCBarcodes = async (): Promise<MigrationReport> => {
       }
 
       const payload = {
-        ...item,
-        qc_barcode: barcodeValue
+        qc_barcode: barcodeValue,
+        product_name: item.productName || '',
+        product_code: item.productCode || '',
+        batch_id: item.batchId || '',
+        micro_batch_no: item.microBatchNo || '',
+        product_barcodes: item.productBarcodes || [],
+        current_stage: item.currentStage || 'QC'
       };
 
       const { error } = await supabase.from('qc_barcodes').insert(payload);
@@ -187,7 +210,7 @@ export const migrateQCBarcodes = async (): Promise<MigrationReport> => {
       report.migrated++;
     } catch (err: any) {
       report.failed++;
-      report.errors.push(err.message);
+      report.errors.push(err.message || String(err));
     }
   }
   return report;
