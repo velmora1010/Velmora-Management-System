@@ -1,13 +1,20 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Home, CheckSquare, Archive, Settings, Menu } from 'lucide-react';
+import { ArrowLeft, Home, CheckSquare, Archive, Settings, Menu, LogOut } from 'lucide-react';
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
+import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
 
 export const MainLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { user } = useAuth();
+  
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
   
   const isHome = location.pathname === '/';
 
@@ -104,14 +111,17 @@ export const MainLayout = () => {
         {/* User Profile and Theme Toggle */}
         <div className="mt-auto px-2 pt-4 border-t border-border/10">
           <div className="flex items-center gap-3">
-             <div className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-sm shrink-0">
-               A
+             <div className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-sm shrink-0 uppercase">
+               {user?.email?.charAt(0) || 'A'}
              </div>
              <div className="min-w-0 flex-1">
-               <div className="text-sm font-semibold text-main truncate">Admin</div>
+               <div className="text-sm font-semibold text-main truncate">{user?.email || 'Admin'}</div>
                <div className="text-xs text-muted truncate">Workspace</div>
              </div>
-             <div className="shrink-0 ml-auto">
+             <div className="shrink-0 ml-auto flex items-center gap-2">
+               <button onClick={handleLogout} className="p-2 text-muted hover:text-red-400 transition-colors rounded-lg hover:bg-red-400/10" title="Sign Out">
+                 <LogOut size={18} />
+               </button>
                <ThemeToggle />
              </div>
           </div>

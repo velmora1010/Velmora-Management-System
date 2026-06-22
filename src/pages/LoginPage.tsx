@@ -2,23 +2,22 @@ import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
+import toast from 'react-hot-toast';
 
 export const LoginPage = () => {
   const { user, isAuthLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   // If already authenticated, redirect to dashboard
   if (!isAuthLoading && user) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/inventory/dashboard" replace />;
   }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setError(null);
 
     try {
       const { error } = await supabase.auth.signInWithPassword({
@@ -29,7 +28,7 @@ export const LoginPage = () => {
       if (error) throw error;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to sign in';
-      setError(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -53,11 +52,6 @@ export const LoginPage = () => {
         
         <div className="p-8">
           <form onSubmit={handleLogin} className="space-y-6">
-            {error && (
-              <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500 text-sm text-center">
-                {error}
-              </div>
-            )}
             
             <div className="space-y-2">
               <label className="text-sm font-medium text-white block">Email Address</label>
