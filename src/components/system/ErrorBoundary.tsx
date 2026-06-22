@@ -50,10 +50,11 @@ export class ErrorBoundary extends Component<Props, State> {
               Try Again
             </button>
             
-            {import.meta.env.MODE === 'development' && this.state.error && (
+            {this.state.error && (
               <div className="mt-6 text-left p-4 bg-black/50 rounded overflow-x-auto">
-                <pre className="text-xs text-red-400 font-mono">
-                  {this.state.error.toString()}
+                <p className="text-sm text-red-400 font-mono font-bold mb-2">Error Details:</p>
+                <pre className="text-xs text-red-400 font-mono whitespace-pre-wrap">
+                  {this.state.error.message || this.state.error.toString()}
                 </pre>
               </div>
             )}
