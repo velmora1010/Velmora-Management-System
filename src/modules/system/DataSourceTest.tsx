@@ -111,8 +111,8 @@ export const DataSourceTest = () => {
           <Database size={24} />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-white">Supabase Connection & Migration</h2>
-          <p className="text-muted text-sm">Test table connectivity and sync LocalStorage data.</p>
+          <h2 className="text-xl font-bold text-white">Supabase Database Status</h2>
+          <p className="text-muted text-sm">Test table connectivity, view counts, errors, and sync LocalStorage data.</p>
         </div>
       </div>
 
