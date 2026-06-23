@@ -19,6 +19,8 @@ interface CampaignDetailsProps {
 
 type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'analytics';
 
+import { isArchived } from '../../utils/marketingUtils';
+
 export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBack, onCampaignUpdate }) => {
   const [currentView, setCurrentView] = useState<CampaignView>('overview');
   const [editingInfluencer, setEditingInfluencer] = useState<CampaignInfluencer | null>(null);
@@ -26,7 +28,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const [isEditingCampaign, setIsEditingCampaign] = useState(false);
   const { influencers, refresh } = useCampaignInfluencers(campaign.id);
 
-  const activeInfluencers = influencers.filter(inf => !inf.is_archived);
+  const activeInfluencers = influencers.filter(inf => !isArchived(inf.is_archived));
   const budgetUsed = activeInfluencers.reduce((sum, inf) => sum + (inf.pricing?.final_price || 0), 0);
   const videosLive = activeInfluencers.reduce((sum, inf) => sum + (inf.pricing?.total_videos || 0), 0);
 

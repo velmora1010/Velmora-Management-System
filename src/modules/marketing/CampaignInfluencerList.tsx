@@ -3,6 +3,7 @@ import type { Campaign, CampaignInfluencer } from '../../types';
 import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink } from 'lucide-react';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
+import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
 const InfluencerCard = ({ 
@@ -56,7 +57,7 @@ City: ${influencer.city}`;
             )}
             <button onClick={() => onEdit(influencer)} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-blue-400 transition-colors" title="Edit"><Edit size={14} /></button>
             <button onClick={handleCopy} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-slate-200 transition-colors" title="Copy"><Copy size={14} /></button>
-            {influencer.is_archived ? (
+            {isArchived(influencer.is_archived) ? (
                 <button onClick={() => onToggleArchive(influencer.id, false)} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-green-400 transition-colors" title="Restore"><ArchiveRestore size={14} /></button>
             ) : (
                 <button onClick={() => onToggleArchive(influencer.id, true)} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-red-400 transition-colors" title="Archive"><Archive size={14} /></button>
@@ -67,11 +68,11 @@ City: ${influencer.city}`;
         <div className="absolute top-2 right-2 md:hidden">
             <InfluencerActionMenu
               isDispatched={!!influencer.dispatchDetails}
-              isArchived={!!influencer.is_archived}
+              isArchived={isArchived(influencer.is_archived)}
               onDispatch={onDispatch ? () => onDispatch(influencer) : undefined}
               onEdit={() => onEdit(influencer)}
               onCopy={handleCopy}
-              onToggleArchive={() => onToggleArchive(influencer.id, !influencer.is_archived)}
+              onToggleArchive={() => onToggleArchive(influencer.id, !isArchived(influencer.is_archived))}
             />
         </div>
 
@@ -89,8 +90,8 @@ City: ${influencer.city}`;
             <p className="text-slate-400 text-xs">@{influencer.name} &bull; {influencer.code}</p>
           </div>
           <div className="ml-4 hidden sm:block">
-            <span className={`px-2 py-0.5 rounded text-xs font-semibold ${influencer.is_archived ? 'bg-slate-700 text-slate-300' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
-              {influencer.is_archived ? 'Archived' : 'Active'}
+            <span className={`px-2 py-0.5 rounded text-xs font-semibold ${isArchived(influencer.is_archived) ? 'bg-slate-700 text-slate-300' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
+              {isArchived(influencer.is_archived) ? 'Archived' : 'Active'}
             </span>
           </div>
         </div>
@@ -291,7 +292,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({ 
 
   const filteredInfluencers = useMemo(() => {
     return influencers.filter(inf => {
-      const matchStatus = filter === 'active' ? (inf.is_archived === false || inf.is_archived == null) : inf.is_archived === true;
+      const matchStatus = filter === 'active' ? !isArchived(inf.is_archived) : isArchived(inf.is_archived);
       const term = searchTerm.toLowerCase();
       const matchSearch = ((inf.name || '').toLowerCase().includes(term)) ||
                           ((inf.influencer_name || '').toLowerCase().includes(term)) ||

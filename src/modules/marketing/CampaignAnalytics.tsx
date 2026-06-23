@@ -11,10 +11,12 @@ interface CampaignAnalyticsProps {
   onBack: () => void;
 }
 
+import { isArchived } from '../../utils/marketingUtils';
+
 export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, influencers }) => {
   const metrics = useMemo(() => {
 
-    const activeInfluencers = influencers.filter(inf => !inf.is_archived);
+    const activeInfluencers = influencers.filter(inf => !isArchived(inf.is_archived));
     
     let diyCount = 0;
     let spongeCount = 0;
@@ -68,7 +70,7 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
   }, [influencers]);
 
   const handleExportCsv = () => {
-    const activeInfluencers = influencers.filter(inf => !inf.is_archived);
+    const activeInfluencers = influencers.filter(inf => !isArchived(inf.is_archived));
     
     if (activeInfluencers.length === 0) {
       toast.error('No active influencers to export.');

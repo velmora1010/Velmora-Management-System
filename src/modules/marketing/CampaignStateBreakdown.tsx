@@ -91,10 +91,12 @@ interface StateMetrics {
   color: string;
 }
 
+import { isArchived } from '../../utils/marketingUtils';
+
 export const CampaignStateBreakdown: React.FC<CampaignStateBreakdownProps> = ({ influencers }) => {
   const [expanded, setExpanded] = useState(false);
 
-  const activeInfluencers = useMemo(() => influencers.filter(inf => !inf.is_archived), [influencers]);
+  const activeInfluencers = useMemo(() => influencers.filter(inf => !isArchived(inf.is_archived)), [influencers]);
 
   const { chartData, stateCards } = useMemo(() => {
     const metricsMap = new Map<string, StateMetrics>();
