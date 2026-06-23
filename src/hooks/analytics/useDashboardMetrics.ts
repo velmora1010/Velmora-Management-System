@@ -74,7 +74,7 @@ export const useDashboardMetrics = (timeframe: TimeframeFilter) => {
       try {
         // Build the queries
         let poQuery = supabase
-          .from('purchase_orders')
+          .from('purchase_orders_rows')
           .select('id, subtotal, gst_total, created_at, vendor_name');
 
         if (startDate) {
@@ -82,7 +82,7 @@ export const useDashboardMetrics = (timeframe: TimeframeFilter) => {
         }
 
         const vendorQuery = supabase
-          .from('vendors')
+          .from('Vendors_row')
           .select('id', { count: 'exact', head: true });
 
         const [poResult, vendorResult] = await Promise.all([poQuery, vendorQuery]);

@@ -11,33 +11,44 @@ export const useCampaigns = () => {
     setIsLoading(true);
     setError(null);
     try {
-      console.log('Loading campaigns_rows...');
+      console.log('Loading influencer_create_campaigns_rows...');
       let { data: fetchResult, error: fetchError } = await supabase
-        .from('campaigns_rows')
+        .from('influencer_create_campaigns_rows')
         .select('*')
         .order('created_at', { ascending: false });
 
       let data = fetchResult;
       if (fetchError) {
-        console.error('campaigns_rows fetch error:', fetchError.message);
+        console.error('influencer_create_campaigns_rows fetch error:', fetchError.message);
         const fallback = localStorage.getItem('campaigns');
         if (fallback) data = JSON.parse(fallback);
         else throw fetchError;
       }
       
-      console.log('Loaded campaigns_rows:', data?.length);
+      console.log('Loaded influencer_create_campaigns_rows:', data?.length);
       
       if (isMounted.current) {
         // Normalize campaign_name to be a string just in case it was saved as an object
         const normalizedData = (data || []).map((c: any) => {
-          let name = c.campaign_name || c.name || c.title || 'Untitled Campaign';
+          let name = c.campaign_name || c.name || c.title;
+          
           if (name && typeof name === 'object') {
             name = name.campaign_name || name.name || name.title || JSON.stringify(name);
           }
-          if (name === '[object Object]') {
-             name = c.name || c.title || 'Untitled Campaign';
+          
+          let finalName = String(name || 'Untitled Campaign');
+          if (finalName === '[object Object]') {
+             finalName = String(c.name || c.title || 'Untitled Campaign');
+             if (finalName === '[object Object]') finalName = 'Untitled Campaign';
           }
-          return { ...c, campaign_name: name };
+          
+          return { 
+            ...c, 
+            campaign_name: finalName,
+            status: c.status || 'draft',
+            total_budget: c.total_budget || 0,
+            expected_influencers: c.expected_influencers || 0
+          };
         });
         setCampaigns((normalizedData as Campaign[]) || []);
       }
@@ -64,7 +75,7 @@ export const useCampaigns = () => {
 
   const addCampaign = async (campaignData: Partial<Campaign>) => {
     const { data, error } = await supabase
-      .from('campaigns_rows')
+      .from('influencer_create_campaigns_rows')
       .insert([campaignData])
       .select();
     
@@ -81,7 +92,7 @@ export const useCampaigns = () => {
 
   const updateCampaign = async (id: string, campaignData: Partial<Campaign>) => {
     const { data, error } = await supabase
-      .from('campaigns_rows')
+      .from('influencer_create_campaigns_rows')
       .update(campaignData)
       .eq('id', id)
       .select();
@@ -95,7 +106,7 @@ export const useCampaigns = () => {
 
   const deleteCampaign = async (id: string) => {
     const { error } = await supabase
-      .from('campaigns_rows')
+      .from('influencer_create_campaigns_rows')
       .delete()
       .eq('id', id);
     

@@ -293,10 +293,10 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({ 
     return influencers.filter(inf => {
       const matchStatus = filter === 'active' ? (inf.is_archived === false || inf.is_archived == null) : inf.is_archived === true;
       const term = searchTerm.toLowerCase();
-      const matchSearch = (inf.name?.toLowerCase().includes(term)) ||
-                          (inf.influencer_name?.toLowerCase().includes(term)) ||
-                          (inf.code?.toLowerCase().includes(term)) ||
-                          (inf.city?.toLowerCase().includes(term));
+      const matchSearch = ((inf.name || '').toLowerCase().includes(term)) ||
+                          ((inf.influencer_name || '').toLowerCase().includes(term)) ||
+                          ((inf.code || '').toLowerCase().includes(term)) ||
+                          ((inf.city || '').toLowerCase().includes(term));
       return matchStatus && matchSearch;
     });
   }, [influencers, searchTerm, filter]);

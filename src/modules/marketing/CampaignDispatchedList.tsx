@@ -20,10 +20,10 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ 
       // 1. Search Logic (mimicking original: creator_name, campaign_name, phone_number, state)
       const term = searchTerm.toLowerCase();
       const matchSearch = 
-        (record.creator_name?.toLowerCase().includes(term)) ||
-        (record.campaign_name?.toLowerCase().includes(term)) ||
-        (record.phone_number?.toLowerCase().includes(term)) ||
-        (record.state?.toLowerCase().includes(term));
+        ((record.creator_name || '').toLowerCase().includes(term)) ||
+        ((record.campaign_name || '').toLowerCase().includes(term)) ||
+        ((record.phone_number || '').toLowerCase().includes(term)) ||
+        ((record.state || '').toLowerCase().includes(term));
 
       // 2. Courier Filter Logic
       let matchCourier = true;

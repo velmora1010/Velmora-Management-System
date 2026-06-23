@@ -21,7 +21,8 @@ export const VendorList: React.FC<VendorListProps> = ({ onEditVendor }) => {
 
   const filteredVendors = useMemo(() => {
     return vendors.filter(v => {
-      const matchesSearch = v.vendor_name?.toLowerCase().includes(searchTerm.toLowerCase());
+      const vendorName = v.vendor_name || '';
+      const matchesSearch = vendorName.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = categoryFilter ? v.vendor_category === categoryFilter : true;
       return matchesSearch && matchesCategory;
     });

@@ -10,7 +10,7 @@ export const SUPABASE_TABLES = {
   influencerBargainHistory: "influencer_bargain_history_rows",
   influencerBrandPerformance: "influencer_brand_performance_rows",
   influencerCreate: "influencer_create_rows",
-  influencerDispatch: "influencer_dispatch_rows",
+  influencerDispatch: "influencer_dispatch_details_rows",
   influencerPlatform: "influencer_platform_rows",
   influencerPricing: "influencer_pricing_rows",
   influencerProduct: "influencer_product_rows",

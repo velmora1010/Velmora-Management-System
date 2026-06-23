@@ -38,7 +38,7 @@ export const usePOHistory = (pageSize = 10) => {
 
     try {
       let query = supabase
-        .from('purchase_orders')
+        .from('purchase_orders_rows')
         .select('*', { count: 'exact' });
 
       // Apply search filter (PO Number OR Vendor Name)

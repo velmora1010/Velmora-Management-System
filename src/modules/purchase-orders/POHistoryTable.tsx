@@ -47,7 +47,7 @@ export const POHistoryTable = memo(({
       
       // 1. Fetch the exact finalized product snapshot from DB
       const { data: productsData, error: productsErr } = await supabase
-        .from('purchase_order_products')
+        .from('purchase_order_products_rows')
         .select('*')
         .eq('purchase_order_id', po.id);
         
@@ -67,7 +67,7 @@ export const POHistoryTable = memo(({
 
       await exportPurchaseOrderPDF(pdfSnapshot);
 
-      logAction('EXPORT_PDF', 'purchase_orders', po.id, {
+      logAction('EXPORT_PDF', 'purchase_orders_rows', po.id, {
         po_number: po.po_number,
       });
 
