@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
 import { 
@@ -54,13 +54,6 @@ export const CustomerTicketsDashboard = () => {
   const dailyTrendData = Object.keys(dailyMap)
     .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
     .map(k => ({ date: k, tickets: dailyMap[k] }));
-
-  // Status Distribution
-  const statusData = [
-    { name: 'Open', value: stats.openTickets, color: '#f59e0b' },
-    { name: 'In Progress', value: stats.inProgressTickets, color: '#3b82f6' },
-    { name: 'Resolved', value: stats.resolvedTickets, color: '#10b981' }
-  ];
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -165,7 +158,7 @@ export const CustomerTicketsDashboard = () => {
                   paddingAngle={5}
                   dataKey="value"
                 >
-                  {issueTypeData.map((entry, index) => (
+                  {issueTypeData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>

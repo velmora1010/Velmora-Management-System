@@ -1,5 +1,5 @@
 import db from '../lib/db';
-import type { CustomerTicket, IssueType, TicketStatus, TicketPriority } from '../types/customer-tickets';
+import type { CustomerTicket } from '../types/customer-tickets';
 
 export const customerTicketsService = {
   async getAllTickets() {
