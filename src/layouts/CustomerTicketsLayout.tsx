@@ -1,24 +1,58 @@
+import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Ticket, ListTodo, CheckCircle2, LayoutDashboard, ChevronLeft } from 'lucide-react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import db from '../lib/db';
+import { supabase } from '../lib/supabase';
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
 
 export const CustomerTicketsLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const openCount = useLiveQuery(
-    () => db.customer_tickets.filter(t => t.status !== 'Resolved').count(),
-    [],
-    0
-  );
+  const [openCount, setOpenCount] = useState(0);
+  const [resolvedCount, setResolvedCount] = useState(0);
 
-  const resolvedCount = useLiveQuery(
-    () => db.customer_tickets.filter(t => t.status === 'Resolved').count(),
-    [],
-    0
-  );
+  const fetchCounts = async () => {
+    try {
+      const { count: open } = await supabase
+        .from('customer_tickets')
+        .select('*', { count: 'exact', head: true })
+        .neq('status', 'Resolved');
+
+      const { count: resolved } = await supabase
+        .from('customer_tickets')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'Resolved');
+
+      setOpenCount(open || 0);
+      setResolvedCount(resolved || 0);
+    } catch (err) {
+      console.error('Failed to fetch ticket counts from Supabase:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCounts();
+
+    // Subscribe to changes on customer_tickets table to update counts in real time
+    const channel = supabase
+      .channel('customer-tickets-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'customer_tickets',
+        },
+        () => {
+          fetchCounts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const navigation = [
     { name: 'Dashboard', href: '/tickets/dashboard', icon: LayoutDashboard },

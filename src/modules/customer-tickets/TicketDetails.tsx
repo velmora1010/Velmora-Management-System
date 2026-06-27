@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, ArrowLeft } from 'lucide-react';
+import { Save, ArrowLeft, Trash2 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
 import type { CustomerTicket, TicketStatus } from '../../types/customer-tickets';
@@ -18,6 +18,22 @@ export const TicketDetails = () => {
   useEffect(() => {
     if (id) loadTicket(Number(id));
   }, [id]);
+
+  const handleDelete = async () => {
+    if (!ticket) return;
+    if (!window.confirm('Are you sure you want to delete this ticket?')) return;
+
+    try {
+      setIsSubmitting(true);
+      await customerTicketsService.deleteTicket(ticket.id!);
+      toast.success('Ticket deleted successfully');
+      navigate('/tickets/open');
+    } catch (err: any) {
+      toast.error('Failed to delete ticket: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const loadTicket = async (ticketId: number) => {
     const data = await customerTicketsService.getTicketById(ticketId);
@@ -180,6 +196,15 @@ export const TicketDetails = () => {
                 className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-xl transition-colors flex justify-center items-center gap-2 disabled:opacity-50"
               >
                 <Save size={18} /> {isSubmitting ? 'Saving...' : 'Save Changes'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={isSubmitting}
+                className="w-full bg-rose-600/10 hover:bg-rose-600/20 text-rose-400 border border-rose-500/30 hover:border-rose-500/50 font-medium py-3 rounded-xl transition-colors flex justify-center items-center gap-2 disabled:opacity-50 mt-3"
+              >
+                <Trash2 size={18} /> Delete Ticket
               </button>
             </div>
           </Card>

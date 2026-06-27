@@ -1,72 +1,180 @@
-import db from '../lib/db';
+import { supabase } from '../lib/supabase';
 import type { CustomerTicket } from '../types/customer-tickets';
+
+const mapToDb = (ticket: Partial<CustomerTicket>) => {
+  const dbObj: any = {};
+  if (ticket.id !== undefined) dbObj.id = ticket.id;
+  if (ticket.ticketId !== undefined) dbObj.ticket_id = ticket.ticketId;
+  if (ticket.customerName !== undefined) dbObj.customer_name = ticket.customerName;
+  if (ticket.phoneNumber !== undefined) dbObj.phone_number = ticket.phoneNumber;
+  if (ticket.orderId !== undefined) dbObj.order_id = ticket.orderId;
+  if (ticket.orderDate !== undefined) dbObj.order_date = ticket.orderDate;
+  if (ticket.awbNumber !== undefined) dbObj.awb_number = ticket.awbNumber;
+  if (ticket.courierPartner !== undefined) dbObj.courier_partner = ticket.courierPartner;
+  if (ticket.state !== undefined) dbObj.state = ticket.state;
+  if (ticket.city !== undefined) dbObj.city = ticket.city;
+  if (ticket.issueType !== undefined) dbObj.issue_type = ticket.issueType;
+  if (ticket.issueDescription !== undefined) dbObj.issue_description = ticket.issueDescription;
+  if (ticket.priority !== undefined) dbObj.priority = ticket.priority;
+  if (ticket.status !== undefined) dbObj.status = ticket.status;
+  if (ticket.createdAt !== undefined) dbObj.created_at = ticket.createdAt;
+  if (ticket.updatedAt !== undefined) dbObj.updated_at = ticket.updatedAt;
+  if (ticket.resolvedAt !== undefined) dbObj.resolved_at = ticket.resolvedAt;
+  if (ticket.resolutionNotes !== undefined) dbObj.resolution_notes = ticket.resolutionNotes;
+  if (ticket.internalNotes !== undefined) dbObj.internal_notes = ticket.internalNotes;
+  return dbObj;
+};
+
+const mapFromDb = (dbObj: any): CustomerTicket => {
+  return {
+    id: dbObj.id,
+    ticketId: dbObj.ticket_id,
+    customerName: dbObj.customer_name,
+    phoneNumber: dbObj.phone_number,
+    orderId: dbObj.order_id,
+    orderDate: dbObj.order_date,
+    awbNumber: dbObj.awb_number,
+    courierPartner: dbObj.courier_partner,
+    state: dbObj.state,
+    city: dbObj.city,
+    issueType: dbObj.issue_type,
+    issueDescription: dbObj.issue_description,
+    priority: dbObj.priority,
+    status: dbObj.status,
+    createdAt: dbObj.created_at,
+    updatedAt: dbObj.updated_at,
+    resolvedAt: dbObj.resolved_at,
+    resolutionNotes: dbObj.resolution_notes,
+    internalNotes: dbObj.internal_notes
+  };
+};
 
 export const customerTicketsService = {
   async getAllTickets() {
-    return await db.customer_tickets.toArray();
+    const { data, error } = await supabase
+      .from('customer_tickets')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapFromDb);
   },
 
   async getOpenTickets() {
-    return await db.customer_tickets
-      .filter(t => t.status !== 'Resolved')
-      .toArray();
+    const { data, error } = await supabase
+      .from('customer_tickets')
+      .select('*')
+      .neq('status', 'Resolved')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapFromDb);
   },
 
   async getResolvedTickets() {
-    return await db.customer_tickets
-      .filter(t => t.status === 'Resolved')
-      .toArray();
+    const { data, error } = await supabase
+      .from('customer_tickets')
+      .select('*')
+      .eq('status', 'Resolved')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapFromDb);
   },
 
   async getTicketById(id: number) {
-    return await db.customer_tickets.get(id);
+    const { data, error } = await supabase
+      .from('customer_tickets')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    return mapFromDb(data);
   },
 
   async getTicketByTicketId(ticketId: string) {
-    return await db.customer_tickets.where('ticketId').equals(ticketId).first();
+    const { data, error } = await supabase
+      .from('customer_tickets')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapFromDb(data) : null;
   },
 
   async createTicket(ticket: Omit<CustomerTicket, 'id' | 'ticketId' | 'createdAt' | 'updatedAt'>) {
-    // Generate new ticket ID
-    const count = await db.customer_tickets.count();
-    const newTicketId = `CT-${String(count + 1).padStart(4, '0')}`;
-    
+    const { count, error: countError } = await supabase
+      .from('customer_tickets')
+      .select('*', { count: 'exact', head: true });
+    if (countError) throw countError;
+
+    const newTicketId = `CT-${String((count || 0) + 1).padStart(4, '0')}`;
     const now = new Date().toISOString();
-    const newTicket: CustomerTicket = {
+
+    const dbPayload = mapToDb({
       ...ticket,
       ticketId: newTicketId,
       createdAt: now,
       updatedAt: now
-    };
+    });
 
-    const id = await db.customer_tickets.add(newTicket);
-    return { id, ticketId: newTicketId };
+    const { data, error } = await supabase
+      .from('customer_tickets')
+      .insert([dbPayload])
+      .select()
+      .single();
+    if (error) throw error;
+
+    return { id: data.id, ticketId: newTicketId };
   },
 
   async updateTicket(id: number, updates: Partial<Omit<CustomerTicket, 'id' | 'ticketId' | 'createdAt'>>) {
     const now = new Date().toISOString();
-    await db.customer_tickets.update(id, {
+    const dbPayload = mapToDb({
       ...updates,
       updatedAt: now
     });
+
+    const { error } = await supabase
+      .from('customer_tickets')
+      .update(dbPayload)
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  async deleteTicket(id: number) {
+    const { error } = await supabase
+      .from('customer_tickets')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
   },
 
   async checkDuplicateTicket(orderId: string, awbNumber: string) {
-    // Check if there are open tickets with same orderId or awbNumber
-    const existing = await db.customer_tickets
-      .filter(t => t.status !== 'Resolved' && (t.orderId === orderId || t.awbNumber === awbNumber))
-      .first();
-    
-    return existing || null;
+    if (!orderId && !awbNumber) return null;
+
+    let query = supabase
+      .from('customer_tickets')
+      .select('*')
+      .neq('status', 'Resolved');
+
+    if (orderId && awbNumber) {
+      query = query.or(`order_id.eq."${orderId}",awb_number.eq."${awbNumber}"`);
+    } else if (orderId) {
+      query = query.eq('order_id', orderId);
+    } else {
+      query = query.eq('awb_number', awbNumber);
+    }
+
+    const { data, error } = await query.limit(1).maybeSingle();
+    if (error) throw error;
+    return data ? mapFromDb(data) : null;
   },
   
   async getDashboardAnalytics() {
-    const allTickets = await db.customer_tickets.toArray();
+    const allTickets = await this.getAllTickets();
     const now = new Date();
     
     // Summary counts
     const totalTickets = allTickets.length;
-    const openTickets = allTickets.filter(t => t.status === 'Open').length;
+    const openTickets = allTickets.filter(t => t.status !== 'Resolved').length;
     const inProgressTickets = allTickets.filter(t => t.status === 'In Progress').length;
     const resolvedTickets = allTickets.filter(t => t.status === 'Resolved').length;
     
@@ -110,12 +218,12 @@ export const customerTicketsService = {
     }, {} as Record<string, number>);
 
     const stateWiseCount = allTickets.reduce((acc, t) => {
-      acc[t.state] = (acc[t.state] || 0) + 1;
+      acc[t.state || 'Unknown'] = (acc[t.state || 'Unknown'] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
     
     const courierPartnerCount = allTickets.reduce((acc, t) => {
-      acc[t.courierPartner] = (acc[t.courierPartner] || 0) + 1;
+      acc[t.courierPartner || 'Unknown'] = (acc[t.courierPartner || 'Unknown'] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
