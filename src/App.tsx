@@ -40,6 +40,14 @@ const ViewBarcode = lazy(() => import('./modules/inventory/ViewBarcode').then(mo
 const QCBarcodeList = lazy(() => import('./modules/inventory/quality-check/QCBarcodeList').then(module => ({ default: module.QCBarcodeList })));
 const BackupRestore = lazy(() => import('./modules/system/BackupRestore').then(module => ({ default: module.BackupRestore })));
 
+// Customer Tickets
+const CustomerTicketsLayout = lazy(() => import('./layouts/CustomerTicketsLayout').then(module => ({ default: module.CustomerTicketsLayout })));
+const CustomerTicketsDashboard = lazy(() => import('./modules/customer-tickets/CustomerTicketsDashboard').then(module => ({ default: module.CustomerTicketsDashboard })));
+const OpenTickets = lazy(() => import('./modules/customer-tickets/OpenTickets').then(module => ({ default: module.OpenTickets })));
+const ResolvedTickets = lazy(() => import('./modules/customer-tickets/ResolvedTickets').then(module => ({ default: module.ResolvedTickets })));
+const AddTicket = lazy(() => import('./modules/customer-tickets/AddTicket').then(module => ({ default: module.AddTicket })));
+const TicketDetails = lazy(() => import('./modules/customer-tickets/TicketDetails').then(module => ({ default: module.TicketDetails })));
+
 // Fallback loader
 const RouteLoader = () => (
   <div className="flex h-[calc(100vh-64px)] w-full items-center justify-center">
@@ -117,6 +125,17 @@ function App() {
                     <Route path="quality-check/*" element={<QCBarcodeList />} />
                     <Route path="system" element={<BackupRestore />} />
                   </Route>
+
+                  {/* Customer Tickets Department */}
+                  <Route path="/tickets" element={<CustomerTicketsLayout />}>
+                    <Route index element={<Navigate to="dashboard" replace />} />
+                    <Route path="dashboard" element={<CustomerTicketsDashboard />} />
+                    <Route path="open" element={<OpenTickets />} />
+                    <Route path="resolved" element={<ResolvedTickets />} />
+                    <Route path="new" element={<AddTicket />} />
+                    <Route path=":id" element={<TicketDetails />} />
+                  </Route>
+
                   <Route path="/sales" element={<PlaceholderPage title="Sales" icon={<TrendingUp size={32} />} />} />
                   <Route path="/documents" element={<PlaceholderPage title="Document Room" icon={<FolderOpen size={32} />} />} />
                   <Route path="/marketing" element={<MarketingHome />} />

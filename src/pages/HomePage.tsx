@@ -10,7 +10,8 @@ import {
   Users, 
   Tag, 
   Settings, 
-  Banknote 
+  Banknote,
+  Ticket
 } from 'lucide-react';
 
 const DEPARTMENTS = [
@@ -24,7 +25,8 @@ const DEPARTMENTS = [
   { id: 'hr', title: 'Human Resources', icon: Users, color: '#f97316', path: '/hr' },
   { id: 'brand', title: 'Brand Management', icon: Tag, color: '#e11d48', path: '/brand' },
   { id: 'operations', title: 'Operations', icon: Settings, color: '#64748b', path: '/operations' },
-  { id: 'finance', title: 'Finance', icon: Banknote, color: '#10b981', path: '/finance' }
+  { id: 'finance', title: 'Finance', icon: Banknote, color: '#10b981', path: '/finance' },
+  { id: 'customer-tickets', title: 'Customer Tickets', icon: Ticket, color: '#f43f5e', path: '/tickets' }
 ];
 
 export const HomePage = () => {

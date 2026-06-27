@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Download, Upload, AlertTriangle, CheckCircle2, FileJson } from 'lucide-react';
+import db from '../../lib/db';
 import { Card } from '../../components/ui/Card';
 import { motion } from 'framer-motion';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
@@ -24,7 +25,7 @@ export const BackupRestore = () => {
     return `${YYYY}-${MM}-${DD}-${HH}-${mm}`;
   };
 
-  const handleExportBackup = () => {
+  const handleExportBackup = async () => {
     try {
       const data: Record<string, string> = {};
       for (let i = 0; i < localStorage.length; i++) {
@@ -33,6 +34,13 @@ export const BackupRestore = () => {
           data[key] = localStorage.getItem(key) || '';
         }
       }
+      
+      // Add Dexie customer_tickets
+      const tickets = await db.customer_tickets.toArray();
+      if (tickets.length > 0) {
+        data['customer_tickets_dexie'] = JSON.stringify(tickets);
+      }
+
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -72,6 +80,7 @@ export const BackupRestore = () => {
         const comboCount = data['combo_batches'] ? JSON.parse(data['combo_batches']).length : 0;
         const draftsCount = data['combo_drafts'] ? JSON.parse(data['combo_drafts']).length : 0;
         const auditsCount = data['inventory_audit_log'] ? JSON.parse(data['inventory_audit_log']).length : 0;
+        const ticketsCount = data['customer_tickets_dexie'] ? JSON.parse(data['customer_tickets_dexie']).length : 0;
 
         setPendingRestore({
           data,
@@ -80,7 +89,8 @@ export const BackupRestore = () => {
             Transactions: txCount,
             Drafts: draftsCount,
             Combos: comboCount,
-            Audits: auditsCount
+            Audits: auditsCount,
+            Tickets: ticketsCount
           }
         });
 
@@ -98,10 +108,10 @@ export const BackupRestore = () => {
     setIsConfirmOpen(true);
   };
 
-  const executeRestore = () => {
+  const executeRestore = async () => {
     if (!pendingRestore) return;
     
-    // Create Temporary Rollback
+    // Create Temporary Rollback for localstorage
     const rollbackData: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -110,9 +120,15 @@ export const BackupRestore = () => {
 
     try {
       localStorage.clear();
-      Object.keys(pendingRestore.data).forEach(key => {
-        localStorage.setItem(key, pendingRestore.data[key]);
-      });
+      for (const key of Object.keys(pendingRestore.data)) {
+        if (key === 'customer_tickets_dexie') {
+          const tickets = JSON.parse(pendingRestore.data[key]);
+          await db.customer_tickets.clear();
+          await db.customer_tickets.bulkAdd(tickets);
+        } else {
+          localStorage.setItem(key, pendingRestore.data[key]);
+        }
+      }
 
       setStatus({ type: 'success', message: 'Restore Successful! Reloading...' });
       setTimeout(() => window.location.reload(), 1500);
