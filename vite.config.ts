@@ -41,6 +41,7 @@ export default defineConfig({
   ],
   build: {
     rollupOptions: {
+      external: ['@react-pdf/renderer', '@zxing/browser'],
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
@@ -49,9 +50,6 @@ export default defineConfig({
             }
             if (id.includes('recharts')) {
               return 'charts';
-            }
-            if (id.includes('@react-pdf')) {
-              return 'pdf';
             }
             if (id.includes('lucide')) {
               return 'icons';

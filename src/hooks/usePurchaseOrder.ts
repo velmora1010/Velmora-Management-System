@@ -221,6 +221,8 @@ export const usePurchaseOrder = () => {
             price: p.unit_price || 0,
             gst_percent: p.gst || 0,
             used_in: p.used_in || '',
+            total_amount: (p.quantity || 0) * (p.unit_price || 0),
+            hasVendorData: true,
           })) : [],
           termsConditions: poHeader.terms_conditions || DEFAULT_TERMS,
         });
@@ -251,7 +253,7 @@ export const usePurchaseOrder = () => {
     setTermsConditions,
     updateField,
     savePurchaseOrder,
-    updatePurchaseOrder,
+    updatePurchaseOrder: savePurchaseOrder,
     loadPurchaseOrder,
   };
 };

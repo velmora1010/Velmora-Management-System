@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { settingsService } from '../../services/settingsService';
-import type { SystemSettings, SettingsSectionKey } from '../../types/settings';
+import type { SystemSettings, SettingsSectionKey, NumberingSequences } from '../../types/settings';
 import { Building2, Globe, DollarSign, Hash, Bell, Sliders, Save, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 

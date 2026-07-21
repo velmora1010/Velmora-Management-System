@@ -9,7 +9,7 @@ import { LayoutDashboard } from 'lucide-react';
 
 export const TaskManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'add' | 'view' | 'status' | 'addMain' | 'viewMain' | 'category'>('add');
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingTask, setEditingTask] = useState<any | null>(null);
 
   const navButtonClass = (isActive: boolean) => 
     `px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${

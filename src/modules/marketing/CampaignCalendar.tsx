@@ -152,7 +152,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   // Fetch influencer platforms reactively
   useEffect(() => {
     const fetchPlatforms = async () => {
-      const influencerIds = [...new Set(trackingRecords.map(r => r.influencer_id).filter(Boolean))];
+      const influencerIds = Array.from(new Set(trackingRecords.map(r => r.influencer_id).filter(Boolean)));
       if (influencerIds.length === 0) return;
 
       try {
@@ -265,7 +265,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       }
 
       // 4. Video 1 Final Post milestone
-      const totalVids = r.pricing?.total_videos || 1;
+      const totalVids = (r.pricing as any)?.total_videos || 1;
       const rawV1Link = metadata.video1_final_post_link || r.final_post_link;
       const isV1Completed = !!(metadata.video1_confirmed || r.final_post_completed) && 
                             !isFakeUrl(rawV1Link) && 
@@ -663,7 +663,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                   const draft1UploadedAt = metadata.draft1_uploaded_at || metadata.draft_uploaded_at;
                   const draft2UploadedAt = metadata.draft2_uploaded_at;
 
-                  const totalVideos = r.pricing?.total_videos || 1;
+                  const totalVideos = (r.pricing as any)?.total_videos || 1;
                   const rawV1Link = metadata.video1_final_post_link || r.final_post_link;
                   const isVideo1FinalPostCompleted = !!(metadata.video1_confirmed || r.final_post_completed) && 
                                                      !isFakeUrl(rawV1Link) && 

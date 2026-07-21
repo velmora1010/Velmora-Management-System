@@ -27,13 +27,13 @@ class RecommendationRefreshManager {
   }
 
   private notify() {
-    for (const listener of this.listeners) {
+    this.listeners.forEach(listener => {
       try {
         listener(this.refreshing);
       } catch (err) {
         console.error("Error in refresh listener:", err);
       }
-    }
+    });
   }
 }
 

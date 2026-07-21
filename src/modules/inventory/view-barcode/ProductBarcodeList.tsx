@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { CheckCircle, PackageSearch, Download, Search, Package, RefreshCcw, ArrowLeft, AlertTriangle, ArrowRight } from 'lucide-react';
 import { inventoryService } from '../../../services/inventoryService';
+import { departmentService } from '../../../services/departmentService';
 import Barcode from 'react-barcode';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ConfirmModal } from '../../../components/ui/ConfirmModal';

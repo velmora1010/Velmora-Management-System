@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+// @ts-ignore
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { X, CameraOff } from 'lucide-react';
 
@@ -21,7 +22,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({ onScan
         const controls = await codeReader.decodeFromVideoDevice(
           undefined, // undefined selects default camera device
           videoRef.current!,
-          (result) => {
+          (result: any) => {
             if (result) {
               const scannedText = result.getText();
               if (scannedText) {

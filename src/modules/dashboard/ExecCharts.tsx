@@ -61,13 +61,8 @@ const SkeletonChart = () => (
 
 // ── Custom Pie Label ──────────────────────────────────────────────────────────
 
-interface PieLabelProps {
-  name: string;
-  percent: number;
-}
-
-const renderPieLabel = ({ name, percent }: PieLabelProps) =>
-  percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '';
+const renderPieLabel = (entry: any) =>
+  (entry.percent || 0) > 0.05 ? `${entry.name || ''} ${((entry.percent || 0) * 100).toFixed(0)}%` : '';
 
 // ── Main Component ────────────────────────────────────────────────────────────
 

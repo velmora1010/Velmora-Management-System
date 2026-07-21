@@ -9,6 +9,7 @@ import { ProcurementTotalsCard } from '../../components/procurement/ProcurementT
 import { Card } from '../../components/ui/Card';
 import type { Vendor } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { departmentService } from '../../services/departmentService';
 
 export const PurchaseOrderForm: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -20,7 +21,6 @@ export const PurchaseOrderForm: React.FC = () => {
   // ── Central state engine ──
   const po = usePurchaseOrder();
 
-  // Load PO if editing/viewing
   useEffect(() => {
     if (poId) {
       po.loadPurchaseOrder(poId);
@@ -36,9 +36,9 @@ export const PurchaseOrderForm: React.FC = () => {
   useEffect(() => {
     const loadDeptsAndSections = async () => {
       const { data: depts } = await departmentService.getAllDepartments();
-      if (depts) setDepartments(depts.filter(d => (d as any).status !== 'archived'));
+      if (depts) setDepartments(depts.filter((d: any) => d.status !== 'archived'));
       const { data: secs } = await departmentService.getAllSections();
-      if (secs) setSections(secs.filter(s => (s as any).status !== 'archived'));
+      if (secs) setSections(secs.filter((s: any) => s.status !== 'archived'));
     };
     loadDeptsAndSections();
   }, []);
@@ -282,7 +282,7 @@ export const PurchaseOrderForm: React.FC = () => {
           products={po.formState.products}
           onFieldChange={po.handleProductFieldChange}
           onRemove={po.handleRemoveProduct}
-          disabled={isViewMode}
+          readonly={isViewMode}
         />
       </Card>
 
@@ -459,7 +459,7 @@ export const PurchaseOrderForm: React.FC = () => {
             <button
               type="button"
               className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-8 rounded-lg shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              onClick={editPoId ? () => po.updatePurchaseOrder(editPoId) : po.savePurchaseOrder}
+              onClick={po.savePurchaseOrder}
               disabled={po.uiState.isSaving || !po.formState.vendorId || po.formState.products.length === 0}
             >
               {po.uiState.isSaving ? 'Saving Order...' : (editPoId ? 'Update Purchase Order' : 'Save Purchase Order')}

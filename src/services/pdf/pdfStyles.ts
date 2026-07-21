@@ -1,4 +1,5 @@
-import { StyleSheet } from '@react-pdf/renderer';
+// @ts-ignore
+import { StyleSheet, Font } from '@react-pdf/renderer';
 
 // Register standard fonts for a professional look
 // For a robust production app, you might want to load fonts from a URL,

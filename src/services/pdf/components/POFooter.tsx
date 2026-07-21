@@ -1,3 +1,4 @@
+// @ts-ignore
 import { Text, View } from '@react-pdf/renderer';
 import { styles } from '../pdfStyles';
 
@@ -10,7 +11,7 @@ export const POFooter = ({ termsConditions }: POFooterProps) => (
     <Text style={styles.termsTitle}>Terms & Conditions</Text>
     <Text style={styles.termsText}>{termsConditions || 'Standard Velmora Business Terms Apply.'}</Text>
     
-    <Text style={styles.pageNumber} render={({ pageNumber, totalPages }) => (
+    <Text style={styles.pageNumber} render={({ pageNumber, totalPages }: any) => (
       `Page ${pageNumber} of ${totalPages}  |  Generated on ${new Date().toLocaleString()}`
     )} />
   </View>

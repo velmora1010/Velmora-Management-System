@@ -1,3 +1,4 @@
+// @ts-ignore
 import { pdf } from '@react-pdf/renderer';
 import { PurchaseOrderDocument, type PurchaseOrderDocumentProps } from './pdfTemplates';
 

@@ -53,7 +53,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     const isDraft1Completed = !!record.draft_video_url;
     const isDraft2Completed = !!record.re_draft_video_url;
 
-    const pricingTotalVideos = record.pricing?.total_videos || 1;
+    const pricingTotalVideos = (record.pricing as any)?.total_videos || 1;
     const rawV1Link = metadata.video1_final_post_link || record.final_post_link;
     const isVideo1Completed = !!(metadata.video1_confirmed || record.final_post_completed) && 
                               !isFakeUrl(rawV1Link) && 
@@ -260,7 +260,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     const isDraft1Completed = !!record.draft_video_url;
     const isDraft2Completed = !!record.re_draft_video_url;
 
-    const pricingTotalVideos = record.pricing?.total_videos || 1;
+    const pricingTotalVideos = (record.pricing as any)?.total_videos || 1;
     const rawV1Link = metadata.video1_final_post_link || record.final_post_link;
     const isVideo1Completed = !!(metadata.video1_confirmed || record.final_post_completed) && 
                               !isFakeUrl(rawV1Link) && 

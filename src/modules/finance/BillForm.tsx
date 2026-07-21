@@ -96,7 +96,7 @@ export const BillForm = ({ bill, onClose, onSuccess }: BillFormProps) => {
           .eq('sub2', formData.sub_category2)
           .eq('status', 'active');
         if (!error && data && mounted) {
-          const unique = Array.from(new Set(data.map(d => d.sub_sub_sub_category || d.sub3).filter(Boolean))) as string[];
+          const unique = Array.from(new Set(data.map((d: any) => d.sub_sub_sub_category || d.sub3).filter(Boolean))) as string[];
           setSub3Options(unique);
         }
       } catch (err) {

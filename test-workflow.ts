@@ -9,7 +9,7 @@ const store: Record<string, string> = {};
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function runTests() {
-  const { localInventoryService } = await import('./src/services/localInventoryService.ts');
+  const { localInventoryService } = await import('./src/services/localInventoryService');
   console.log("Starting tests...");
 
   // Setup: add some finished goods products to the mock state

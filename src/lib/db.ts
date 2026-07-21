@@ -1,6 +1,19 @@
-import Dexie, { Table } from 'dexie';
+import Dexie, { type EntityTable } from 'dexie';
 
-<<<<<<< HEAD
+import type {
+  RawMaterial,
+  InventoryIn,
+  Batch,
+  InventoryOut,
+  ProductionBatch,
+  ProductionMicroBatch,
+  ProductionIngredient,
+  RawMaterialIssue,
+  FinishedGoodsInventory
+} from '../types/inventory';
+import type { CustomerTicket } from '../types/customer-tickets';
+import type { LogisticsImport, LogisticsOrder, TrackingLog, HistoricalDeliveryData, DeliveryHistory } from '../types/logistics';
+
 export interface Shipment {
   awb: string;
   orderId: string;
@@ -26,182 +39,73 @@ export interface Extraction {
 }
 
 export class AppDB extends Dexie {
-  shipments!: Table<Shipment, string>;
-  extractions!: Table<Extraction, string>;
+  shipments!: EntityTable<Shipment, 'awb'>;
+  extractions!: EntityTable<Extraction, 'id'>;
+  raw_materials!: EntityTable<RawMaterial, 'id'>;
+  inventory_in!: EntityTable<InventoryIn, 'id'>;
+  batches!: EntityTable<Batch, 'id'>;
+  inventory_out!: EntityTable<InventoryOut, 'id'>;
+  production_batches!: EntityTable<ProductionBatch, 'id'>;
+  production_micro_batches!: EntityTable<ProductionMicroBatch, 'id'>;
+  production_ingredients!: EntityTable<ProductionIngredient, 'id'>;
+  raw_material_issues!: EntityTable<RawMaterialIssue, 'id'>;
+  finished_goods_inventory!: EntityTable<FinishedGoodsInventory, 'id'>;
+  customer_tickets!: EntityTable<CustomerTicket, 'id'>;
+  logistics_imports!: EntityTable<LogisticsImport, 'id'>;
+  logistics_orders!: EntityTable<LogisticsOrder, 'id'>;
+  tracking_logs!: EntityTable<TrackingLog, 'id'>;
+  historical_delivery_data!: EntityTable<HistoricalDeliveryData, 'id'>;
+  delivery_history!: EntityTable<DeliveryHistory, 'id'>;
 
   constructor() {
-    super('STCourierDB');
+    super('VelmoraAppDB');
     this.version(1).stores({
-      shipments: 'awb, orderId, status, state, department, lastSyncedAt'
+      shipments: 'awb, orderId, status, state, department, lastSyncedAt',
+      raw_materials: '++id, name, category, created_at',
+      inventory_in: '++id, product_id, vendor_name, date_received, created_at',
+      batches: '++id, batch_id, inventory_in_id, product_id, status, created_at',
+      inventory_out: '++id, batch_id, product_id, date, created_at'
     });
     this.version(2).stores({
       extractions: 'id, imageName, awb, status, uploadedAt'
     });
-=======
-import type {
-  RawMaterial,
-  InventoryIn,
-  Batch,
-  InventoryOut,
-  ProductionBatch,
-  ProductionMicroBatch,
-  ProductionIngredient,
-  RawMaterialIssue,
-  FinishedGoodsInventory
-} from '../types/inventory';
-import type { CustomerTicket } from '../types/customer-tickets';
-import type { LogisticsImport, LogisticsOrder, TrackingLog, HistoricalDeliveryData, DeliveryHistory } from '../types/logistics';
+    this.version(3).stores({
+      raw_materials: '++id, name, category, created_at',
+      inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
+      batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
+      inventory_out: '++id, batch_id, product_id, date, created_at'
+    });
+    this.version(4).stores({
+      production_batches: '++id, production_batch_id, product_name, status, created_at',
+      production_micro_batches: '++id, production_batch_id, status',
+      production_ingredients: '++id, production_batch_id, material_name, status',
+      raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
+      finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status'
+    }).upgrade(tx => {
+      return tx.table('batches').toCollection().modify(record => {
+        record.status = record.status || 'Active';
+      });
+    });
+    this.version(5).stores({
+      customer_tickets: '++id, ticketId, orderId, awbNumber, status, priority, issueType, createdAt'
+    });
+    this.version(10).stores({
+      logistics_imports: '++id, fileName, uploadedAt',
+      logistics_orders: '++id, orderId, awbNumber, stage, orderType, phoneNumber'
+    });
+    this.version(11).stores({
+      tracking_logs: '++id, awb, courier, startedAt, success'
+    });
+    this.version(12).stores({
+      historical_delivery_data: '++id, pincode, state, courier, orderDate, deliveredDate, deliveryDays'
+    });
+    this.version(13).stores({
+      delivery_history: '++id, orderNo, pincode, state, courier, orderDate, deliveredDate, deliveryDays, sourceFileName, importedAt'
+    });
+  }
+}
 
-const db = new Dexie('MaterialManagementDB') as Dexie & {
-  raw_materials: EntityTable<RawMaterial, 'id'>;
-  inventory_in: EntityTable<InventoryIn, 'id'>;
-  batches: EntityTable<Batch, 'id'>;
-  inventory_out: EntityTable<InventoryOut, 'id'>;
-  
-  production_batches: EntityTable<ProductionBatch, 'id'>;
-  production_micro_batches: EntityTable<ProductionMicroBatch, 'id'>;
-  production_ingredients: EntityTable<ProductionIngredient, 'id'>;
-  raw_material_issues: EntityTable<RawMaterialIssue, 'id'>;
-  finished_goods_inventory: EntityTable<FinishedGoodsInventory, 'id'>;
-  customer_tickets: EntityTable<CustomerTicket, 'id'>;
-  logistics_imports: EntityTable<LogisticsImport, 'id'>;
-  logistics_orders: EntityTable<LogisticsOrder, 'id'>;
-  tracking_logs: EntityTable<TrackingLog, 'id'>;
-  historical_delivery_data: EntityTable<HistoricalDeliveryData, 'id'>;
-  delivery_history: EntityTable<DeliveryHistory, 'id'>;
-};
-
-// Schema declaration
-db.version(1).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, product_id, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, inventory_in_id, product_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at'
-});
-
-db.version(2).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, product_id, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, inventory_in_id, product_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at'
-});
-
-db.version(3).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at'
-});
-
-db.version(4).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at',
-  production_batches: '++id, production_batch_id, product_name, status, created_at',
-  production_micro_batches: '++id, production_batch_id, status',
-  production_ingredients: '++id, production_batch_id, material_name, status',
-  raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
-  finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status'
-}).upgrade(tx => {
-  return tx.table('batches').toCollection().modify(record => {
-    record.status = record.status || 'Active';
-  });
-});
-
-db.version(5).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at',
-  production_batches: '++id, production_batch_id, product_name, status, created_at',
-  production_micro_batches: '++id, production_batch_id, status',
-  production_ingredients: '++id, production_batch_id, material_name, status',
-  raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
-  finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status',
-  customer_tickets: '++id, ticketId, orderId, awbNumber, status, priority, issueType, createdAt'
-});
-
-db.version(6).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at',
-  production_batches: '++id, production_batch_id, product_name, status, created_at',
-  production_micro_batches: '++id, production_batch_id, status',
-  production_ingredients: '++id, production_batch_id, material_name, status',
-  raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
-  finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status',
-  customer_tickets: '++id, ticketId, orderId, awbNumber, status, priority, issueType, createdAt'
-});
-
-db.version(10).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at',
-  production_batches: '++id, production_batch_id, product_name, status, created_at',
-  production_micro_batches: '++id, production_batch_id, status',
-  production_ingredients: '++id, production_batch_id, material_name, status',
-  raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
-  finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status',
-  customer_tickets: '++id, ticketId, orderId, awbNumber, status, priority, issueType, createdAt',
-  logistics_imports: '++id, fileName, uploadedAt',
-  logistics_orders: '++id, orderId, awbNumber, stage, orderType, phoneNumber'
-});
-
-db.version(11).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at',
-  production_batches: '++id, production_batch_id, product_name, status, created_at',
-  production_micro_batches: '++id, production_batch_id, status',
-  production_ingredients: '++id, production_batch_id, material_name, status',
-  raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
-  finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status',
-  customer_tickets: '++id, ticketId, orderId, awbNumber, status, priority, issueType, createdAt',
-  logistics_imports: '++id, fileName, uploadedAt',
-  logistics_orders: '++id, orderId, awbNumber, stage, orderType, phoneNumber',
-  tracking_logs: '++id, awb, courier, startedAt, success'
-});
-
-db.version(12).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at',
-  production_batches: '++id, production_batch_id, product_name, status, created_at',
-  production_micro_batches: '++id, production_batch_id, status',
-  production_ingredients: '++id, production_batch_id, material_name, status',
-  raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
-  finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status',
-  customer_tickets: '++id, ticketId, orderId, awbNumber, status, priority, issueType, createdAt',
-  logistics_imports: '++id, fileName, uploadedAt',
-  logistics_orders: '++id, orderId, awbNumber, stage, orderType, phoneNumber',
-  tracking_logs: '++id, awb, courier, startedAt, success',
-  historical_delivery_data: '++id, pincode, state, courier, orderDate, deliveredDate, deliveryDays'
-});
-
-db.version(13).stores({
-  raw_materials: '++id, name, category, created_at',
-  inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
-  batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
-  inventory_out: '++id, batch_id, product_id, date, created_at',
-  production_batches: '++id, production_batch_id, product_name, status, created_at',
-  production_micro_batches: '++id, production_batch_id, status',
-  production_ingredients: '++id, production_batch_id, material_name, status',
-  raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
-  finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status',
-  customer_tickets: '++id, ticketId, orderId, awbNumber, status, priority, issueType, createdAt',
-  logistics_imports: '++id, fileName, uploadedAt',
-  logistics_orders: '++id, orderId, awbNumber, stage, orderType, phoneNumber',
-  tracking_logs: '++id, awb, courier, startedAt, success',
-  historical_delivery_data: '++id, pincode, state, courier, orderDate, deliveredDate, deliveryDays',
-  delivery_history: '++id, orderNo, pincode, state, courier, orderDate, deliveredDate, deliveryDays, sourceFileName, importedAt'
-});
-
-
+export const db = new AppDB();
 
 let isSeeding = false;
 
@@ -247,8 +151,7 @@ export const seedDatabase = async () => {
 
   } finally {
     isSeeding = false;
->>>>>>> e53e620 (feat: complete enterprise infrastructure integration)
   }
-}
+};
 
-export const db = new AppDB();
+export default db;

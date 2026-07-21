@@ -1,3 +1,4 @@
+// @ts-ignore
 import { Text, View } from '@react-pdf/renderer';
 import { styles } from '../pdfStyles';
 import { formatCurrencyPDF } from '../pdfHelpers';

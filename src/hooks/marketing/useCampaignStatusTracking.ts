@@ -103,8 +103,8 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
       const records = (trackingData || []) as StatusTrackingRecord[];
       
       if (records.length > 0) {
-        const dispatchIds = [...new Set(records.map(r => r.dispatch_id).filter(Boolean))];
-        const influencerIds = [...new Set(records.map(r => r.influencer_id).filter(Boolean))];
+        const dispatchIds = Array.from(new Set(records.map(r => r.dispatch_id).filter(Boolean)));
+        const influencerIds = Array.from(new Set(records.map(r => r.influencer_id).filter(Boolean)));
         const { data: dispatchData, error: dispatchError } = await supabase
           .from(SUPABASE_TABLES.influencerDispatch)
           .select('*')

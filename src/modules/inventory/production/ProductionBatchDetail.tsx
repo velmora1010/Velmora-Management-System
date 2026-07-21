@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { QrCode, CheckCircle2, PackagePlus, Boxes, ArrowLeft, Package, Check, X, AlertTriangle, Activity, ArrowRight, Barcode } from 'lucide-react';
+import { QrCode, CheckCircle2, PackagePlus, Boxes, ArrowLeft, Package, Check, X, AlertTriangle, Activity, ArrowRight, Barcode, Edit } from 'lucide-react';
 import ReactBarcode from 'react-barcode';
 import { inventoryService } from '../../../services/inventoryService';
+import { departmentService } from '../../../services/departmentService';
 import { calculateRequiredIngredients } from '../../../config/productFormulas';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getProductDisplayName, getProductSubtext, getProductTheme } from './productHelpers';
@@ -35,12 +36,35 @@ const ProductionBatchDetail = () => {
 
   const [isRestoring, setIsRestoring] = useState(false);
 
-  
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editProducedBy, setEditProducedBy] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editDeptId, setEditDeptId] = useState('');
+  const [editSectionId, setEditSectionId] = useState('');
+  const [editSectionsList, setEditSectionsList] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [sections, setSections] = useState<any[]>([]);
+
+  const getDeptName = (deptId: string) => {
+    const dept = departments.find(d => String(d.id) === String(deptId));
+    return dept ? dept.department_name : (deptId || '-');
+  };
+
+  const getSectionName = (secId: string) => {
+    const sec = sections.find(s => String(s.id) === String(secId));
+    return sec ? sec.section_name : (secId || '-');
+  };
 
   const fetchData = useCallback(async () => {
     try {
-      const allBatches = await inventoryService.getProductionBatches();
-      const batch = allBatches.find(b => b.id === id);
+      const [allBatches, deptsRes, sectsRes] = await Promise.all([
+        inventoryService.getProductionBatches(),
+        departmentService.getAllDepartments(),
+        departmentService.getAllSections()
+      ]);
+      setDepartments(deptsRes.data || []);
+      setSections(sectsRes.data || []);
+      const batch = allBatches.find((b: any) => b.id === id);
       setProductionBatch(batch || null);
       
       if (batch) {
@@ -379,6 +403,7 @@ const ProductionBatchDetail = () => {
       console.error(err);
       toast.error(err.message || "Failed to save barcodes");
     }
+  };
   const handleEditDeptChange = (deptId: string) => {
     setEditDeptId(deptId);
     setEditSectionId('');

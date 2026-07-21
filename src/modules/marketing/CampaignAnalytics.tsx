@@ -145,7 +145,7 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
     let pendPayCount = 0;
 
     trackingRecords.forEach(r => {
-      const influencerVids = Number(r.pricing?.total_videos) || 1;
+      const influencerVids = Number((r.pricing as any)?.total_videos) || 1;
       vRequired += influencerVids;
 
       if (r.delivered_confirmed) delCount++;

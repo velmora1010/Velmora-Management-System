@@ -12,6 +12,7 @@ export const AUDIT_ACTIONS = {
   LOGOUT: 'LOGOUT',
   ROLE_CHANGE: 'ROLE_CHANGE',
   STATUS_CHANGE: 'STATUS_CHANGE',
+  EXPORT_PDF: 'EXPORT_PDF',
 } as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[keyof typeof AUDIT_ACTIONS];

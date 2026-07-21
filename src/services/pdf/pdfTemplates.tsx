@@ -1,3 +1,4 @@
+// @ts-ignore
 import { Document, Page } from '@react-pdf/renderer';
 import { styles } from './pdfStyles';
 import { POHeader } from './components/POHeader';

@@ -199,5 +199,26 @@ export const analyticsService = {
     } catch (e) {
       return [];
     }
+  },
+
+  async getLogisticsStateSummary(): Promise<Record<string, any>> {
+    try {
+      const { data } = await supabase.from('delivery_history').select('*');
+      const stateMap: Record<string, any> = {};
+
+      (data || []).forEach(row => {
+        const st = row.state || 'Unknown';
+        if (!stateMap[st]) {
+          stateMap[st] = { state: st, totalOrders: 0, delivered: 0, pending: 0, avgDeliveryDays: 0 };
+        }
+        stateMap[st].totalOrders += 1;
+        if (row.deliveredDate) stateMap[st].delivered += 1;
+        else stateMap[st].pending += 1;
+      });
+
+      return stateMap;
+    } catch (e) {
+      return {};
+    }
   }
 };

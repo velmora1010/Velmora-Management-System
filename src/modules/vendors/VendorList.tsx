@@ -166,12 +166,12 @@ export const VendorList: React.FC<VendorListProps> = ({ onEditVendor }) => {
                 <div className="flex justify-between items-start mb-4">
                   <div className="font-semibold text-base text-slate-100">{vendor.vendor_name}</div>
                   <span className="text-[11px] px-2 py-1 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-full font-medium">
-                    {getDeptName(vendor.vendor_category)}
+                    {getDeptName(vendor.vendor_category || null)}
                   </span>
                 </div>
                 
                 <div className="text-sm text-slate-400 mb-5 flex-1">
-                  <div className="mb-1"><strong className="text-slate-300 font-medium">Section:</strong> {getSectionName(vendor.sub_category)}</div>
+                  <div className="mb-1"><strong className="text-slate-300 font-medium">Section:</strong> {getSectionName(vendor.sub_category || null)}</div>
                   {vendor.sub_sub_category && (
                     <div className="mb-1"><strong className="text-slate-300 font-medium">Sub Category 2:</strong> {vendor.sub_sub_category}</div>
                   )}

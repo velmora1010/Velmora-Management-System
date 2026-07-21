@@ -37,7 +37,7 @@ export const useTaskCategories = (initialMain?: string, initialSub1?: string, in
         }
 
         console.log(`Loaded task_categories_rows:`, data.length);
-        const mains = [...new Set(data.map((c: any) => c.main as string).filter(Boolean))].sort();
+        const mains = Array.from(new Set(data.map((c: any) => c.main as string).filter(Boolean))).sort();
 
         const sub1: Record<string, string[]> = {};
         const sub2: Record<string, string[]> = {};

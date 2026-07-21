@@ -62,7 +62,7 @@ export const useCampaignDispatch = (campaignId?: string) => {
 
       if (records.length > 0) {
         // Fetch influencer info like original script.js
-        const influencerIds = [...new Set(records.map(r => r.influencer_id))];
+        const influencerIds = Array.from(new Set(records.map(r => r.influencer_id)));
         const { data: infoData, error: infoError } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
           .select('id, name, profile_file_url, code, is_archived')

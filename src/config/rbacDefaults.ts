@@ -77,7 +77,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<AppRole, Record<AppModule, Record<
   }, {} as Record<AppModule, Record<PermissionAction, boolean>>),
 
   [ROLES.STAFF]: ALL_MODULES.reduce((acc, mod) => {
-    const isOperational = [MODULES.TASKS, MODULES.INVENTORY, MODULES.PRODUCTION, MODULES.QUALITY_CONTROL].includes(mod);
+    const isOperational = ([MODULES.TASKS, MODULES.INVENTORY, MODULES.PRODUCTION, MODULES.QUALITY_CONTROL] as string[]).includes(mod);
     acc[mod] = {
       [ACTIONS.VIEW]: true,
       [ACTIONS.CREATE]: isOperational,
