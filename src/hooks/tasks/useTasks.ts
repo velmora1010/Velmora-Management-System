@@ -26,9 +26,7 @@ export const useTasks = () => {
 
       if (tasksError) {
         console.error('Task_row fetch error:', tasksError.message);
-        const fallback = localStorage.getItem('tasks');
-        if (fallback) baseTasks = JSON.parse(fallback);
-        else throw tasksError;
+        throw tasksError;
       }
       
       console.log("Loaded table:", SUPABASE_TABLES.tasks, baseTasks?.length, tasksError);
@@ -43,8 +41,7 @@ export const useTasks = () => {
 
       if (itemsError) {
         console.error('Task_item_rows fetch error:', itemsError.message);
-        const fallback = localStorage.getItem('task_items');
-        if (fallback) baseItems = JSON.parse(fallback);
+        throw itemsError;
       }
       
       console.log("Loaded table:", SUPABASE_TABLES.taskItems, baseItems?.length, itemsError);
@@ -190,12 +187,35 @@ export const useTasks = () => {
     }
   };
 
+  const updateTask = async (taskId: string, taskPayload: Partial<Task>) => {
+    setIsLoading(true);
+    setError('');
+    try {
+      const { error } = await supabase
+        .from(SUPABASE_TABLES.tasks)
+        .update(taskPayload)
+        .eq('id', taskId);
+
+      if (error) throw error;
+      await fetchTasks();
+      return true;
+    } catch (err: unknown) {
+      console.error('Error updating task:', err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(errorMessage || 'Failed to update task');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return {
     tasks,
     isLoading,
     error,
     fetchTasks,
     saveTask,
+    updateTask,
     updateTaskStatus,
     toggleTaskItem,
     archiveTask

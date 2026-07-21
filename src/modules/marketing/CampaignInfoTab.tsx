@@ -90,18 +90,30 @@ export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ campaign }) =>
             <h3 className="text-lg font-semibold text-slate-200">Target Languages</h3>
           </div>
           <div className="flex flex-wrap gap-2">
-            {Array.isArray(campaign.target_languages) 
-              ? campaign.target_languages.map((lang, idx) => (
-                  <span key={idx} className="px-3 py-1 bg-slate-700 text-slate-200 rounded-full text-sm">
-                    {lang}
-                  </span>
-                ))
-              : (
-                  <span className="px-3 py-1 bg-slate-700 text-slate-200 rounded-full text-sm">
-                    {campaign.target_languages || 'N/A'}
-                  </span>
-              )
-            }
+            {(() => {
+              let parsed: string[] = [];
+              try {
+                if (typeof campaign.target_languages === 'string') {
+                  const p = JSON.parse(campaign.target_languages);
+                  parsed = Array.isArray(p) ? p : [campaign.target_languages];
+                } else if (Array.isArray(campaign.target_languages)) {
+                  parsed = campaign.target_languages;
+                }
+              } catch (e) {
+                if (typeof campaign.target_languages === 'string') {
+                  parsed = [campaign.target_languages];
+                }
+              }
+              return parsed.length > 0 ? parsed.map((lang, idx) => (
+                <span key={idx} className="px-3 py-1 bg-slate-700 text-slate-200 rounded-full text-sm">
+                  {lang}
+                </span>
+              )) : (
+                <span className="px-3 py-1 bg-slate-700 text-slate-200 rounded-full text-sm">
+                  N/A
+                </span>
+              );
+            })()}
           </div>
         </div>
 

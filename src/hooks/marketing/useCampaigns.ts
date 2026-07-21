@@ -20,9 +20,7 @@ export const useCampaigns = () => {
       let data = fetchResult;
       if (fetchError) {
         console.error('influencer_create_campaigns_rows fetch error:', fetchError.message);
-        const fallback = localStorage.getItem('campaigns');
-        if (fallback) data = JSON.parse(fallback);
-        else throw fetchError;
+        throw fetchError;
       }
       
       console.log('Loaded influencer_create_campaigns_rows:', data?.length);

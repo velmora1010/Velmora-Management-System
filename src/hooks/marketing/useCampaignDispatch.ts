@@ -65,7 +65,7 @@ export const useCampaignDispatch = (campaignId?: string) => {
         const influencerIds = [...new Set(records.map(r => r.influencer_id))];
         const { data: infoData, error: infoError } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
-          .select('id, name, profile_file_url, code')
+          .select('id, name, profile_file_url, code, is_archived')
           .in('id', influencerIds);
           
         if (infoError) throw infoError;
@@ -77,11 +77,15 @@ export const useCampaignDispatch = (campaignId?: string) => {
           });
         }
 
-        // Map together
-        const combined = records.map(r => ({
-          ...r,
-          influencer: infoMap[r.influencer_id]
-        }));
+        // Map together and filter out archived
+        const combined = records
+          .map(r => ({
+            ...r,
+            influencer: infoMap[r.influencer_id]
+          }))
+          .filter(r => {
+            return !r.influencer || (r.influencer.is_archived !== true && r.influencer.is_archived !== 'true');
+          });
         
         setDispatchRecords(combined);
       } else {

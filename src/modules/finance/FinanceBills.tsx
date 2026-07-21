@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Edit2, Trash2 } from 'lucide-react';
 import { useBills, type FinanceBill } from '../../hooks/finance/useBills';
 import { BillAnalytics } from './BillAnalytics';
 import { BillForm } from './BillForm';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import { departmentService } from '../../services/departmentService';
+import { supabase } from '../../lib/supabase';
+import type { Department, DepartmentSection } from '../../types';
 
 export const FinanceBills = () => {
   const { bills, isLoading, archiveBill, refreshBills } = useBills();
@@ -17,12 +20,46 @@ export const FinanceBills = () => {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [billToDelete, setBillToDelete] = useState<string | null>(null);
 
+  // Mappings
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [sections, setSections] = useState<DepartmentSection[]>([]);
+
+  useEffect(() => {
+    const loadMappings = async () => {
+      try {
+        const { data: depts } = await departmentService.getAllDepartments();
+        if (depts) setDepartments(depts);
+        
+        const { data: secs } = await departmentService.getAllSections();
+        if (secs) setSections(secs);
+      } catch (err) {
+        console.error('Failed to load mappings in FinanceBills:', err);
+      }
+    };
+    loadMappings();
+  }, []);
+
+  const getDeptName = (id: string | null) => {
+    if (!id) return '-';
+    const match = departments.find(d => String(d.id) === String(id));
+    return match ? match.department_name : String(id);
+  };
+
+  const getSectionName = (id: string | null) => {
+    if (!id) return '-';
+    const match = sections.find(s => String(s.id) === String(id));
+    return match ? match.section_name : String(id);
+  };
+
   const filteredBills = bills.filter(bill => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
+    const resolvedDept = getDeptName(bill.main_category).toLowerCase();
+    const resolvedSection = getSectionName(bill.sub_category1).toLowerCase();
+
     return (
-      (bill.main_category || '').toLowerCase().includes(q) ||
-      (bill.sub_category1 || '').toLowerCase().includes(q) ||
+      resolvedDept.includes(q) ||
+      resolvedSection.includes(q) ||
       (bill.payment_type || '').toLowerCase().includes(q) ||
       (bill.bill_status || '').toLowerCase().includes(q)
     );
@@ -57,7 +94,7 @@ export const FinanceBills = () => {
   };
 
   return (
-    <div className="flex flex-col h-full fade-in">
+    <div className="flex flex-col h-full fade-in text-slate-200">
       {/* Finance Sub Navigation */}
       <div className="flex flex-wrap gap-2.5 mb-6">
         <button
@@ -153,7 +190,7 @@ export const FinanceBills = () => {
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-1">
                           <h3 className="text-lg font-semibold text-main">
-                            {bill.main_category || 'Uncategorized'}
+                            {getDeptName(bill.main_category)}
                           </h3>
                           <span className={`px-2.5 py-1 text-xs font-medium rounded-md ${
                             bill.bill_status === 'Paid' ? 'bg-green-500/10 text-green-500' :
@@ -164,7 +201,7 @@ export const FinanceBills = () => {
                           </span>
                         </div>
                         <div className="text-sm text-muted mb-4">
-                          {bill.sub_category1 || ''} 
+                          {getSectionName(bill.sub_category1)} 
                           {bill.sub_category2 ? ` › ${bill.sub_category2}` : ''}
                         </div>
 

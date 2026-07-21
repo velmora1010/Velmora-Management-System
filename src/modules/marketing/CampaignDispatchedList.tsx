@@ -6,7 +6,7 @@ import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 interface CampaignDispatchedListProps {
   campaign: Campaign;
   onBack: () => void;
-  onMoveToStatus: () => void;
+  onMoveToStatus: (record: any) => void;
 }
 
 export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ campaign, onBack, onMoveToStatus }) => {
@@ -139,7 +139,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ 
                         </div>
                       </div>
                       <button 
-                        onClick={onMoveToStatus}
+                        onClick={() => onMoveToStatus(record)}
                         className="flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
                       >
                         Move To Status <ChevronRight size={16} />

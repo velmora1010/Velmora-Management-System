@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useTasks } from '../../hooks/tasks/useTasks';
 import { Card } from '../../components/ui/Card';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import type { Department, DepartmentSection } from '../../types';
+import { departmentService } from '../../services/departmentService';
+import { supabase } from '../../lib/supabase';
 
 export const TaskStatus: React.FC = () => {
   const { tasks, isLoading, fetchTasks, archiveTask, toggleTaskItem, updateTaskStatus } = useTasks();
@@ -10,9 +13,38 @@ export const TaskStatus: React.FC = () => {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [taskToArchive, setTaskToArchive] = useState<string | null>(null);
 
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [sections, setSections] = useState<DepartmentSection[]>([]);
+
   useEffect(() => {
     fetchTasks();
+    
+    // Load mapping data
+    const loadMappings = async () => {
+      try {
+        const { data: depts } = await departmentService.getAllDepartments();
+        if (depts) setDepartments(depts);
+        
+        const { data: secs } = await departmentService.getAllSections();
+        if (secs) setSections(secs);
+      } catch (err) {
+        console.error('Failed to load mappings in TaskStatus:', err);
+      }
+    };
+    loadMappings();
   }, [fetchTasks]);
+
+  const getDeptName = (id: string | number) => {
+    if (!id) return '-';
+    const match = departments.find(d => String(d.id) === String(id));
+    return match ? match.department_name : String(id);
+  };
+
+  const getSectionName = (id: string | number) => {
+    if (!id) return '-';
+    const match = sections.find(s => String(s.id) === String(id));
+    return match ? match.section_name : String(id);
+  };
 
   const handleArchive = (id: string) => {
     setTaskToArchive(id);
@@ -48,12 +80,14 @@ export const TaskStatus: React.FC = () => {
   };
 
   const filteredTasks = tasks.filter(t => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
     const title = (t.task_title || '').toLowerCase();
     const assignedTo = (t.assigned_to || '').toLowerCase();
-    const dept = (t.department || '').toLowerCase();
-    return title.includes(term) || assignedTo.includes(term) || dept.includes(term);
+    const resolvedDept = getDeptName(t.department).toLowerCase();
+    const resolvedSection = getSectionName(t.sub_category1 || '').toLowerCase();
+
+    if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
+    return title.includes(term) || assignedTo.includes(term) || resolvedDept.includes(term) || resolvedSection.includes(term);
   });
 
   return (
@@ -107,8 +141,8 @@ export const TaskStatus: React.FC = () => {
               } catch { /* ignore */ }
             }
 
-            const categoryParts = [task.department];
-            if (task.sub_category1) categoryParts.push(task.sub_category1);
+            const categoryParts = [getDeptName(task.department)];
+            if (task.sub_category1) categoryParts.push(getSectionName(task.sub_category1));
             if (task.sub_category2) categoryParts.push(task.sub_category2);
             const categoryBreadcrumb = categoryParts.filter(Boolean).join(' › ');
 
@@ -128,65 +162,59 @@ export const TaskStatus: React.FC = () => {
                     <div className="text-[12px] font-medium text-muted">⏰ {fTime}</div>
                   </div>
                 </div>
-                
-                {task.assigned_by && task.assigned_to && (
-                  <div className="text-[13px] font-medium text-main mb-3 bg-card-alt px-3 py-2 rounded-md border border-border inline-block w-fit">
-                    Assigned: <span className="text-primary font-semibold">{task.assigned_by}</span> → <span className="text-primary font-semibold">{task.assigned_to}</span>
-                  </div>
-                )}
-                
+
                 {task.task_description && (
-                  <div className="text-[13px] text-muted leading-relaxed mb-3">
+                  <div className="text-sm text-muted mb-4 line-clamp-3">
                     {task.task_description}
                   </div>
                 )}
 
-                {task.task_items && task.task_items.length > 0 && (
+                <div className="flex justify-between text-sm py-1.5 border-t border-border">
+                  <span className="text-muted font-medium">Assigned By</span>
+                  <span className="text-main font-medium">{task.assigned_by || '-'}</span>
+                </div>
+                <div className="flex justify-between text-sm py-1.5 border-b border-border mb-4">
+                  <span className="text-muted font-medium">Assigned To</span>
+                  <span className="text-main font-medium">{task.assigned_to || '-'}</span>
+                </div>
+
+                {totalItems > 0 && (
                   <div className="mb-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <div className="text-xs font-semibold text-muted uppercase tracking-wide">Tracking Status</div>
+                    <div className="flex justify-between items-center text-xs text-muted mb-1.5">
+                      <span>Sub Tasks Progress</span>
                       <div className="text-xs font-medium text-primary">{completedItems} / {totalItems}</div>
                     </div>
-                    
-                    {/* Progress Bar */}
-                    <div className="w-full bg-border rounded-full h-1.5 mb-3">
-                      <div className="bg-primary h-1.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+                    <div className="w-full bg-border h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-primary h-full transition-all" style={{ width: `${progress}%` }}></div>
                     </div>
 
-                    <div className="flex flex-col gap-2">
-                      {task.task_items.map(st => (
-                        <label key={st.id} className="flex items-start gap-2.5 cursor-pointer group">
+                    <div className="mt-3 space-y-2">
+                      {task.task_items?.map((st) => (
+                        <label key={st.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card-alt hover:bg-border/30 border border-border/50 cursor-pointer transition-colors text-sm text-main">
                           <input 
                             type="checkbox" 
-                            className="mt-0.5 w-4 h-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer"
                             checked={st.is_completed}
                             onChange={() => handleToggleItem(task.id, st.id, st.is_completed, totalItems, completedItems)}
+                            className="w-[18px] h-[18px] rounded border-border text-primary focus:ring-primary/20 cursor-pointer"
                           />
-                          <span className={`text-sm select-none transition-colors ${st.is_completed ? 'text-muted line-through' : 'text-main group-hover:text-primary'}`}>
-                            {st.sub_task}
-                          </span>
+                          <span className={st.is_completed ? 'line-through text-muted' : ''}>{st.sub_task}</span>
                         </label>
                       ))}
                     </div>
                   </div>
                 )}
 
-                <div className="flex justify-between items-center mt-auto border-t border-border pt-4">
-                  <span className="text-[11px] font-semibold px-3 py-1 rounded-full" style={{ color: pColor, backgroundColor: pBg }}>
-                    {task.priority || 'Low'} Priority
+                <div className="flex justify-between items-center mt-auto pt-3 border-t border-border">
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ color: sColor, backgroundColor: sBg }}>
+                    {task.status || 'Pending'}
                   </span>
-                  <div className="flex gap-2.5 items-center">
-                    <span className="text-[11px] font-semibold px-3 py-1 rounded-full capitalize" style={{ color: sColor, backgroundColor: sBg }}>
-                      {task.status || 'Pending'}
-                    </span>
-                    <button 
-                      type="button" 
-                      onClick={() => handleArchive(task.id)}
-                      className="text-xs px-3 py-1 rounded-md border border-border bg-transparent text-muted hover:border-red-500 hover:text-red-500 transition-colors"
-                    >
-                      Archive
-                    </button>
-                  </div>
+                  <button 
+                    type="button" 
+                    onClick={() => handleArchive(task.id)}
+                    className="text-xs px-3 py-1.5 rounded-md border border-border bg-transparent text-muted hover:border-red-500 hover:text-red-500 transition-colors"
+                  >
+                    Archive
+                  </button>
                 </div>
               </Card>
             );
@@ -195,8 +223,8 @@ export const TaskStatus: React.FC = () => {
       ) : (
         <div className="text-center p-16 bg-card rounded-lg border border-dashed border-border text-muted">
           <div className="text-4xl mb-4">📋</div>
-          <h3 className="text-lg font-semibold text-main mb-2">No active tasks</h3>
-          <p>You haven't created any tasks yet, or they have all been archived.</p>
+          <h3 className="text-lg font-semibold text-main mb-2">No tasks status</h3>
+          <p>You have no active tasks status details currently.</p>
         </div>
       )}
 

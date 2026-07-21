@@ -21,9 +21,7 @@ export const useVendors = () => {
       let data = fetchResult;
       if (fetchError) {
         console.error('Vendors_row fetch error:', fetchError.message);
-        const fallback = localStorage.getItem('vendors');
-        if (fallback) data = JSON.parse(fallback);
-        else throw fetchError;
+        throw fetchError;
       }
       
       console.log('Loaded Vendors_row:', data?.length);

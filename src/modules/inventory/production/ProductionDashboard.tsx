@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Archive, QrCode, ClipboardList, Factory, ArrowRight, Trash2, AlertTriangle, Layers, CheckCircle2 } from 'lucide-react';
+import { Plus, Archive, QrCode, ClipboardList, Factory, ArrowRight, Trash2, AlertTriangle, Layers, CheckCircle2, Search } from 'lucide-react';
 import { inventoryService } from '../../../services/inventoryService';
+import { departmentService } from '../../../services/departmentService';
+import { supabase } from '../../../lib/supabase';
 import { motion } from 'framer-motion';
 import { getProductDisplayName, getProductTheme } from './productHelpers';
+import type { Department, DepartmentSection } from '../../../types';
 
 const ProductionDashboard = () => {
   const navigate = useNavigate();
@@ -19,22 +22,59 @@ const ProductionDashboard = () => {
   const [deleteError, setDeleteError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
 
+  // Mappings and Filters
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [sections, setSections] = useState<DepartmentSection[]>([]);
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState('all');
+  const [selectedSectionFilter, setSelectedSectionFilter] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+
   useEffect(() => {
-    const fetchProductionBatches = async () => {
+    const fetchProductionData = async () => {
       setLoading(true);
       try {
-        const data = await inventoryService.getProductionBatches();
+        const [data, { data: depts }, { data: secs }] = await Promise.all([
+          inventoryService.getProductionBatches(),
+          departmentService.getAllDepartments(),
+          departmentService.getAllSections()
+        ]);
         // Sort by created_at descending locally
-        data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        setProductionBatches(data);
+        if (data) {
+          data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          setProductionBatches(data);
+        }
+        if (depts) setDepartments(depts);
+        if (secs) setSections(secs);
       } catch (err) {
         console.error('Failed to load production batches locally', err);
       } finally {
         setLoading(false);
       }
     };
-    fetchProductionBatches();
+    fetchProductionData();
   }, []);
+
+  const getDeptName = (id: string | null) => {
+    if (!id) return '-';
+    const match = departments.find(d => String(d.id) === String(id));
+    return match ? match.department_name : String(id);
+  };
+
+  const getSectionName = (id: string | null) => {
+    if (!id) return '-';
+    const match = sections.find(s => String(s.id) === String(id));
+    return match ? match.section_name : String(id);
+  };
+
+  const filteredSectionsForFilter = useMemo(() => {
+    if (selectedDeptFilter === 'all') return [];
+    return sections.filter(s => String(s.department_id) === selectedDeptFilter);
+  }, [sections, selectedDeptFilter]);
+
+  // Reset section filter if department changes
+  useEffect(() => {
+    setSelectedSectionFilter('all');
+  }, [selectedDeptFilter]);
   
   if (loading) return <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading production data...</div>;
 
@@ -46,10 +86,32 @@ const ProductionDashboard = () => {
 
   const filteredBatches = productionBatches.filter((b: any) => {
     if (!showDeleted && b.status === 'DELETED') return false;
-    if (showDeleted && activeTab === 'All') return true;
-    if (activeTab === 'All') return b.status !== 'DELETED';
-    if (activeTab === 'Complete') return b.status === 'Complete' || b.status === 'COMPLETE' || b.status === 'Saved';
-    return b.status === 'Prep' || b.status === 'In Progress';
+
+    // Tab filter
+    if (activeTab === 'All') {
+      if (!showDeleted && b.status === 'DELETED') return false;
+    } else if (activeTab === 'Complete') {
+      if (b.status !== 'Complete' && b.status !== 'COMPLETE' && b.status !== 'Saved') return false;
+    } else {
+      if (b.status !== 'Prep' && b.status !== 'In Progress') return false;
+    }
+
+    // Dept filter
+    if (selectedDeptFilter !== 'all' && String(b.department_id) !== selectedDeptFilter) return false;
+    
+    // Section filter
+    if (selectedSectionFilter !== 'all' && String(b.section_id) !== selectedSectionFilter) return false;
+
+    // Search filter
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      const resolvedDept = getDeptName(b.department_id).toLowerCase();
+      const resolvedSection = getSectionName(b.section_id).toLowerCase();
+      const targetStr = `${b.product_name} ${b.production_batch_id} ${b.produced_by} ${resolvedDept} ${resolvedSection}`.toLowerCase();
+      if (!targetStr.includes(q)) return false;
+    }
+
+    return true;
   });
 
   const handleDeleteBatch = async () => {
@@ -151,8 +213,8 @@ const ProductionDashboard = () => {
         ))}
       </div>
 
-      {/* PREMIUM TABS & TOGGLE */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+      {/* PREMIUM TABS & TOGGLE & FILTERS */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '16px', marginBottom: '32px' }}>
         <div style={{ display: 'flex', gap: '12px', background: '#111827', padding: '6px', borderRadius: '16px', width: 'fit-content', border: '1px solid #263244' }}>
           {['All', 'In Progress', 'Complete'].map(tab => (
             <button 
@@ -175,9 +237,49 @@ const ProductionDashboard = () => {
             </button>
           ))}
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '14px', cursor: 'pointer' }}>
-          <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} style={{ width: '16px', height: '16px', accentColor: '#ef4444' }} /> Show Deleted Batches
-        </label>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+          {/* Search bar */}
+          <div style={{ position: 'relative', width: '200px' }}>
+            <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input 
+              type="text" 
+              placeholder="Search batches..." 
+              value={searchTerm} 
+              onChange={e => setSearchTerm(e.target.value)} 
+              style={{ paddingLeft: '36px', height: '36px', width: '100%', borderRadius: '8px', border: '1px solid #334155', background: '#111827', color: 'white', fontSize: '13px' }} 
+            />
+          </div>
+
+          {/* Department filter */}
+          <select
+            value={selectedDeptFilter}
+            onChange={(e) => setSelectedDeptFilter(e.target.value)}
+            style={{ height: '36px', borderRadius: '8px', border: '1px solid #334155', background: '#111827', color: 'white', padding: '0 8px', fontSize: '13px' }}
+          >
+            <option value="all">All Departments</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>{d.department_name}</option>
+            ))}
+          </select>
+
+          {/* Section filter */}
+          <select
+            value={selectedSectionFilter}
+            onChange={(e) => setSelectedSectionFilter(e.target.value)}
+            disabled={selectedDeptFilter === 'all'}
+            style={{ height: '36px', borderRadius: '8px', border: '1px solid #334155', background: '#111827', color: 'white', padding: '0 8px', fontSize: '13px', opacity: selectedDeptFilter === 'all' ? 0.5 : 1 }}
+          >
+            <option value="all">All Sections</option>
+            {filteredSectionsForFilter.map((s) => (
+              <option key={s.id} value={s.id}>{s.section_name}</option>
+            ))}
+          </select>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '14px', cursor: 'pointer' }}>
+            <input type="checkbox" checked={showDeleted} onChange={(e) => setShowDeleted(e.target.checked)} style={{ width: '16px', height: '16px', accentColor: '#ef4444' }} /> Show Deleted Batches
+          </label>
+        </div>
       </div>
 
       <div className="grid grid-2">
@@ -262,6 +364,9 @@ const ProductionDashboard = () => {
                       </span>
                       <span>•</span>
                       <span>{new Date(batch.created_at).toLocaleDateString('en-GB')}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '6px' }}>
+                      Dept: <span style={{ color: 'white', fontWeight: 600 }}>{getDeptName(batch.department_id)}</span> | Section: <span style={{ color: 'white', fontWeight: 600 }}>{getSectionName(batch.section_id)}</span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>

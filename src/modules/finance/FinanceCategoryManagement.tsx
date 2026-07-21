@@ -1,24 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Trash2, Edit2, Search } from 'lucide-react';
 import { useFinanceCategories, type FinanceCategoryRow } from '../../hooks/finance/useFinanceCategories';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import { departmentService } from '../../services/departmentService';
+import { supabase } from '../../lib/supabase';
+import type { Department, DepartmentSection } from '../../types';
 import toast from 'react-hot-toast';
 
-type ActiveTab = 'main' | 'sub1' | 'sub2' | 'sub3' | 'list' | 'default';
+type ActiveTab = 'sub2' | 'sub3' | 'list' | 'default';
 
 export const FinanceCategoryManagement = () => {
   const {
     categories,
     isLoading,
-    uniqueMains,
-    uniqueSub1,
-    uniqueSub2,
     fetchCategories,
     saveCategoryRow,
-    addMainCategories,
-    addSub1Categories,
-    addSub2Categories,
-    addSub3Categories,
     archiveCategory
   } = useFinanceCategories();
 
@@ -28,14 +24,16 @@ export const FinanceCategoryManagement = () => {
   // Edit mode
   const [editId, setEditId] = useState<string | null>(null);
 
-  // Form selections
-  const [selectedMain, setSelectedMain] = useState('');
-  const [selectedSub1, setSelectedSub1] = useState('');
+  // Mappings
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [sections, setSections] = useState<DepartmentSection[]>([]);
+
+  // Selection state
+  const [selectedDeptId, setSelectedDeptId] = useState('');
+  const [selectedSectionId, setSelectedSectionId] = useState('');
   const [selectedSub2, setSelectedSub2] = useState('');
 
   // Dynamic inputs arrays
-  const [mainInputs, setMainInputs] = useState<string[]>(['']);
-  const [sub1Inputs, setSub1Inputs] = useState<string[]>(['']);
   const [sub2Inputs, setSub2Inputs] = useState<string[]>(['']);
   const [sub3Inputs, setSub3Inputs] = useState<string[]>(['']);
 
@@ -44,6 +42,61 @@ export const FinanceCategoryManagement = () => {
   // Modal state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadMappings = async () => {
+      try {
+        const { data: depts } = await departmentService.getAllDepartments();
+        if (depts) setDepartments(depts);
+        
+        const { data: secs } = await departmentService.getAllSections();
+        if (secs) setSections(secs);
+      } catch (err) {
+        console.error('Failed to load mappings in FinanceCategoryManagement:', err);
+      }
+    };
+    loadMappings();
+  }, []);
+
+  const getDeptName = (id: string | null) => {
+    if (!id) return '-';
+    const match = departments.find(d => String(d.id) === String(id));
+    return match ? match.department_name : String(id);
+  };
+
+  const getSectionName = (id: string | null) => {
+    if (!id) return '-';
+    const match = sections.find(s => String(s.id) === String(id));
+    return match ? match.section_name : String(id);
+  };
+
+  // Sections filtered by selected department
+  const filteredSections = useMemo(() => {
+    if (!selectedDeptId) return [];
+    return sections.filter(s => String(s.department_id) === selectedDeptId);
+  }, [sections, selectedDeptId]);
+
+  // Sub Category 2 options filtered by selected department and section
+  const filteredSub2Options = useMemo(() => {
+    if (!selectedDeptId || !selectedSectionId) return [];
+    const filtered = categories.filter(c => 
+      String(c.main) === selectedDeptId && 
+      String(c.sub1) === selectedSectionId &&
+      c.sub2 && c.sub2 !== '-'
+    );
+    return Array.from(new Set(filtered.map(c => c.sub2).filter(Boolean))) as string[];
+  }, [categories, selectedDeptId, selectedSectionId]);
+
+  // Reset section when department changes
+  useEffect(() => {
+    setSelectedSectionId('');
+    setSelectedSub2('');
+  }, [selectedDeptId]);
+
+  // Reset sub2 when section changes
+  useEffect(() => {
+    setSelectedSub2('');
+  }, [selectedSectionId]);
 
   // --- Handlers for Input Arrays ---
   const updateInput = (setter: React.Dispatch<React.SetStateAction<string[]>>, index: number, value: string) => {
@@ -62,13 +115,10 @@ export const FinanceCategoryManagement = () => {
   const handleTabSwitch = (tab: ActiveTab) => {
     setEditId(null);
     setActiveTab(tab);
-    // Reset forms
-    setMainInputs(['']);
-    setSub1Inputs(['']);
     setSub2Inputs(['']);
     setSub3Inputs(['']);
-    setSelectedMain('');
-    setSelectedSub1('');
+    setSelectedDeptId('');
+    setSelectedSectionId('');
     setSelectedSub2('');
     
     if (tab === 'list') fetchCategories();
@@ -77,83 +127,97 @@ export const FinanceCategoryManagement = () => {
   // --- Edit Flow ---
   const handleEdit = (cat: FinanceCategoryRow) => {
     setEditId(cat.id);
-    if (cat.sub2 && cat.sub2 !== '-') {
+    setSelectedDeptId(cat.main || '');
+    setSelectedSectionId(cat.sub1 || '');
+    
+    if (cat.sub3 && cat.sub3 !== '-') {
+      handleTabSwitch('sub3');
+      setEditId(cat.id);
+      setSelectedDeptId(cat.main || '');
+      setSelectedSectionId(cat.sub1 || '');
+      setSelectedSub2(cat.sub2 || '');
+      setSub3Inputs([cat.sub3]);
+    } else if (cat.sub2 && cat.sub2 !== '-') {
       handleTabSwitch('sub2');
-      setEditId(cat.id); // restore after switch
-      setSelectedSub1(cat.sub1 || '');
+      setEditId(cat.id);
+      setSelectedDeptId(cat.main || '');
+      setSelectedSectionId(cat.sub1 || '');
       setSub2Inputs([cat.sub2]);
-    } else if (cat.sub1 && cat.sub1 !== '-') {
-      handleTabSwitch('sub1');
-      setEditId(cat.id);
-      setSelectedMain(cat.main || '');
-      setSub1Inputs([cat.sub1]);
-    } else {
-      handleTabSwitch('main');
-      setEditId(cat.id);
-      setMainInputs([cat.main || '']);
     }
   };
 
   // --- Save Handlers ---
-  const handleSaveMain = async () => {
-    const valid = mainInputs.map(v => v.trim()).filter(Boolean);
-    if (valid.length === 0) return toast.error('Please enter at least one name.');
-    
-    setIsSubmitting(true);
-    if (editId) {
-      await saveCategoryRow(editId, { main: valid[0] });
-    } else {
-      await addMainCategories(valid);
-    }
-    setIsSubmitting(false);
-    handleTabSwitch('default');
-  };
-
-  const handleSaveSub1 = async () => {
-    if (!selectedMain) return toast.error('Select Main Category!');
-    const valid = sub1Inputs.map(v => v.trim()).filter(Boolean);
-    if (valid.length === 0) return toast.error('Please enter at least one name.');
-    
-    setIsSubmitting(true);
-    if (editId) {
-      await saveCategoryRow(editId, { main: selectedMain, sub1: valid[0] });
-    } else {
-      await addSub1Categories(selectedMain, valid);
-    }
-    setIsSubmitting(false);
-    handleTabSwitch('default');
-  };
-
   const handleSaveSub2 = async () => {
-    if (!selectedSub1) return toast.error('Select Sub Category 1!');
+    if (!selectedDeptId || !selectedSectionId) {
+      return toast.error('Please select Department and Section.');
+    }
     const valid = sub2Inputs.map(v => v.trim()).filter(Boolean);
     if (valid.length === 0) return toast.error('Please enter at least one name.');
 
     setIsSubmitting(true);
-    if (editId) {
-      const ref = categories.find(c => c.sub1 === selectedSub1);
-      await saveCategoryRow(editId, { main: ref?.main || null, sub1: selectedSub1, sub2: valid[0] });
-    } else {
-      await addSub2Categories(selectedSub1, valid);
+    try {
+      if (editId) {
+        await saveCategoryRow(editId, { 
+          main: selectedDeptId, 
+          sub1: selectedSectionId, 
+          sub2: valid[0],
+          sub3: null
+        });
+      } else {
+        // Insert rows
+        for (const val of valid) {
+          await saveCategoryRow(null, {
+            main: selectedDeptId,
+            sub1: selectedSectionId,
+            sub2: val
+          });
+        }
+      }
+      toast.success('Categories saved successfully!');
+      handleTabSwitch('list');
+    } catch (err) {
+      console.error('Error saving categories:', err);
+      toast.error('Failed to save category.');
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
-    handleTabSwitch('default');
   };
 
   const handleSaveSub3 = async () => {
-    if (!selectedSub2) return toast.error('Select Sub Category 2!');
+    if (!selectedDeptId || !selectedSectionId || !selectedSub2) {
+      return toast.error('Please select Department, Section, and Sub Category 2.');
+    }
     const valid = sub3Inputs.map(v => v.trim()).filter(Boolean);
     if (valid.length === 0) return toast.error('Please enter at least one name.');
 
     setIsSubmitting(true);
-    if (editId) {
-      const ref = categories.find(c => c.sub2 === selectedSub2);
-      await saveCategoryRow(editId, { main: ref?.main || null, sub1: ref?.sub1 || null, sub2: selectedSub2, sub3: valid[0] });
-    } else {
-      await addSub3Categories(selectedSub2, valid);
+    try {
+      if (editId) {
+        await saveCategoryRow(editId, { 
+          main: selectedDeptId, 
+          sub1: selectedSectionId, 
+          sub2: selectedSub2, 
+          sub3: valid[0] 
+        });
+      } else {
+        // Insert rows
+        for (const val of valid) {
+          await saveCategoryRow(null, {
+            main: selectedDeptId,
+            sub1: selectedSectionId,
+            sub2: selectedSub2,
+            sub3: val
+          });
+        }
+      }
+      toast.success('Sub Categories saved successfully!');
+      handleTabSwitch('list');
+    } catch (err) {
+      console.error('Error saving sub categories:', err);
+      toast.error('Failed to save sub category.');
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
-    handleTabSwitch('default');
   };
 
   const handleDelete = (id: string) => {
@@ -170,17 +234,23 @@ export const FinanceCategoryManagement = () => {
 
   const filteredCategories = categories.filter(c => {
     const q = searchQuery.toLowerCase();
-    return (c.main?.toLowerCase().includes(q) || c.sub1?.toLowerCase().includes(q) || c.sub2?.toLowerCase().includes(q) || c.sub3?.toLowerCase().includes(q));
+    const resolvedDept = getDeptName(c.main).toLowerCase();
+    const resolvedSection = getSectionName(c.sub1).toLowerCase();
+
+    return (
+      resolvedDept.includes(q) ||
+      resolvedSection.includes(q) ||
+      (c.sub2 || '').toLowerCase().includes(q) ||
+      (c.sub3 || '').toLowerCase().includes(q)
+    );
   });
 
   return (
-    <div className="flex flex-col h-full fade-in">
+    <div className="flex flex-col h-full fade-in text-slate-200">
       {/* Header section matching Old Vanilla design exactly */}
       <h2 className="text-2xl font-bold text-main tracking-tight mb-4">Finance Categories</h2>
       
       <div className="flex flex-wrap gap-2.5 mb-8">
-        <button onClick={() => handleTabSwitch('main')} className="bg-primary text-white px-4 py-2.5 rounded-xl font-medium shadow-lg shadow-primary/20 hover:brightness-110 transition-all">+ Add Finance Category</button>
-        <button onClick={() => handleTabSwitch('sub1')} className="bg-primary text-white px-4 py-2.5 rounded-xl font-medium shadow-lg shadow-primary/20 hover:brightness-110 transition-all">+ Add Sub Category 1</button>
         <button onClick={() => handleTabSwitch('sub2')} className="bg-primary text-white px-4 py-2.5 rounded-xl font-medium shadow-lg shadow-primary/20 hover:brightness-110 transition-all">+ Add Sub Category 2</button>
         <button onClick={() => handleTabSwitch('sub3')} className="bg-primary text-white px-4 py-2.5 rounded-xl font-medium shadow-lg shadow-primary/20 hover:brightness-110 transition-all">+ Add Sub Category 3</button>
         <button onClick={() => handleTabSwitch('list')} className="bg-card border border-border/50 text-main px-4 py-2.5 rounded-xl font-medium hover:bg-black/5 dark:hover:bg-white/5 transition-all">View Saved Category</button>
@@ -196,88 +266,40 @@ export const FinanceCategoryManagement = () => {
           </div>
         )}
 
-        {/* Form: Main Category */}
-        {activeTab === 'main' && (
-          <div className="bg-card p-6 rounded-2xl border border-border/50 shadow-sm max-w-2xl">
-            <div className="text-lg font-semibold text-main mb-6 border-b border-border/50 pb-4">
-              {editId ? 'Edit Finance Main Category' : 'Add Finance Main Category'}
-            </div>
-            <div className="space-y-3 mb-4">
-              {mainInputs.map((val, i) => (
-                <input
-                  key={i}
-                  type="text"
-                  placeholder="Enter Category Name"
-                  value={val}
-                  onChange={(e) => updateInput(setMainInputs, i, e.target.value)}
-                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors"
-                />
-              ))}
-            </div>
-            {!editId && (
-              <button type="button" onClick={() => addInput(setMainInputs)} className="text-sm font-medium text-main bg-background border border-border px-4 py-2 rounded-xl mb-8 hover:bg-black/5 transition-colors">
-                + Add Another
-              </button>
-            )}
-            <div className="flex justify-end">
-              <button onClick={handleSaveMain} disabled={isSubmitting} className="bg-primary text-white px-6 py-2.5 rounded-xl font-medium disabled:opacity-50 transition-colors">
-                {isSubmitting ? 'Saving...' : 'Save Categories'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Form: Sub Category 1 */}
-        {activeTab === 'sub1' && (
-          <div className="bg-card p-6 rounded-2xl border border-border/50 shadow-sm max-w-2xl">
-            <div className="text-lg font-semibold text-main mb-6 border-b border-border/50 pb-4">
-              {editId ? 'Edit Finance Sub Category 1' : 'Add Finance Sub Category 1'}
-            </div>
-            <div className="mb-6">
-              <label className="text-sm font-medium text-main mb-1.5 block">Select Main Category</label>
-              <select value={selectedMain} onChange={e => setSelectedMain(e.target.value)} className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors">
-                <option value="">Select Main Category</option>
-                {uniqueMains.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-            <div className="space-y-3 mb-4">
-              {sub1Inputs.map((val, i) => (
-                <input
-                  key={i}
-                  type="text"
-                  placeholder="Enter Sub Category 1 Name"
-                  value={val}
-                  onChange={(e) => updateInput(setSub1Inputs, i, e.target.value)}
-                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors"
-                />
-              ))}
-            </div>
-            {!editId && (
-              <button type="button" onClick={() => addInput(setSub1Inputs)} className="text-sm font-medium text-main bg-background border border-border px-4 py-2 rounded-xl mb-8 hover:bg-black/5 transition-colors">
-                + Add Another
-              </button>
-            )}
-            <div className="flex justify-end">
-              <button onClick={handleSaveSub1} disabled={isSubmitting} className="bg-primary text-white px-6 py-2.5 rounded-xl font-medium disabled:opacity-50 transition-colors">
-                {isSubmitting ? 'Saving...' : 'Save Sub Categories'}
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Form: Sub Category 2 */}
         {activeTab === 'sub2' && (
           <div className="bg-card p-6 rounded-2xl border border-border/50 shadow-sm max-w-2xl">
             <div className="text-lg font-semibold text-main mb-6 border-b border-border/50 pb-4">
               {editId ? 'Edit Finance Sub Category 2' : 'Add Finance Sub Category 2'}
             </div>
-            <div className="mb-6">
-              <label className="text-sm font-medium text-main mb-1.5 block">Select Sub Category 1</label>
-              <select value={selectedSub1} onChange={e => setSelectedSub1(e.target.value)} className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors">
-                <option value="">Select Sub Category 1</option>
-                {uniqueSub1.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-main block">Department *</label>
+                <select 
+                  value={selectedDeptId} 
+                  onChange={e => setSelectedDeptId(e.target.value)} 
+                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors"
+                >
+                  <option value="">Select Department</option>
+                  {departments.map(d => <option key={d.id} value={d.id}>{d.department_name}</option>)}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-main block">Section *</label>
+                <select 
+                  value={selectedSectionId} 
+                  onChange={e => setSelectedSectionId(e.target.value)} 
+                  disabled={!selectedDeptId}
+                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+                >
+                  <option value="">Select Section</option>
+                  {filteredSections.map(s => <option key={s.id} value={s.id}>{s.section_name}</option>)}
+                </select>
+              </div>
             </div>
+
             <div className="space-y-3 mb-4">
               {sub2Inputs.map((val, i) => (
                 <input
@@ -309,13 +331,47 @@ export const FinanceCategoryManagement = () => {
             <div className="text-lg font-semibold text-main mb-6 border-b border-border/50 pb-4">
               {editId ? 'Edit Finance Sub Category 3' : 'Add Finance Sub Category 3'}
             </div>
-            <div className="mb-6">
-              <label className="text-sm font-medium text-main mb-1.5 block">Select Sub Category 2</label>
-              <select value={selectedSub2} onChange={e => setSelectedSub2(e.target.value)} className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors">
-                <option value="">Select Sub Category 2</option>
-                {uniqueSub2.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-main block">Department *</label>
+                <select 
+                  value={selectedDeptId} 
+                  onChange={e => setSelectedDeptId(e.target.value)} 
+                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors"
+                >
+                  <option value="">Select Department</option>
+                  {departments.map(d => <option key={d.id} value={d.id}>{d.department_name}</option>)}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-main block">Section *</label>
+                <select 
+                  value={selectedSectionId} 
+                  onChange={e => setSelectedSectionId(e.target.value)} 
+                  disabled={!selectedDeptId}
+                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+                >
+                  <option value="">Select Section</option>
+                  {filteredSections.map(s => <option key={s.id} value={s.id}>{s.section_name}</option>)}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-main block">Sub Category 2 *</label>
+                <select 
+                  value={selectedSub2} 
+                  onChange={e => setSelectedSub2(e.target.value)} 
+                  disabled={!selectedSectionId}
+                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+                >
+                  <option value="">Select Sub Category 2</option>
+                  {filteredSub2Options.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
             </div>
+
             <div className="space-y-3 mb-4">
               {sub3Inputs.map((val, i) => (
                 <input
@@ -372,8 +428,8 @@ export const FinanceCategoryManagement = () => {
                 <table className="w-full text-left text-sm">
                   <thead className="bg-black/5 dark:bg-white/5 border-b border-border/50 text-muted sticky top-0 z-10">
                     <tr>
-                      <th className="px-6 py-4 font-medium">Main Category</th>
-                      <th className="px-6 py-4 font-medium">Sub Category 1</th>
+                      <th className="px-6 py-4 font-medium">Department</th>
+                      <th className="px-6 py-4 font-medium">Section</th>
                       <th className="px-6 py-4 font-medium">Sub Category 2</th>
                       <th className="px-6 py-4 font-medium">Sub Category 3</th>
                       <th className="px-6 py-4 font-medium text-right">Actions</th>
@@ -382,8 +438,8 @@ export const FinanceCategoryManagement = () => {
                   <tbody className="divide-y divide-border/50">
                     {filteredCategories.map(cat => (
                       <tr key={cat.id} className="hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-                        <td className="px-6 py-4 font-medium text-main">{cat.main || '-'}</td>
-                        <td className="px-6 py-4 text-main">{cat.sub1 || '-'}</td>
+                        <td className="px-6 py-4 font-medium text-main">{getDeptName(cat.main)}</td>
+                        <td className="px-6 py-4 text-main">{getSectionName(cat.sub1)}</td>
                         <td className="px-6 py-4 text-main">{cat.sub2 || '-'}</td>
                         <td className="px-6 py-4 text-main">{cat.sub3 || '-'}</td>
                         <td className="px-6 py-4 text-right">

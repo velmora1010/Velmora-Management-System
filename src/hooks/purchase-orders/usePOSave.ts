@@ -156,5 +156,91 @@ export const usePOSave = (
     }
   }, [validation, formState.products.length, formState.termsConditions, prepareHeaderPayload, prepareProductPayloads, generatePONumber, setUIState, setFormState, logAction]);
 
-  return { savePurchaseOrder };
+  const updatePurchaseOrder = useCallback(async (poId: string): Promise<boolean> => {
+    if (!validation.isValid) {
+      setUIState((prev: POUIState) => ({ ...prev, saveError: validation.errors[0] }));
+      return false;
+    }
+
+    if (formState.products.length === 0) {
+      setUIState((prev: POUIState) => ({ ...prev, saveError: 'Cannot save a Purchase Order without products.' }));
+      return false;
+    }
+
+    setUIState((prev: POUIState) => ({
+      ...prev,
+      isSaving: true,
+      saveError: '',
+      saveSuccess: false,
+    }));
+
+    try {
+      const headerPayload = prepareHeaderPayload();
+      
+      const { error: headerErr } = await supabase
+        .from(SUPABASE_TABLES.purchaseOrders)
+        .update({
+          po_number: headerPayload.po_number,
+          vendor_id: headerPayload.vendor_id,
+          vendor_name: headerPayload.vendor_name,
+          category: headerPayload.category,
+          sub_category_1: headerPayload.sub_category_1,
+          sub_category_2: headerPayload.sub_category_2,
+          subtotal: headerPayload.subtotal,
+          gst_total: headerPayload.gst_total,
+          payment_mode: headerPayload.payment_mode,
+          initiated_by: headerPayload.initiated_by,
+          approved_by: headerPayload.approved_by,
+          delivery_address: headerPayload.delivery_address,
+          expected_delivery_date: headerPayload.expected_delivery_date,
+          shipping_charges: headerPayload.shipping_charges,
+          terms_conditions: headerPayload.terms_conditions,
+        })
+        .eq('id', poId);
+
+      if (headerErr) throw headerErr;
+
+      // Delete existing products snapshot
+      const { error: deleteErr } = await supabase
+        .from('purchase_order_products_rows')
+        .delete()
+        .eq('purchase_order_id', poId);
+
+      if (deleteErr) throw deleteErr;
+
+      // Re-insert products
+      const productPayloads = prepareProductPayloads(poId);
+      const { error: productsErr } = await supabase
+        .from('purchase_order_products_rows')
+        .insert(productPayloads);
+
+      if (productsErr) throw productsErr;
+
+      setUIState((prev: POUIState) => ({
+        ...prev,
+        isSaving: false,
+        saveSuccess: true,
+      }));
+
+      // Fire-and-forget audit log
+      logAction('UPDATE', SUPABASE_TABLES.purchaseOrders, poId, {
+        po_number: headerPayload.po_number,
+        subtotal: headerPayload.subtotal,
+        vendor_name: headerPayload.vendor_name
+      });
+
+      return true;
+    } catch (err: unknown) {
+      console.error('Failed to update PO:', err);
+      const message = err instanceof Error ? err.message : 'Unknown network error occurred';
+      setUIState((prev: POUIState) => ({ 
+        ...prev, 
+        isSaving: false,
+        saveError: `Failed to update Purchase Order: ${message}` 
+      }));
+      return false;
+    }
+  }, [validation, formState, prepareHeaderPayload, prepareProductPayloads, setUIState, logAction]);
+
+  return { savePurchaseOrder, updatePurchaseOrder };
 };

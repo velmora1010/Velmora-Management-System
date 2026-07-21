@@ -70,43 +70,31 @@ export const useDispatch = () => {
         dispatch_photo_url = await uploadPhoto(dispatchPhotoFile);
       }
 
+      // Generate manual ID since the table has no auto-increment sequence
+      const { data: maxData } = await supabase
+        .from(SUPABASE_TABLES.influencerDispatch)
+        .select('id')
+        .not('id', 'is', null)
+        .order('id', { ascending: false })
+        .limit(1);
+
+      const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
+      const nextId = isNaN(maxId) ? 1 : maxId + 1;
+
       const finalPayload = {
         ...payload,
+        id: nextId,
         product_photo_url,
         dispatch_photo_url,
-        dispatch_status: 'Dispatched'
+        dispatch_status: 'Dispatched',
+        created_at: new Date().toISOString()
       };
 
-      const { data: insertedDispatch, error: dispatchError } = await supabase
+      const { error: dispatchError } = await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
-        .insert([finalPayload])
-        .select()
-        .single();
+        .insert([finalPayload]);
 
       if (dispatchError) throw dispatchError;
-
-      const trackingPayload = {
-        dispatch_id: insertedDispatch.id,
-        influencer_id: insertedDispatch.influencer_id,
-        campaign_id: insertedDispatch.campaign_id,
-        current_step: 1,
-        delivered_confirmed: false,
-        pay_advance_completed: false,
-        reference_video_received: false,
-        expected_delivery_completed: false,
-        draft_received: false,
-        payment_remaining_completed: false,
-        final_post_completed: false
-      };
-
-      const { error: trackingError } = await supabase
-        .from(SUPABASE_TABLES.influencerStatus)
-        .insert([trackingPayload]);
-
-      if (trackingError) {
-        console.error('Error setting up status tracking:', trackingError);
-        // We don't fail the dispatch if tracking fails, but we log it (as in legacy)
-      }
 
       return true;
     } catch (err: unknown) {

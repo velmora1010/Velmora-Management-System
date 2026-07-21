@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useCategories } from '../../hooks/useCategories';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import type { Vendor } from '../../types';
+import { useDepartmentSelection } from '../../hooks/tasks/useDepartmentSelection';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 interface VendorFormProps {
   vendorId?: string;
@@ -20,28 +21,27 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
   const [vendorType2, setVendorType2] = useState('');
   const [gstAvailable, setGstAvailable] = useState(false);
 
-  // Re-use cascading category logic
+  // Re-use dynamic department & section cascading selection hook
   const {
-    mainCategory: vendorCategory,
-    subCategory1: subCategory,
-    subCategory2: subSubCategory,
-    mainOptions: vendorCategoryOptions,
-    sub1Options: subCategoryOptions,
-    sub2Options: subSubCategoryOptions,
-    sub3Options: subCategory3OptionsRaw,
-    handleMainChange: handleVendorCategoryChange,
-    handleSub1Change: handleSubCategoryChange,
-    handleSub2Change: handleSubSubCategoryChange,
-    setMainCategory: setVendorCategory,
-    setSubCategory1: setSubCategory,
-    setSubCategory2: setSubSubCategory
-  } = useCategories();
+    departments,
+    sections,
+    selectedDeptId,
+    selectedSectionId,
+    setSelectedSectionId,
+    handleDepartmentChange,
+    isDeptsLoading,
+    isSectionsLoading,
+    deptsError,
+    sectionsError
+  } = useDepartmentSelection('', '');
 
-  // Handle multi-select for subCategory3 manually
+  // Sub Category 2 (sub_sub_category) & Sub Category 3 (sub_category_3) states
+  const [subSubCategory, setSubSubCategory] = useState('');
   const [vendorSubCategory3, setVendorSubCategory3] = useState<string[]>([]);
   const [isSub3DropdownOpen, setIsSub3DropdownOpen] = useState(false);
-  // Sort options dynamically
-  const subCategory3Options = [...subCategory3OptionsRaw].sort();
+
+  const [subSubCategoryOptions, setSubSubCategoryOptions] = useState<string[]>([]);
+  const [subCategory3Options, setSubCategory3Options] = useState<string[]>([]);
 
   // 2. Vendor Details
   const [vendorName, setVendorName] = useState('');
@@ -59,6 +59,61 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
   const [ifscCode, setIfscCode] = useState('');
   const [upiId, setUpiId] = useState('');
 
+  // Fetch subSubCategory options based on selected Department & Section
+  useEffect(() => {
+    let mounted = true;
+    const fetchSub2 = async () => {
+      if (!selectedDeptId || !selectedSectionId) {
+        if (mounted) setSubSubCategoryOptions([]);
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from('Vendor_Category')
+          .select('sub_sub_category')
+          .eq('category', selectedDeptId)
+          .eq('sub_category', selectedSectionId)
+          .eq('status', 'active');
+        if (!error && data && mounted) {
+          const unique = Array.from(new Set(data.map(d => d.sub_sub_category).filter(Boolean))) as string[];
+          setSubSubCategoryOptions(unique);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchSub2();
+    return () => { mounted = false; };
+  }, [selectedDeptId, selectedSectionId]);
+
+  // Fetch subCategory3 options based on selected Department, Section, and subSubCategory
+  useEffect(() => {
+    let mounted = true;
+    const fetchSub3 = async () => {
+      if (!selectedDeptId || !selectedSectionId || !subSubCategory) {
+        if (mounted) setSubCategory3Options([]);
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from('Vendor_Category')
+          .select('sub_sub_sub_category')
+          .eq('category', selectedDeptId)
+          .eq('sub_category', selectedSectionId)
+          .eq('sub_sub_category', subSubCategory)
+          .eq('status', 'active');
+        if (!error && data && mounted) {
+          const unique = Array.from(new Set(data.map(d => d.sub_sub_sub_category).filter(Boolean))) as string[];
+          setSubCategory3Options(unique.sort());
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchSub3();
+    return () => { mounted = false; };
+  }, [selectedDeptId, selectedSectionId, subSubCategory]);
+
   useEffect(() => {
     const loadVendor = async () => {
       try {
@@ -73,8 +128,20 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
         if (data) {
           setVendorType1(data.vendor_type_1 || '');
           setVendorType2(data.vendor_type_2 || '');
-          setVendorCategory(data.vendor_category || '');
-          setSubCategory(data.sub_category || '');
+          
+          // Set selection IDs
+          handleDepartmentChange(data.vendor_category || '');
+          // We wait briefly or trigger manual update for section
+          if (data.vendor_category) {
+            const { data: secs } = await supabase
+              .from('department_sections')
+              .select('*')
+              .eq('department_id', Number(data.vendor_category));
+            if (secs) {
+              setSelectedSectionId(data.sub_category || '');
+            }
+          }
+          
           setSubSubCategory(data.sub_sub_category || '');
           setVendorSubCategory3(data.sub_category_3 || []);
           setGstAvailable(data.gst_available || false);
@@ -102,7 +169,7 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
     if (vendorId) {
       loadVendor();
     }
-  }, [vendorId, setVendorCategory, setSubCategory, setSubSubCategory]);
+  }, [vendorId]);
 
   const toggleSub3Option = (opt: string) => {
     if (vendorSubCategory3.includes(opt)) {
@@ -116,9 +183,13 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
     e.preventDefault();
     setError('');
     
-    // Vanilla JS requires Vendor Name
     if (!vendorName) {
       setError('Vendor Name is required.');
+      return;
+    }
+
+    if (!selectedDeptId || !selectedSectionId) {
+      setError('Department and Section are required.');
       return;
     }
 
@@ -127,8 +198,8 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
     const payload: Partial<Vendor> = {
       vendor_type_1: vendorType1,
       vendor_type_2: vendorType2,
-      vendor_category: vendorCategory,
-      sub_category: subCategory,
+      vendor_category: selectedDeptId,
+      sub_category: selectedSectionId,
       sub_sub_category: subSubCategory,
       sub_category_3: vendorSubCategory3,
       gst_available: gstAvailable,
@@ -149,10 +220,10 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
 
     try {
       if (vendorId) {
-        const { error } = await supabase.from('vendors').update(payload).eq('id', vendorId);
+        const { error } = await supabase.from(SUPABASE_TABLES.vendors).update(payload).eq('id', vendorId);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('vendors').insert([payload]);
+        const { error } = await supabase.from(SUPABASE_TABLES.vendors).insert([payload]);
         if (error) throw error;
       }
       
@@ -167,10 +238,16 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
   };
 
   return (
-    <div className="w-full bg-slate-800/80 rounded-xl p-6 border border-slate-700 shadow-sm max-w-[1000px] mx-auto">
+    <div className="w-full bg-slate-800/80 rounded-xl p-6 border border-slate-700 shadow-sm max-w-[1000px] mx-auto text-slate-200 animate-in">
       <div className="flex justify-between items-center border-b border-slate-700/50 pb-4 mb-6">
         <span className="text-lg font-semibold text-slate-100">{vendorId ? 'Edit Vendor' : 'Add Vendor'}</span>
-        <button type="button" className="h-[36px] px-4 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm flex items-center justify-center border border-slate-700">Task</button>
+        <button 
+          type="button" 
+          onClick={onCancel}
+          className="h-[36px] px-4 bg-slate-750 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-colors shadow-sm flex items-center justify-center border border-slate-650"
+        >
+          Cancel
+        </button>
       </div>
 
       {error && (
@@ -203,30 +280,71 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
                 <option value="tertiary_vendor">Tertiary Vendor</option>
               </select>
             </div>
+            
+            {/* Department (vendor_category) dropdown */}
             <div className="form-group">
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Vendor Category</label>
-              <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" value={vendorCategory} onChange={e => handleVendorCategoryChange(e.target.value)}>
-                <option value="">Select Category</option>
-                {vendorCategoryOptions.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">Department *</label>
+              <select 
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" 
+                value={selectedDeptId} 
+                onChange={e => handleDepartmentChange(e.target.value)}
+                disabled={isDeptsLoading}
+                required
+              >
+                <option value="">{isDeptsLoading ? 'Loading departments...' : 'Select Department'}</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.department_name}</option>
+                ))}
               </select>
+              {deptsError && <span className="text-xs text-red-500 mt-1">{deptsError}</span>}
             </div>
+
+            {/* Section (sub_category) dropdown */}
             <div className="form-group">
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Sub Category</label>
-              <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" value={subCategory} onChange={e => handleSubCategoryChange(e.target.value)} disabled={!vendorCategory || subCategoryOptions.length === 0}>
-                <option value="">Select Category First</option>
-                {subCategoryOptions.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">Section *</label>
+              <select 
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none disabled:opacity-50" 
+                value={selectedSectionId} 
+                onChange={e => setSelectedSectionId(e.target.value)} 
+                disabled={!selectedDeptId || isSectionsLoading}
+                required
+              >
+                <option value="">
+                  {!selectedDeptId 
+                    ? 'Select department first' 
+                    : isSectionsLoading 
+                    ? 'Loading sections...' 
+                    : sections.length === 0 
+                    ? 'No sections' 
+                    : 'Select Section'
+                  }
+                </option>
+                {sections.map((s) => (
+                  <option key={s.id} value={s.id}>{s.section_name}</option>
+                ))}
               </select>
+              {sectionsError && <span className="text-xs text-red-500 mt-1">{sectionsError}</span>}
             </div>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Sub-Sub Category (sub_sub_category) dropdown */}
             <div className="form-group">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">Sub-Sub Category</label>
-              <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" value={subSubCategory} onChange={e => handleSubSubCategoryChange(e.target.value)} disabled={!subCategory || subSubCategoryOptions.length === 0}>
-                <option value="">Select Sub Category</option>
-                {subSubCategoryOptions.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+              <select 
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none disabled:opacity-50" 
+                value={subSubCategory} 
+                onChange={e => setSubSubCategory(e.target.value)} 
+                disabled={!selectedSectionId || subSubCategoryOptions.length === 0}
+              >
+                <option value="">Select Sub-Sub Category</option>
+                {subSubCategoryOptions.map((opt: string) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
               </select>
             </div>
+
+            {/* Sub Category 3 dropdown */}
             <div className="form-group relative">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">Sub Category 3</label>
               <div 
@@ -250,6 +368,7 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
                 </div>
               )}
             </div>
+
             <div className="form-group flex items-center pt-6 pb-2">
               <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
                 <input type="checkbox" id="gstAvailable" checked={gstAvailable} onChange={e => setGstAvailable(e.target.checked)} className="cursor-pointer accent-purple-500 w-4 h-4 rounded" />
@@ -258,81 +377,90 @@ export const VendorForm: React.FC<VendorFormProps> = ({ vendorId, onSuccess, onC
             </div>
           </div>
         </div>
-          
+
         {/* Section 2: Vendor Details */}
         <div>
           <div className="text-sm font-semibold text-slate-300 mb-4 border-b border-slate-700/50 pb-2">Vendor Details</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div className="form-group">
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Vendor Name <span className="text-red-500">*</span></label>
-              <input type="text" placeholder="Enter vendor name" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={vendorName} onChange={e => setVendorName(e.target.value)} required />
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">Vendor Name *</label>
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="Alpine Tape" value={vendorName} onChange={e => setVendorName(e.target.value)} required />
             </div>
             <div className="form-group">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">Representative Name</label>
-              <input type="text" placeholder="Enter representative name" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={representativeName} onChange={e => setRepresentativeName(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Phone Number</label>
-              <input type="tel" placeholder="Enter phone number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={phone} onChange={e => setPhone(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Email</label>
-              <input type="email" placeholder="Enter email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={email} onChange={e => setEmail(e.target.value)} />
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="Jack Ross" value={representativeName} onChange={e => setRepresentativeName(e.target.value)} />
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div className="form-group">
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">Phone Number</label>
+              <input type="tel" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="9876543210" value={phone} onChange={e => setPhone(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">Email Address</label>
+              <input type="email" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="jack@alpine.com" value={email} onChange={e => setEmail(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">Delivery Time (Days)</label>
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="e.g. 3-5 days" value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="form-group md:col-span-2">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">Address</label>
-              <input type="text" placeholder="Enter address" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={address} onChange={e => setAddress(e.target.value)} />
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="Street Address" value={address} onChange={e => setAddress(e.target.value)} />
             </div>
             <div className="form-group">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">City</label>
-              <input type="text" placeholder="Enter city" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={city} onChange={e => setCity(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Delivery Time</label>
-              <input type="text" placeholder="e.g. 3-5 days" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={deliveryTime} onChange={e => setDeliveryTime(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">GST Number</label>
-              <input type="text" placeholder="Enter GST number" className={`w-full border rounded-lg p-2.5 text-sm placeholder-slate-500 focus:border-purple-500 focus:outline-none ${gstAvailable ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-800/50 border-slate-700/50 text-slate-500 cursor-not-allowed'}`} value={gstNumber} onChange={e => setGstNumber(e.target.value)} disabled={!gstAvailable} />
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="Coimbatore" value={city} onChange={e => setCity(e.target.value)} />
             </div>
           </div>
+          
+          {gstAvailable && (
+            <div className="form-group mt-4 max-w-md">
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">GST Number</label>
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="33AAJCA6244L1ZJ" value={gstNumber} onChange={e => setGstNumber(e.target.value)} />
+            </div>
+          )}
         </div>
 
         {/* Section 3: Bank Details */}
         <div>
           <div className="text-sm font-semibold text-slate-300 mb-4 border-b border-slate-700/50 pb-2">Bank Details</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div className="form-group">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">Account Holder Name</label>
-              <input type="text" placeholder="Enter account holder name" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={accountHolder} onChange={e => setAccountHolder(e.target.value)} />
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="Alpine Tape Private Limited" value={accountHolder} onChange={e => setAccountHolder(e.target.value)} />
             </div>
             <div className="form-group">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">Account Number</label>
-              <input type="text" placeholder="Enter account number" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} />
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="904905010000003" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} />
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="form-group">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">IFSC Code</label>
-              <input type="text" placeholder="Enter IFSC code" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={ifscCode} onChange={e => setIfscCode(e.target.value)} />
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="UBIN0590495" value={ifscCode} onChange={e => setIfscCode(e.target.value)} />
             </div>
             <div className="form-group">
               <label className="block text-xs font-medium text-slate-400 mb-1.5">UPI ID</label>
-              <input type="text" placeholder="Enter UPI ID" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-purple-500 focus:outline-none" value={upiId} onChange={e => setUpiId(e.target.value)} />
+              <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none" placeholder="alpine@upi" value={upiId} onChange={e => setUpiId(e.target.value)} />
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col-reverse md:flex-row justify-end gap-3 pt-4 border-t border-slate-700/50">
-          {onCancel && (
-            <button type="button" onClick={onCancel} className="w-full md:w-auto px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-sm font-medium transition-colors shadow-sm">
-              Cancel
-            </button>
-          )}
-          <button type="submit" disabled={isSaving} className="w-full md:w-auto px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
-            {isSaving ? 'Saving...' : 'Save Vendor'}
-          </button>
-        </div>
+        <button 
+          type="submit" 
+          disabled={isSaving} 
+          className="w-full h-[48px] bg-purple-600 hover:bg-purple-750 text-white rounded-[10px] text-sm font-semibold transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSaving ? 'Saving...' : 'Save Vendor'}
+        </button>
       </form>
     </div>
   );

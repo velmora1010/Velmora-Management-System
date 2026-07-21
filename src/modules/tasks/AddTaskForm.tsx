@@ -1,28 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { useTaskCategories } from '../../hooks/tasks/useTaskCategories';
 import { useMainTasks } from '../../hooks/tasks/useMainTasks';
 import type { Task } from '../../types';
 import { useTasks } from '../../hooks/tasks/useTasks';
+import { useDepartmentSelection } from '../../hooks/tasks/useDepartmentSelection';
 import toast from 'react-hot-toast';
 
 interface AddTaskFormProps {
+  initialTask?: Task;
   onSuccess?: () => void;
 }
 
-export const AddTaskForm: React.FC<AddTaskFormProps> = ({ onSuccess }) => {
-  const {
-    mainCategory, subCategory1, subCategory2,
-    mainOptions, sub1Options, sub2Options, sub3Options,
-    handleMainChange, handleSub1Change, handleSub2Change
-  } = useTaskCategories();
-
+export const AddTaskForm: React.FC<AddTaskFormProps> = ({ initialTask, onSuccess }) => {
   const { mainTasks, fetchMainTasks } = useMainTasks();
-  const { saveTask, isLoading } = useTasks();
+  const { saveTask, updateTask, isLoading } = useTasks();
+
+  const {
+    departments,
+    sections,
+    selectedDeptId,
+    selectedSectionId,
+    setSelectedSectionId,
+    handleDepartmentChange,
+    isDeptsLoading,
+    isSectionsLoading,
+    deptsError,
+    sectionsError
+  } = useDepartmentSelection(
+    initialTask?.department,
+    initialTask?.sub_category1
+  );
 
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState('');
-  const [subCategory3, setSubCategory3] = useState<string[]>([]);
-  const [isSub3DropdownOpen, setIsSub3DropdownOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [assignedBy, setAssignedBy] = useState('');
@@ -30,55 +39,69 @@ export const AddTaskForm: React.FC<AddTaskFormProps> = ({ onSuccess }) => {
   const [priority, setPriority] = useState('');
   const [selectedMainTask, setSelectedMainTask] = useState('');
 
-  const sortedSub3Options = [...sub3Options].sort();
+  // Populate form fields in Edit Mode
+  useEffect(() => {
+    if (initialTask) {
+      setDate(initialTask.due_date || '');
+      setTime(initialTask.due_time || '');
+      setTitle(initialTask.task_title || '');
+      setDescription(initialTask.task_description || '');
+      setAssignedBy(initialTask.assigned_by || '');
+      setAssignedTo(initialTask.assigned_to || '');
+      setPriority(initialTask.priority || '');
+    }
+  }, [initialTask]);
 
   useEffect(() => {
     fetchMainTasks();
   }, [fetchMainTasks]);
 
-  const toggleSub3Option = (opt: string) => {
-    if (subCategory3.includes(opt)) {
-      setSubCategory3(subCategory3.filter(v => v !== opt));
-    } else {
-      setSubCategory3([...subCategory3, opt]);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mainCategory || !date || !time || !title || !priority) {
+    if (!selectedDeptId || !selectedSectionId || !date || !time || !title || !priority) {
       toast.error('Please fill out all required fields (*)');
       return;
     }
 
     const payload: Partial<Task> = {
-      department: mainCategory,
+      department: selectedDeptId,
+      sub_category1: selectedSectionId,
       due_date: date,
       due_time: time,
-      sub_category1: subCategory1,
-      sub_category2: subCategory2,
       task_title: title,
       task_description: description,
       assigned_by: assignedBy,
       assigned_to: assignedTo,
       priority,
-      status: 'pending'
+      status: initialTask?.status || 'pending'
     };
 
-    const success = await saveTask(payload, selectedMainTask);
+    let success = false;
+    if (initialTask?.id) {
+      success = await updateTask(initialTask.id, payload);
+      if (success) {
+        toast.success('Task updated successfully!');
+      }
+    } else {
+      success = await saveTask(payload, selectedMainTask);
+      if (success) {
+        toast.success('Task created successfully!');
+      }
+    }
+
     if (success) {
-      toast.success('Task created successfully!');
-      // Reset form
-      handleMainChange('');
-      setDate(new Date().toISOString().split('T')[0]);
-      setTime('');
-      setSubCategory3([]);
-      setTitle('');
-      setDescription('');
-      setAssignedBy('');
-      setAssignedTo('');
-      setPriority('');
-      setSelectedMainTask('');
+      // Reset form if not editing
+      if (!initialTask) {
+        handleDepartmentChange('');
+        setDate(new Date().toISOString().split('T')[0]);
+        setTime('');
+        setTitle('');
+        setDescription('');
+        setAssignedBy('');
+        setAssignedTo('');
+        setPriority('');
+        setSelectedMainTask('');
+      }
       if (onSuccess) onSuccess();
     }
   };
@@ -88,7 +111,7 @@ export const AddTaskForm: React.FC<AddTaskFormProps> = ({ onSuccess }) => {
 
   return (
     <div className="w-full max-w-[1100px] mx-auto bg-card rounded-2xl shadow-sm border border-border p-[30px] flex flex-col gap-[24px] animate-in">
-      <div className="text-[1.25rem] font-bold text-main">Add New Task</div>
+      <div className="text-[1.25rem] font-bold text-main">{initialTask ? 'Edit Task' : 'Add New Task'}</div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-[24px]">
         <div className="flex flex-col gap-[16px]">
@@ -96,65 +119,81 @@ export const AddTaskForm: React.FC<AddTaskFormProps> = ({ onSuccess }) => {
             Task Details
           </div>
 
+          {/* Department and Date/Time */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-[20px]">
             <div className="flex flex-col gap-[8px] md:col-span-2">
               <label className={labelClass}>Department <span className="text-red-500">*</span></label>
-              <select className={inputClass} value={mainCategory} onChange={(e) => handleMainChange(e.target.value)} required>
-                <option value="">Select Category</option>
-                {mainOptions.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+              <select 
+                className={inputClass} 
+                value={selectedDeptId} 
+                onChange={(e) => handleDepartmentChange(e.target.value)} 
+                required
+                disabled={isDeptsLoading}
+              >
+                <option value="">{isDeptsLoading ? 'Loading departments...' : 'Select Department'}</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.department_name}</option>
+                ))}
               </select>
+              {deptsError && <span className="text-xs text-red-500 mt-1">{deptsError}</span>}
             </div>
+            
             <div className="flex flex-col gap-[8px] md:col-span-1">
               <label className={labelClass}>📅 Date <span className="text-red-500">*</span></label>
-              <input type="date" className={`${inputClass} [color-scheme:light] dark:[color-scheme:dark]`} value={date} onChange={(e) => setDate(e.target.value)} required />
+              <input 
+                type="date" 
+                className={`${inputClass} [color-scheme:light] dark:[color-scheme:dark]`} 
+                value={date} 
+                onChange={(e) => setDate(e.target.value)} 
+                required 
+              />
             </div>
+            
             <div className="flex flex-col gap-[8px] md:col-span-1">
               <label className={labelClass}>⏰ Time <span className="text-red-500">*</span></label>
-              <input type="time" className={`${inputClass} [color-scheme:light] dark:[color-scheme:dark]`} value={time} onChange={(e) => setTime(e.target.value)} required />
+              <input 
+                type="time" 
+                className={`${inputClass} [color-scheme:light] dark:[color-scheme:dark]`} 
+                value={time} 
+                onChange={(e) => setTime(e.target.value)} 
+                required 
+              />
             </div>
           </div>
 
+          {/* Section dropdown */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
             <div className="flex flex-col gap-[8px]">
-              <label className={labelClass}>Sub Category 1</label>
-              <select className={inputClass} value={subCategory1} onChange={(e) => handleSub1Change(e.target.value)} disabled={!mainCategory || sub1Options.length === 0}>
-                <option value="">Select Sub Category 1</option>
-                {sub1Options.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col gap-[8px]">
-              <label className={labelClass}>Sub Category 2</label>
-              <select className={inputClass} value={subCategory2} onChange={(e) => handleSub2Change(e.target.value)} disabled={!subCategory1 || sub2Options.length === 0}>
-                <option value="">Select Sub Category 2</option>
-                {sub2Options.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col gap-[8px] relative">
-              <label className={labelClass}>Sub Category 3</label>
-              <div 
-                className={inputClass}
-                style={{ cursor: subCategory2 ? 'pointer' : 'not-allowed', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                onClick={() => { if(subCategory2) setIsSub3DropdownOpen(!isSub3DropdownOpen); }}
+              <label className={labelClass}>Section <span className="text-red-500">*</span></label>
+              <select 
+                className={inputClass} 
+                value={selectedSectionId} 
+                onChange={(e) => setSelectedSectionId(e.target.value)} 
+                disabled={!selectedDeptId || isSectionsLoading}
+                required
               >
-                <span className="truncate">
-                  {subCategory3.length > 0 ? subCategory3.join(', ') : 'Select Sub Category 3'}
-                </span>
-                <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" strokeWidth="2" fill="none" className="shrink-0"><polyline points="6 9 12 15 18 9"></polyline></svg>
-              </div>
-              {isSub3DropdownOpen && (
-                <div className="absolute top-full left-0 right-0 bg-card border border-border rounded-lg max-h-[200px] overflow-y-auto z-10 shadow-lg mt-1">
-                  {sortedSub3Options.map((opt: string) => (
-                    <div key={opt} className="px-3 py-2 cursor-pointer flex items-center gap-2 hover:bg-card-alt" onClick={() => toggleSub3Option(opt)}>
-                      <input type="checkbox" checked={subCategory3.includes(opt)} readOnly className="cursor-pointer w-[18px] h-[18px] rounded border-border text-primary focus:ring-primary/20" />
-                      <span className="text-[13px] text-main">{opt}</span>
-                    </div>
-                  ))}
-                  {sortedSub3Options.length === 0 && <div className="px-3 py-2 text-[13px] text-muted">No options available</div>}
-                </div>
+                <option value="">
+                  {!selectedDeptId 
+                    ? 'Select a department first' 
+                    : isSectionsLoading 
+                    ? 'Loading sections...' 
+                    : sections.length === 0 
+                    ? 'No sections available' 
+                    : 'Select Section'
+                  }
+                </option>
+                {sections.map((s) => (
+                  <option key={s.id} value={s.id}>{s.section_name}</option>
+                ))}
+              </select>
+              {sectionsError && <span className="text-xs text-red-500 mt-1">{sectionsError}</span>}
+              {selectedDeptId && !isSectionsLoading && sections.length === 0 && (
+                <span className="text-xs text-amber-500 mt-1">This department does not have any sections defined yet.</span>
               )}
             </div>
           </div>
 
+          {/* Title and Description */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
             <div className="flex flex-col gap-[8px] md:col-span-2">
               <label className={labelClass}>Task Title <span className="text-red-500">*</span></label>
@@ -166,6 +205,7 @@ export const AddTaskForm: React.FC<AddTaskFormProps> = ({ onSuccess }) => {
             </div>
           </div>
 
+          {/* Assigner and Assignee */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
             <div className="flex flex-col gap-[8px]">
               <label className={labelClass}>Assigned By</label>
@@ -194,6 +234,7 @@ export const AddTaskForm: React.FC<AddTaskFormProps> = ({ onSuccess }) => {
             </div>
           </div>
 
+          {/* Priority and Add to main task */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
             <div className="flex flex-col gap-[8px]">
               <label className={labelClass}>Priority <span className="text-red-500">*</span></label>
@@ -219,7 +260,7 @@ export const AddTaskForm: React.FC<AddTaskFormProps> = ({ onSuccess }) => {
           disabled={isLoading}
           className="mt-[10px] h-[48px] bg-primary hover:bg-primary/90 text-white rounded-[12px] text-[1rem] font-semibold transition-all w-full flex items-center justify-center shadow-md hover:shadow-lg hover:-translate-y-[2px]"
         >
-          {isLoading ? 'Creating...' : 'Create Task'}
+          {isLoading ? 'Saving...' : (initialTask ? 'Save Task' : 'Create Task')}
         </button>
       </form>
     </div>

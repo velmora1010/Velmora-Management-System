@@ -1,16 +1,18 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import type { UserRole } from '../../contexts/AuthContext';
+import { useRBAC } from '../../hooks/useRBAC';
+import type { AppModule } from '../../types/rbac';
 
 interface ProtectedRouteProps {
-  allowedRoles?: UserRole[];
+  requiredModule?: AppModule;
 }
 
-export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
-  const { user, role, isAuthLoading } = useAuth();
+export const ProtectedRoute = ({ requiredModule }: ProtectedRouteProps) => {
+  const { user, isAuthLoading } = useAuth();
+  const { canView, isLoading: isRbacLoading } = useRBAC();
   const location = useLocation();
 
-  if (isAuthLoading) {
+  if (isAuthLoading || isRbacLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -23,9 +25,8 @@ export const ProtectedRoute = ({ allowedRoles }: ProtectedRouteProps) => {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Role checking (if allowedRoles are specified)
-  if (allowedRoles && role && !allowedRoles.includes(role)) {
-    // If authenticated but unauthorized role, redirect to dashboard (or show unauthorized UI)
+  // Module level permission checking
+  if (requiredModule && !canView(requiredModule)) {
     return <Navigate to="/" replace />;
   }
 

@@ -11,7 +11,8 @@ import {
   Tag, 
   Settings, 
   Banknote,
-  Ticket
+  Ticket,
+  Truck
 } from 'lucide-react';
 
 const DEPARTMENTS = [
@@ -24,13 +25,23 @@ const DEPARTMENTS = [
   { id: 'research', title: 'Research & Development', icon: Lightbulb, color: '#a855f7', path: '/research' },
   { id: 'hr', title: 'Human Resources', icon: Users, color: '#f97316', path: '/hr' },
   { id: 'brand', title: 'Brand Management', icon: Tag, color: '#e11d48', path: '/brand' },
+  { id: 'logistics', title: 'Logistics', icon: Truck, color: '#0ea5e9', path: '/logistics' },
   { id: 'operations', title: 'Operations', icon: Settings, color: '#64748b', path: '/operations' },
   { id: 'finance', title: 'Finance', icon: Banknote, color: '#10b981', path: '/finance' },
   { id: 'customer-tickets', title: 'Customer Tickets', icon: Ticket, color: '#f43f5e', path: '/tickets' }
 ];
 
+import { useRBAC } from '../hooks/useRBAC';
+import type { AppModule } from '../types/rbac';
+
 export const HomePage = () => {
   const navigate = useNavigate();
+  const { canView } = useRBAC();
+
+  const visibleDepartments = DEPARTMENTS.filter(dept => {
+    const modId = dept.id === 'customer-tickets' ? 'tasks' : (dept.id as AppModule);
+    return canView(modId);
+  });
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-8 animate-in fade-in duration-300 py-8">
@@ -40,7 +51,7 @@ export const HomePage = () => {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-        {DEPARTMENTS.map((dept) => {
+        {visibleDepartments.map((dept) => {
           const Icon = dept.icon;
           return (
             <div 

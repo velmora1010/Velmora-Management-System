@@ -379,9 +379,38 @@ const ProductionBatchDetail = () => {
       console.error(err);
       toast.error(err.message || "Failed to save barcodes");
     }
+  const handleEditDeptChange = (deptId: string) => {
+    setEditDeptId(deptId);
+    setEditSectionId('');
+    const sectList = sections.filter(s => String(s.department_id) === String(deptId));
+    setEditSectionsList(sectList);
   };
 
-  
+  const handleSaveEditBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editProducedBy.trim()) {
+      toast.error('Produced By is required');
+      return;
+    }
+    if (!editDeptId || !editSectionId) {
+      toast.error('Department and Section are required');
+      return;
+    }
+    try {
+      await inventoryService.updateProductionBatch(productionBatch.id, {
+        produced_by: editProducedBy.trim(),
+        notes: editNotes.trim(),
+        department_id: editDeptId,
+        section_id: editSectionId
+      });
+      toast.success('Batch details updated successfully');
+      setIsEditModalOpen(false);
+      fetchData();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Failed to update batch details');
+    }
+  };
 
   const handleFailMicroBatchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -478,6 +507,28 @@ const ProductionBatchDetail = () => {
                 <span><strong style={{ color: 'white' }}>{productionBatch.total_units}</strong> Total Units</span>
                 <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#475569' }} />
                 <span>Created {new Date(productionBatch.created_at || '').toLocaleDateString('en-GB')}</span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', color: 'var(--text-muted)', fontSize: '13px', alignItems: 'center', marginTop: '8px' }}>
+                <span>Dept: <strong style={{ color: 'white' }}>{getDeptName(productionBatch.department_id)}</strong></span>
+                <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#475569' }} />
+                <span>Section: <strong style={{ color: 'white' }}>{getSectionName(productionBatch.section_id)}</strong></span>
+                <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#475569' }} />
+                <span>Produced By: <strong style={{ color: 'white' }}>{productionBatch.produced_by}</strong></span>
+                <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#475569' }} />
+                <button 
+                  onClick={() => {
+                    setEditProducedBy(productionBatch.produced_by || '');
+                    setEditNotes(productionBatch.notes || '');
+                    setEditDeptId(productionBatch.department_id || '');
+                    setEditSectionId(productionBatch.section_id || '');
+                    const sectList = sections.filter(s => String(s.department_id) === String(productionBatch.department_id));
+                    setEditSectionsList(sectList);
+                    setIsEditModalOpen(true);
+                  }}
+                  style={{ background: 'none', border: 'none', color: '#8b5cf6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', padding: 0, fontSize: '12px', fontWeight: 600 }}
+                >
+                  <Edit size={12} /> Edit Details
+                </button>
               </div>
             </div>
           </div>
@@ -933,6 +984,82 @@ const ProductionBatchDetail = () => {
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                 <button type="button" className="btn hover-lift" style={{ padding: '12px 20px', borderRadius: '12px', background: 'transparent', color: '#94a3b8', border: '1px solid #334155', fontWeight: 600 }} onClick={() => setFailModalOpen(false)}>Cancel</button>
                 <button type="submit" className="btn hover-lift" style={{ padding: '12px 24px', borderRadius: '12px', background: '#ef4444', color: 'white', border: 'none', fontWeight: 600 }}>Confirm Fail</button>
+              </div>
+            </form>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* EDIT BATCH DETAILS MODAL */}
+      {isEditModalOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }} 
+          animate={{ opacity: 1 }} 
+          exit={{ opacity: 0 }}
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+        >
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }} 
+            animate={{ scale: 1, opacity: 1 }} 
+            exit={{ scale: 0.95, opacity: 0 }}
+            style={{ background: '#0f172a', width: '100%', maxWidth: '500px', borderRadius: '24px', border: '1px solid #334155', overflow: 'hidden' }}
+          >
+            <div style={{ padding: '24px', borderBottom: '1px solid #1e293b' }}>
+              <h2 style={{ color: 'white', margin: 0, fontSize: '20px' }}>Edit Batch Details</h2>
+            </div>
+            
+            <form onSubmit={handleSaveEditBatch} style={{ padding: '24px' }}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: '#94a3b8' }}>Produced By *</label>
+                <input 
+                  type="text" 
+                  value={editProducedBy} 
+                  onChange={e => setEditProducedBy(e.target.value)} 
+                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '15px', outline: 'none' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: '#94a3b8' }}>Department *</label>
+                <select 
+                  value={editDeptId}
+                  onChange={e => handleEditDeptChange(e.target.value)}
+                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '15px', outline: 'none' }}
+                >
+                  <option value="">Select Department</option>
+                  {departments.map((d: any) => (
+                    <option key={d.id} value={d.id}>{d.department_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: '#94a3b8' }}>Section *</label>
+                <select 
+                  value={editSectionId}
+                  onChange={e => setEditSectionId(e.target.value)}
+                  disabled={!editDeptId}
+                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '15px', outline: 'none', opacity: editDeptId ? 1 : 0.5 }}
+                >
+                  <option value="">Select Section</option>
+                  {editSectionsList.map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.section_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '8px', color: '#94a3b8' }}>Notes (Optional)</label>
+                <textarea 
+                  value={editNotes} 
+                  onChange={e => setEditNotes(e.target.value)} 
+                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '15px', outline: 'none', minHeight: '80px', resize: 'vertical' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn hover-lift" style={{ padding: '12px 20px', borderRadius: '12px', background: 'transparent', color: '#94a3b8', border: '1px solid #334155', fontWeight: 600 }} onClick={() => setIsEditModalOpen(false)}>Cancel</button>
+                <button type="submit" className="btn hover-lift" style={{ padding: '12px 24px', borderRadius: '12px', background: '#8b5cf6', color: 'white', border: 'none', fontWeight: 600 }}>Save Changes</button>
               </div>
             </form>
           </motion.div>

@@ -1,15 +1,20 @@
 import React, { useState } from 'react';
-import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit } from 'lucide-react';
+import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { AddCampaignInfluencer } from './AddCampaignInfluencer';
 import { CampaignInfluencerList } from './CampaignInfluencerList';
 import { CampaignDispatchedList } from './CampaignDispatchedList';
 import { CampaignStatusTracking } from './CampaignStatusTracking';
 import { CampaignAnalytics } from './CampaignAnalytics';
+import { CampaignCalendar } from './CampaignCalendar';
 import { CampaignInfoTab } from './CampaignInfoTab';
 import { EditCampaignModal } from './EditCampaignModal';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
+import { supabase } from '../../lib/supabase';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import toast from 'react-hot-toast';
 
 interface CampaignDetailsProps {
   campaign: Campaign;
@@ -17,7 +22,7 @@ interface CampaignDetailsProps {
   onCampaignUpdate?: (campaign: Campaign) => void;
 }
 
-type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'analytics';
+type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'calendar' | 'analytics';
 
 import { isArchived } from '../../utils/marketingUtils';
 
@@ -31,6 +36,114 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const activeInfluencers = influencers.filter(inf => !isArchived(inf.is_archived));
   const budgetUsed = activeInfluencers.reduce((sum, inf) => sum + (inf.pricing?.final_price || 0), 0);
   const videosLive = activeInfluencers.reduce((sum, inf) => sum + (inf.pricing?.total_videos || 0), 0);
+
+  const handleMoveToStatus = async (record: any) => {
+    const cleanBigInt = (val: any) => {
+      if (
+        val === undefined ||
+        val === null ||
+        val === "" ||
+        val === "null" ||
+        (typeof val === "number" && isNaN(val))
+      ) {
+        return null;
+      }
+      const num = Number(val);
+      return isNaN(num) ? null : num;
+    };
+
+    try {
+      const cleanedDispatchId = cleanBigInt(record.id);
+
+      // Guard: dispatch record MUST have a valid numeric id
+      if (cleanedDispatchId === null) {
+        console.error("Move To Status failed: dispatch record has null id", record);
+        toast.error("This dispatch record has no valid ID. Please re-dispatch this influencer.");
+        return;
+      }
+
+      // 1. Check if tracking record already exists (use admin to bypass RLS)
+      const { data: existing, error: findError } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerStatus)
+        .select('*')
+        .eq('dispatch_id', cleanedDispatchId);
+
+      if (findError) {
+        console.error("Find existing error:", findError);
+        toast.error(findError.message || JSON.stringify(findError));
+        return;
+      }
+
+      if (existing && existing.length > 0) {
+        // Already exists, redirect
+        setCurrentView('status-tracking');
+        return;
+      }
+
+      // 2. Query max ID (use admin to bypass RLS)
+      const { data: maxData, error: maxError } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerStatus)
+        .select('id')
+        .not('id', 'is', null)
+        .order('id', { ascending: false })
+        .limit(1);
+
+      if (maxError) {
+        console.error("Max ID error:", maxError);
+        toast.error(`Failed to get next ID: ${maxError.message}`);
+        return;
+      }
+
+      const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
+      const nextId = isNaN(maxId) ? 1 : maxId + 1;
+
+      // 3. Prepare payload
+      const trackingPayload = {
+        id: cleanBigInt(nextId),
+        dispatch_id: cleanedDispatchId,
+        influencer_id: cleanBigInt(record.influencer_id),
+        campaign_id: cleanBigInt(record.campaign_id) || cleanBigInt(campaign.id),
+        current_step: 0,
+        delivered_confirmed: false,
+        pay_advance_completed: false,
+        reference_video_received: false,
+        expected_delivery_completed: false,
+        draft_received: false,
+        payment_remaining_completed: false,
+        final_post_completed: false,
+        status: 'Active'
+      };
+
+      console.log("Move To Status Payload:", trackingPayload);
+
+      // Use admin client to bypass RLS (table has no INSERT policy)
+      const { error: insertError } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerStatus)
+        .insert([trackingPayload]);
+
+      if (insertError) {
+        console.error("Insert error:", insertError);
+        toast.error(`Failed inserting into ${SUPABASE_TABLES.influencerStatus}: ${insertError.message}`);
+        return;
+      }
+
+      // Update dispatch record's status to Tracking
+      const { error: updateError } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerDispatch)
+        .update({ dispatch_status: 'Tracking' })
+        .eq('id', cleanedDispatchId);
+
+      if (updateError) {
+        console.error("Update dispatch status error:", updateError);
+      }
+
+      toast.success('Moved to Status Tracking successfully!');
+      setCurrentView('status-tracking');
+    } catch (err: any) {
+      console.error("Move To Status exception:", err);
+      toast.error(err?.message || JSON.stringify(err));
+    }
+  };
 
   const renderContent = () => {
     switch (currentView) {
@@ -59,10 +172,12 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         return <CampaignDispatchedList 
                  campaign={campaign} 
                  onBack={() => setCurrentView('overview')} 
-                 onMoveToStatus={() => setCurrentView('status-tracking')} 
+                 onMoveToStatus={handleMoveToStatus} 
                />;
       case 'status-tracking':
         return <CampaignStatusTracking campaign={campaign} onBack={() => setCurrentView('overview')} />;
+      case 'calendar':
+        return <CampaignCalendar campaign={campaign} onBack={() => setCurrentView('overview')} onNavigateToStatusTracking={() => setCurrentView('status-tracking')} />;
       case 'analytics':
         return <CampaignAnalytics campaign={campaign} influencers={influencers} onBack={() => setCurrentView('overview')} />;
       case 'overview':
@@ -128,6 +243,12 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             <Settings size={14} /> Status Tracking
           </button>
           <button 
+            onClick={() => setCurrentView('calendar')}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'calendar' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+          >
+            <Calendar size={14} /> Calendar
+          </button>
+          <button 
             onClick={() => setCurrentView('analytics')}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'analytics' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
@@ -137,7 +258,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
       </div>
 
       {/* Analytics Widgets Specific to Campaign */}
-      {currentView !== 'analytics' && (
+      {currentView !== 'analytics' && currentView !== 'calendar' && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
           <div className="text-slate-400 text-sm mb-1">Budget Used</div>
@@ -154,9 +275,22 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
           <div className="text-slate-400 text-sm mb-1">Target Languages</div>
           <div className="text-sm font-semibold text-slate-200 truncate">
-            {Array.isArray(campaign.target_languages) 
-              ? campaign.target_languages.join(', ') 
-              : campaign.target_languages}
+            {(() => {
+              let parsed: string[] = [];
+              try {
+                if (typeof campaign.target_languages === 'string') {
+                  const p = JSON.parse(campaign.target_languages);
+                  parsed = Array.isArray(p) ? p : [campaign.target_languages];
+                } else if (Array.isArray(campaign.target_languages)) {
+                  parsed = campaign.target_languages;
+                }
+              } catch (e) {
+                if (typeof campaign.target_languages === 'string') {
+                  parsed = [campaign.target_languages];
+                }
+              }
+              return parsed.length > 0 ? parsed.join(', ') : 'N/A';
+            })()}
           </div>
         </div>
       </div>

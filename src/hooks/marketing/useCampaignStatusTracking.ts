@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export interface StatusTrackingRecord {
@@ -52,6 +53,8 @@ export interface StatusTrackingRecord {
   re_draft_corrections_required: string;
   re_draft_final_product_link: string;
   re_draft_final_description: string;
+  created_at?: string;
+  updated_at?: string;
   
   // Joined from influencer_dispatch_details & influencers_info
   dispatch?: {
@@ -78,31 +81,30 @@ export interface StatusTrackingRecord {
 
 export const useCampaignStatusTracking = (campaignId?: string) => {
   const [trackingRecords, setTrackingRecords] = useState<StatusTrackingRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const loadTrackingRecords = useCallback(async () => {
-    if (!campaignId) return;
+    if (!campaignId) {
+      setIsLoading(false);
+      return;
+    }
     
     setIsLoading(true);
     setError(null);
     try {
-      // Step 1: Fetch from influencer_status_tracking
-      console.log('Loading', SUPABASE_TABLES.influencerStatus, '...');
-      const { data: trackingData, error: trackingError } = await supabase
+      const { data: trackingData, error: trackingError } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerStatus)
         .select('*')
         .eq('campaign_id', campaignId);
         
       if (trackingError) throw trackingError;
       
-      console.log('Loaded table:', SUPABASE_TABLES.influencerStatus, trackingData?.length, trackingError);
-      
       const records = (trackingData || []) as StatusTrackingRecord[];
       
       if (records.length > 0) {
-        // Step 2: Fetch dispatch details to join
         const dispatchIds = [...new Set(records.map(r => r.dispatch_id).filter(Boolean))];
+        const influencerIds = [...new Set(records.map(r => r.influencer_id).filter(Boolean))];
         const { data: dispatchData, error: dispatchError } = await supabase
           .from(SUPABASE_TABLES.influencerDispatch)
           .select('*')
@@ -110,19 +112,16 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           
         if (dispatchError) throw dispatchError;
         
-        // Step 3: Fetch influencer info to join
-        const influencerIds = [...new Set(records.map(r => r.influencer_id).filter(Boolean))];
         const { data: infoData, error: infoError } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
-          .select('id, name, profile_file_url, code')
+          .select('id, name, profile_file_url, code, is_archived')
           .in('id', influencerIds);
           
         if (infoError) throw infoError;
 
-        // Step 4: Fetch pricing info to join
         const { data: pricingData, error: pricingError } = await supabase
           .from(SUPABASE_TABLES.influencerPricing)
-          .select('influencer_id, final_price')
+          .select('influencer_id, final_price, total_videos')
           .in('influencer_id', influencerIds);
           
         if (pricingError) throw pricingError;
@@ -143,36 +142,43 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           return acc;
         }, {});
 
-        // Combine
-        const combined = records.map(r => {
-          const dispatch = dispatchMap[r.dispatch_id] || {};
-          const info = infoMap[r.influencer_id] || {};
-          const pricing = pricingMap[r.influencer_id] || {};
-          
-          return {
-            ...r,
-            dispatch: {
-              campaign_name: dispatch.campaign_name,
-              address: dispatch.address,
-              state: dispatch.state,
-              phone_number: dispatch.phone_number,
-              alternative_phone_number: dispatch.alternative_phone_number,
-              dispatch_date: dispatch.dispatch_date,
-              expected_delivery_date: dispatch.expected_delivery_date,
-              product_name: dispatch.product_name,
-              total_products: dispatch.total_products,
-              total_product_value: dispatch.total_product_value,
-              courier_partner: dispatch.courier_partner,
-              tracking_id: dispatch.tracking_id,
-              influencer_name: info.name || dispatch.creator_name,
-              influencer_code: info.code,
-              influencer_avatar: info.profile_file_url
-            },
-            pricing: {
-              final_price: pricing.final_price
-            }
-          };
-        });
+        // Combine and filter out archived
+        const combined = records
+          .map(r => {
+            const dispatch = dispatchMap[r.dispatch_id] || {};
+            const info = infoMap[r.influencer_id] || {};
+            const pricing = pricingMap[r.influencer_id] || {};
+            
+            return {
+              ...r,
+              dispatch: {
+                campaign_name: dispatch.campaign_name,
+                address: dispatch.address,
+                state: dispatch.state,
+                phone_number: dispatch.phone_number,
+                alternative_phone_number: dispatch.alternative_phone_number,
+                dispatch_date: dispatch.dispatch_date,
+                expected_delivery_date: dispatch.expected_delivery_date,
+                product_name: dispatch.product_name,
+                total_products: dispatch.total_products,
+                total_product_value: dispatch.total_product_value,
+                courier_partner: dispatch.courier_partner,
+                tracking_id: dispatch.tracking_id,
+                influencer_name: info.name || dispatch.creator_name,
+                influencer_code: info.code,
+                influencer_avatar: info.profile_file_url,
+                is_archived: info.is_archived
+              },
+              pricing: {
+                final_price: pricing.final_price,
+                total_videos: pricing.total_videos !== undefined ? pricing.total_videos : 1
+              }
+            };
+          })
+          .filter(r => {
+            // We soft-delete by checking is_archived (true/false)
+            return r.dispatch.is_archived !== true && r.dispatch.is_archived !== 'true';
+          });
         
         setTrackingRecords(combined);
       } else {
@@ -193,7 +199,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
   // Save specific milestone data (PATCH only the provided fields)
   const saveMilestone = async (trackingId: string, updates: Partial<StatusTrackingRecord>) => {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerStatus)
         .update(updates)
         .eq('id', trackingId);
@@ -205,10 +211,10 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         record.id === trackingId ? { ...record, ...updates } : record
       ));
       
-      return true;
-    } catch (err) {
+      return { success: true };
+    } catch (err: any) {
       console.error('Error saving milestone:', err);
-      return false;
+      return { success: false, error: err };
     }
   };
 

@@ -50,9 +50,7 @@ export const useExpenses = () => {
 
       if (fetchError) {
         console.error('expenses_row fetch error:', fetchError.message);
-        const fallback = localStorage.getItem('expenses');
-        if (fallback) data = JSON.parse(fallback);
-        else throw fetchError;
+        throw fetchError;
       }
       
       const activeExpenses = (data || []).filter(e => e.status !== 'archived');

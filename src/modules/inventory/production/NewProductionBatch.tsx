@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Package, Beaker, Factory, AlertTriangle, CheckCircle2, AlertCircle, Play } from 'lucide-react';
 import { PRODUCTS, calculateRequiredIngredients } from '../../../config/productFormulas';
 import { inventoryService } from '../../../services/inventoryService';
+import { useDepartmentSelection } from '../../../hooks/tasks/useDepartmentSelection';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getProductDisplayName, getProductSubtext, getProductTheme } from './productHelpers';
 import toast from 'react-hot-toast';
@@ -14,6 +15,17 @@ const NewProductionBatch = () => {
   const [customUnits, setCustomUnits] = useState<number>(500);
   const [producedBy, setProducedBy] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
+
+  const {
+    departments: deptOptions,
+    sections: sectOptions,
+    selectedDeptId,
+    selectedSectionId,
+    setSelectedSectionId,
+    handleDepartmentChange,
+    isDeptsLoading,
+    isSectionsLoading
+  } = useDepartmentSelection('', '');
 
   const selectedProduct = PRODUCTS.find(p => p.id === selectedProductId);
 
@@ -60,11 +72,15 @@ const NewProductionBatch = () => {
   }, [requiredIngredients]);
 
   const hasInsufficientStock = ingredientStatus.some((s: any) => !s.sufficient);
-  const canStart = selectedProduct && sizeType && !hasInsufficientStock && (requiredIngredients !== null);
+  const canStart = selectedProduct && sizeType && !hasInsufficientStock && (requiredIngredients !== null) && selectedDeptId && selectedSectionId;
 
   const handleStartBatch = async () => {
     if (!producedBy.trim()) {
       toast.error("Please enter Produced By");
+      return;
+    }
+    if (!selectedDeptId || !selectedSectionId) {
+      toast.error("Department and Section are required");
       return;
     }
 
@@ -97,7 +113,9 @@ const NewProductionBatch = () => {
         total_micro_batches: microBatches.length,
         completed_micro_batches: 0,
         produced_units: 0,
-        inventory_units: 0
+        inventory_units: 0,
+        department_id: selectedDeptId,
+        section_id: selectedSectionId
       };
       await inventoryService.saveProductionBatch(batchData);
 
@@ -418,6 +436,44 @@ const NewProductionBatch = () => {
                   )}
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '32px', background: '#0b1120', padding: '24px', borderRadius: '16px', border: '1px solid #1f2937' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Department <span style={{ color: '#ef4444' }}>*</span></label>
+                      <select 
+                        value={selectedDeptId}
+                        onChange={e => handleDepartmentChange(e.target.value)}
+                        style={{ width: '100%', padding: '14px 16px', borderRadius: '12px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '15px', outline: 'none' }}
+                      >
+                        <option value="">{isDeptsLoading ? 'Loading departments...' : 'Select Department'}</option>
+                        {deptOptions.map((d: any) => (
+                          <option key={d.id} value={d.id}>{d.department_name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Section <span style={{ color: '#ef4444' }}>*</span></label>
+                      <select 
+                        value={selectedSectionId}
+                        onChange={e => setSelectedSectionId(e.target.value)}
+                        disabled={!selectedDeptId}
+                        style={{ width: '100%', padding: '14px 16px', borderRadius: '12px', border: '1px solid #334155', background: '#1e293b', color: 'white', fontSize: '15px', outline: 'none', opacity: selectedDeptId ? 1 : 0.5 }}
+                      >
+                        <option value="">
+                          {!selectedDeptId 
+                            ? 'Select department first' 
+                            : isSectionsLoading 
+                            ? 'Loading sections...' 
+                            : sectOptions.length === 0 
+                            ? 'No sections' 
+                            : 'Select Section'
+                          }
+                        </option>
+                        {sectOptions.map((s: any) => (
+                          <option key={s.id} value={s.id}>{s.section_name}</option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div>
                       <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '10px', color: '#94a3b8', textTransform: 'uppercase' }}>Produced By <span style={{ color: '#ef4444' }}>*</span></label>
                       <input 

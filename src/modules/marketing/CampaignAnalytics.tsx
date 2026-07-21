@@ -3,6 +3,8 @@ import type { Campaign, CampaignInfluencer } from '../../types';
 import { Users, Film, IndianRupee, LineChart, Download } from 'lucide-react';
 import { CampaignStateBreakdown } from './CampaignStateBreakdown';
 import { CampaignPerformanceChart } from './CampaignPerformanceChart';
+import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
+import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import toast from 'react-hot-toast';
 
 interface CampaignAnalyticsProps {
@@ -13,11 +15,28 @@ interface CampaignAnalyticsProps {
 
 import { isArchived } from '../../utils/marketingUtils';
 
-export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, influencers }) => {
-  const metrics = useMemo(() => {
+const isFakeUrl = (url: string | null | undefined): boolean => {
+  if (!url) return true;
+  const lower = url.toLowerCase().trim();
+  return (
+    lower === '' ||
+    lower === 'default' ||
+    lower === 'default2' ||
+    lower.includes('instagram.com/p/default') ||
+    lower.includes('instagram.com/p/default2') ||
+    lower === 'placeholder' ||
+    lower === 'null' ||
+    lower === 'undefined'
+  );
+};
 
-    const activeInfluencers = influencers.filter(inf => !isArchived(inf.is_archived));
-    
+export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, influencers }) => {
+  const { trackingRecords, isLoading: isTrackingLoading } = useCampaignStatusTracking(campaign.id);
+  const { dispatchRecords, isLoading: isDispatchLoading } = useCampaignDispatch(campaign.id);
+
+  const activeInfluencers = useMemo(() => influencers.filter(inf => !isArchived(inf.is_archived)), [influencers]);
+
+  const metrics = useMemo(() => {
     let diyCount = 0;
     let spongeCount = 0;
     let diyVideos = 0;
@@ -39,8 +58,6 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
 
         diyBudget += Number(p.video1_price) || 0;
         spongeBudget += Number(p.video2_price) || 0;
-
-      } else {
       }
     });
 
@@ -51,7 +68,6 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
     const avgBudget = totalVideos > 0 ? Math.round(totalBudget / totalVideos) : 0;
     const avgDiy = diyVideos > 0 ? Math.round(diyBudget / diyVideos) : 0;
     const avgSponge = spongeVideos > 0 ? Math.round(spongeBudget / spongeVideos) : 0;
-
 
     return {
       totalInfluencers,
@@ -67,11 +83,167 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
       avgDiy,
       avgSponge
     };
-  }, [influencers]);
+  }, [activeInfluencers]);
+
+  // 1. Campaign Summary Calculations
+  const budgetUsed = metrics.totalBudget;
+  const targetLanguagesStr = useMemo(() => {
+    let parsed: string[] = [];
+    try {
+      if (typeof campaign.target_languages === 'string') {
+        const p = JSON.parse(campaign.target_languages);
+        parsed = Array.isArray(p) ? p : [campaign.target_languages];
+      } else if (Array.isArray(campaign.target_languages)) {
+        parsed = campaign.target_languages;
+      }
+    } catch (e) {
+      if (typeof campaign.target_languages === 'string') {
+        parsed = [campaign.target_languages];
+      }
+    }
+    return parsed.length > 0 ? parsed.join(', ') : 'N/A';
+  }, [campaign.target_languages]);
+
+  // 2. Workflow & Video & Payment Live Calculations
+  const {
+    dispatchedCount,
+    deliveredCount,
+    payAdvanceCount,
+    refVideosCount,
+    expTimelineCount,
+    draft1Count,
+    draft2Count,
+    payRemainingCount,
+    finalPostCount,
+    totalPendingSteps,
+    totalVideosRequired,
+    totalVideosPosted,
+    video1Completed,
+    video2Completed,
+    pendingVideos,
+    totalPaid,
+    remainingPayment,
+    pendingPaymentsCount
+  } = useMemo(() => {
+    const dispCount = dispatchRecords.length;
+    let delCount = 0;
+    let payAdvCount = 0;
+    let refVCount = 0;
+    let expTimeCount = 0;
+    let dr1Count = 0;
+    let dr2Count = 0;
+    let payRemCount = 0;
+    let finPCount = 0;
+    let pendSteps = 0;
+
+    let vRequired = 0;
+    let v1Done = 0;
+    let v2Done = 0;
+
+    let paidSum = 0;
+    let remPaySum = 0;
+    let pendPayCount = 0;
+
+    trackingRecords.forEach(r => {
+      const influencerVids = Number(r.pricing?.total_videos) || 1;
+      vRequired += influencerVids;
+
+      if (r.delivered_confirmed) delCount++;
+      if (r.pay_advance_completed) payAdvCount++;
+      if (r.reference_video_received) refVCount++;
+      if (r.expected_delivery_completed) expTimeCount++;
+      if (r.draft_received || !!r.draft_video_url) dr1Count++;
+      
+      const isD2Done = (r.draft_approval_status === 'Approved') || !!r.re_draft_video_url;
+      if (isD2Done) dr2Count++;
+      if (r.payment_remaining_completed) payRemCount++;
+      if (r.final_post_completed) finPCount++;
+
+      // Video 1 and Video 2 Live status
+      let metadata: any = {};
+      try {
+        metadata = JSON.parse(r.notes || '{}');
+      } catch (e) {}
+
+      const rawV1Link = metadata.video1_final_post_link || r.final_post_link;
+      const v1DoneFlag = !!(metadata.video1_confirmed || r.final_post_completed) && 
+                         !isFakeUrl(rawV1Link) && 
+                         !!(metadata.video1_posted_at || r.final_post_actual_datetime);
+      
+      const v2DoneFlag = !!metadata.video2_confirmed && 
+                         !isFakeUrl(metadata.video2_final_post_link) && 
+                         !!metadata.video2_posted_at;
+
+      if (v1DoneFlag) v1Done++;
+      if (v2DoneFlag) v2Done++;
+
+      // Pending steps calculation
+      if (!r.delivered_confirmed) pendSteps++;
+      if (!r.pay_advance_completed) pendSteps++;
+      if (!r.reference_video_received) pendSteps++;
+      if (!r.expected_delivery_completed) pendSteps++;
+      if (!r.draft_video_url) pendSteps++;
+      if (influencerVids === 2 && !isD2Done) pendSteps++;
+      if (!r.payment_remaining_completed) pendSteps++;
+      if (!v1DoneFlag) pendSteps++;
+      if (influencerVids === 2 && !v2DoneFlag) pendSteps++;
+
+      // Payments calculations
+      const advPaid = Number(r.advance_paid_amount) || 0;
+      const finalPrice = Number(r.pricing?.final_price) || 0;
+      const remainingPrice = finalPrice - advPaid;
+      
+      paidSum += advPaid;
+      if (r.payment_remaining_completed) {
+        paidSum += remainingPrice;
+      } else {
+        remPaySum += remainingPrice;
+        pendPayCount++;
+      }
+    });
+
+    const vPosted = v1Done + v2Done;
+    const pendVideos = Math.max(0, vRequired - vPosted);
+
+    return {
+      dispatchedCount: dispCount,
+      deliveredCount: delCount,
+      payAdvanceCount: payAdvCount,
+      refVideosCount: refVCount,
+      expTimelineCount: expTimeCount,
+      draft1Count: dr1Count,
+      draft2Count: dr2Count,
+      payRemainingCount: payRemCount,
+      finalPostCount: finPCount,
+      totalPendingSteps: pendSteps,
+      totalVideosRequired: vRequired,
+      totalVideosPosted: vPosted,
+      video1Completed: v1Done,
+      video2Completed: v2Done,
+      pendingVideos: pendVideos,
+      totalPaid: paidSum,
+      remainingPayment: remPaySum,
+      pendingPaymentsCount: pendPayCount
+    };
+  }, [trackingRecords, dispatchRecords]);
+
+  // 3. Platform Distribution Calculations
+  const { instagramCount, youtubeCount, facebookCount } = useMemo(() => {
+    let insta = 0;
+    let yt = 0;
+    let fb = 0;
+    activeInfluencers.forEach(inf => {
+      const hasInsta = inf.platforms?.some(p => p.platform.toLowerCase() === 'instagram');
+      const hasYt = inf.platforms?.some(p => p.platform.toLowerCase() === 'youtube');
+      const hasFb = inf.platforms?.some(p => p.platform.toLowerCase() === 'facebook');
+      if (hasInsta) insta++;
+      if (hasYt) yt++;
+      if (hasFb) fb++;
+    });
+    return { instagramCount: insta, youtubeCount: yt, facebookCount: fb };
+  }, [activeInfluencers]);
 
   const handleExportCsv = () => {
-    const activeInfluencers = influencers.filter(inf => !isArchived(inf.is_archived));
-    
     if (activeInfluencers.length === 0) {
       toast.error('No active influencers to export.');
       return;
@@ -126,6 +298,15 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
     document.body.removeChild(link);
   };
 
+  if (isTrackingLoading || isDispatchLoading) {
+    return (
+      <div className="bg-slate-800/80 rounded-xl border border-slate-700 p-6 flex flex-col items-center justify-center min-h-[500px]">
+        <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-slate-400 text-sm mt-4">Loading campaign analytics...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-fade-in space-y-6 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -143,7 +324,7 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
       </div>
 
       {/* Top Cards Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
         {/* Total Influencers */}
         <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700/50 flex flex-col justify-between min-h-[140px]">
@@ -237,6 +418,158 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
           </div>
         </div>
 
+      </div>
+
+      {/* Campaign Summary & Platform Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+        {/* Campaign Summary */}
+        <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700/50 space-y-4">
+          <h3 className="text-lg font-bold text-slate-100 border-b border-slate-700 pb-3">📋 Campaign Summary</h3>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Budget Used</span>
+              <span className="text-slate-200 font-semibold">₹{budgetUsed.toLocaleString()} / ₹{campaign.total_budget.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Onboarded Influencers</span>
+              <span className="text-slate-200 font-semibold">{activeInfluencers.length} / {campaign.expected_influencers || 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Videos Live</span>
+              <span className="text-slate-200 font-semibold">{totalVideosPosted} / {totalVideosRequired}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Target Languages</span>
+              <span className="text-slate-200 font-semibold truncate max-w-[250px]">{targetLanguagesStr}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Platform Statistics */}
+        <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700/50 space-y-4">
+          <h3 className="text-lg font-bold text-slate-100 border-b border-slate-700 pb-3">📱 Platform Distribution</h3>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Instagram Influencers</span>
+              <span className="text-slate-200 font-semibold">{instagramCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">YouTube Influencers</span>
+              <span className="text-slate-200 font-semibold">{youtubeCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Facebook Influencers</span>
+              <span className="text-slate-200 font-semibold">{facebookCount}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Workflow Stats & Video/Payment Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+        {/* Workflow Statistics */}
+        <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700/50 space-y-3">
+          <h3 className="text-lg font-bold text-slate-100 border-b border-slate-700 pb-3">🔄 Workflow Step Completion</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Total Influencers Tracked</span>
+              <span className="text-slate-200 font-semibold">{trackingRecords.length}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Dispatched Products</span>
+              <span className="text-slate-200 font-semibold">{dispatchedCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Delivered</span>
+              <span className="text-slate-200 font-semibold">{deliveredCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Pay Advance Completed</span>
+              <span className="text-slate-200 font-semibold">{payAdvanceCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Reference Videos Sent</span>
+              <span className="text-slate-200 font-semibold">{refVideosCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Expected Timeline Set</span>
+              <span className="text-slate-200 font-semibold">{expTimelineCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Draft 1 Completed</span>
+              <span className="text-slate-200 font-semibold">{draft1Count}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Draft 2 Completed</span>
+              <span className="text-slate-200 font-semibold">{draft2Count}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Remaining Payment Completed</span>
+              <span className="text-slate-200 font-semibold">{payRemainingCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Final Post Completed</span>
+              <span className="text-slate-200 font-semibold">{finalPostCount}</span>
+            </div>
+            <div className="flex justify-between pt-2 border-t border-slate-700/50">
+              <span className="text-slate-300 font-semibold">Pending Workflow Steps</span>
+              <span className="text-indigo-400 font-bold">{totalPendingSteps}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Video & Payment Statistics */}
+        <div className="space-y-6">
+          {/* Video Statistics */}
+          <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700/50 space-y-3">
+            <h3 className="text-lg font-bold text-slate-100 border-b border-slate-700 pb-3">🎬 Video Deliverables</h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Total Videos Required</span>
+                <span className="text-slate-200 font-semibold">{totalVideosRequired}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Total Videos Posted</span>
+                <span className="text-slate-200 font-semibold">{totalVideosPosted}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Video 1 Completed</span>
+                <span className="text-slate-200 font-semibold">{video1Completed}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Video 2 Completed</span>
+                <span className="text-slate-200 font-semibold">{video2Completed}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-slate-700/50">
+                <span className="text-slate-300 font-semibold">Pending Videos</span>
+                <span className="text-rose-400 font-bold">{pendingVideos}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Statistics */}
+          <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700/50 space-y-3">
+            <h3 className="text-lg font-bold text-slate-100 border-b border-slate-700 pb-3">💰 Financial Settlement</h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Total Budget Booked</span>
+                <span className="text-slate-200 font-semibold">₹{budgetUsed.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Total Paid Amount</span>
+                <span className="text-slate-205 text-emerald-400 font-bold">₹{totalPaid.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Total Remaining Payment</span>
+                <span className="text-slate-205 text-orange-400 font-bold">₹{remainingPayment.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-slate-700/50">
+                <span className="text-slate-300 font-semibold">Pending Remaining Payments</span>
+                <span className="text-amber-400 font-bold">{pendingPaymentsCount} creators</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Bottom Layout Row */}

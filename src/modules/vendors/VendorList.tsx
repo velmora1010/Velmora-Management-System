@@ -2,6 +2,9 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useVendors } from '../../hooks/vendors/useVendors';
 import type { Vendor } from '../../types';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import { departmentService } from '../../services/departmentService';
+import { supabase } from '../../lib/supabase';
+import type { Department, DepartmentSection } from '../../types';
 
 interface VendorListProps {
   onEditVendor: (id: string) => void;
@@ -10,23 +13,81 @@ interface VendorListProps {
 export const VendorList: React.FC<VendorListProps> = ({ onEditVendor }) => {
   const { vendors, isLoading, fetchVendors, archiveVendor } = useVendors();
   const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
+  
+  // Filters
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState('all');
+  const [selectedSectionFilter, setSelectedSectionFilter] = useState('all');
 
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [vendorToArchive, setVendorToArchive] = useState<string | null>(null);
 
+  // Mappings
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [sections, setSections] = useState<DepartmentSection[]>([]);
+
   useEffect(() => {
     fetchVendors();
+    const loadMappings = async () => {
+      try {
+        const { data: depts } = await departmentService.getAllDepartments();
+        if (depts) setDepartments(depts);
+        
+        const { data: secs } = await departmentService.getAllSections();
+        if (secs) setSections(secs);
+      } catch (err) {
+        console.error('Failed to load mappings in VendorList:', err);
+      }
+    };
+    loadMappings();
   }, [fetchVendors]);
+
+  const getDeptName = (id: string | null) => {
+    if (!id) return '-';
+    const match = departments.find(d => String(d.id) === String(id));
+    return match ? match.department_name : String(id);
+  };
+
+  const getSectionName = (id: string | null) => {
+    if (!id) return '-';
+    const match = sections.find(s => String(s.id) === String(id));
+    return match ? match.section_name : String(id);
+  };
+
+  // Sections filtered by selected department filter
+  const filteredSectionsForFilterDropdown = useMemo(() => {
+    if (selectedDeptFilter === 'all') return [];
+    return sections.filter(s => String(s.department_id) === selectedDeptFilter);
+  }, [sections, selectedDeptFilter]);
+
+  // Reset section filter if department filter changes
+  useEffect(() => {
+    setSelectedSectionFilter('all');
+  }, [selectedDeptFilter]);
 
   const filteredVendors = useMemo(() => {
     return vendors.filter(v => {
+      // Dept filter
+      if (selectedDeptFilter !== 'all' && String(v.vendor_category) !== selectedDeptFilter) {
+        return false;
+      }
+      // Section filter
+      if (selectedSectionFilter !== 'all' && String(v.sub_category) !== selectedSectionFilter) {
+        return false;
+      }
+
       const vendorName = v.vendor_name || '';
-      const matchesSearch = vendorName.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCategory = categoryFilter ? v.vendor_category === categoryFilter : true;
-      return matchesSearch && matchesCategory;
+      const resolvedDept = getDeptName(v.vendor_category || '').toLowerCase();
+      const resolvedSection = getSectionName(v.sub_category || '').toLowerCase();
+      
+      const q = searchTerm.toLowerCase();
+      const matchesSearch = 
+        vendorName.toLowerCase().includes(q) ||
+        resolvedDept.includes(q) ||
+        resolvedSection.includes(q);
+        
+      return matchesSearch;
     });
-  }, [vendors, searchTerm, categoryFilter]);
+  }, [vendors, searchTerm, selectedDeptFilter, selectedSectionFilter, departments, sections]);
 
   const handleArchive = (id: string) => {
     setVendorToArchive(id);
@@ -41,10 +102,12 @@ export const VendorList: React.FC<VendorListProps> = ({ onEditVendor }) => {
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full text-slate-200">
       <div className="flex flex-col md:flex-row justify-between md:items-center mb-5 gap-4">
         <h2 className="text-lg font-semibold text-slate-100">Vendor List</h2>
         <div className="flex flex-col md:flex-row gap-2.5 w-full md:w-auto">
+          
+          {/* Search bar */}
           <div className="relative w-full md:w-64">
             <svg className="absolute left-3 top-2.5 text-slate-500" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
@@ -58,21 +121,32 @@ export const VendorList: React.FC<VendorListProps> = ({ onEditVendor }) => {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <select 
+
+          {/* Department Filter */}
+          <select
+            value={selectedDeptFilter}
+            onChange={(e) => setSelectedDeptFilter(e.target.value)}
             className="w-full md:w-auto bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
           >
-            <option value="">All Categories</option>
-            <option value="Product">Product</option>
-            <option value="Operations">Operations</option>
-            <option value="Marketing">Marketing</option>
-            <option value="Logistics">Logistics</option>
-            <option value="Financial">Financial</option>
-            <option value="Software">Software</option>
-            <option value="Compliance">Compliance</option>
-            <option value="Assets">Assets</option>
+            <option value="all">All Departments</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>{d.department_name}</option>
+            ))}
           </select>
+
+          {/* Section Filter */}
+          <select
+            value={selectedSectionFilter}
+            onChange={(e) => setSelectedSectionFilter(e.target.value)}
+            disabled={selectedDeptFilter === 'all'}
+            className="w-full md:w-auto bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500 disabled:opacity-50"
+          >
+            <option value="all">All Sections</option>
+            {filteredSectionsForFilterDropdown.map((s) => (
+              <option key={s.id} value={s.id}>{s.section_name}</option>
+            ))}
+          </select>
+
         </div>
       </div>
 
@@ -92,11 +166,15 @@ export const VendorList: React.FC<VendorListProps> = ({ onEditVendor }) => {
                 <div className="flex justify-between items-start mb-4">
                   <div className="font-semibold text-base text-slate-100">{vendor.vendor_name}</div>
                   <span className="text-[11px] px-2 py-1 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-full font-medium">
-                    {vendor.vendor_category || 'Uncategorized'}
+                    {getDeptName(vendor.vendor_category)}
                   </span>
                 </div>
                 
                 <div className="text-sm text-slate-400 mb-5 flex-1">
+                  <div className="mb-1"><strong className="text-slate-300 font-medium">Section:</strong> {getSectionName(vendor.sub_category)}</div>
+                  {vendor.sub_sub_category && (
+                    <div className="mb-1"><strong className="text-slate-300 font-medium">Sub Category 2:</strong> {vendor.sub_sub_category}</div>
+                  )}
                   <div className="mb-1"><strong className="text-slate-300 font-medium">Type:</strong> {vendor.vendor_type_1 || '-'}</div>
                   <div className="mb-1"><strong className="text-slate-300 font-medium">Rep:</strong> {vendor.representative_name || '-'}</div>
                   <div className="mb-1"><strong className="text-slate-300 font-medium">Contact:</strong> {vendor.phone || '-'}</div>

@@ -9,6 +9,7 @@ import { LayoutDashboard } from 'lucide-react';
 
 export const TaskManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'add' | 'view' | 'status' | 'addMain' | 'viewMain' | 'category'>('add');
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
 
   const navButtonClass = (isActive: boolean) => 
     `px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
@@ -30,9 +31,14 @@ export const TaskManager: React.FC = () => {
       </div>
 
       <div className="flex flex-wrap gap-3 p-1 bg-card rounded-xl border border-border sticky top-0 z-10 w-fit">
-        <button onClick={() => setActiveTab('add')} className={navButtonClass(activeTab === 'add')}>
+        <button onClick={() => { setEditingTask(null); setActiveTab('add'); }} className={navButtonClass(activeTab === 'add' && !editingTask)}>
           + Add New Task
         </button>
+        {editingTask && (
+          <button onClick={() => setActiveTab('add')} className={navButtonClass(activeTab === 'add')}>
+            ✏️ Edit Task
+          </button>
+        )}
         <button onClick={() => setActiveTab('view')} className={navButtonClass(activeTab === 'view')}>
           View Created Task
         </button>
@@ -53,8 +59,23 @@ export const TaskManager: React.FC = () => {
       </div>
 
       <div className="mt-4">
-        {activeTab === 'add' && <AddTaskForm onSuccess={() => setActiveTab('view')} />}
-        {activeTab === 'view' && <ViewCreatedTasks />}
+        {activeTab === 'add' && (
+          <AddTaskForm 
+            initialTask={editingTask || undefined} 
+            onSuccess={() => {
+              setEditingTask(null);
+              setActiveTab('view');
+            }} 
+          />
+        )}
+        {activeTab === 'view' && (
+          <ViewCreatedTasks 
+            onEdit={(task) => {
+              setEditingTask(task);
+              setActiveTab('add');
+            }} 
+          />
+        )}
         {activeTab === 'status' && <TaskStatus />}
         {activeTab === 'addMain' && <AddMainTaskForm onSuccess={() => setActiveTab('viewMain')} />}
         {activeTab === 'viewMain' && <ViewMainTasks />}

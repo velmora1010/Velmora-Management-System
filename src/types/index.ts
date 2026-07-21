@@ -305,7 +305,9 @@ export interface CampaignInfluencer {
   pricing?: InfluencerPricing;
   products?: InfluencerProduct[];
   performance?: InfluencerBrandPerformance[];
+  brandPerformance?: InfluencerBrandPerformance[];
   dispatchDetails?: any;
 }
 
 export * from './inventory';
+export * from './department';

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { VendorForm } from '../modules/vendors/VendorForm';
 import { VendorList } from '../modules/vendors/VendorList';
+import { VendorCategoryManagement } from '../modules/vendors/VendorCategoryManagement';
 
-type ViewState = 'form' | 'list';
+type ViewState = 'form' | 'list' | 'category';
 
 export const VendorManagement: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('list');
@@ -35,12 +36,6 @@ export const VendorManagement: React.FC = () => {
         <div className="grid grid-cols-2 md:flex gap-2.5 w-full md:w-auto">
           <button 
             type="button" 
-            className="col-span-2 md:col-span-1 h-[44px] px-4 bg-slate-800 hover:bg-slate-700 text-white rounded-[10px] text-sm font-medium transition-colors shadow-sm flex items-center justify-center border border-slate-700"
-          >
-            Task
-          </button>
-          <button 
-            type="button" 
             onClick={handleAddVendor}
             className={`h-[44px] px-4 rounded-[10px] text-sm font-medium transition-colors shadow-sm flex items-center justify-center border border-purple-500/30 ${currentView === 'form' && !editVendorId ? 'bg-purple-700 text-white' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}
           >
@@ -52,6 +47,13 @@ export const VendorManagement: React.FC = () => {
             className={`h-[44px] px-4 rounded-[10px] text-sm font-medium transition-colors shadow-sm flex items-center justify-center border border-slate-700 ${currentView === 'list' ? 'bg-slate-700 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}`}
           >
             Vendor List
+          </button>
+          <button 
+            type="button" 
+            onClick={() => setCurrentView('category')}
+            className={`h-[44px] px-4 rounded-[10px] text-sm font-medium transition-colors shadow-sm flex items-center justify-center border border-slate-700 ${currentView === 'category' ? 'bg-slate-700 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}`}
+          >
+            Categories
           </button>
         </div>
       </div>
@@ -69,6 +71,10 @@ export const VendorManagement: React.FC = () => {
           <VendorList 
             onEditVendor={handleEditVendor} 
           />
+        )}
+
+        {currentView === 'category' && (
+          <VendorCategoryManagement />
         )}
       </div>
     </div>

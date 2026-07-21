@@ -58,7 +58,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           const pricing = (pricingData || []).find(p => p.influencer_id === inf.id) || {};
           const bargainHistory = bargainData.filter(b => b.pricing_id === pricing.id);
           const products = (productsData || []).filter(p => p.influencer_id === inf.id);
-          const performance = (performanceData || []).filter(p => p.influencer_id === inf.id);
+          const brandPerformance = (performanceData || []).filter(p => p.influencer_id === inf.id);
           const dispatchDetails = (dispatchData || []).find(d => d.influencer_id === inf.id);
 
           return {
@@ -66,7 +66,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             platforms,
             pricing: { ...pricing, bargainHistory },
             products,
-            performance,
+            performance: brandPerformance,
+            brandPerformance,
             dispatchDetails
           };
         });
@@ -86,13 +87,27 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     loadInfluencers();
   }, [loadInfluencers]);
 
+  const getMaxId = async (table: string): Promise<number> => {
+    const { data, error } = await supabase
+      .from(table)
+      .select('id')
+      .not('id', 'is', null)
+      .order('id', { ascending: false })
+      .limit(1);
+    if (error) {
+      console.warn(`Could not fetch max id for ${table}:`, error);
+      return 0;
+    }
+    const maxVal = data && data.length > 0 ? Number(data[0].id) : 0;
+    return isNaN(maxVal) ? 0 : maxVal;
+  };
+
   const addInfluencer = async (influencerData: Partial<CampaignInfluencer>): Promise<boolean> => {
     if (!campaignId) return false;
     
     setIsSaving(true);
     setError(null);
     try {
-        // 1. Generate new Code
         const prefix = influencerData.name ? 
           influencerData.name.split(' ').map(w => w[0]?.toUpperCase() || '').join('').substring(0, 3).toUpperCase() : 'INF';
         
@@ -117,106 +132,162 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         }
         const newCode = `${prefix}${maxNum + 1}`;
 
-        // 2. Insert into influencers_info
-        const { data: newInfo, error: insertInfoErr } = await supabase
+        // Get max ID for influencersInfo
+        const maxInfoId = await getMaxId(SUPABASE_TABLES.influencersInfo);
+        const newInfluencerId = maxInfoId + 1;
+
+        const infoPayload = {
+          id: newInfluencerId,
+          campaign_id: campaignId,
+          code: newCode,
+          name: influencerData.name,
+          influencer_name: influencerData.influencer_name,
+          phone_number: influencerData.phone_number,
+          alternative_number: influencerData.alternative_number,
+          upi_number: influencerData.upi_number,
+          complete_address: influencerData.complete_address,
+          city: influencerData.city,
+          state: influencerData.state,
+          languages: influencerData.languages,
+          profile_file_url: influencerData.profile_file_url,
+          auto_dm: influencerData.auto_dm || false,
+          is_archived: false
+        };
+
+        const { error: insertInfoErr } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
-          .insert([{
-            campaign_id: campaignId,
-            code: newCode,
-            name: influencerData.name,
-            influencer_name: influencerData.influencer_name,
-            phone_number: influencerData.phone_number,
-            alternative_number: influencerData.alternative_number,
-            upi_number: influencerData.upi_number,
-            complete_address: influencerData.complete_address,
-            city: influencerData.city,
-            state: influencerData.state,
-            languages: influencerData.languages,
-            profile_file_url: influencerData.profile_file_url,
-            auto_dm: influencerData.auto_dm || false,
-            is_archived: false
-          }])
-          .select('id')
-          .single();
+          .insert([infoPayload]);
 
-        if (insertInfoErr) throw insertInfoErr;
-        const newInfluencerId = newInfo.id;
+        if (insertInfoErr) {
+          console.error(insertInfoErr);
+          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencersInfo}: ${insertInfoErr.message || JSON.stringify(insertInfoErr)}`);
+        }
 
-        let newPricingId: string | null = null;
+        let newPricingId: number | null = null;
 
         try {
           // 3. Platforms
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           if (influencerData.platforms && (influencerData.platforms as any[]).length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const platformsToInsert = (influencerData.platforms as any[]).map(p => ({
-              ...p,
-              influencer_id: newInfluencerId
-            }));
-            const { error: platErr } = await supabase.from(SUPABASE_TABLES.influencerPlatform).insert(platformsToInsert);
-            if (platErr) throw platErr;
+            let nextPlatformId = await getMaxId(SUPABASE_TABLES.influencerPlatform);
+            const platformsToInsert = (influencerData.platforms as any[]).map(p => {
+              nextPlatformId++;
+              return {
+                ...p,
+                id: nextPlatformId,
+                influencer_id: newInfluencerId
+              };
+            });
+
+            const { error: platErr } = await supabase
+              .from(SUPABASE_TABLES.influencerPlatform)
+              .insert(platformsToInsert);
+
+            if (platErr) {
+              console.error(platErr);
+              throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPlatform}: ${platErr.message || JSON.stringify(platErr)}`);
+            }
           }
 
           // 4. Pricing
           if (influencerData.pricing) {
-            const { data: newPricing, error: priceErr } = await supabase
+            const nextPricingIdVal = (await getMaxId(SUPABASE_TABLES.influencerPricing)) + 1;
+            const pricingPayload = {
+              id: nextPricingIdVal,
+              influencer_id: newInfluencerId,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              video1_count: (influencerData.pricing as any).video1_count,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              video1_price: (influencerData.pricing as any).video1_price,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              video2_count: (influencerData.pricing as any).video2_count,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              video2_price: (influencerData.pricing as any).video2_price,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              total_videos: (influencerData.pricing as any).total_videos,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              final_price: (influencerData.pricing as any).final_price
+            };
+
+            const { error: priceErr } = await supabase
               .from(SUPABASE_TABLES.influencerPricing)
-              .insert([{
-                influencer_id: newInfluencerId,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                video1_count: (influencerData.pricing as any).video1_count,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                video1_price: (influencerData.pricing as any).video1_price,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                video2_count: (influencerData.pricing as any).video2_count,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                video2_price: (influencerData.pricing as any).video2_price,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                total_videos: (influencerData.pricing as any).total_videos,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                final_price: (influencerData.pricing as any).final_price
-              }])
-              .select('id')
-              .single();
-            if (priceErr) throw priceErr;
-            newPricingId = newPricing.id;
+              .insert([pricingPayload]);
+
+            if (priceErr) {
+              console.error(priceErr);
+              throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPricing}: ${priceErr.message || JSON.stringify(priceErr)}`);
+            }
+            newPricingId = nextPricingIdVal;
 
             // 5. Bargain History
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             if ((influencerData.pricing as any).bargainHistory && (influencerData.pricing as any).bargainHistory.length > 0) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const bargainsToInsert = (influencerData.pricing as any).bargainHistory.map((b: any) => ({
-                pricing_id: newPricingId,
-                creator_request: b.creator_request,
-                brand_request: b.brand_request
-              }));
-              const { error: bargainErr } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).insert(bargainsToInsert);
-              if (bargainErr) throw bargainErr;
+              let nextBargainId = await getMaxId(SUPABASE_TABLES.influencerBargainHistory);
+              const bargainsToInsert = (influencerData.pricing as any).bargainHistory.map((b: any) => {
+                nextBargainId++;
+                return {
+                  id: nextBargainId,
+                  pricing_id: newPricingId,
+                  creator_request: b.creator_request,
+                  brand_request: b.brand_request
+                };
+              });
+
+              const { error: bargainErr } = await supabase
+                .from(SUPABASE_TABLES.influencerBargainHistory)
+                .insert(bargainsToInsert);
+
+              if (bargainErr) {
+                console.error(bargainErr);
+                throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBargainHistory}: ${bargainErr.message || JSON.stringify(bargainErr)}`);
+              }
             }
           }
 
           // 6. Products
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           if (influencerData.products && (influencerData.products as any[]).length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const productsToInsert = (influencerData.products as any[]).map(p => ({
-              ...p,
-              influencer_id: newInfluencerId
-            }));
-            const { error: prodErr } = await supabase.from(SUPABASE_TABLES.influencerProduct).insert(productsToInsert);
-            if (prodErr) throw prodErr;
+            let nextProductId = await getMaxId(SUPABASE_TABLES.influencerProduct);
+            const productsToInsert = (influencerData.products as any[]).map(p => {
+              nextProductId++;
+              return {
+                ...p,
+                id: nextProductId,
+                influencer_id: newInfluencerId
+              };
+            });
+
+            const { error: prodErr } = await supabase
+              .from(SUPABASE_TABLES.influencerProduct)
+              .insert(productsToInsert);
+
+            if (prodErr) {
+              console.error(prodErr);
+              throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerProduct}: ${prodErr.message || JSON.stringify(prodErr)}`);
+            }
           }
 
           // 7. Performance
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if (influencerData.performance && (influencerData.performance as any[]).length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const perfsToInsert = (influencerData.performance as any[]).map(p => ({
-              ...p,
-              influencer_id: newInfluencerId
-            }));
-            const { error: perfErr } = await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).insert(perfsToInsert);
-            if (perfErr) throw perfErr;
+          const perfData = influencerData.brandPerformance || influencerData.performance;
+          if (perfData && (perfData as any[]).length > 0) {
+            let nextPerfId = await getMaxId(SUPABASE_TABLES.influencerBrandPerformance);
+            const perfsToInsert = (perfData as any[]).map(p => {
+              nextPerfId++;
+              return {
+                ...p,
+                id: nextPerfId,
+                influencer_id: newInfluencerId
+              };
+            });
+
+            const { error: perfErr } = await supabase
+              .from(SUPABASE_TABLES.influencerBrandPerformance)
+              .insert(perfsToInsert);
+
+            if (perfErr) {
+              console.error(perfErr);
+              throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBrandPerformance}: ${perfErr.message || JSON.stringify(perfErr)}`);
+            }
           }
         } catch (innerErr) {
           console.error("Error copying related data, rolling back:", innerErr);
@@ -226,9 +297,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
         await loadInfluencers();
         return true;
-    } catch (err: unknown) {
+    } catch (err: any) {
       console.error('Error saving campaign influencer:', err);
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(err instanceof Error ? err : new Error(err?.message || JSON.stringify(err)));
       throw err;
     } finally {
       setIsSaving(false);
@@ -242,122 +313,181 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     setError(null);
     try {
       // 1. Update basic info
+      console.log("Saving table:", SUPABASE_TABLES.influencersInfo);
+      const updatePayload = {
+        name: influencerData.name,
+        influencer_name: influencerData.influencer_name,
+        phone_number: influencerData.phone_number,
+        alternative_number: influencerData.alternative_number,
+        upi_number: influencerData.upi_number,
+        complete_address: influencerData.complete_address,
+        city: influencerData.city,
+        state: influencerData.state,
+        languages: influencerData.languages,
+        profile_file_url: influencerData.profile_file_url,
+        auto_dm: influencerData.auto_dm || false
+      };
       const { error: updateInfoErr } = await supabase
         .from(SUPABASE_TABLES.influencersInfo)
-        .update({
-          name: influencerData.name,
-          influencer_name: influencerData.influencer_name,
-          phone_number: influencerData.phone_number,
-          alternative_number: influencerData.alternative_number,
-          upi_number: influencerData.upi_number,
-          complete_address: influencerData.complete_address,
-          city: influencerData.city,
-          state: influencerData.state,
-          languages: influencerData.languages,
-          profile_file_url: influencerData.profile_file_url,
-          auto_dm: influencerData.auto_dm || false
-        })
+        .update(updatePayload)
         .eq('id', id);
 
-      if (updateInfoErr) throw updateInfoErr;
+      if (updateInfoErr) {
+        console.error(updateInfoErr);
+        throw new Error(`Failed updating ${SUPABASE_TABLES.influencersInfo}: ${updateInfoErr.message || JSON.stringify(updateInfoErr)}`);
+      }
 
       // 2. Delete existing relational data safely
       await supabase.from(SUPABASE_TABLES.influencerPlatform).delete().eq('influencer_id', id);
       
       const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', id);
       if (oldPricing && oldPricing.length > 0) {
-        const oldPricingIds = oldPricing.map(p => p.id);
-        await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
+        const oldPricingIds = oldPricing.map(p => p.id).filter(Boolean);
+        if (oldPricingIds.length > 0) {
+          await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
+        }
       }
       
       await supabase.from(SUPABASE_TABLES.influencerPricing).delete().eq('influencer_id', id);
       await supabase.from(SUPABASE_TABLES.influencerProduct).delete().eq('influencer_id', id);
       await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).delete().eq('influencer_id', id);
 
-      let newPricingId: string | null = null;
+      let newPricingId: number | null = null;
 
       // 3. Platforms
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (influencerData.platforms && (influencerData.platforms as any[]).length > 0) {
+        let nextPlatformId = await getMaxId(SUPABASE_TABLES.influencerPlatform);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const platformsToInsert = (influencerData.platforms as any[]).map(p => ({
-          ...p,
-          id: undefined, // remove old ids
-          influencer_id: id
-        }));
-        const { error: platErr } = await supabase.from(SUPABASE_TABLES.influencerPlatform).insert(platformsToInsert);
-        if (platErr) throw platErr;
+        const platformsToInsert = (influencerData.platforms as any[]).map(p => {
+          nextPlatformId++;
+          return {
+            ...p,
+            id: nextPlatformId,
+            influencer_id: id
+          };
+        });
+
+        const { error: platErr } = await supabase
+          .from(SUPABASE_TABLES.influencerPlatform)
+          .insert(platformsToInsert);
+
+        if (platErr) {
+          console.error(platErr);
+          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPlatform}: ${platErr.message || JSON.stringify(platErr)}`);
+        }
       }
 
       // 4. Pricing
       if (influencerData.pricing) {
-        const { data: newPricing, error: priceErr } = await supabase
+        const nextPricingIdVal = (await getMaxId(SUPABASE_TABLES.influencerPricing)) + 1;
+        const pricingPayload = {
+          id: nextPricingIdVal,
+          influencer_id: id,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          video1_count: (influencerData.pricing as any).video1_count,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          video1_price: (influencerData.pricing as any).video1_price,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          video2_count: (influencerData.pricing as any).video2_count,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          video2_price: (influencerData.pricing as any).video2_price,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          total_videos: (influencerData.pricing as any).total_videos,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          final_price: (influencerData.pricing as any).final_price
+        };
+
+        const { error: priceErr } = await supabase
           .from(SUPABASE_TABLES.influencerPricing)
-          .insert([{
-            influencer_id: id,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            video1_count: (influencerData.pricing as any).video1_count,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            video1_price: (influencerData.pricing as any).video1_price,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            video2_count: (influencerData.pricing as any).video2_count,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            video2_price: (influencerData.pricing as any).video2_price,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            total_videos: (influencerData.pricing as any).total_videos,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            final_price: (influencerData.pricing as any).final_price
-          }])
-          .select('id')
-          .single();
-        if (priceErr) throw priceErr;
-        newPricingId = newPricing.id;
+          .insert([pricingPayload]);
+
+        if (priceErr) {
+          console.error(priceErr);
+          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPricing}: ${priceErr.message || JSON.stringify(priceErr)}`);
+        }
+        newPricingId = nextPricingIdVal;
 
         // 5. Bargain History
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if ((influencerData.pricing as any).bargainHistory && (influencerData.pricing as any).bargainHistory.length > 0) {
+          let nextBargainId = await getMaxId(SUPABASE_TABLES.influencerBargainHistory);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const bargainsToInsert = (influencerData.pricing as any).bargainHistory.map((b: any) => ({
-            pricing_id: newPricingId,
-            creator_request: b.creator_request,
-            brand_request: b.brand_request
-          }));
-          const { error: bargainErr } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).insert(bargainsToInsert);
-          if (bargainErr) throw bargainErr;
+          const bargainsToInsert = (influencerData.pricing as any).bargainHistory.map((b: any) => {
+            nextBargainId++;
+            return {
+              id: nextBargainId,
+              pricing_id: newPricingId,
+              creator_request: b.creator_request,
+              brand_request: b.brand_request
+            };
+          });
+
+          const { error: bargainErr } = await supabase
+            .from(SUPABASE_TABLES.influencerBargainHistory)
+            .insert(bargainsToInsert);
+
+          if (bargainErr) {
+            console.error(bargainErr);
+            throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBargainHistory}: ${bargainErr.message || JSON.stringify(bargainErr)}`);
+          }
         }
       }
 
       // 6. Products
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (influencerData.products && (influencerData.products as any[]).length > 0) {
+        let nextProductId = await getMaxId(SUPABASE_TABLES.influencerProduct);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const productsToInsert = (influencerData.products as any[]).map(p => ({
-          ...p,
-          id: undefined,
-          influencer_id: id
-        }));
-        const { error: prodErr } = await supabase.from(SUPABASE_TABLES.influencerProduct).insert(productsToInsert);
-        if (prodErr) throw prodErr;
+        const productsToInsert = (influencerData.products as any[]).map(p => {
+          nextProductId++;
+          return {
+            ...p,
+            id: nextProductId,
+            influencer_id: id
+          };
+        });
+
+        const { error: prodErr } = await supabase
+          .from(SUPABASE_TABLES.influencerProduct)
+          .insert(productsToInsert);
+
+        if (prodErr) {
+          console.error(prodErr);
+          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerProduct}: ${prodErr.message || JSON.stringify(prodErr)}`);
+        }
       }
 
       // 7. Performance
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (influencerData.performance && (influencerData.performance as any[]).length > 0) {
+      const perfData = influencerData.brandPerformance || influencerData.performance;
+      if (perfData && (perfData as any[]).length > 0) {
+        let nextPerfId = await getMaxId(SUPABASE_TABLES.influencerBrandPerformance);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const perfsToInsert = (influencerData.performance as any[]).map(p => ({
-          ...p,
-          id: undefined,
-          influencer_id: id
-        }));
-        const { error: perfErr } = await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).insert(perfsToInsert);
-        if (perfErr) throw perfErr;
+        const perfsToInsert = (perfData as any[]).map(p => {
+          nextPerfId++;
+          return {
+            ...p,
+            id: nextPerfId,
+            influencer_id: id
+          };
+        });
+
+        const { error: perfErr } = await supabase
+          .from(SUPABASE_TABLES.influencerBrandPerformance)
+          .insert(perfsToInsert);
+
+        if (perfErr) {
+          console.error(perfErr);
+          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBrandPerformance}: ${perfErr.message || JSON.stringify(perfErr)}`);
+        }
       }
 
       await loadInfluencers();
       return true;
-    } catch (err: unknown) {
+    } catch (err: any) {
       console.error('Error updating campaign influencer:', err);
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(err instanceof Error ? err : new Error(err?.message || JSON.stringify(err)));
       throw err;
     } finally {
       setIsSaving(false);

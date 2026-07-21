@@ -2,17 +2,54 @@ import React, { useEffect, useState } from 'react';
 import { useTasks } from '../../hooks/tasks/useTasks';
 import { Card } from '../../components/ui/Card';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import type { Task, Department, DepartmentSection } from '../../types';
+import { departmentService } from '../../services/departmentService';
+import { supabase } from '../../lib/supabase';
 
-export const ViewCreatedTasks: React.FC = () => {
+interface ViewCreatedTasksProps {
+  onEdit?: (task: Task) => void;
+}
+
+export const ViewCreatedTasks: React.FC<ViewCreatedTasksProps> = ({ onEdit }) => {
   const { tasks, isLoading, fetchTasks, archiveTask } = useTasks();
   const [searchTerm, setSearchTerm] = useState('');
   
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [taskToArchive, setTaskToArchive] = useState<string | null>(null);
 
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [sections, setSections] = useState<DepartmentSection[]>([]);
+
   useEffect(() => {
     fetchTasks();
+    
+    // Load department/section mapping values
+    const loadMappings = async () => {
+      try {
+        const { data: depts } = await departmentService.getAllDepartments();
+        if (depts) setDepartments(depts);
+        
+        const { data: secs } = await departmentService.getAllSections();
+        if (secs) setSections(secs);
+      } catch (err) {
+        console.error('Failed to load department mappings in ViewCreatedTasks:', err);
+      }
+    };
+    
+    loadMappings();
   }, [fetchTasks]);
+
+  const getDeptName = (id: string | number) => {
+    if (!id) return '-';
+    const match = departments.find(d => String(d.id) === String(id));
+    return match ? match.department_name : String(id);
+  };
+
+  const getSectionName = (id: string | number) => {
+    if (!id) return '-';
+    const match = sections.find(s => String(s.id) === String(id));
+    return match ? match.section_name : String(id);
+  };
 
   const handleArchive = (id: string) => {
     setTaskToArchive(id);
@@ -27,12 +64,14 @@ export const ViewCreatedTasks: React.FC = () => {
   };
 
   const filteredTasks = tasks.filter(t => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
     const title = (t.task_title || '').toLowerCase();
     const assignedTo = (t.assigned_to || '').toLowerCase();
-    const dept = (t.department || '').toLowerCase();
-    return title.includes(term) || assignedTo.includes(term) || dept.includes(term);
+    const resolvedDept = getDeptName(t.department).toLowerCase();
+    const resolvedSection = getSectionName(t.sub_category1 || '').toLowerCase();
+    
+    if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
+    return title.includes(term) || assignedTo.includes(term) || resolvedDept.includes(term) || resolvedSection.includes(term);
   });
 
   return (
@@ -90,16 +129,18 @@ export const ViewCreatedTasks: React.FC = () => {
                 <div className="border-b border-border pb-3 mb-3">
                   <div className="flex justify-between text-sm py-1">
                     <span className="text-muted font-medium">Department</span>
-                    <span className="text-main font-medium">{task.department || '-'}</span>
+                    <span className="text-main font-medium">{getDeptName(task.department)}</span>
                   </div>
                   <div className="flex justify-between text-sm py-1">
-                    <span className="text-muted font-medium">Sub Category 1</span>
-                    <span className="text-main font-medium">{task.sub_category1 || '-'}</span>
+                    <span className="text-muted font-medium">Section</span>
+                    <span className="text-main font-medium">{getSectionName(task.sub_category1 || '')}</span>
                   </div>
-                  <div className="flex justify-between text-sm py-1">
-                    <span className="text-muted font-medium">Sub Category 2</span>
-                    <span className="text-main font-medium">{task.sub_category2 || '-'}</span>
-                  </div>
+                  {task.sub_category2 && (
+                    <div className="flex justify-between text-sm py-1">
+                      <span className="text-muted font-medium">Sub Category 2</span>
+                      <span className="text-main font-medium">{task.sub_category2}</span>
+                    </div>
+                  )}
                 </div>
 
                 {task.task_description && (
@@ -137,13 +178,24 @@ export const ViewCreatedTasks: React.FC = () => {
                   <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ color: sColor, backgroundColor: sBg }}>
                     {task.status || 'Pending'}
                   </span>
-                  <button 
-                    type="button" 
-                    onClick={() => handleArchive(task.id)}
-                    className="text-xs px-3 py-1.5 rounded-md border border-border bg-transparent text-muted hover:border-red-500 hover:text-red-500 transition-colors"
-                  >
-                    Archive
-                  </button>
+                  <div className="flex gap-2">
+                    {onEdit && (
+                      <button 
+                        type="button" 
+                        onClick={() => onEdit(task)}
+                        className="text-xs px-3 py-1.5 rounded-md border border-border bg-transparent text-primary hover:border-primary hover:bg-primary/5 transition-colors"
+                      >
+                        Edit
+                      </button>
+                    )}
+                    <button 
+                      type="button" 
+                      onClick={() => handleArchive(task.id)}
+                      className="text-xs px-3 py-1.5 rounded-md border border-border bg-transparent text-muted hover:border-red-500 hover:text-red-500 transition-colors"
+                    >
+                      Archive
+                    </button>
+                  </div>
                 </div>
               </Card>
             );

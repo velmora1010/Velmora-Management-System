@@ -32,9 +32,7 @@ export const useFinanceCategories = () => {
 
       if (error) {
         console.error('finance_categories_rows fetch error:', error.message);
-        const fallback = localStorage.getItem('finance_categories');
-        if (fallback) data = JSON.parse(fallback);
-        else throw error;
+        throw error;
       }
       
       if (!error && data) {

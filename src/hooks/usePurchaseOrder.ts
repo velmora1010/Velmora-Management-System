@@ -171,6 +171,67 @@ export const usePurchaseOrder = () => {
     setUIState(prev => ({ ...prev, saveSuccess: false }));
   }, []);
 
+  const loadPurchaseOrder = useCallback(async (poId: string) => {
+    setUIState(prev => ({ ...prev, isLoadingPONumber: true }));
+    try {
+      const { data: poHeader, error: poHeaderErr } = await supabase
+        .from('purchase_orders_rows')
+        .select('*')
+        .eq('id', poId)
+        .single();
+      if (poHeaderErr) throw poHeaderErr;
+
+      const { data: poProducts, error: poProductsErr } = await supabase
+        .from('purchase_order_products_rows')
+        .select('*')
+        .eq('purchase_order_id', poId);
+      if (poProductsErr) throw poProductsErr;
+
+      if (poHeader) {
+        // Fetch matching vendor
+        const { data: vendorData } = await supabase
+          .from('vendors')
+          .select('*')
+          .eq('id', poHeader.vendor_id)
+          .single();
+        if (vendorData) {
+          setSelectedVendor(vendorData);
+        }
+
+        setFormState({
+          poNumber: poHeader.po_number || '',
+          date: poHeader.created_at ? poHeader.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+          vendorId: poHeader.vendor_id || '',
+          vendorName: poHeader.vendor_name || '',
+          mainCategory: poHeader.category || '',
+          subCategory1: poHeader.sub_category_1 || '',
+          subCategory2: poHeader.sub_category_2 || '',
+          selectedProductNames: poProducts ? poProducts.map((p: any) => p.product_name) : [],
+          paymentMode: poHeader.payment_mode || '',
+          initiatedBy: poHeader.initiated_by || '',
+          approvedBy: poHeader.approved_by || '',
+          deliveryAddress: poHeader.delivery_address || '',
+          expectedDeliveryDate: poHeader.expected_delivery_date || '',
+          shippingCharges: poHeader.shipping_charges || 0,
+          products: poProducts ? poProducts.map((p: any) => ({
+            product_name: p.product_name || '',
+            moq: p.moq || '',
+            batch_size: p.batch_size || '',
+            quantity: p.quantity || 0,
+            price: p.unit_price || 0,
+            gst_percent: p.gst || 0,
+            used_in: p.used_in || '',
+          })) : [],
+          termsConditions: poHeader.terms_conditions || DEFAULT_TERMS,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load purchase order:', err);
+    } finally {
+      setUIState(prev => ({ ...prev, isLoadingPONumber: false }));
+    }
+  }, []);
+
   return {
     formState,
     uiState,
@@ -190,5 +251,7 @@ export const usePurchaseOrder = () => {
     setTermsConditions,
     updateField,
     savePurchaseOrder,
+    updatePurchaseOrder,
+    loadPurchaseOrder,
   };
 };

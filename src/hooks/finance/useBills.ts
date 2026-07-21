@@ -51,9 +51,7 @@ export const useBills = () => {
 
       if (fetchError) {
         console.error('finance_bills_rows fetch error:', fetchError.message);
-        const fallback = localStorage.getItem('finance_bills');
-        if (fallback) data = JSON.parse(fallback);
-        else throw fetchError;
+        throw fetchError;
       }
       
       // Filter out archived manually just in case

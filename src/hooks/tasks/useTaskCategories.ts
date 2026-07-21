@@ -29,9 +29,7 @@ export const useTaskCategories = (initialMain?: string, initialSub1?: string, in
 
         if (error) {
           console.error('task_categories_rows fetch error:', error.message);
-          const fallback = localStorage.getItem('task_categories');
-          if (fallback) data = JSON.parse(fallback);
-          else throw error;
+          throw error;
         }
 
         if (!data || data.length === 0) {

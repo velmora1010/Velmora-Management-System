@@ -806,7 +806,45 @@ private init() {
 
   async createInventoryTransaction(transaction: any): Promise<any> {
     const list = await this.getInventoryTransactions();
-    const newTx = { ...transaction, id: crypto.randomUUID(), createdAt: transaction.createdAt || new Date().toISOString() };
+    
+    let deptId = transaction.department_id || '';
+    let sectId = transaction.section_id || '';
+    
+    if (!deptId || !sectId) {
+      try {
+        const bc = String(transaction.barcodeNumber || '').trim().toUpperCase().replace(/\s+/g, '');
+        const batches = this.getList('inventory_batches');
+        const matchBatch = batches.find((b: any) => {
+          const mB = (b.displayBarcode || b.barcodeNumber || b.barcode || b.code || b.serial_number || b.barcode_no || b.barcodeValue || b.batchNo || b.id || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+          return mB === bc;
+        });
+        if (matchBatch && matchBatch.material_id) {
+          const mats = this.getList('inventory_materials');
+          const mat = mats.find((m: any) => m.id === matchBatch.material_id);
+          if (mat) {
+            deptId = mat.department_id || '';
+            sectId = mat.section_id || '';
+          }
+        } else {
+          const mats = this.getList('inventory_materials');
+          const mat = mats.find((m: any) => m.id === transaction.barcodeNumber || String(m.name || '').trim().toUpperCase().replace(/\s+/g, '') === bc);
+          if (mat) {
+            deptId = mat.department_id || '';
+            sectId = mat.section_id || '';
+          }
+        }
+      } catch (err) {
+        console.error('Error resolving dept/sect for trx:', err);
+      }
+    }
+
+    const newTx = { 
+      ...transaction, 
+      id: crypto.randomUUID(), 
+      createdAt: transaction.createdAt || new Date().toISOString(),
+      department_id: deptId || null,
+      section_id: sectId || null,
+    };
     list.push(newTx);
     await this.saveInventoryTransactions(list);
     return newTx;

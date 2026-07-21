@@ -13,11 +13,13 @@ const CACHE_TTL = 30 * 1000; // 30 seconds for transactional history
 export const usePOHistory = (pageSize = 10) => {
   const [page, setPage] = useState(0); // 0-indexed
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState('all');
+  const [selectedSectionFilter, setSelectedSectionFilter] = useState('all');
   
-  // 300ms debounce as requested
+  // 300ms debounce
   const debouncedSearch = useDebounce(searchTerm, 300);
   
-  const cacheKey = `${page}-${debouncedSearch}`;
+  const cacheKey = `${page}-${debouncedSearch}-${selectedDeptFilter}-${selectedSectionFilter}`;
 
   const [data, setData] = useState<POHistoryRecord[]>(() => poHistoryCache[cacheKey]?.data || []);
   const [totalCount, setTotalCount] = useState(() => poHistoryCache[cacheKey]?.count || 0);
@@ -44,6 +46,14 @@ export const usePOHistory = (pageSize = 10) => {
       // Apply search filter (PO Number OR Vendor Name)
       if (debouncedSearch) {
         query = query.or(`po_number.ilike.%${debouncedSearch}%,vendor_name.ilike.%${debouncedSearch}%`);
+      }
+
+      // Apply Department & Section filters
+      if (selectedDeptFilter !== 'all') {
+        query = query.eq('category', selectedDeptFilter);
+      }
+      if (selectedSectionFilter !== 'all') {
+        query = query.eq('sub_category_1', selectedSectionFilter);
       }
 
       // Apply Pagination
@@ -76,18 +86,16 @@ export const usePOHistory = (pageSize = 10) => {
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch, page, pageSize, cacheKey]);
+  }, [debouncedSearch, page, pageSize, selectedDeptFilter, selectedSectionFilter, cacheKey]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchHistory();
   }, [fetchHistory]);
 
-  // Reset page to 0 when search term changes
+  // Reset page to 0 when search term or filters change
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPage(0);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, selectedDeptFilter, selectedSectionFilter]);
 
   const nextPage = () => {
     if ((page + 1) * pageSize < totalCount) {
@@ -108,10 +116,14 @@ export const usePOHistory = (pageSize = 10) => {
     pageSize,
     searchTerm,
     setSearchTerm,
+    selectedDeptFilter,
+    setSelectedDeptFilter,
+    selectedSectionFilter,
+    setSelectedSectionFilter,
     isLoading,
     error,
     nextPage,
     prevPage,
-    refresh: fetchHistory,
+    refreshHistory: fetchHistory,
   };
 };

@@ -6,6 +6,7 @@ import { FinanceLayout } from './layouts/FinanceLayout';
 import { InventoryLayout } from './layouts/InventoryLayout';
 import { ErrorBoundary } from './components/system/ErrorBoundary';
 import { AuthProvider } from './contexts/AuthContext';
+import { RBACProvider } from './contexts/RBACContext';
 import { ProtectedRoute } from './components/system/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
@@ -22,6 +23,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage').then(module => 
 const PurchaseOrderPage = lazy(() => import('./pages/PurchaseOrderPage').then(module => ({ default: module.PurchaseOrderPage })));
 const POHistoryPage = lazy(() => import('./pages/POHistoryPage').then(module => ({ default: module.POHistoryPage })));
 const VendorManagement = lazy(() => import('./pages/VendorManagement').then(module => ({ default: module.VendorManagement })));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then(module => ({ default: module.AnalyticsPage })));
 
 const FinanceBills = lazy(() => import('./modules/finance/FinanceBills').then(module => ({ default: module.FinanceBills })));
 const FinanceExpense = lazy(() => import('./modules/finance/FinanceExpense').then(module => ({ default: module.FinanceExpense })));
@@ -39,6 +41,7 @@ const InventoryRoom = lazy(() => import('./modules/inventory/InventoryRoom'));
 const ViewBarcode = lazy(() => import('./modules/inventory/ViewBarcode').then(module => ({ default: module.ViewBarcode })));
 const QCBarcodeList = lazy(() => import('./modules/inventory/quality-check/QCBarcodeList').then(module => ({ default: module.QCBarcodeList })));
 const BackupRestore = lazy(() => import('./modules/system/BackupRestore').then(module => ({ default: module.BackupRestore })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(module => ({ default: module.SettingsPage })));
 
 // Customer Tickets
 const CustomerTicketsLayout = lazy(() => import('./layouts/CustomerTicketsLayout').then(module => ({ default: module.CustomerTicketsLayout })));
@@ -47,6 +50,9 @@ const OpenTickets = lazy(() => import('./modules/customer-tickets/OpenTickets').
 const ResolvedTickets = lazy(() => import('./modules/customer-tickets/ResolvedTickets').then(module => ({ default: module.ResolvedTickets })));
 const AddTicket = lazy(() => import('./modules/customer-tickets/AddTicket').then(module => ({ default: module.AddTicket })));
 const TicketDetails = lazy(() => import('./modules/customer-tickets/TicketDetails').then(module => ({ default: module.TicketDetails })));
+
+// Logistics
+const LogisticsPage = lazy(() => import('./modules/Logistics/LogisticsPage').then(module => ({ default: module.LogisticsPage })));
 
 // Fallback loader
 const RouteLoader = () => (
@@ -59,7 +65,8 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <BrowserRouter>
+        <RBACProvider>
+          <BrowserRouter>
           <Toaster position="bottom-right" toastOptions={{
             style: {
               background: '#1e293b',
@@ -106,7 +113,7 @@ function App() {
                       <Route path="po-history" element={<POHistoryPage />} />
                       
                       <Route path="bank-account" element={<PlaceholderPage title="Bank Account" />} />
-                      <Route path="analytics" element={<PlaceholderPage title="Analytics" />} />
+                      <Route path="analytics" element={<AnalyticsPage />} />
                     </Route>
 
                     <Route path="categories" element={<FinanceCategoryManagement />} />
@@ -136,6 +143,9 @@ function App() {
                     <Route path=":id" element={<TicketDetails />} />
                   </Route>
 
+                  {/* Logistics Department */}
+                  <Route path="/logistics" element={<LogisticsPage />} />
+
                   <Route path="/sales" element={<PlaceholderPage title="Sales" icon={<TrendingUp size={32} />} />} />
                   <Route path="/documents" element={<PlaceholderPage title="Document Room" icon={<FolderOpen size={32} />} />} />
                   <Route path="/marketing" element={<MarketingHome />} />
@@ -143,6 +153,7 @@ function App() {
                   <Route path="/research" element={<PlaceholderPage title="Research & Development" icon={<Lightbulb size={32} />} />} />
                   <Route path="/hr" element={<PlaceholderPage title="Human Resources" icon={<Users size={32} />} />} />
                   <Route path="/brand" element={<PlaceholderPage title="Brand Management" icon={<Tag size={32} />} />} />
+                  <Route path="/settings" element={<SettingsPage />} />
 
                   {/* Catch-all redirect */}
                   <Route path="*" element={<Navigate to="/" replace />} />
@@ -150,7 +161,8 @@ function App() {
               </Route>
             </Routes>
           </Suspense>
-        </BrowserRouter>
+          </BrowserRouter>
+        </RBACProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

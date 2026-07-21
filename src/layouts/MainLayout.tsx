@@ -3,6 +3,8 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Home, CheckSquare, Archive, Settings, Menu, LogOut } from 'lucide-react';
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
+import { NotificationCenter } from '../components/notifications/NotificationCenter';
+import { AiAssistantPanel } from '../components/ai/AiAssistantPanel';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 
@@ -90,19 +92,24 @@ export const MainLayout = () => {
               const Icon = item.icon;
               
               return (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl text-[15px] font-medium transition-all ${
-                    isActive 
-                      ? 'bg-gradient-to-r from-primary to-[#9FA8FF] text-white shadow-lg shadow-primary/30' 
-                      : 'text-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-main'
-                  }`}
-                >
-                  <Icon size={20} className={isActive ? 'text-white' : ''} />
-                  {item.name}
-                </Link>
+                <div key={item.name} className="flex flex-col w-full">
+                  <div className="flex items-center w-full">
+                    <Link
+                      to={item.href}
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl text-[15px] font-medium transition-all ${
+                        isActive 
+                          ? 'bg-gradient-to-r from-primary to-[#9FA8FF] text-white shadow-lg shadow-primary/30' 
+                          : 'text-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-main'
+                      }`}
+                    >
+                      <Icon size={20} className={isActive ? 'text-white' : ''} />
+                      <span className="flex-1">{item.name}</span>
+                    </Link>
+                  </div>
+                </div>
               );
             })}
           </nav>
@@ -118,7 +125,8 @@ export const MainLayout = () => {
                <div className="text-sm font-semibold text-main truncate">{user?.email || 'Admin'}</div>
                <div className="text-xs text-muted truncate">Workspace</div>
              </div>
-             <div className="shrink-0 ml-auto flex items-center gap-2">
+             <div className="shrink-0 ml-auto flex items-center gap-1.5">
+               <NotificationCenter />
                <button onClick={handleLogout} className="p-2 text-muted hover:text-red-400 transition-colors rounded-lg hover:bg-red-400/10" title="Sign Out">
                  <LogOut size={18} />
                </button>
@@ -146,11 +154,14 @@ export const MainLayout = () => {
             </div>
             <h1 className="text-xl font-bold text-main tracking-tight">Velmora</h1>
           </div>
-          {!isHome && (
-            <button onClick={() => navigate(-1)} className="text-muted hover:text-main p-2 -mr-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-              <ArrowLeft size={20} />
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <NotificationCenter />
+            {!isHome && (
+              <button onClick={() => navigate(-1)} className="text-muted hover:text-main p-2 -mr-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                <ArrowLeft size={20} />
+              </button>
+            )}
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 relative">
@@ -158,6 +169,7 @@ export const MainLayout = () => {
             <Outlet />
           </ErrorBoundary>
         </main>
+        <AiAssistantPanel />
       </div>
     </div>
   );

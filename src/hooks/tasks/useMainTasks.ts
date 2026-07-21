@@ -22,9 +22,7 @@ export const useMainTasks = () => {
       let mData = mDataResult;
       if (mError) {
         console.error('main_tasks fetch error:', mError.message);
-        const fallback = localStorage.getItem('main_tasks');
-        if (fallback) mData = JSON.parse(fallback);
-        else throw mError;
+        throw mError;
       }
       console.log("Loaded table:", SUPABASE_TABLES.mainTasks, mData?.length, mError);
       
@@ -36,9 +34,7 @@ export const useMainTasks = () => {
       let sData = sDataResult;
       if (sError) {
         console.error('sub_tasks_rows fetch error:', sError.message);
-        const fallback = localStorage.getItem('sub_tasks');
-        if (fallback) sData = JSON.parse(fallback);
-        else throw sError;
+        throw sError;
       }
       console.log("Loaded table: sub_tasks_rows", sData?.length, sError);
 

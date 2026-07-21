@@ -46,6 +46,8 @@ const getProductBadge = (stage: string, tab: string) => {
   return { text: currentStage.replace(/_/g, ' '), bg: 'rgba(100, 116, 139, 0.1)', color: '#94a3b8', border: 'rgba(100, 116, 139, 0.2)' };
 };
 
+import { supabase } from '../../../lib/supabase';
+
 interface ProductBarcodeListProps {
   onBack: () => void;
 }
@@ -57,6 +59,30 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
   const [productBarcodes, setProductBarcodes] = useState<any[]>([]);
   const [comboBoxes, setComboBoxes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Mappings for lookup display
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [sections, setSections] = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadMappingData = async () => {
+      try {
+        const { data: depts } = await departmentService.getAllDepartments();
+        if (depts) setDepartments(depts);
+        const { data: secs } = await departmentService.getAllSections();
+        if (secs) setSections(secs);
+      } catch (err) {
+        console.error('Failed to load mapping data in ProductBarcodeList:', err);
+      }
+    };
+    loadMappingData();
+  }, []);
+
+  const getDeptName = (id: string | null) => {
+    if (!id) return '-';
+    const match = departments.find(d => String(d.id) === String(id));
+    return match ? match.department_name : String(id);
+  };
   
   const [showPackInlineMessage, setShowPackInlineMessage] = useState(false);
   
@@ -893,9 +919,14 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
                       <span style={{ color: '#94a3b8', fontSize: '12px', textTransform: 'uppercase', fontWeight: 600, display: 'block', marginBottom: '8px' }}>Movement History</span>
                       <div style={{ maxHeight: '100px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         {scanModal.barcode.transactionHistory.map((tx: any) => (
-                          <div key={tx.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', background: 'rgba(255,255,255,0.05)', padding: '6px 8px', borderRadius: '6px' }}>
-                            <span style={{ color: 'white' }}>{tx.fromLocation} → {tx.toLocation}</span>
-                            <span style={{ color: '#94a3b8' }}>{new Date(tx.createdAt).toLocaleTimeString()}</span>
+                          <div key={tx.id} style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', background: 'rgba(255,255,255,0.05)', padding: '6px 8px', borderRadius: '6px', gap: '2px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'white' }}>{tx.fromLocation} → {tx.toLocation}</span>
+                              <span style={{ color: '#94a3b8' }}>{new Date(tx.createdAt).toLocaleTimeString()}</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                              Dept: {getDeptName(tx.department_id)}
+                            </div>
                           </div>
                         ))}
                       </div>

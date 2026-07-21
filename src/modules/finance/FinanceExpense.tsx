@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Search, Edit2, Trash2 } from 'lucide-react';
 import { useExpenses, type FinanceExpense as FinanceExpenseType } from '../../hooks/finance/useExpenses';
 import { ExpenseForm } from './ExpenseForm';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import { departmentService } from '../../services/departmentService';
+import { supabase } from '../../lib/supabase';
+import type { Department, DepartmentSection } from '../../types';
 
 export const FinanceExpense = () => {
   const { expenses, isLoading, archiveExpense, refreshExpenses } = useExpenses();
@@ -16,16 +19,75 @@ export const FinanceExpense = () => {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null);
 
-  const filteredExpenses = expenses.filter(expense => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      (expense.main_category || '').toLowerCase().includes(q) ||
-      (expense.sub_category1 || '').toLowerCase().includes(q) ||
-      (expense.vendor || '').toLowerCase().includes(q) ||
-      (expense.purchased_by || '').toLowerCase().includes(q)
-    );
-  });
+  // Mappings
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [sections, setSections] = useState<DepartmentSection[]>([]);
+  const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
+  const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
+
+  useEffect(() => {
+    const loadMappings = async () => {
+      try {
+        const { data: depts } = await departmentService.getAllDepartments();
+        if (depts) setDepartments(depts);
+        
+        const { data: secs } = await departmentService.getAllSections();
+        if (secs) setSections(secs);
+      } catch (err) {
+        console.error('Failed to load mappings in FinanceExpense:', err);
+      }
+    };
+    loadMappings();
+  }, []);
+
+  const getDeptName = (id: string | null) => {
+    if (!id) return '-';
+    const match = departments.find(d => String(d.id) === String(id));
+    return match ? match.department_name : String(id);
+  };
+
+  const getSectionName = (id: string | null) => {
+    if (!id) return '-';
+    const match = sections.find(s => String(s.id) === String(id));
+    return match ? match.section_name : String(id);
+  };
+
+  // Sections filtered by selected department filter
+  const filteredSectionsForFilterDropdown = useMemo(() => {
+    if (selectedDeptFilter === 'all') return [];
+    return sections.filter(s => String(s.department_id) === selectedDeptFilter);
+  }, [sections, selectedDeptFilter]);
+
+  // Reset section filter if department filter changes
+  useEffect(() => {
+    setSelectedSectionFilter('all');
+  }, [selectedDeptFilter]);
+
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter(expense => {
+      // Dept filter
+      if (selectedDeptFilter !== 'all' && String(expense.main_category) !== selectedDeptFilter) {
+        return false;
+      }
+      // Section filter
+      if (selectedSectionFilter !== 'all' && String(expense.sub_category1) !== selectedSectionFilter) {
+        return false;
+      }
+
+      if (!searchQuery) return true;
+      const q = searchQuery.toLowerCase();
+      const resolvedDept = getDeptName(expense.main_category).toLowerCase();
+      const resolvedSection = getSectionName(expense.sub_category1).toLowerCase();
+      
+      return (
+        resolvedDept.includes(q) ||
+        resolvedSection.includes(q) ||
+        (expense.sub_category2 || '').toLowerCase().includes(q) ||
+        (expense.vendor || '').toLowerCase().includes(q) ||
+        (expense.purchased_by || '').toLowerCase().includes(q)
+      );
+    });
+  }, [expenses, selectedDeptFilter, selectedSectionFilter, searchQuery, departments, sections]);
 
   const handleEdit = (expense: FinanceExpenseType) => {
     setEditingExpense(expense);
@@ -56,7 +118,7 @@ export const FinanceExpense = () => {
   };
 
   return (
-    <div className="flex flex-col h-full fade-in">
+    <div className="flex flex-col h-full fade-in text-slate-200">
       {/* Finance Sub Navigation */}
       <div className="flex flex-wrap gap-2.5 mb-6">
         <button
@@ -92,15 +154,42 @@ export const FinanceExpense = () => {
       </div>
 
       {activeTab === 'view' && (
-        <div className="relative w-full md:w-64 mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
-          <input
-            type="text"
-            placeholder="Search expenses..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-card border border-border/50 text-main text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-primary transition-colors"
-          />
+        <div className="flex flex-col sm:flex-row gap-3 mb-6 items-center">
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
+            <input
+              type="text"
+              placeholder="Search expenses..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-card border border-border/50 text-main text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-primary transition-colors"
+            />
+          </div>
+          
+          {/* Department Filter */}
+          <select
+            value={selectedDeptFilter}
+            onChange={(e) => setSelectedDeptFilter(e.target.value)}
+            className="w-full sm:w-48 bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
+          >
+            <option value="all">All Departments</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>{d.department_name}</option>
+            ))}
+          </select>
+
+          {/* Section Filter */}
+          <select
+            value={selectedSectionFilter}
+            onChange={(e) => setSelectedSectionFilter(e.target.value)}
+            disabled={selectedDeptFilter === 'all'}
+            className="w-full sm:w-48 bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+          >
+            <option value="all">All Sections</option>
+            {filteredSectionsForFilterDropdown.map((s) => (
+              <option key={s.id} value={s.id}>{s.section_name}</option>
+            ))}
+          </select>
         </div>
       )}
 
@@ -142,7 +231,9 @@ export const FinanceExpense = () => {
                 </div>
                 <h3 className="text-xl font-semibold text-main mb-2">No expenses found</h3>
                 <p className="text-muted max-w-md">
-                  {searchQuery ? "Try adjusting your search criteria." : "Click '+ Add Expense' to log your first expense."}
+                  {searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' 
+                    ? "Try adjusting your search or filters." 
+                    : "Click '+ Add Expense' to log your first expense."}
                 </p>
               </div>
             ) : (
@@ -154,14 +245,14 @@ export const FinanceExpense = () => {
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-1">
                           <h3 className="text-lg font-semibold text-main">
-                            {expense.main_category || 'Uncategorized'}
+                            {getDeptName(expense.main_category)}
                           </h3>
                           <span className={`px-2.5 py-1 text-xs font-medium rounded-md bg-primary/10 text-primary`}>
                             {expense.vendor || 'No Vendor'}
                           </span>
                         </div>
                         <div className="text-sm text-muted mb-4">
-                          {expense.sub_category1 || ''} 
+                          {getSectionName(expense.sub_category1)} 
                           {expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}
                         </div>
 

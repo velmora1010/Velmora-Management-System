@@ -58,7 +58,7 @@ interface CategoryRow {
     setIsLoading(true);
     try {
       for (const val of validInputs) {
-        await supabase.from('task_categories').insert([{ category: val.trim(), status: 'active' }]);
+        await supabase.from('task_categories_rows').insert([{ category: val.trim(), status: 'active' }]);
       }
       toast.error('Main Categories saved!');
       setViewMode('default');
@@ -78,7 +78,7 @@ interface CategoryRow {
     setIsLoading(true);
     try {
       for (const val of validInputs) {
-        await supabase.from('task_categories').insert([{ 
+        await supabase.from('task_categories_rows').insert([{ 
           category: mainCategory, 
           sub_category: val.trim(), 
           status: 'active' 
@@ -102,12 +102,12 @@ interface CategoryRow {
     setIsLoading(true);
     try {
       // Find parent main category for this sub1
-      const { data } = await supabase.from('task_categories').select('category').eq('sub_category', subCategory1).limit(1);
+      const { data } = await supabase.from('task_categories_rows').select('category').eq('sub_category', subCategory1).limit(1);
       const mainCat = data?.[0]?.category;
       if (!mainCat) return toast.error('Could not resolve Main Category');
 
       for (const val of validInputs) {
-        await supabase.from('task_categories').insert([{ 
+        await supabase.from('task_categories_rows').insert([{ 
           category: mainCat, 
           sub_category: subCategory1, 
           sub_sub_category: val.trim(),
@@ -132,13 +132,13 @@ interface CategoryRow {
     setIsLoading(true);
     try {
       // Find parent main and sub1 for this sub2
-      const { data } = await supabase.from('task_categories').select('category, sub_category').eq('sub_sub_category', subCategory2).limit(1);
+      const { data } = await supabase.from('task_categories_rows').select('category, sub_category').eq('sub_sub_category', subCategory2).limit(1);
       const mainCat = data?.[0]?.category;
       const sub1Cat = data?.[0]?.sub_category;
       if (!mainCat || !sub1Cat) return toast.error('Could not resolve parent categories');
 
       for (const val of validInputs) {
-        await supabase.from('task_categories').insert([{ 
+        await supabase.from('task_categories_rows').insert([{ 
           category: mainCat, 
           sub_category: sub1Cat, 
           sub_sub_category: subCategory2,
@@ -159,7 +159,7 @@ interface CategoryRow {
   const loadCategoryList = async () => {
     setIsLoading(true);
     try {
-      const { data } = await supabase.from('task_categories').select('*').eq('status', 'active');
+      const { data } = await supabase.from('task_categories_rows').select('*').eq('status', 'active');
       setHierarchyData(data || []);
     } catch (e) {
       console.error(e);
@@ -176,7 +176,7 @@ interface CategoryRow {
   const executeArchive = async () => {
     if (!categoryToArchive) return;
     try {
-      await supabase.from('task_categories').update({ status: 'archived' }).eq('id', categoryToArchive);
+      await supabase.from('task_categories_rows').update({ status: 'archived' }).eq('id', categoryToArchive);
       loadCategoryList();
       setIsConfirmOpen(false);
       setCategoryToArchive(null);

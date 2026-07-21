@@ -81,35 +81,44 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       // Platforms mapping
       let pAvail = 'All';
       if (initialData.platforms && initialData.platforms.length > 0) {
-        const pNames = initialData.platforms.map(p => p.platform);
-        if (pNames.includes('Instagram') && pNames.includes('Youtube') && pNames.includes('Facebook')) pAvail = 'All';
-        else if (pNames.includes('Instagram') && pNames.includes('Youtube')) pAvail = 'Instagram and Youtube';
-        else if (pNames.includes('Instagram') && pNames.includes('Facebook')) pAvail = 'Instagram and Facebook';
-        else if (pNames.includes('Youtube') && pNames.includes('Facebook')) pAvail = 'Youtube and Facebook';
-        else if (pNames.includes('Instagram')) pAvail = 'Instagram';
-        else if (pNames.includes('Youtube')) pAvail = 'Youtube';
-        else if (pNames.includes('Facebook')) pAvail = 'Facebook';
+        const pNames = initialData.platforms.map(p => p.platform.toLowerCase());
+        const hasInsta = pNames.includes('instagram');
+        const hasYoutube = pNames.includes('youtube');
+        const hasFb = pNames.includes('facebook');
+
+        if (hasInsta && hasYoutube && hasFb) pAvail = 'All';
+        else if (hasInsta && hasYoutube) pAvail = 'Instagram and Youtube';
+        else if (hasInsta && hasFb) pAvail = 'Instagram and Facebook';
+        else if (hasYoutube && hasFb) pAvail = 'Youtube and Facebook';
+        else if (hasInsta) pAvail = 'Instagram';
+        else if (hasYoutube) pAvail = 'Youtube';
+        else if (hasFb) pAvail = 'Facebook';
         setPlatformAvailability(pAvail);
         
         setPlatforms(prev => prev.map(p => {
-          const match = initialData.platforms?.find(x => x.platform === p.platform);
+          const match = initialData.platforms?.find(x => x.platform.toLowerCase() === p.platform.toLowerCase());
           if (match) {
              const views = Array.isArray(match.video_views) ? match.video_views : [];
              const paddedViews = [...views, ...Array(15).fill('')].slice(0, 15);
-             return { ...p, ...match, video_views: paddedViews as unknown as number[] };
+             return { ...p, ...match, platform: p.platform, video_views: paddedViews as unknown as number[] };
           }
           return p;
         }));
       }
 
       if (initialData.pricing) {
+        const v1c = Number(initialData.pricing.video1_count) || 0;
+        const v1p = Number(initialData.pricing.video1_price) || 0;
+        const v2c = Number(initialData.pricing.video2_count) || 0;
+        const v2p = Number(initialData.pricing.video2_price) || 0;
+
         setPricing({
-          video1_count: initialData.pricing.video1_count || 0,
-          video1_price: initialData.pricing.video1_price || 0,
-          video2_count: initialData.pricing.video2_count || 0,
-          video2_price: initialData.pricing.video2_price || 0,
-          total_videos: initialData.pricing.total_videos || 0,
-          final_price: initialData.pricing.final_price || 0,
+          video1_count: v1c,
+          video1_price: v1p,
+          video2_count: v2c,
+          video2_price: v2p,
+          total_videos: v1c + v2c,
+          final_price: (v1c * v1p) + (v2c * v2p),
           bargainHistory: (initialData.pricing as any).bargainHistory || []
         });
       }
@@ -118,8 +127,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         setProducts(initialData.products.map(p => ({ ...p, selected: true })));
       }
 
-      if (initialData.performance) {
-        setPerformance(initialData.performance);
+      const perfData = initialData.brandPerformance || initialData.performance;
+      if (perfData) {
+        setPerformance(perfData);
       }
     }
   }, [initialData]);
@@ -199,10 +209,10 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   const handlePricingChange = (field: keyof InfluencerPricing, value: number) => {
     setPricing(prev => {
       const updated = { ...prev, [field]: value };
-      const v1c = updated.video1_count || 0;
-      const v1p = updated.video1_price || 0;
-      const v2c = updated.video2_count || 0;
-      const v2p = updated.video2_price || 0;
+      const v1c = Number(updated.video1_count) || 0;
+      const v1p = Number(updated.video1_price) || 0;
+      const v2c = Number(updated.video2_count) || 0;
+      const v2p = Number(updated.video2_price) || 0;
       
       updated.total_videos = v1c + v2c;
       updated.final_price = (v1c * v1p) + (v2c * v2p);
@@ -271,8 +281,13 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       if (success) {
         onBack();
       }
-    } catch (err) {
-      toast.error("Failed to save influencer: " + err);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(
+        err?.message ??
+        err?.details ??
+        JSON.stringify(err, null, 2)
+      );
     }
   };
 

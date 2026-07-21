@@ -33,6 +33,8 @@ City: ${influencer.city}`;
     toast.success('Influencer details copied to clipboard!');
   };
 
+
+
   return (
      <div className="bg-slate-900 border border-slate-700 p-4 rounded-xl hover:border-slate-600 transition-colors relative mb-6">
         {/* Header Actions - Desktop */}
@@ -250,27 +252,30 @@ City: ${influencer.city}`;
 
           {activeTab === 'performance' && (
              <div className="space-y-4">
-               {influencer.performance && influencer.performance.length > 0 ? (
-                 influencer.performance.map((perf, idx) => (
-                   <div key={idx} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
-                      <div className="grid grid-cols-2 gap-4 mb-2">
-                         <div><span className="text-slate-500 block text-xs">Brand</span><span className="text-slate-200">{perf.brand_name || '-'}</span></div>
-                         <div><span className="text-slate-500 block text-xs">Product</span><span className="text-slate-200">{perf.product_name || '-'}</span></div>
-                         <div><span className="text-slate-500 block text-xs">Views</span><span className="text-slate-200">{perf.views || '-'}</span></div>
-                         <div><span className="text-slate-500 block text-xs">Platforms</span><span className="text-slate-200">{Array.isArray(perf.uploaded_platforms) ? perf.uploaded_platforms.join(', ') : '-'}</span></div>
-                      </div>
-                      {(perf.instagram_link || perf.youtube_link || perf.facebook_link) && (
-                        <div className="pt-2 border-t border-slate-700 mt-2 space-y-1">
-                          {perf.instagram_link && <a href={perf.instagram_link} target="_blank" rel="noreferrer" className="block text-xs text-blue-400 hover:underline">Instagram: {perf.instagram_link}</a>}
-                          {perf.youtube_link && <a href={perf.youtube_link} target="_blank" rel="noreferrer" className="block text-xs text-red-400 hover:underline">YouTube: {perf.youtube_link}</a>}
-                          {perf.facebook_link && <a href={perf.facebook_link} target="_blank" rel="noreferrer" className="block text-xs text-blue-500 hover:underline">Facebook: {perf.facebook_link}</a>}
-                        </div>
-                      )}
-                   </div>
-                 ))
-               ) : (
-                 <div className="text-slate-500 italic">No brand performance records.</div>
-               )}
+               {(() => {
+                 const bp = influencer.brandPerformance || influencer.performance;
+                 return bp && bp.length > 0 ? (
+                   bp.map((perf: any, idx: number) => (
+                    <div key={idx} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
+                       <div className="grid grid-cols-2 gap-4 mb-2">
+                          <div><span className="text-slate-500 block text-xs">Brand</span><span className="text-slate-200">{perf.brand_name || '-'}</span></div>
+                          <div><span className="text-slate-500 block text-xs">Product</span><span className="text-slate-200">{perf.product_name || '-'}</span></div>
+                          <div><span className="text-slate-500 block text-xs">Views</span><span className="text-slate-200">{perf.views || '-'}</span></div>
+                          <div><span className="text-slate-500 block text-xs">Platforms</span><span className="text-slate-200">{Array.isArray(perf.uploaded_platforms) ? perf.uploaded_platforms.join(', ') : '-'}</span></div>
+                       </div>
+                       {(perf.instagram_link || perf.youtube_link || perf.facebook_link) && (
+                         <div className="pt-2 border-t border-slate-700 mt-2 space-y-1">
+                           {perf.instagram_link && <a href={perf.instagram_link} target="_blank" rel="noreferrer" className="block text-xs text-blue-400 hover:underline">Instagram: {perf.instagram_link}</a>}
+                           {perf.youtube_link && <a href={perf.youtube_link} target="_blank" rel="noreferrer" className="block text-xs text-red-400 hover:underline">YouTube: {perf.youtube_link}</a>}
+                           {perf.facebook_link && <a href={perf.facebook_link} target="_blank" rel="noreferrer" className="block text-xs text-blue-500 hover:underline">Facebook: {perf.facebook_link}</a>}
+                         </div>
+                       )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-slate-500 italic">No brand performance records.</div>
+                );
+               })()}
              </div>
           )}
         </div>

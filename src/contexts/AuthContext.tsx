@@ -30,26 +30,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }, 5000);
 
-    const fetchProfileRole = async (userId: string) => {
-      try {
-        const { data, error } = await supabase
-          .from('user_profiles')
-          .select('role')
-          .eq('id', userId)
-          .single();
-
-        if (error) {
-          console.error('Error fetching user role:', error);
-          if (mounted) setRole('Viewer');
-        } else if (mounted) {
-          setRole(data.role as UserRole);
-        }
-      } catch (error) {
-        console.error('Unexpected error fetching role:', error);
-        if (mounted) setRole('Viewer');
-      }
-    };
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return;
       
@@ -58,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (newSession?.user) {
         if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-          await fetchProfileRole(newSession.user.id);
+          setRole('Viewer');
         }
       } else {
         setRole(null);
