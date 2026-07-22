@@ -41,7 +41,7 @@ export default defineConfig({
   ],
   build: {
     rollupOptions: {
-      external: ['@react-pdf/renderer', '@zxing/browser'],
+      external: ['@react-pdf/renderer'],
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {

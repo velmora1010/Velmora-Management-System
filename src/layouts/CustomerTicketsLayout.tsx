@@ -34,8 +34,9 @@ export const CustomerTicketsLayout = () => {
     fetchCounts();
 
     // Subscribe to changes on customer_tickets table to update counts in real time
+    const channelName = `customer-tickets-changes-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const channel = supabase
-      .channel('customer-tickets-changes')
+      .channel(channelName)
       .on(
         'postgres_changes',
         {

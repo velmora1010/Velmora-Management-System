@@ -273,8 +273,9 @@ export const notificationService = {
 
   // Real-Time Subscription Support
   subscribeToNotifications(userId: string | null, onNewNotification: (notification: AppNotification) => void) {
+    const channelName = `realtime_notifications_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const channel = supabase
-      .channel('realtime_notifications')
+      .channel(channelName)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications' },
