@@ -167,7 +167,7 @@ const GenerateBarcode = () => {
       </div>
 
       {/* TOOLBAR */}
-      <div className="no-print" style={{ position: 'sticky', top: '0', zIndex: 20, background: 'rgba(7, 11, 18, 0.95)', backdropFilter: 'blur(12px)', padding: '16px 0', borderBottom: '1px solid #263244', marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+      <div className="no-print" style={{ position: 'sticky', top: 'var(--inventory-header-height, 60px)', zIndex: 20, background: 'rgba(7, 11, 18, 0.95)', backdropFilter: 'blur(12px)', padding: '16px 0', borderBottom: '1px solid #263244', marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
         <div style={{ flex: '1', minWidth: '300px', position: 'relative' }}>
           <Search size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
           <input 

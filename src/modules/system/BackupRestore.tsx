@@ -1,11 +1,12 @@
-import React, { useRef, useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Download, Upload, AlertTriangle, CheckCircle2, FileJson } from 'lucide-react';
-import db from '../../lib/db';
 import { Card } from '../../components/ui/Card';
+import { inventoryService } from '../../services/inventoryService';
+import toast from 'react-hot-toast';
+import { DatabaseStatus } from './DatabaseStatus';
 import { motion } from 'framer-motion';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
-import { DataMigration } from './DataMigration';
-import { DataSourceTest } from './DataSourceTest';
+import db from '../../lib/db';
 
 export const BackupRestore = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -232,11 +233,8 @@ export const BackupRestore = () => {
         }}
       />
 
-      {/* SUPABASE DATA MIGRATION SECTION */}
-      <DataMigration />
-
-      {/* DATA SOURCE SETTINGS & TEST */}
-      <DataSourceTest />
+      {/* DATABASE STATUS SECTION */}
+      <DatabaseStatus />
     </motion.div>
   );
 };

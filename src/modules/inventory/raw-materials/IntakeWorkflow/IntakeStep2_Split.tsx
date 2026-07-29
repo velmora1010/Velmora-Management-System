@@ -182,7 +182,7 @@ const IntakeStep2_Split = () => {
 
         {/* Sticky Summary */}
         <div className="lg:col-span-1">
-          <div className="sticky top-24 p-6 rounded-2xl border border-border bg-surface/50 shadow-xl backdrop-blur-xl">
+          <div className="sticky p-6 rounded-2xl border border-border bg-surface/50 shadow-xl backdrop-blur-xl" style={{ top: 'calc(var(--inventory-header-height, 60px) + 24px)' }}>
             <h3 className="text-sm uppercase tracking-wider text-muted-foreground font-bold mb-6 pb-4 border-b border-border">Summary</h3>
             
             <div className="space-y-6">

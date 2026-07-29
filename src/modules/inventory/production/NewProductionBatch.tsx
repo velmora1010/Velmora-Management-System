@@ -52,27 +52,57 @@ const NewProductionBatch = () => {
     return calculateRequiredIngredients(selectedProductId, totalUnits);
   }, [selectedProductId, totalUnits]);
 
-  // Stock check
+  // Stock check states
+  const [isLoadingStock, setIsLoadingStock] = useState<boolean>(false);
+  const [stockLoadError, setStockLoadError] = useState<string | null>(null);
   const [ingredientStatus, setIngredientStatus] = useState<any[]>([]);
+  const [isStartingBatch, setIsStartingBatch] = useState<boolean>(false);
 
   useEffect(() => {
     const checkStock = async () => {
       if (!requiredIngredients) {
         setIngredientStatus([]);
+        setStockLoadError(null);
         return;
       }
+      setIsLoadingStock(true);
+      setStockLoadError(null);
       try {
         const status = await (inventoryService as any).validateIngredientAvailability(requiredIngredients);
         setIngredientStatus(status);
-      } catch (err) {
+      } catch (err: any) {
         console.error(err);
+        setStockLoadError(err.message || String(err));
+        setIngredientStatus([]);
+      } finally {
+        setIsLoadingStock(false);
       }
     };
     checkStock();
   }, [requiredIngredients]);
 
-  const hasInsufficientStock = ingredientStatus.some((s: any) => !s.sufficient);
-  const canStart = selectedProduct && sizeType && !hasInsufficientStock && (requiredIngredients !== null) && selectedDeptId && selectedSectionId;
+  // Validation logic:
+  // Ready for Production only when:
+  // - The formula contains at least one valid ingredient.
+  // - Every ingredient is successfully matched with a Supabase raw material record (ing.hasMapping is true).
+  // - Every required quantity is greater than zero.
+  // - Every available stock quantity is loaded successfully.
+  // - Available quantity is greater than or equal to required quantity for every ingredient.
+  const isValidProduction = useMemo(() => {
+    if (isLoadingStock || stockLoadError || requiredIngredients === null) return false;
+    if (!requiredIngredients || requiredIngredients.length === 0) return false;
+    if (ingredientStatus.length === 0) return false;
+    
+    return ingredientStatus.every((ing: any) => 
+      ing.hasMapping && 
+      ing.required > 0 && 
+      ing.available !== undefined && 
+      ing.available !== null && 
+      ing.available >= ing.required
+    );
+  }, [isLoadingStock, stockLoadError, requiredIngredients, ingredientStatus]);
+
+  const canStart = selectedProduct && sizeType && isValidProduction && selectedDeptId && selectedSectionId && !isStartingBatch;
 
   const handleStartBatch = async () => {
     if (!producedBy.trim()) {
@@ -84,8 +114,9 @@ const NewProductionBatch = () => {
       return;
     }
 
-    if (!canStart || !selectedProduct) return;
+    if (!canStart || !selectedProduct || isStartingBatch || !requiredIngredients) return;
 
+    setIsStartingBatch(true);
     try {
       const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
       const prodBatchId = `PROD-${dateStr}-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
@@ -97,6 +128,7 @@ const NewProductionBatch = () => {
       } catch (err: any) {
         console.error("Deduction failed:", err);
         toast.error("Cannot start batch. Required raw materials are not available.");
+        setIsStartingBatch(false);
         return; // Abort transaction
       }
 
@@ -139,12 +171,12 @@ const NewProductionBatch = () => {
       }));
       await inventoryService.saveMicroBatches(microBatchesData);
 
-      // Show Success Toast simulation (via alert since no toast present in this context)
       toast.success("Raw materials deducted successfully");
-      navigate(`/inventory/production/batch/${dbBatchId}`);;
+      navigate(`/inventory/production/batch/${dbBatchId}`);
     } catch (err) {
       console.error("Failed to start batch:", err);
       toast.error("Failed to create production batch.");
+      setIsStartingBatch(false);
     }
   };
 
@@ -361,11 +393,16 @@ const NewProductionBatch = () => {
                 <h2 style={{ fontSize: '20px', margin: 0, color: 'white' }}>Ingredient Review</h2>
               </div>
               
-              {requiredIngredients === null ? (
+              {isLoadingStock ? (
+                <div style={{ padding: '48px', textAlign: 'center', background: '#0b1120', borderRadius: '16px', border: '1px solid #263244' }}>
+                  <div className="animate-spin" style={{ width: '32px', height: '32px', border: '4px solid rgba(59, 130, 246, 0.2)', borderTopColor: '#3b82f6', borderRadius: '50%', margin: '0 auto 16px auto' }} />
+                  <p style={{ color: 'var(--text-muted)', fontSize: '15px', margin: 0 }}>Validating production materials...</p>
+                </div>
+              ) : (stockLoadError || requiredIngredients === null || requiredIngredients.length === 0 || ingredientStatus.length === 0) ? (
                 <div style={{ padding: '32px', textAlign: 'center', background: 'rgba(220, 38, 38, 0.1)', color: '#ef4444', borderRadius: '16px', border: '1px dashed rgba(220, 38, 38, 0.3)' }}>
                   <AlertCircle size={40} style={{ margin: '0 auto 16px auto', opacity: 0.8 }} />
-                  <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>Formula Not Configured</h3>
-                  <p style={{ margin: 0, fontSize: '14px', color: '#fca5a5' }}>Please configure the formula for {selectedProduct.name} in settings to proceed.</p>
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>Unable to validate production materials</h3>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#fca5a5' }}>Product formula or raw material stock could not be loaded. Production cannot continue.</p>
                 </div>
               ) : (
                 <div className="table-responsive">
@@ -381,31 +418,39 @@ const NewProductionBatch = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {ingredientStatus.map((ing: any, i: any) => (
-                          <tr key={i} style={{ borderBottom: '1px solid #1e293b', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
-                            <td style={{ padding: '16px', fontWeight: 600, color: 'white' }}>{ing.name}</td>
-                            <td style={{ padding: '16px', fontWeight: 'bold', color: '#e2e8f0' }}>{ing.required.toFixed(2)}</td>
-                            <td style={{ padding: '16px', color: ing.sufficient ? '#10b981' : '#ef4444', fontWeight: 600 }}>
-                              {ing.available.toFixed(2)}
-                            </td>
-                            <td style={{ padding: '16px' }}>
-                              {ing.sufficient ? (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '12px', fontWeight: 'bold', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
-                                  <CheckCircle2 size={14} /> SUFFICIENT
-                                </span>
-                              ) : (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
-                                  <AlertTriangle size={14} /> SHORTAGE
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                        {ingredientStatus.map((ing: any, i: any) => {
+                          const remaining = ing.available - ing.required;
+                          const isSufficient = ing.sufficient;
+
+                          return (
+                            <tr key={i} style={{ borderBottom: '1px solid #1e293b', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                              <td style={{ padding: '16px', fontWeight: 600, color: 'white' }}>{ing.name}</td>
+                              <td style={{ padding: '16px', fontWeight: 'bold', color: '#e2e8f0' }}>{ing.required.toFixed(2)}</td>
+                              <td style={{ padding: '16px', color: isSufficient ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                                {ing.available.toFixed(2)}
+                              </td>
+                              <td style={{ padding: '16px', color: remaining >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                                {remaining.toFixed(2)}
+                              </td>
+                              <td style={{ padding: '16px' }}>
+                                {isSufficient ? (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '12px', fontWeight: 'bold', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
+                                    <CheckCircle2 size={14} /> SUFFICIENT
+                                  </span>
+                                ) : (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
+                                    <AlertTriangle size={14} /> INSUFFICIENT
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
-                  {hasInsufficientStock ? (
+                  {!isValidProduction ? (
                     <motion.div 
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
@@ -530,7 +575,7 @@ const NewProductionBatch = () => {
                         disabled={!canStart} 
                         onClick={handleStartBatch}
                       >
-                        <Play size={18} fill="currentColor" /> Start Production Batch
+                        <Play size={18} fill="currentColor" /> {isStartingBatch ? 'Starting...' : 'Start Production Batch'}
                       </button>
                     </div>
                   </div>

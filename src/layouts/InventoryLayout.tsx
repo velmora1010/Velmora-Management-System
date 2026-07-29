@@ -17,13 +17,13 @@ export const InventoryLayout = () => {
   ];
 
   return (
-    <div className="flex flex-col min-h-[100vh] w-full overflow-x-hidden">
+    <div className="flex flex-col w-full" style={{ '--inventory-header-height': '60px' } as React.CSSProperties}>
       {/* Top horizontal navigation */}
       <div 
         style={{ 
           position: 'sticky', 
           top: 0, 
-          zIndex: 100, 
+          zIndex: 50, 
           background: 'rgba(15, 23, 42, 0.85)', 
           backdropFilter: 'blur(12px)', 
           borderBottom: '1px solid rgba(255, 255, 255, 0.05)', 
@@ -32,7 +32,7 @@ export const InventoryLayout = () => {
         className="w-full shrink-0 mb-6"
       >
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-          <nav className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <nav className="flex flex-nowrap items-center gap-2 sm:gap-3 overflow-x-auto custom-scrollbar w-full xl:w-auto">
             {navigation.map((item) => {
               const isActive = location.pathname.startsWith(item.href);
               const Icon = item.icon;

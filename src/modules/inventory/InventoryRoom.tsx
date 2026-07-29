@@ -312,7 +312,7 @@ const InventoryRoom = () => {
       ) : (
         <>
           {/* SEARCH AND TABS TOOLBAR */}
-          <div style={{ position: 'sticky', top: '0px', zIndex: 10, background: '#070b12', padding: '16px 0', borderBottom: '1px solid #263244', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', gap: '20px' }}>
+          <div style={{ position: 'sticky', top: 'var(--inventory-header-height, 60px)', zIndex: 10, background: '#070b12', padding: '16px 0', borderBottom: '1px solid #263244', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', gap: '20px' }}>
             <div style={{ display: 'flex', gap: '4px' }}>
               <button 
                 className="btn hover-lift" 
