@@ -27,6 +27,8 @@ const ProductionBatchDetail = () => {
 
   const [pendingBarcodeMB, setPendingBarcodeMB] = useState<any>(null);
   const [pendingBarcodesList, setPendingBarcodesList] = useState<{ no: string, scanned: boolean }[]>([]);
+  const [isSavingBarcode, setIsSavingBarcode] = useState(false);
+  const [barcodesAlreadySaved, setBarcodesAlreadySaved] = useState(false);
   const [forceShowMicroBatches, setForceShowMicroBatches] = useState(false);
   const [productionBatch, setProductionBatch] = useState<any>(null);
   const [ingredients, setIngredients] = useState<any[]>([]);
@@ -277,22 +279,45 @@ const ProductionBatchDetail = () => {
       }
     }
 
-    setPendingBarcodeMB(mb);
-    if (productionBatch) {
-      const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
-      const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
-      const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
-      
-      const list = [];
-      for (let i = 1; i <= mbUnits; i++) {
-        const serial = i.toString().padStart(3, '0');
-        list.push({
-          no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
-          scanned: false
-        });
+    if (!productionBatch) return;
+
+    // Check if barcodes already exist in Supabase for this micro batch
+    try {
+      const existingBarcodes = await (inventoryService as any).getProductBarcodesForMicroBatch(
+        productionBatch.id,
+        mb.micro_batch_no
+      );
+
+      if (existingBarcodes.length > 0) {
+        // Barcodes already saved — load them for display instead of generating new ones
+        setPendingBarcodeMB(mb);
+        setPendingBarcodesList(existingBarcodes.map((b: any) => ({
+          no: b.barcodeNumber || b.barcode_no || b.barcode || b.no,
+          scanned: true
+        })));
+        setBarcodesAlreadySaved(true);
+        return;
       }
-      setPendingBarcodesList(list);
+    } catch (err) {
+      console.error('Failed to check existing barcodes:', err);
     }
+
+    // No existing barcodes — generate new barcode strings for review
+    setPendingBarcodeMB(mb);
+    setBarcodesAlreadySaved(false);
+    const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
+    const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
+    const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
+    
+    const list = [];
+    for (let i = 1; i <= mbUnits; i++) {
+      const serial = i.toString().padStart(3, '0');
+      list.push({
+        no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
+        scanned: false
+      });
+    }
+    setPendingBarcodesList(list);
   };
 
   const handleCancelBarcode = () => {
@@ -302,55 +327,72 @@ const ProductionBatchDetail = () => {
 
   const handleSaveBarcode = async (mb: any) => {
     if (!productionBatch) return;
+    if (isSavingBarcode) return; // Prevent double-click
 
-    const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
-    const finalBarcodes = pendingBarcodesList.map((b: any) => ({
-      id: crypto.randomUUID(),
-      type: 'PRODUCT',
-      productId: productionBatch.id,
-      batchId: productionBatch.id,
-      productName: productionBatch.product_name,
-      productCode: productCode,
-      microBatchNo: mb.micro_batch_no,
-      barcodeNumber: b.no,
-      barcode_no: b.no, 
-      displayBarcode: b.no,
-      barcode: b.no,
-      code: b.no,
-      currentStage: 'READY_FOR_FIRST_SCAN',
-      quantity: 1,
-      unit: 'Unit',
-      status: 'NOT_SCANNED', 
-      scan_status: 'NOT_SCANNED', 
-      comboReady: false,
-      createdAt: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      savedAt: new Date().toISOString(),
-      scannedAt: null,
-      addedToComboAt: null,
-      producedBy: mb.producedBy,
-      producedAt: mb.producedAt
-    }));
+    // If barcodes were already saved (loaded from DB), just dismiss
+    if (barcodesAlreadySaved) {
+      toast.success('Barcodes already saved for this micro batch.');
+      await inventoryService.updateMicroBatch(mb.id, { status: 'Barcode Saved' });
+      setPendingBarcodeMB(null);
+      setPendingBarcodesList([]);
+      setBarcodesAlreadySaved(false);
+      fetchData();
+      return;
+    }
+
+    setIsSavingBarcode(true);
     
     try {
-      const checkAll = await inventoryService.getProductBarcodes();
-      const existingForMB = checkAll.filter((item: any) => 
-        (item.batchId === productionBatch.id || item.productId === productionBatch.id) && String(item.microBatchNo) === String(mb.micro_batch_no)
+      // Final server-side duplicate check using targeted query
+      const existingForMB = await (inventoryService as any).getProductBarcodesForMicroBatch(
+        productionBatch.id,
+        mb.micro_batch_no
       );
+
       if (existingForMB.length > 0) {
         toast.error('Barcodes have already been generated and saved for this micro batch!');
-        await inventoryService.updateMicroBatch(mb.id, {
-          status: 'Barcode Saved',
-        });
+        await inventoryService.updateMicroBatch(mb.id, { status: 'Barcode Saved' });
         setPendingBarcodeMB(null);
         setPendingBarcodesList([]);
+        setBarcodesAlreadySaved(false);
         fetchData();
         return;
       }
 
+      // Build barcode payloads
+      const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
+      const finalBarcodes = pendingBarcodesList.map((b: any) => ({
+        id: crypto.randomUUID(),
+        type: 'PRODUCT',
+        productId: productionBatch.id,
+        batchId: productionBatch.id,
+        productName: productionBatch.product_name,
+        productCode: productCode,
+        microBatchNo: mb.micro_batch_no,
+        barcodeNumber: b.no,
+        barcode_no: b.no, 
+        displayBarcode: b.no,
+        barcode: b.no,
+        code: b.no,
+        currentStage: 'READY_FOR_FIRST_SCAN',
+        quantity: 1,
+        unit: 'Unit',
+        status: 'NOT_SCANNED', 
+        scan_status: 'NOT_SCANNED', 
+        comboReady: false,
+        createdAt: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        savedAt: new Date().toISOString(),
+        scannedAt: null,
+        addedToComboAt: null,
+        producedBy: mb.producedBy,
+        producedAt: mb.producedAt
+      }));
+
+      // Insert product barcodes
       await (inventoryService as any).saveProductBarcodes(finalBarcodes);
 
-      // --- Generate and save master QC barcode ---
+      // Generate and save master QC barcode (idempotent — addQCBarcode checks for existing)
       const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
       const last4BatchId = String(productionBatch.id).slice(-4);
       const qcBarcodeNo = `QC-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${last4BatchId}`;
@@ -374,18 +416,8 @@ const ProductionBatchDetail = () => {
 
       const savedQC = await (inventoryService as any).addQCBarcode(qcRecord);
       const isQCDuplicate = savedQC?.isDuplicate;
-      // -------------------------------------------
-      
-      const checkAllPost = await inventoryService.getProductBarcodes();
-      const existingForMBPost = checkAllPost.filter((item: any) => 
-        (item.batchId === productionBatch.id || item.productId === productionBatch.id) && String(item.microBatchNo) === String(mb.micro_batch_no)
-      );
 
-      if (existingForMBPost.length < finalBarcodes.length) {
-        toast.error('Barcode save failed. Please try again.');
-        return;
-      }
-
+      // Create inventory transactions
       for (const b of finalBarcodes) {
         await inventoryService.createInventoryTransaction({
           barcodeNumber: b.barcodeNumber,
@@ -402,9 +434,7 @@ const ProductionBatchDetail = () => {
         });
       }
 
-      await inventoryService.updateMicroBatch(mb.id, {
-        status: 'Barcode Saved',
-      });
+      await inventoryService.updateMicroBatch(mb.id, { status: 'Barcode Saved' });
 
       if (isQCDuplicate) {
         toast.success('Product barcodes saved. QC barcode already exists.');
@@ -414,11 +444,14 @@ const ProductionBatchDetail = () => {
 
       setPendingBarcodeMB(null);
       setPendingBarcodesList([]);
+      setBarcodesAlreadySaved(false);
       
       fetchData(); 
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || "Failed to save barcodes");
+    } finally {
+      setIsSavingBarcode(false);
     }
   };
   const handleEditDeptChange = (deptId: string) => {
@@ -927,7 +960,9 @@ const ProductionBatchDetail = () => {
                                   <span style={{ fontFamily: 'monospace', fontSize: '13px', color: 'white' }}>{bc.no}</span>
                                 </div>
                                 <div>
-                                  <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>PENDING</span>
+                                  <span style={{ color: barcodesAlreadySaved ? '#10b981' : '#94a3b8', fontSize: '12px', fontWeight: 600 }}>
+                                    {barcodesAlreadySaved ? 'SAVED' : 'PENDING'}
+                                  </span>
                                 </div>
                               </div>
                             ))}
@@ -938,15 +973,17 @@ const ProductionBatchDetail = () => {
                             className="btn hover-lift" 
                             style={{ padding: '8px 16px', borderRadius: '8px', background: 'transparent', color: '#94a3b8', border: '1px solid #334155', fontWeight: 600 }} 
                             onClick={handleCancelBarcode}
+                            disabled={isSavingBarcode}
                           >
                             Cancel
                           </button>
                           <button 
                             className="btn hover-lift" 
-                            style={{ padding: '8px 16px', borderRadius: '8px', background: '#10b981', color: 'white', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }} 
+                            style={{ padding: '8px 16px', borderRadius: '8px', background: isSavingBarcode ? '#059669' : '#10b981', color: 'white', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', opacity: isSavingBarcode ? 0.7 : 1, cursor: isSavingBarcode ? 'not-allowed' : 'pointer' }} 
                             onClick={() => handleSaveBarcode(mb)}
+                            disabled={isSavingBarcode}
                           >
-                            <CheckCircle2 size={16} /> Save Barcode
+                            <CheckCircle2 size={16} /> {isSavingBarcode ? 'Saving...' : 'Save Barcode'}
                           </button>
                         </div>
                       </div>

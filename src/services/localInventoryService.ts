@@ -998,6 +998,31 @@ class LocalInventoryService {
     }));
   }
 
+  async getProductBarcodesForMicroBatch(batchId: string, microBatchNo: string | number) {
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLES.productBarcodes)
+      .select('*')
+      .eq('batch_id', batchId)
+      .eq('micro_batch_no', String(microBatchNo));
+    if (error) {
+      throw error;
+    }
+    return (data || []).map((item: any) => ({
+      ...item,
+      barcode_no: item.barcode,
+      barcodeNumber: item.barcode,
+      displayBarcode: item.barcode,
+      no: item.barcode,
+      productName: item.product_name,
+      productCode: item.product_code,
+      batchId: item.batch_id,
+      batch_no: item.batch_id,
+      microBatchNo: item.micro_batch_no,
+      mb_no: item.micro_batch_no,
+      currentStage: item.current_stage || 'Production'
+    }));
+  }
+
   async saveProductBarcodes(newBarcodes: any[]) {
     const payloads = newBarcodes.map(item => ({
       id: item.id || crypto.randomUUID(),
@@ -1088,12 +1113,27 @@ class LocalInventoryService {
   }
 
   async addQCBarcode(record: any) {
+    const batchId = record.batchId || record.batch_id || '';
+    const microBatchNo = String(record.microBatchNo || record.micro_batch_no || '');
+
+    // Check if a QC barcode already exists for this batch + micro batch
+    const { data: existing } = await supabase
+      .from(SUPABASE_TABLES.qcBarcodes)
+      .select('id')
+      .eq('batch_id', batchId)
+      .eq('micro_batch_no', microBatchNo)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      return { isDuplicate: true };
+    }
+
     const payload = {
       qc_barcode: record.qcBarcode || record.qc_barcode,
       product_name: record.productName || record.product_name || '',
       product_code: record.productCode || record.product_code || '',
-      batch_id: record.batchId || record.batch_id || '',
-      micro_batch_no: record.microBatchNo || record.micro_batch_no || '',
+      batch_id: batchId,
+      micro_batch_no: microBatchNo,
       total_units: record.totalUnits || record.total_units || 0,
       produced_by: record.producedBy || record.produced_by || null,
       labeled_by: record.labeledBy || record.labeled_by || null,
@@ -1107,6 +1147,7 @@ class LocalInventoryService {
       toast.error('Failed to save QC barcode: ' + error.message);
       throw error;
     }
+    return { isDuplicate: false };
   }
 
   async updateQCBarcode(updatedRecord: any) {
