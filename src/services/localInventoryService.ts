@@ -1323,8 +1323,16 @@ class LocalInventoryService {
       displayBarcode: item.combo_box_barcode,
       comboName: item.combo_name,
       comboType: item.combo_type,
-      packedItems: item.packed_items,
-      currentStage: item.current_stage
+      packedItems: item.packed_items || [],
+      requiredItems: item.required_items || [],
+      currentStage: item.current_stage,
+      createdAt: item.created_at,
+      generatedBy: item.generated_by,
+      generatedAt: item.generated_at,
+      comboInventoryInPersonName: item.inventory_in_person,
+      comboInventoryOutPersonName: item.inventory_out_person,
+      comboInventoryInAt: item.inventory_in_at,
+      comboInventoryOutAt: item.inventory_out_at
     }));
   }
 
@@ -1334,13 +1342,14 @@ class LocalInventoryService {
       combo_box_barcode: barcodeValue,
       combo_name: box.comboName || box.combo_name || '',
       combo_type: box.comboType || box.combo_type || '',
-      generated_by: box.generated_by || null,
-      generated_at: box.generated_at || null,
-      inventory_in_person: box.inventory_in_person || null,
-      inventory_out_person: box.inventory_out_person || null,
-      inventory_in_at: box.inventory_in_at || null,
-      inventory_out_at: box.inventory_out_at || null,
+      generated_by: box.generatedBy || box.generated_by || null,
+      generated_at: box.generatedAt || box.generated_at || null,
+      inventory_in_person: box.comboInventoryInPersonName || box.inventory_in_person || null,
+      inventory_out_person: box.comboInventoryOutPersonName || box.inventory_out_person || null,
+      inventory_in_at: box.comboInventoryInAt || box.inventory_in_at || null,
+      inventory_out_at: box.comboInventoryOutAt || box.inventory_out_at || null,
       packed_items: box.packedItems || box.packed_items || [],
+      required_items: box.requiredItems || box.required_items || [],
       status: box.status || 'EMPTY',
       current_stage: box.currentStage || box.current_stage || 'Packed'
     };

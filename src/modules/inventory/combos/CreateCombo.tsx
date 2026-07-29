@@ -91,7 +91,7 @@ export const CreateCombo = () => {
          if (p.packedComboBoxBarcode) return false;
          const pCode = normalizeProductCode(p);
          if (!pCode) return false;
-         return box.requiredItems.some((req: any) => req.productCode === pCode);
+         return (box.requiredItems || []).some((req: any) => req.productCode === pCode);
       });
       setAvailableProducts(matching);
     } catch (err) {

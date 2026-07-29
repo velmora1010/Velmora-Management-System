@@ -331,13 +331,13 @@ export const CombosDashboard = () => {
 
              <h3 style={{ fontSize: '16px', color: 'white', marginBottom: '16px', borderBottom: '1px solid #334155', paddingBottom: '8px' }}>Products Inside</h3>
              
-             {selectedBox.packedItems.length === 0 ? (
+             {(selectedBox.packedItems || []).length === 0 ? (
                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '12px' }}>
                  No products packed inside this box.
                </div>
              ) : (
                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                 {selectedBox.packedItems.map((item: any, idx: number) => {
+                 {(selectedBox.packedItems || []).map((item: any, idx: number) => {
                     const code = String(item.productCode || item.product_code || item.variantCode || "").toUpperCase();
                     return (
                       <div key={idx} style={{ padding: '16px', background: '#1e293b', borderRadius: '12px', border: '1px solid #334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
