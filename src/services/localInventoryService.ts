@@ -1614,7 +1614,25 @@ class LocalInventoryService {
     return this.getSettingsList('product_released_to_combo');
   }
 
-  async packProductIntoCombo(comboBoxBarcode: string, productBarcode: string, addedBy?: string) {
+  async packProductIntoComboBox(param1: any, param2?: string, param3?: string) {
+    let comboBoxBarcode: string = '';
+    let productBarcode: string = '';
+    let addedBy: string = 'Admin';
+
+    if (typeof param1 === 'object' && param1 !== null) {
+      comboBoxBarcode = String(param1.comboBoxBarcode || param1.combo_box_barcode || param1.comboBox || '').trim();
+      productBarcode = String(param1.productBarcode || param1.barcode || param1.product_barcode || '').trim();
+      addedBy = String(param1.addedBy || param1.scannedBy || param1.added_by || 'Admin').trim();
+    } else {
+      comboBoxBarcode = String(param1 || '').trim();
+      productBarcode = String(param2 || '').trim();
+      addedBy = String(param3 || 'Admin').trim();
+    }
+
+    if (!comboBoxBarcode || !productBarcode) {
+      return { success: false, message: 'Missing combo box barcode or product barcode.' };
+    }
+
     try {
       const normalizeProductCode = (item: any) => {
         const code = String(item.productCode || item.product_code || item.variantCode || "").toUpperCase();
@@ -1627,72 +1645,170 @@ class LocalInventoryService {
         return "";
       };
 
-      const getMasterBarcode = (item: any) => String(item.barcode_no || item.barcodeNumber || item.barcode || "").trim().toUpperCase();
-      const mBar = String(productBarcode || "").trim().toUpperCase();
+      const getMasterBarcode = (item: any) => String(item.barcode_no || item.barcodeNumber || item.barcode || item.displayBarcode || "").trim().toUpperCase();
+      const mBar = productBarcode.toUpperCase();
 
-      const comboBoxes = await this.getComboBoxes();
-      const boxIndex = comboBoxes.findIndex((b: any) => b.comboBoxBarcode === comboBoxBarcode);
-      if (boxIndex === -1) return { success: false, message: "Combo box not found." };
-      const comboBox = comboBoxes[boxIndex];
+      // 1. Fetch product barcode directly from Supabase
+      const { data: prodData, error: prodErr } = await supabase
+        .from(SUPABASE_TABLES.productBarcodes)
+        .select('*')
+        .eq('barcode', mBar)
+        .maybeSingle();
 
-      if (comboBox.status === 'READY') return { success: false, message: "This combo box is already fully packed." };
-
-      if (comboBox.packedItems?.find((item: any) => getMasterBarcode(item) === mBar)) {
-        return { success: false, message: "This product is already packed in this combo box." };
+      if (prodErr) {
+        toast.error('Error querying product barcode: ' + prodErr.message);
+        return { success: false, message: 'Error querying product barcode: ' + prodErr.message };
       }
 
-      const products = await this.getProductBarcodes();
-      const prodIndex = products.findIndex((p: any) => getMasterBarcode(p) === mBar);
-      if (prodIndex === -1) return { success: false, message: "Product barcode not found." };
-      const product = products[prodIndex];
-
-      if (product.currentStage !== "PRODUCT_OUT") {
-        return { success: false, message: "Product is not released to Combo yet (Must be PRODUCT_OUT)." };
+      if (!prodData) {
+        return { success: false, message: 'Product barcode not found.' };
       }
 
-      if (product.packedComboBoxBarcode) {
-        return { success: false, message: `Product is already packed in box: ${product.packedComboBoxBarcode}` };
+      // Validate product state
+      if (prodData.packed_combo_box_barcode) {
+        return { success: false, message: `Product is already packed in box: ${prodData.packed_combo_box_barcode}` };
       }
 
-      const pCode = normalizeProductCode(product);
-      if (!comboBox.requiredItems) return { success: false, message: "Combo box has no required items." };
-
-      let requiredMatch = comboBox.requiredItems.find((req: any) => req.productCode === pCode);
-      if (!requiredMatch) {
-        return { success: false, message: `Wrong product. This combo requires: ${comboBox.requiredItems.map((r:any) => r.productCode).join(' + ')}.` };
+      if (prodData.current_stage !== 'PRODUCT_OUT') {
+        return { success: false, message: 'Product is not released to Combo yet (Must be PRODUCT_OUT).' };
       }
 
-      if (!comboBox.packedItems) comboBox.packedItems = [];
-      const alreadyPacked = comboBox.packedItems.filter((p:any) => normalizeProductCode(p) === pCode).length;
-      if (alreadyPacked >= requiredMatch.requiredQty) {
-        return { success: false, message: `Box already has enough ${pCode} (${alreadyPacked}/${requiredMatch.requiredQty}).` };
+      // 2. Fetch combo box directly from Supabase
+      const { data: boxData, error: boxErr } = await supabase
+        .from(SUPABASE_TABLES.comboBoxes)
+        .select('*')
+        .eq('combo_box_barcode', comboBoxBarcode)
+        .maybeSingle();
+
+      if (boxErr) {
+        toast.error('Error querying combo box: ' + boxErr.message);
+        return { success: false, message: 'Error querying combo box: ' + boxErr.message };
       }
 
-      const packedProduct = { ...product };
-      packedProduct.currentStage = "PACKED_IN_COMBO";
-      packedProduct.packedComboBoxBarcode = comboBoxBarcode;
-      packedProduct.addedAt = new Date().toISOString();
-      packedProduct.addedBy = addedBy || "Admin";
+      if (!boxData) {
+        return { success: false, message: 'Combo box not found.' };
+      }
 
-      comboBox.packedItems.push(packedProduct);
+      if (boxData.status === 'READY') {
+        return { success: false, message: 'This combo box is already fully packed.' };
+      }
+
+      const pCode = normalizeProductCode(prodData);
+      const requiredItems = boxData.required_items || [];
+      const packedItems = boxData.packed_items || [];
+
+      // Check if product is already in packed_items of this box
+      if (packedItems.some((item: any) => getMasterBarcode(item) === mBar)) {
+        return { success: false, message: 'This product is already packed in this combo box.' };
+      }
+
+      let requiredMatch = requiredItems.find((req: any) => req.productCode === pCode);
+      if (!requiredMatch && requiredItems.length > 0) {
+        return { success: false, message: `Wrong product. This combo requires: ${requiredItems.map((r: any) => r.productCode).join(' + ')}.` };
+      }
+
+      if (requiredMatch) {
+        const alreadyPackedCount = packedItems.filter((p: any) => normalizeProductCode(p) === pCode).length;
+        if (alreadyPackedCount >= requiredMatch.requiredQty) {
+          return { success: false, message: `Box already has enough ${pCode} (${alreadyPackedCount}/${requiredMatch.requiredQty}).` };
+        }
+      }
+
+      // 3. Update product_barcodes in Supabase
+      const { error: updateProdErr } = await supabase
+        .from(SUPABASE_TABLES.productBarcodes)
+        .update({
+          packed_combo_box_barcode: comboBoxBarcode,
+          current_stage: 'PACKED_IN_COMBO',
+          updated_at: new Date().toISOString()
+        })
+        .eq('barcode', mBar);
+
+      if (updateProdErr) {
+        toast.error('Failed to update product barcode in Supabase: ' + updateProdErr.message);
+        return { success: false, message: 'Failed to update product barcode: ' + updateProdErr.message };
+      }
+
+      // 4. Update combo_boxes in Supabase
+      const packedProduct = {
+        ...prodData,
+        barcode: mBar,
+        barcode_no: mBar,
+        barcodeNumber: mBar,
+        displayBarcode: mBar,
+        productName: prodData.product_name,
+        product_name: prodData.product_name,
+        productCode: pCode,
+        product_code: pCode,
+        currentStage: 'PACKED_IN_COMBO',
+        current_stage: 'PACKED_IN_COMBO',
+        packedComboBoxBarcode: comboBoxBarcode,
+        packed_combo_box_barcode: comboBoxBarcode,
+        addedAt: new Date().toISOString(),
+        addedBy: addedBy
+      };
+
+      const updatedPackedItems = [...packedItems, packedProduct];
 
       let isReady = true;
       let totalPacked = 0;
-      comboBox.requiredItems.forEach((req: any) => {
-        const count = comboBox.packedItems.filter((p:any) => normalizeProductCode(p) === req.productCode).length;
-        totalPacked += count;
-        if (count < req.requiredQty) isReady = false;
-      });
+      if (requiredItems.length > 0) {
+        requiredItems.forEach((req: any) => {
+          const count = updatedPackedItems.filter((p: any) => normalizeProductCode(p) === req.productCode).length;
+          totalPacked += count;
+          if (count < req.requiredQty) isReady = false;
+        });
+      } else {
+        totalPacked = updatedPackedItems.length;
+      }
 
-      comboBox.status = totalPacked === 0 ? 'EMPTY' : (isReady ? 'READY' : 'PARTIAL');
+      const newStatus = totalPacked === 0 ? 'EMPTY' : (isReady ? 'READY' : 'PARTIAL');
 
-      await this.saveComboBox(comboBox);
-      await this.updateProductBarcode(packedProduct);
+      const { error: updateBoxErr } = await supabase
+        .from(SUPABASE_TABLES.comboBoxes)
+        .update({
+          packed_items: updatedPackedItems,
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('combo_box_barcode', comboBoxBarcode);
 
-      return { success: true, message: "Product added to combo box.", comboBox };
+      if (updateBoxErr) {
+        // Rollback product barcode update if combo box update fails
+        await supabase
+          .from(SUPABASE_TABLES.productBarcodes)
+          .update({
+            packed_combo_box_barcode: null,
+            current_stage: 'PRODUCT_OUT',
+            updated_at: new Date().toISOString()
+          })
+          .eq('barcode', mBar);
+
+        toast.error('Failed to update combo box in Supabase: ' + updateBoxErr.message);
+        return { success: false, message: 'Failed to update combo box: ' + updateBoxErr.message };
+      }
+
+      const updatedBoxMapped = {
+        ...boxData,
+        comboBoxBarcode: boxData.combo_box_barcode,
+        displayBarcode: boxData.combo_box_barcode,
+        comboName: boxData.combo_name,
+        comboType: boxData.combo_type,
+        packedItems: updatedPackedItems,
+        requiredItems: requiredItems,
+        status: newStatus,
+        currentStage: boxData.current_stage
+      };
+
+      return { success: true, message: 'Product added to combo box.', comboBox: updatedBoxMapped };
     } catch (err: any) {
-      return { success: false, message: err.message || "Failed to pack product." };
+      console.error(err);
+      return { success: false, message: err.message || 'Failed to pack product.' };
     }
+  }
+
+  async packProductIntoCombo(param1: any, param2?: string, param3?: string) {
+    return this.packProductIntoComboBox(param1, param2, param3);
   }
 
   async getComboAvailableProductStock() {

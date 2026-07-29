@@ -273,6 +273,7 @@ export const CreateCombo = () => {
         const boxes = await (inventoryService as any).getComboBoxes();
         setComboBoxes(boxes.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
         setActiveBoxToPack(result.comboBox);
+        await fetchAvailableProducts(result.comboBox);
         setScannerInput('');
         setScanMessage({ type: 'success', text: result.message || 'Product packed successfully.' });
         toast.success("Product added to combo box");
