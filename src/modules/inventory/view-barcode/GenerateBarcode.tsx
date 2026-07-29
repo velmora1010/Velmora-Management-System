@@ -253,11 +253,15 @@ const GenerateBarcode = () => {
               <div style={{ padding: '20px', display: 'flex', gap: '12px', borderBottom: '1px solid #1e293b', background: '#070b12' }}>
                 <div style={{ flex: 1, padding: '10px', background: '#111827', borderRadius: '10px', border: '1px solid #1e293b' }}>
                   <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: '4px' }}>Quantity</div>
-                  <div style={{ fontSize: '14px', color: 'white', fontWeight: 700 }}>{b.original_quantity} KG</div>
+                  <div style={{ fontSize: '14px', color: 'white', fontWeight: 700 }}>
+                    {((b.quantity !== undefined && b.quantity !== null) ? b.quantity : (b.original_quantity !== undefined && b.original_quantity !== null) ? b.original_quantity : 0)} {String(b.unit || 'KG').toUpperCase()}
+                  </div>
                 </div>
                 <div style={{ flex: 1, padding: '10px', background: '#111827', borderRadius: '10px', border: '1px solid #1e293b' }}>
                   <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: '4px' }}>Vendor</div>
-                  <div style={{ fontSize: '14px', color: 'white', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.vendor_name || '-'}</div>
+                  <div style={{ fontSize: '14px', color: 'white', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {b.vendor || b.vendor_name || '-'}
+                  </div>
                 </div>
               </div>
 

@@ -157,18 +157,23 @@ class LocalInventoryService {
                 barcode: barcodeValue,
                 material_name: item.materialName || item.material_name || '',
                 batch_no: item.batchNo || item.batch_no || '',
-                vendor: item.vendor || '',
-                quantity: item.quantity || 0,
-                unit: item.unit || 'KG',
-                price_per_kg: item.price_per_kg || 0,
-                gst_percent: item.gst_percent || 0,
+                vendor: item.vendor || item.vendor_name || '',
+                quantity: Number(item.quantity || item.original_quantity || item.available_quantity || 0),
+                unit: String(item.unit || 'kg').toLowerCase(),
+                price_per_kg: Number(item.price_per_kg || 0),
+                gst_percent: Number(item.gst_percent || 0),
                 generated_by: item.generated_by || 'Admin',
                 inventory_in_person: item.inventory_in_person || null,
                 inventory_out_person: item.inventory_out_person || null,
                 inventory_in_at: item.inventory_in_at || null,
                 inventory_out_at: item.inventory_out_at || null,
                 current_stage: item.currentStage || item.current_stage || 'Incoming',
-                created_at: item.created_at || new Date().toISOString()
+                created_at: item.created_at || new Date().toISOString(),
+                updated_at: item.updated_at || new Date().toISOString(),
+                po_reference: item.po_reference || null,
+                scanning_person_name: item.scanning_person_name || item.scanningPersonName || null,
+                notes: item.notes || null,
+                received_date: item.received_date || item.date_received || new Date().toISOString()
               };
               const { error: insError } = await supabase.from(SUPABASE_TABLES.rawMaterialBarcodes).insert(payload);
               if (insError) throw insError;
@@ -648,7 +653,9 @@ class LocalInventoryService {
       material_name: item.material_name,
       batchNo: item.batch_no,
       batch_id: item.batch_no,
-      currentStage: item.current_stage || 'Incoming'
+      currentStage: item.current_stage || 'Incoming',
+      original_quantity: item.quantity,
+      vendor_name: item.vendor
     }));
   }
 
@@ -658,18 +665,23 @@ class LocalInventoryService {
       barcode: batch.barcodeNumber || batch.barcode || batch.serial_number || batch.code || batch.id,
       material_name: batch.materialName || batch.material_name || '',
       batch_no: batch.batchNo || batch.batch_no || '',
-      vendor: batch.vendor || '',
-      quantity: batch.quantity || 0,
-      unit: batch.unit || 'KG',
-      price_per_kg: batch.price_per_kg || 0,
-      gst_percent: batch.gst_percent || 0,
+      vendor: batch.vendor || batch.vendor_name || '',
+      quantity: Number(batch.quantity || batch.original_quantity || batch.available_quantity || 0),
+      unit: String(batch.unit || 'kg').toLowerCase(),
+      price_per_kg: Number(batch.price_per_kg || 0),
+      gst_percent: Number(batch.gst_percent || 0),
       generated_by: batch.generated_by || 'Admin',
       inventory_in_person: batch.inventory_in_person || null,
       inventory_out_person: batch.inventory_out_person || null,
       inventory_in_at: batch.inventory_in_at || null,
       inventory_out_at: batch.inventory_out_at || null,
       current_stage: batch.currentStage || batch.current_stage || 'Incoming',
-      created_at: batch.created_at || batch.createdAt || new Date().toISOString()
+      created_at: batch.created_at || batch.createdAt || new Date().toISOString(),
+      updated_at: batch.updated_at || new Date().toISOString(),
+      po_reference: batch.po_reference || null,
+      scanning_person_name: batch.scanning_person_name || batch.scanningPersonName || null,
+      notes: batch.notes || null,
+      received_date: batch.received_date || batch.date_received || new Date().toISOString()
     };
     const { error } = await supabase.from(SUPABASE_TABLES.rawMaterialBarcodes).insert(payload);
     if (error) {
@@ -684,18 +696,23 @@ class LocalInventoryService {
       barcode: batch.barcodeNumber || batch.barcode || batch.serial_number || batch.code || batch.id,
       material_name: batch.materialName || batch.material_name || '',
       batch_no: batch.batchNo || batch.batch_no || '',
-      vendor: batch.vendor || '',
-      quantity: batch.quantity || 0,
-      unit: batch.unit || 'KG',
-      price_per_kg: batch.price_per_kg || 0,
-      gst_percent: batch.gst_percent || 0,
+      vendor: batch.vendor || batch.vendor_name || '',
+      quantity: Number(batch.quantity || batch.original_quantity || batch.available_quantity || 0),
+      unit: String(batch.unit || 'kg').toLowerCase(),
+      price_per_kg: Number(batch.price_per_kg || 0),
+      gst_percent: Number(batch.gst_percent || 0),
       generated_by: batch.generated_by || 'Admin',
       inventory_in_person: batch.inventory_in_person || null,
       inventory_out_person: batch.inventory_out_person || null,
       inventory_in_at: batch.inventory_in_at || null,
       inventory_out_at: batch.inventory_out_at || null,
       current_stage: batch.currentStage || batch.current_stage || 'Incoming',
-      created_at: batch.created_at || batch.createdAt || new Date().toISOString()
+      created_at: batch.created_at || batch.createdAt || new Date().toISOString(),
+      updated_at: batch.updated_at || new Date().toISOString(),
+      po_reference: batch.po_reference || null,
+      scanning_person_name: batch.scanning_person_name || batch.scanningPersonName || null,
+      notes: batch.notes || null,
+      received_date: batch.received_date || batch.date_received || new Date().toISOString()
     }));
     const { error } = await supabase.from(SUPABASE_TABLES.rawMaterialBarcodes).insert(payloads);
     if (error) {

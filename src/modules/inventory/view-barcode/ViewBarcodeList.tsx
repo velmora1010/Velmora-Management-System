@@ -763,8 +763,8 @@ const ViewBarcode = () => {
                     <div style={{ fontSize: '13px', color: '#94a3b8', fontFamily: 'monospace' }}>{displayBarcode}</div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: '#070b12', padding: '12px', borderRadius: '10px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}><span style={{ fontSize: '10px', color: '#64748b' }}>Quantity</span><span style={{ fontSize: '13px', color: 'white', fontWeight: 700 }}>{b.original_quantity} KG</span></div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}><span style={{ fontSize: '10px', color: '#64748b' }}>Vendor</span><span style={{ fontSize: '13px', color: 'white', fontWeight: 700 }}>{b.vendor_name || '-'}</span></div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}><span style={{ fontSize: '10px', color: '#64748b' }}>Quantity</span><span style={{ fontSize: '13px', color: 'white', fontWeight: 700 }}>{((b.quantity !== undefined && b.quantity !== null) ? b.quantity : (b.original_quantity !== undefined && b.original_quantity !== null) ? b.original_quantity : 0)} {String(b.unit || 'KG').toUpperCase()}</span></div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}><span style={{ fontSize: '10px', color: '#64748b' }}>Vendor</span><span style={{ fontSize: '13px', color: 'white', fontWeight: 700 }}>{b.vendor || b.vendor_name || '-'}</span></div>
                     {b.inventoryInPersonName && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}><span style={{ fontSize: '10px', color: '#64748b' }}>Scanned IN By</span><span style={{ fontSize: '13px', color: '#10b981', fontWeight: 700 }}>{b.inventoryInPersonName}</span></div>
                     )}

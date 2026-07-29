@@ -32,6 +32,55 @@ const IntakeStep3_Barcode = () => {
 
   const handleSaveBarcode = async () => {
     if (isSaving) return;
+
+    // 1. Safe numeric parsers and validations
+    const parsedQty = Number(formData.quantity_received);
+    if (isNaN(parsedQty) || parsedQty <= 0) {
+      toast.error("Quantity Received must be a valid number greater than zero.");
+      return;
+    }
+
+    const parsedPrice = Number(formData.price_per_kg);
+    if (isNaN(parsedPrice) || parsedPrice < 0) {
+      toast.error("Price Per KG must be a valid non-negative number.");
+      return;
+    }
+
+    const parsedGst = Number(formData.gst_percent);
+    if (isNaN(parsedGst) || parsedGst < 0) {
+      toast.error("GST percentage must be a valid non-negative number.");
+      return;
+    }
+
+    // 2. Trimming text fields
+    const trimmedVendor = formData.vendor_name.trim();
+    const trimmedPo = formData.po_reference.trim();
+    const trimmedPerson = formData.scanningPersonName.trim();
+    const trimmedNotes = formData.notes.trim();
+
+    if (!trimmedVendor) {
+      toast.error("Vendor Name is required.");
+      return;
+    }
+    if (!trimmedPo) {
+      toast.error("PO Reference / Bill No is required.");
+      return;
+    }
+    if (!trimmedPerson) {
+      toast.error("Scanning Person Name is required.");
+      return;
+    }
+
+    // 3. Date in Supabase-compatible ISO format
+    let isoDateReceived = new Date().toISOString();
+    if (formData.date_received) {
+      try {
+        isoDateReceived = new Date(formData.date_received).toISOString();
+      } catch (e) {
+        console.error("Invalid date format, using current time", e);
+      }
+    }
+
     setIsSaving(true);
     try {
       const existingBatches = await inventoryService.getBatches();
@@ -40,50 +89,60 @@ const IntakeStep3_Barcode = () => {
       const newBatches = previewBatches.filter(b => !existingSerials.has(b.serialNumber));
       
       if (newBatches.length > 0) {
+        const baseAmount = parsedQty * parsedPrice;
+        const gstAmount = baseAmount * (parsedGst / 100);
+        const totalAmount = baseAmount + gstAmount;
+
         const inventoryInRecord = {
           material_id: selectedMaterial.id, 
           material_name: selectedMaterial.name,
-          quantity_received: targetQty,
-          vendor_name: formData.vendor_name, 
-          po_reference: formData.po_reference,
-          price_per_kg: Number(formData.price_per_kg), 
-          gst_percent: Number(formData.gst_percent),
+          quantity_received: parsedQty,
+          vendor_name: trimmedVendor, 
+          po_reference: trimmedPo,
+          price_per_kg: parsedPrice, 
+          gst_percent: parsedGst,
           base_amount: baseAmount, 
           gst_amount: gstAmount, 
           total_amount: totalAmount,
-          date_received: formData.date_received || new Date().toISOString(),
-          notes: formData.notes
+          date_received: isoDateReceived,
+          notes: trimmedNotes
         };
 
         const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
 
         const finalBatches = newBatches.map(b => {
           const batchId = `MAT-${dateStr}-${productCode}-${String(b.batch_no).padStart(3, '0')}`;
-          const batchValue = b.quantity * Number(formData.price_per_kg) * (1 + (Number(formData.gst_percent)/100));
+          const batchValue = Number(b.quantity) * parsedPrice * (1 + (parsedGst / 100));
           const qrDataPayload = b.serialNumber;
 
-          if (!selectedMaterial.name || !batchId || !qrDataPayload || b.quantity == null || !formData.vendor_name) {
-            throw new Error("Missing required fields for batch generation.");
-          }
-
           return {
+            id: crypto.randomUUID(),
             batch_id: batchId, 
             serial_number: b.serialNumber,
+            barcode: b.serialNumber,
             material_id: selectedMaterial.id,
             material_name: selectedMaterial.name,
-            batch_number: b.batch_no, 
-            original_quantity: b.quantity, 
-            available_quantity: b.quantity,
-            vendor_name: formData.vendor_name, 
-            po_reference: formData.po_reference,
-            price_per_kg: Number(formData.price_per_kg), 
-            gst_percent: Number(formData.gst_percent),
+            batch_no: b.batch_no, 
+            quantity: Number(b.quantity), 
+            unit: 'kg', 
+            vendor: trimmedVendor, 
+            vendor_name: trimmedVendor, 
+            po_reference: trimmedPo,
+            price_per_kg: parsedPrice, 
+            gst_percent: parsedGst,
             batch_value: batchValue,
             barcode_data: qrDataPayload,
             status: 'Active',
             inventory_room_saved: false,
             barcode_status: 'Not Scanned',
-            scanningPersonName: formData.scanningPersonName
+            scanning_person_name: trimmedPerson,
+            scanningPersonName: trimmedPerson,
+            notes: trimmedNotes,
+            received_date: isoDateReceived,
+            date_received: isoDateReceived,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            current_stage: 'Incoming'
           };
         });
 
@@ -96,7 +155,7 @@ const IntakeStep3_Barcode = () => {
       setTimeout(() => setShowToast(false), 3000);
       
     } catch (err: any) {
-      console.error("Save barcode local error:", err);
+      console.error("Save barcode error:", err);
       toast.error(`Failed to save barcode: ${err.message || 'Unknown error'}`);
     } finally {
       setIsSaving(false);

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { inventoryService } from '../../../../services/inventoryService';
 import { useIntakeContext } from './IntakeContext';
 import { Package, X, ArrowRight, Loader2, Box } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const getCategoryStyles = (matName: string, category: string = '') => {
   const name = matName.toLowerCase();
@@ -73,9 +74,40 @@ const IntakeStep1_Form = () => {
     e.preventDefault();
     if (!selectedMaterial) return;
     
-    const qty = Number(formData.quantity_received) || 0;
+    // Validate Quantity Received (KG)
+    const qty = Number(formData.quantity_received);
+    if (isNaN(qty) || qty <= 0) {
+      toast.error("Quantity Received must be a valid number greater than zero.");
+      return;
+    }
+
+    // Validate Price Per KG
+    const price = Number(formData.price_per_kg);
+    if (isNaN(price) || price < 0) {
+      toast.error("Price Per KG must be a valid non-negative number.");
+      return;
+    }
+
+    // Validate Vendor Name
+    if (!formData.vendor_name.trim()) {
+      toast.error("Vendor Name is required.");
+      return;
+    }
+
+    // Validate PO Reference
+    if (!formData.po_reference.trim()) {
+      toast.error("PO Reference / Bill No is required.");
+      return;
+    }
+
+    // Validate Scanning Person Name
+    if (!formData.scanningPersonName.trim()) {
+      toast.error("Scanning Person Name is required.");
+      return;
+    }
+    
     // Auto-setup batch 1
-    setBatches([{ id: crypto.randomUUID(), batch_no: 1, quantity: qty }]);
+    setBatches([{ id: crypto.randomUUID(), batch_no: 1, quantity: Number(qty.toFixed(2)) }]);
     
     navigate('/inventory/raw-material/intake/split-batches');
   };
