@@ -510,26 +510,22 @@ class LocalInventoryService {
 
   // --- Helper Settings Methods ---
   private async getSettingsList(key: string): Promise<any[]> {
-    try {
-      const { data, error } = await supabase
-        .from('system_settings')
-        .select('setting_value')
-        .eq('setting_key', key)
-        .maybeSingle();
-      
-      if (!error && data && data.setting_value) {
-        return Array.isArray(data.setting_value) ? data.setting_value : [];
-      }
-    } catch (e) {
-      console.error(`Failed to load setting ${key} from Supabase:`, e);
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('setting_value')
+      .eq('setting_key', key)
+      .maybeSingle();
+    
+    if (error) {
+      toast.error(`Database error loading ${key}: ${error.message}`);
+      throw error;
     }
     
-    try {
-      const mockVal = (mockInitialState as any)[key] || [];
-      return Array.isArray(mockVal) ? mockVal : [];
-    } catch {
-      return [];
+    if (data && data.setting_value) {
+      return Array.isArray(data.setting_value) ? data.setting_value : [];
     }
+    
+    return [];
   }
 
   private async saveSettingsList(key: string, data: any[]): Promise<void> {
@@ -807,9 +803,18 @@ class LocalInventoryService {
       batch_id: b.batch_id,
       productName: b.product_name,
       productCode: b.product_code,
-      batchSize: b.batch_size,
-      totalMicroBatches: b.total_micro_batches,
-      producedBy: b.produced_by,
+      batchSize: Number(b.batch_size || 0),
+      total_units: Number(b.batch_size || 0),
+      totalMicroBatches: Number(b.total_micro_batches || 0),
+      total_micro_batches: Number(b.total_micro_batches || 0),
+      completed_micro_batches: Number(b.completed_micro_batches || 0),
+      produced_units: Number(b.produced_units || 0),
+      inventory_units: Number(b.inventory_units || 0),
+      notes: b.notes || '',
+      department_id: b.department_id || '',
+      section_id: b.section_id || '',
+      producedBy: b.produced_by || 'Admin',
+      produced_by: b.produced_by || 'Admin',
       status: b.status,
       createdAt: b.created_at,
       completedAt: b.completed_at
@@ -819,15 +824,21 @@ class LocalInventoryService {
   async saveProductionBatch(batch: any) {
     const payload = {
       id: batch.id || crypto.randomUUID(),
-      batch_id: batch.batchId || batch.batch_id || '',
+      batch_id: batch.batchId || batch.batch_id || batch.production_batch_id || '',
       product_name: batch.productName || batch.product_name || '',
       product_code: batch.productCode || batch.product_code || '',
-      batch_size: batch.batchSize || batch.batch_size || 0,
-      total_micro_batches: batch.totalMicroBatches || batch.total_micro_batches || 0,
+      batch_size: Number(batch.batchSize || batch.batch_size || batch.total_units || 0),
+      total_micro_batches: Number(batch.totalMicroBatches || batch.total_micro_batches || 0),
       produced_by: batch.producedBy || batch.produced_by || 'Admin',
       status: batch.status || 'Saved',
       created_at: batch.createdAt || batch.created_at || new Date().toISOString(),
-      completed_at: batch.completedAt || batch.completed_at || null
+      completed_at: batch.completedAt || batch.completed_at || null,
+      notes: batch.notes || '',
+      department_id: batch.department_id || '',
+      section_id: batch.section_id || '',
+      completed_micro_batches: Number(batch.completed_micro_batches || 0),
+      produced_units: Number(batch.produced_units || 0),
+      inventory_units: Number(batch.inventory_units || batch.inventory_ready || 0)
     };
     const { error } = await supabase.from(SUPABASE_TABLES.productionBatches).insert(payload);
     if (error) {
@@ -841,11 +852,17 @@ class LocalInventoryService {
     if (updates.batchId !== undefined || updates.batch_id !== undefined) payload.batch_id = updates.batchId || updates.batch_id;
     if (updates.productName !== undefined || updates.product_name !== undefined) payload.product_name = updates.productName || updates.product_name;
     if (updates.productCode !== undefined || updates.product_code !== undefined) payload.product_code = updates.productCode || updates.product_code;
-    if (updates.batchSize !== undefined || updates.batch_size !== undefined) payload.batch_size = updates.batchSize || updates.batch_size;
-    if (updates.totalMicroBatches !== undefined || updates.total_micro_batches !== undefined) payload.total_micro_batches = updates.totalMicroBatches || updates.total_micro_batches;
+    if (updates.batchSize !== undefined || updates.batch_size !== undefined) payload.batch_size = Number(updates.batchSize || updates.batch_size);
+    if (updates.totalMicroBatches !== undefined || updates.total_micro_batches !== undefined) payload.total_micro_batches = Number(updates.totalMicroBatches || updates.total_micro_batches);
     if (updates.producedBy !== undefined || updates.produced_by !== undefined) payload.produced_by = updates.producedBy || updates.produced_by;
     if (updates.status !== undefined) payload.status = updates.status;
     if (updates.completedAt !== undefined || updates.completed_at !== undefined) payload.completed_at = updates.completedAt || updates.completed_at;
+    if (updates.notes !== undefined) payload.notes = updates.notes;
+    if (updates.department_id !== undefined) payload.department_id = updates.department_id;
+    if (updates.section_id !== undefined) payload.section_id = updates.section_id;
+    if (updates.completed_micro_batches !== undefined) payload.completed_micro_batches = Number(updates.completed_micro_batches);
+    if (updates.produced_units !== undefined) payload.produced_units = Number(updates.produced_units);
+    if (updates.inventory_units !== undefined) payload.inventory_units = Number(updates.inventory_units);
 
     const { error } = await supabase
       .from(SUPABASE_TABLES.productionBatches)
@@ -868,10 +885,14 @@ class LocalInventoryService {
     }
   }
 
-  async getProductionIngredients(batchId?: string) {
+  // ---- PRODUCTION INGREDIENTS ----
+  async getProductionIngredients(batchId?: string, humanReadableBatchId?: string) {
     const list = await this.getSettingsList('production_ingredients');
     if (batchId) {
-      return list.filter((x: any) => x.production_batch_id === batchId || x.batch_id === batchId);
+      return list.filter((x: any) => 
+        x.production_batch_id === batchId || 
+        (humanReadableBatchId && x.production_batch_id === humanReadableBatchId)
+      );
     }
     return list;
   }
@@ -891,10 +912,13 @@ class LocalInventoryService {
     }
   }
 
-  async getMicroBatches(batchId?: string) {
+  async getMicroBatches(batchId?: string, humanReadableBatchId?: string) {
     const list = await this.getSettingsList('production_micro_batches');
     if (batchId) {
-      return list.filter((x: any) => x.production_batch_id === batchId);
+      return list.filter((x: any) => 
+        x.production_batch_id === batchId || x.productId === batchId ||
+        (humanReadableBatchId && (x.production_batch_id === humanReadableBatchId || x.productId === humanReadableBatchId))
+      );
     }
     return list;
   }
@@ -967,24 +991,28 @@ class LocalInventoryService {
       productName: item.product_name,
       productCode: item.product_code,
       batchId: item.batch_id,
+      batch_no: item.batch_id,
       microBatchNo: item.micro_batch_no,
+      mb_no: item.micro_batch_no,
       currentStage: item.current_stage || 'Production'
     }));
   }
 
   async saveProductBarcodes(newBarcodes: any[]) {
     const payloads = newBarcodes.map(item => ({
+      id: item.id || crypto.randomUUID(),
       barcode: item.barcode_no || item.barcode || item.barcodeNumber || item.displayBarcode,
       product_name: item.productName || item.product_name || '',
       product_code: item.productCode || item.product_code || '',
       batch_id: item.batchId || item.batch_id || '',
-      micro_batch_no: item.microBatchNo || item.micro_batch_no || '',
-      quantity: item.quantity || 1,
+      micro_batch_no: String(item.microBatchNo || item.micro_batch_no || ''),
+      quantity: Number(item.quantity || 1),
       unit: item.unit || 'Unit',
       produced_by: item.producedBy || item.produced_by || null,
       labeled_by: item.labeledBy || item.labeled_by || null,
       current_stage: item.currentStage || item.current_stage || 'Production',
-      created_at: item.created_at || new Date().toISOString()
+      created_at: item.created_at || new Date().toISOString(),
+      updated_at: item.updated_at || new Date().toISOString()
     }));
     const { error } = await supabase.from(SUPABASE_TABLES.productBarcodes).insert(payloads);
     if (error) {

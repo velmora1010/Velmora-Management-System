@@ -1,10 +1,10 @@
 export const getProductDisplayName = (productName: string): string => {
   if (!productName) return '';
   const lower = productName.toLowerCase();
-  if (lower.includes('liquid a')) return '1B';
-  if (lower.includes('liquid b')) return '1Y';
-  if (lower.includes('conditioner')) return '1P';
-  if (lower.includes('sponge')) return '1S';
+  if (lower.includes('liquid a') || lower.includes('blue') || lower.includes('1b')) return '1B';
+  if (lower.includes('liquid b') || lower.includes('yellow') || lower.includes('1y')) return '1Y';
+  if (lower.includes('conditioner') || lower.includes('pink') || lower.includes('1p')) return '1P';
+  if (lower.includes('sponge') || lower.includes('1s')) return '1S';
   return productName; // fallback
 };
 

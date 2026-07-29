@@ -486,7 +486,19 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
          currentStage: 'PRODUCT_OUT'
       }))
     : productBarcodes.filter(b => {
-    if (selectedProductCode && b.productCode !== selectedProductCode && b.product_code !== selectedProductCode) return false;
+    const pCode = (b.productCode || b.product_code || "").toUpperCase();
+    const normalizeCode = (code: string, name: string) => {
+      const c = code.toUpperCase();
+      const n = name.toLowerCase();
+      if (c === '1B' || c === '1Y' || c === '1P' || c === '1S') return c;
+      if (n.includes('liquid a') || n.includes('blue') || n.includes('1b')) return '1B';
+      if (n.includes('liquid b') || n.includes('yellow') || n.includes('1y')) return '1Y';
+      if (n.includes('conditioner') || n.includes('pink') || n.includes('1p')) return '1P';
+      if (n.includes('sponge') || n.includes('1s')) return '1S';
+      return c;
+    };
+    const resolvedCode = normalizeCode(pCode, b.productName || b.product_name || "");
+    if (selectedProductCode && resolvedCode !== selectedProductCode) return false;
     
     const matchesSearch = !searchTerm || 
       [b.barcode_no, b.product_name, b.product_code, b.batch_no, b.mb_no]

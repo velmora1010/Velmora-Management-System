@@ -4,7 +4,7 @@ import { QrCode, CheckCircle2, PackagePlus, Boxes, ArrowLeft, Package, Check, X,
 import ReactBarcode from 'react-barcode';
 import { inventoryService } from '../../../services/inventoryService';
 import { departmentService } from '../../../services/departmentService';
-import { calculateRequiredIngredients } from '../../../config/productFormulas';
+import { calculateRequiredIngredients, PRODUCTS } from '../../../config/productFormulas';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getProductDisplayName, getProductSubtext, getProductTheme } from './productHelpers';
 import toast from 'react-hot-toast';
@@ -70,8 +70,8 @@ const ProductionBatchDetail = () => {
       if (batch) {
         const prodBatchId = batch.id;
         const [ings, mbs, prodStock] = await Promise.all([
-          inventoryService.getProductionIngredients(prodBatchId),
-          inventoryService.getMicroBatches(prodBatchId),
+          inventoryService.getProductionIngredients(batch.id, batch.batch_id),
+          inventoryService.getMicroBatches(batch.id, batch.batch_id),
           inventoryService.getProductionMaterialStock()
         ]);
 
@@ -80,12 +80,13 @@ const ProductionBatchDetail = () => {
         
         for (const mb of mbs) {
           let updatedMb = { ...mb };
+          const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
           if (mb.status === 'Barcode Saved' || mb.status === 'Passed') {
              const existingForMB = allBarcodes.filter((b: any) => 
-               (b.batchId === prodBatchId || b.productId === prodBatchId) && b.microBatchNo === mb.micro_batch_no
+               (b.batchId === prodBatchId || b.productId === prodBatchId) && String(b.microBatchNo) === String(mb.micro_batch_no)
              );
              
-             if (existingForMB.length < mb.units) {
+             if (existingForMB.length < mbUnits) {
                updatedMb.status = 'Passed';
                if (mb.status !== 'Passed') {
                  await inventoryService.updateMicroBatch(mb.id, { status: 'Passed' });
@@ -280,9 +281,10 @@ const ProductionBatchDetail = () => {
     if (productionBatch) {
       const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
       const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
+      const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
       
       const list = [];
-      for (let i = 1; i <= mb.units; i++) {
+      for (let i = 1; i <= mbUnits; i++) {
         const serial = i.toString().padStart(3, '0');
         list.push({
           no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
@@ -331,6 +333,21 @@ const ProductionBatchDetail = () => {
     }));
     
     try {
+      const checkAll = await inventoryService.getProductBarcodes();
+      const existingForMB = checkAll.filter((item: any) => 
+        (item.batchId === productionBatch.id || item.productId === productionBatch.id) && String(item.microBatchNo) === String(mb.micro_batch_no)
+      );
+      if (existingForMB.length > 0) {
+        toast.error('Barcodes have already been generated and saved for this micro batch!');
+        await inventoryService.updateMicroBatch(mb.id, {
+          status: 'Barcode Saved',
+        });
+        setPendingBarcodeMB(null);
+        setPendingBarcodesList([]);
+        fetchData();
+        return;
+      }
+
       await (inventoryService as any).saveProductBarcodes(finalBarcodes);
 
       // --- Generate and save master QC barcode ---
@@ -359,12 +376,12 @@ const ProductionBatchDetail = () => {
       const isQCDuplicate = savedQC?.isDuplicate;
       // -------------------------------------------
       
-      const checkAll = await inventoryService.getProductBarcodes();
-      const existingForMB = checkAll.filter((item: any) => 
-        (item.batchId === productionBatch.id || item.productId === productionBatch.id) && item.microBatchNo === mb.micro_batch_no
+      const checkAllPost = await inventoryService.getProductBarcodes();
+      const existingForMBPost = checkAllPost.filter((item: any) => 
+        (item.batchId === productionBatch.id || item.productId === productionBatch.id) && String(item.microBatchNo) === String(mb.micro_batch_no)
       );
 
-      if (existingForMB.length < finalBarcodes.length) {
+      if (existingForMBPost.length < finalBarcodes.length) {
         toast.error('Barcode save failed. Please try again.');
         return;
       }
@@ -465,18 +482,50 @@ const ProductionBatchDetail = () => {
 
   if (!productionBatch) return <div style={{ padding: '48px', textAlign: 'center' }}>Loading...</div>;
 
-  const checkedIngredientsCount = ingredients?.filter((i: any) => {
-    const avail = productionStock[normalizeMaterialKey(i.material_name)]?.availableKg || 0;
-    return avail >= i.required_quantity;
-  }).length || 0;
+  const getSafeRequiredQuantity = (ing: any) => {
+    let reqQty = Number(ing.required_quantity);
+    if (!Number.isFinite(reqQty) || reqQty <= 0) {
+      try {
+        const product = PRODUCTS.find(p => p.name === productionBatch.product_name);
+        if (product) {
+          const reqIngs = calculateRequiredIngredients(product.id, Number(productionBatch.total_units || productionBatch.batch_size || 0));
+          const matchedIng = reqIngs?.find(ri => normalizeMaterialKey(ri.name) === normalizeMaterialKey(ing.material_name));
+          if (matchedIng) {
+            reqQty = Number(matchedIng.required_quantity);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to recalculate required quantity:", err);
+      }
+    }
+    return Number.isFinite(reqQty) && reqQty > 0 ? reqQty : 0;
+  };
+
+  const isIngredientReady = (ing: any) => {
+    const req = getSafeRequiredQuantity(ing);
+    if (req <= 0) return false;
+    const avail = Number(productionStock[normalizeMaterialKey(ing.material_name)]?.availableKg);
+    if (!Number.isFinite(avail)) return false;
+    return avail >= req;
+  };
+
+  const checkedIngredientsCount = ingredients?.filter((i: any) => isIngredientReady(i)).length || 0;
   const allIngredientsPrepared = ingredients && ingredients.length > 0 && checkedIngredientsCount === ingredients.length;
 
   let progress = 0;
   if (productionBatch.status === 'Prep') {
-    progress = ingredients.length > 0 ? Math.round((checkedIngredientsCount / ingredients.length) * 100) : 0;
+    const totalIngs = ingredients?.length || 0;
+    progress = totalIngs > 0 ? Math.round((checkedIngredientsCount / totalIngs) * 100) : 0;
   } else {
-    progress = productionBatch.total_micro_batches > 0 ? Math.round((productionBatch.completed_micro_batches / productionBatch.total_micro_batches) * 100) : 0;
+    const completedMB = Number(productionBatch.completed_micro_batches || 0);
+    const totalMBVal = Number(productionBatch.total_micro_batches || 0);
+    if (Number.isFinite(completedMB) && Number.isFinite(totalMBVal) && totalMBVal > 0) {
+      progress = Math.round((completedMB / totalMBVal) * 100);
+    } else {
+      progress = 0;
+    }
   }
+  progress = Math.max(0, Math.min(100, progress));
 
   const isFullyComplete = productionBatch.status === 'Complete';
 
@@ -682,8 +731,9 @@ const ProductionBatchDetail = () => {
           
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px', marginBottom: '24px' }}>
             {ingredients.map((ing: any) => {
-              const avail = productionStock[normalizeMaterialKey(ing.material_name)]?.availableKg || 0;
-              const isReady = avail >= ing.required_quantity;
+              const avail = Number(productionStock[normalizeMaterialKey(ing.material_name)]?.availableKg || 0);
+              const isReady = isIngredientReady(ing);
+              const req = getSafeRequiredQuantity(ing);
               return (
                 <div key={ing.id} style={{ 
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px', 
@@ -708,7 +758,7 @@ const ProductionBatchDetail = () => {
                     </div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '16px', color: isReady ? 'white' : 'var(--text-primary)', marginBottom: '4px' }}>{ing.material_name}</div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Required: <strong style={{ color: isReady ? '#10b981' : 'white' }}>{ing.required_quantity} KG</strong> | Available: <strong style={{ color: isReady ? '#10b981' : '#ef4444' }}>{avail} KG</strong></div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Required: <strong style={{ color: isReady ? '#10b981' : 'white' }}>{req.toFixed(2)} KG</strong> | Available: <strong style={{ color: isReady ? '#10b981' : '#ef4444' }}>{avail.toFixed(2)} KG</strong></div>
                     </div>
                   </div>
                   
@@ -799,7 +849,7 @@ const ProductionBatchDetail = () => {
                     </div>
                     <div>
                       <div style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '4px' }}>Quantity</div>
-                      <div style={{ fontSize: '18px', fontWeight: 700, color: 'white' }}>{mb.units} <span style={{ fontSize: '14px', fontWeight: 'normal', color: '#64748b' }}>units</span></div>
+                      <div style={{ fontSize: '18px', fontWeight: 700, color: 'white' }}>{Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0)} <span style={{ fontSize: '14px', fontWeight: 'normal', color: '#64748b' }}>units</span></div>
                     </div>
                     {(mb.producedBy || mb.producedAt) && (
                       <div style={{ marginLeft: '16px' }}>
