@@ -998,12 +998,19 @@ class LocalInventoryService {
     }));
   }
 
-  async getProductBarcodesForMicroBatch(batchId: string, microBatchNo: string | number) {
-    const { data, error } = await supabase
+  async getProductBarcodesForMicroBatch(batchId: string, microBatchNo: string | number, altBatchId?: string) {
+    let query = supabase
       .from(SUPABASE_TABLES.productBarcodes)
       .select('*')
-      .eq('batch_id', batchId)
       .eq('micro_batch_no', String(microBatchNo));
+
+    if (altBatchId && altBatchId !== batchId) {
+      query = query.or(`batch_id.eq.${batchId},batch_id.eq.${altBatchId}`);
+    } else {
+      query = query.eq('batch_id', batchId);
+    }
+
+    const { data, error } = await query;
     if (error) {
       throw error;
     }
@@ -1021,6 +1028,39 @@ class LocalInventoryService {
       mb_no: item.micro_batch_no,
       currentStage: item.current_stage || 'Production'
     }));
+  }
+
+  async getNextProductBarcodeSerials(productCode: string, mbNo: string | number, dateStr: string, count: number): Promise<string[]> {
+    const prefix = `PROD-${productCode}-MB${mbNo}-${dateStr}-`;
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLES.productBarcodes)
+      .select('barcode')
+      .like('barcode', `${prefix}%`);
+
+    if (error) {
+      console.error('Error fetching existing barcode serials:', error);
+    }
+
+    let maxSerial = 0;
+    if (data && data.length > 0) {
+      for (const row of data) {
+        if (row.barcode) {
+          const parts = row.barcode.split('-');
+          const lastPart = parts[parts.length - 1];
+          const num = parseInt(lastPart, 10);
+          if (!isNaN(num) && num > maxSerial) {
+            maxSerial = num;
+          }
+        }
+      }
+    }
+
+    const serials: string[] = [];
+    for (let i = 1; i <= count; i++) {
+      const nextNum = maxSerial + i;
+      serials.push(`${prefix}${nextNum.toString().padStart(3, '0')}`);
+    }
+    return serials;
   }
 
   async saveProductBarcodes(newBarcodes: any[]) {

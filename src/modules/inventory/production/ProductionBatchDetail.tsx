@@ -285,7 +285,8 @@ const ProductionBatchDetail = () => {
     try {
       const existingBarcodes = await (inventoryService as any).getProductBarcodesForMicroBatch(
         productionBatch.id,
-        mb.micro_batch_no
+        mb.micro_batch_no,
+        productionBatch.batch_id
       );
 
       if (existingBarcodes.length > 0) {
@@ -302,21 +303,30 @@ const ProductionBatchDetail = () => {
       console.error('Failed to check existing barcodes:', err);
     }
 
-    // No existing barcodes — generate new barcode strings for review
+    // No existing barcodes — generate new non-colliding barcode strings for review
     setPendingBarcodeMB(mb);
     setBarcodesAlreadySaved(false);
     const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
     const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
     const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
     
-    const list = [];
-    for (let i = 1; i <= mbUnits; i++) {
-      const serial = i.toString().padStart(3, '0');
-      list.push({
-        no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
-        scanned: false
-      });
+    let generatedNos: string[] = [];
+    try {
+      generatedNos = await (inventoryService as any).getNextProductBarcodeSerials(
+        productCode,
+        mb.micro_batch_no,
+        dateStr,
+        mbUnits
+      );
+    } catch (e) {
+      console.error('Failed to fetch next barcode serials:', e);
+      for (let i = 1; i <= mbUnits; i++) {
+        const serial = i.toString().padStart(3, '0');
+        generatedNos.push(`PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`);
+      }
     }
+
+    const list = generatedNos.map(no => ({ no, scanned: false }));
     setPendingBarcodesList(list);
   };
 
@@ -346,7 +356,8 @@ const ProductionBatchDetail = () => {
       // Final server-side duplicate check using targeted query
       const existingForMB = await (inventoryService as any).getProductBarcodesForMicroBatch(
         productionBatch.id,
-        mb.micro_batch_no
+        mb.micro_batch_no,
+        productionBatch.batch_id
       );
 
       if (existingForMB.length > 0) {
