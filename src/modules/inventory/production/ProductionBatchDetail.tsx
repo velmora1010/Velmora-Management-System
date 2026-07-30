@@ -8,6 +8,8 @@ import { calculateRequiredIngredients } from '../../../config/productFormulas';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getProductDisplayName, getProductSubtext, getProductTheme } from './productHelpers';
 import toast from 'react-hot-toast';
+import { supabase } from '../../../lib/supabase';
+import { SUPABASE_TABLES } from '../../../config/supabaseTables';
 
 
 const normalizeMaterialKey = (name: string) => String(name || "").trim().toLowerCase();
@@ -81,12 +83,14 @@ const ProductionBatchDetail = () => {
         
         for (const mb of mbs) {
           let updatedMb = { ...mb };
+          const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
           if (mb.status === 'Barcode Saved' || mb.status === 'Passed') {
              const existingForMB = allBarcodes.filter((b: any) => 
-               (b.batchId === prodBatchId || b.productId === prodBatchId) && b.microBatchNo === mb.micro_batch_no
+               (b.batchId === prodBatchId || b.productId === prodBatchId || b.batch_id === prodBatchId || b.batchId === batch.batch_id || b.batch_id === batch.batch_id) && 
+               String(b.microBatchNo || b.micro_batch_no || '').replace(/^MB/i, '') === String(mb.micro_batch_no).replace(/^MB/i, '')
              );
              
-             if (existingForMB.length < mb.units) {
+             if (existingForMB.length < mbUnits) {
                updatedMb.status = 'Passed';
                if (mb.status !== 'Passed') {
                  await inventoryService.updateMicroBatch(mb.id, { status: 'Passed' });
@@ -279,15 +283,31 @@ const ProductionBatchDetail = () => {
 
     if (productionBatch) {
       const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
+      const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
+      const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
+      
+      const expectedList = [];
+      for (let i = 1; i <= mbUnits; i++) {
+        const serial = i.toString().padStart(3, '0');
+        expectedList.push({
+          no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
+          scanned: false
+        });
+      }
+
+      const expectedBarcodes = expectedList.map((b: any) => b.no);
+
       try {
-        const existingBarcodes = await (inventoryService as any).getProductBarcodesForMicroBatch(
-          productionBatch.id,
-          mb.micro_batch_no,
-          productionBatch.batch_id
-        );
-        if (existingBarcodes && existingBarcodes.length >= mbUnits) {
+        const { data: existingData } = await supabase
+          .from(SUPABASE_TABLES.productBarcodes)
+          .select('*')
+          .in('barcode', expectedBarcodes);
+
+        const existingCount = new Set((existingData || []).map((r: any) => r.barcode)).size;
+
+        if (existingCount >= mbUnits) {
           await inventoryService.updateMicroBatch(mb.id, { status: 'Barcode Saved' });
-          toast.success(`${existingBarcodes.length} product barcodes already exist and are saved.`);
+          toast.success(`${existingCount} product barcodes already exist and are saved.`);
           await fetchData();
           return;
         }
@@ -296,18 +316,7 @@ const ProductionBatchDetail = () => {
       }
 
       setPendingBarcodeMB(mb);
-      const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
-      const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
-      
-      const list = [];
-      for (let i = 1; i <= mbUnits; i++) {
-        const serial = i.toString().padStart(3, '0');
-        list.push({
-          no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
-          scanned: false
-        });
-      }
-      setPendingBarcodesList(list);
+      setPendingBarcodesList(expectedList);
     }
   };
 
@@ -324,15 +333,16 @@ const ProductionBatchDetail = () => {
 
     const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
     const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
+    const expectedBarcodes = pendingBarcodesList.map((b: any) => b.no);
 
     try {
-      // 1. Fetch existing barcode rows for this micro batch directly from Supabase
-      const existingBarcodes = await (inventoryService as any).getProductBarcodesForMicroBatch(
-        productionBatch.id,
-        mb.micro_batch_no,
-        productionBatch.batch_id
-      );
-      const existingSet = new Set((existingBarcodes || []).map((b: any) => b.barcodeNumber || b.barcode_no || b.barcode || b.no));
+      // 1. Pre-check existing barcode rows directly from Supabase using expected barcodes
+      const { data: existingRows } = await supabase
+        .from(SUPABASE_TABLES.productBarcodes)
+        .select('*')
+        .in('barcode', expectedBarcodes);
+
+      const existingSet = new Set((existingRows || []).map((r: any) => r.barcode));
 
       const finalBarcodes = pendingBarcodesList.map((b: any) => ({
         id: crypto.randomUUID(),
@@ -341,7 +351,7 @@ const ProductionBatchDetail = () => {
         batchId: productionBatch.id,
         productName: productionBatch.product_name,
         productCode: productCode,
-        microBatchNo: mb.micro_batch_no,
+        microBatchNo: String(mb.micro_batch_no).replace(/^MB/i, ''),
         barcodeNumber: b.no,
         barcode_no: b.no, 
         displayBarcode: b.no,
@@ -399,7 +409,7 @@ const ProductionBatchDetail = () => {
         productName: productionBatch.product_name,
         productCode: productCode,
         batchId: productionBatch.id,
-        microBatchNo: mb.micro_batch_no,
+        microBatchNo: String(mb.micro_batch_no).replace(/^MB/i, ''),
         totalUnits: finalBarcodes.length,
         productBarcodes: finalBarcodes.map((b: any) => b.barcodeNumber),
         producedBy: mb.producedBy,
@@ -410,15 +420,20 @@ const ProductionBatchDetail = () => {
 
       await (inventoryService as any).addQCBarcode(qcRecord);
       
-      // 5. Verify that total barcode count in Supabase matches required units
-      const checkAll = await (inventoryService as any).getProductBarcodesForMicroBatch(
-        productionBatch.id,
-        mb.micro_batch_no,
-        productionBatch.batch_id
-      );
+      // 5. FINAL VERIFICATION QUERY directly using expected barcode strings in Supabase
+      const { data: finalVerifiedData, error: verifyErr } = await supabase
+        .from(SUPABASE_TABLES.productBarcodes)
+        .select('*')
+        .in('barcode', expectedBarcodes);
 
-      if (checkAll.length < mbUnits) {
-        toast.error(`Barcode save incomplete (${checkAll.length}/${mbUnits}). Please try again.`);
+      if (verifyErr) {
+        console.error("Supabase verification query error:", verifyErr);
+      }
+
+      const savedCount = new Set((finalVerifiedData || []).map((r: any) => r.barcode)).size;
+
+      if (savedCount < mbUnits) {
+        toast.error(`Barcode save incomplete (${savedCount}/${mbUnits}). Please try again.`);
         return;
       }
 
@@ -426,14 +441,14 @@ const ProductionBatchDetail = () => {
         status: 'Barcode Saved',
       });
 
-      toast.success(`${checkAll.length} product barcodes saved successfully`);
+      toast.success(`${savedCount} product barcodes saved successfully`);
 
       setPendingBarcodeMB(null);
       setPendingBarcodesList([]);
       
       await fetchData(); 
     } catch (err: any) {
-      console.error(err);
+      console.error("Save barcode exception:", err);
       toast.error(err.message || "Failed to save barcodes");
     } finally {
       setIsSavingBarcode(false);
