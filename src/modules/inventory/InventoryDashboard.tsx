@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { Boxes, Factory, Zap, ArrowUpCircle } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { inventoryService } from '../../services/inventoryService';
+import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
 export const InventoryDashboard = () => {
   const [rawMaterials, setRawMaterials] = useState<any[]>([]);
@@ -17,20 +19,26 @@ export const InventoryDashboard = () => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const [rm, b, pb, fg] = await Promise.all([
+      const [rm, bRes, pb, fg] = await Promise.all([
         inventoryService.getMaterials(),
-        inventoryService.getBatches(),
+        supabase.from(SUPABASE_TABLES.rawMaterialBarcodes).select('*'),
         inventoryService.getProductionBatches(),
         inventoryService.getFinishedGoods()
       ]);
       
+      if (bRes.error) {
+        console.error('Supabase query error for raw_material_barcodes:', bRes.error);
+        throw new Error(`Failed to load raw material barcodes: ${bRes.error.message}`);
+      }
+
+      const b = bRes.data || [];
       setRawMaterials(rm || []);
-      setBatches(b || []);
+      setBatches(b);
       setProductionBatches((pb || []).filter((item: any) => item.status !== 'DELETED'));
       setFinishedGoods(fg || []);
 
       // Sort recent raw material intake batches by received_date then created_at
-      const recentBatches = [...(b || [])]
+      const recentBatches = [...b]
         .filter((item: any) => item.current_stage !== 'DELETED' && item.status !== 'DELETED')
         .sort((a: any, b: any) => {
           const dateA = new Date(a.received_date || a.created_at || 0).getTime();
@@ -42,7 +50,7 @@ export const InventoryDashboard = () => {
       setInventoryIn(recentBatches);
     } catch (err: any) {
       console.error('Failed to load dashboard data from Supabase', err);
-      setErrorMsg(err.message || 'Failed to load inventory dashboard data');
+      setErrorMsg(err.message || 'Failed to load inventory dashboard data from Supabase');
     } finally {
       setLoading(false);
     }
@@ -51,33 +59,38 @@ export const InventoryDashboard = () => {
   useEffect(() => {
     fetchDashboardData();
 
-    // Auto-refresh when window regains focus
-    window.addEventListener('focus', fetchDashboardData);
-    return () => window.removeEventListener('focus', fetchDashboardData);
+    // Auto-refresh when window regains focus or storage/inventory updates
+    const handleRefresh = () => fetchDashboardData();
+    window.addEventListener('focus', handleRefresh);
+    window.addEventListener('storage', handleRefresh);
+    return () => {
+      window.removeEventListener('focus', handleRefresh);
+      window.removeEventListener('storage', handleRefresh);
+    };
   }, []);
 
-  // --- MEMOIZED CALCULATIONS ---
-  // Filter out deleted and consumed/moved OUT raw material barcodes for current available stock
+  // --- MEMOIZED CALCULATIONS FOR RAW MATERIAL SUMMARY ---
+
+  // 1. Filter valid non-deleted raw material barcode records
   const validRawBatches = useMemo(() => {
-    return batches.filter(b => {
+    const seen = new Set<string>();
+    return (batches || []).filter(b => {
+      if (!b) return false;
       const isDeleted = b.current_stage === 'DELETED' || b.status === 'DELETED' || b.is_deleted === true;
-      return !isDeleted;
+      if (isDeleted) return false;
+
+      const key = b.barcode || b.id || b.serial_number;
+      if (key && seen.has(key)) return false;
+      if (key) seen.add(key);
+
+      const qty = Number(b.quantity || b.available_quantity || b.original_quantity || 0);
+      return Number.isFinite(qty) && qty > 0;
     });
   }, [batches]);
 
-  // Active in-stock batches (stage is RAW_MATERIAL_IN, READY_FOR_FIRST_SCAN, Incoming, or quantity > 0 and NOT OUT)
-  const activeInStockBatches = useMemo(() => {
-    return validRawBatches.filter(b => {
-      const stage = String(b.current_stage || b.currentStage || '').toUpperCase();
-      const isOut = stage === 'RAW_MATERIAL_OUT' || stage === 'CONSUMED' || b.status === 'Depleted' || b.status === 'Completed';
-      const qty = Number(b.quantity || b.available_quantity || b.original_quantity || 0);
-      return !isOut && qty > 0;
-    });
-  }, [validRawBatches]);
-
-  // Total Stock in KG (excluding water and litre-based materials)
+  // 2. Total Stock in KG (excluding Water and litre-based materials)
   const totalRmStockKg = useMemo(() => {
-    return activeInStockBatches.reduce((acc, b) => {
+    return validRawBatches.reduce((acc, b) => {
       const unit = String(b.unit || '').toLowerCase().trim();
       const matName = String(b.material_name || b.materialName || '').toLowerCase().trim();
       const isLitre = unit.startsWith('l') || unit === 'litre' || unit === 'litres' || matName.includes('water');
@@ -86,27 +99,49 @@ export const InventoryDashboard = () => {
       const qty = Number(b.quantity || b.available_quantity || b.original_quantity || 0);
       return acc + (Number.isFinite(qty) && qty > 0 ? qty : 0);
     }, 0);
-  }, [activeInStockBatches]);
+  }, [validRawBatches]);
 
-  // Total Inventory Value (available quantity * price_per_kg)
+  // 3. Total Inventory Value (quantity * price_per_kg)
   const totalRmValue = useMemo(() => {
-    return activeInStockBatches.reduce((acc, b) => {
+    return validRawBatches.reduce((acc, b) => {
       const qty = Number(b.quantity || b.available_quantity || b.original_quantity || 0);
       const price = Number(b.price_per_kg || b.price || 0);
-      return acc + (Number.isFinite(qty) && qty > 0 && Number.isFinite(price) ? qty * price : 0);
+      return acc + (Number.isFinite(qty) && qty > 0 && Number.isFinite(price) && price >= 0 ? qty * price : 0);
     }, 0);
-  }, [activeInStockBatches]);
+  }, [validRawBatches]);
 
-  // Active Batches Count
-  const activeBatchCount = activeInStockBatches.length;
+  // 4. Active Batches Count (unique material + batch_no)
+  const activeBatchCount = useMemo(() => {
+    const set = new Set<string>();
+    validRawBatches.forEach(b => {
+      const batchNo = b.batch_no || b.batchNo;
+      const matName = b.material_name || b.materialName || '';
+      const key = batchNo ? `${matName}_${batchNo}` : (b.id || b.barcode);
+      if (key) set.add(key);
+    });
+    return set.size;
+  }, [validRawBatches]);
 
-  // Low Stock Count (< 100 KG or status === 'Low Stock')
+  // 5. Low Stock Count (materials whose total stock is < 100 KG, each material counted once)
   const lowStockCount = useMemo(() => {
-    return activeInStockBatches.filter(b => {
-      const qty = Number(b.quantity || b.available_quantity || 0);
-      return qty < 100 || b.status === 'Low Stock';
-    }).length;
-  }, [activeInStockBatches]);
+    const materialTotals = new Map<string, number>();
+    validRawBatches.forEach(b => {
+      const matName = String(b.material_name || b.materialName || '').trim();
+      if (!matName) return;
+      const qty = Number(b.quantity || b.available_quantity || b.original_quantity || 0);
+      if (Number.isFinite(qty) && qty > 0) {
+        materialTotals.set(matName, (materialTotals.get(matName) || 0) + qty);
+      }
+    });
+
+    let count = 0;
+    materialTotals.forEach((totalQty) => {
+      if (totalQty > 0 && totalQty < 100) {
+        count++;
+      }
+    });
+    return count;
+  }, [validRawBatches]);
 
   const totalProdBatches = useMemo(() => productionBatches.length, [productionBatches]);
   const inProgressProdBatches = useMemo(() => productionBatches.filter(b => b.status === 'Prep' || b.status === 'In Progress').length, [productionBatches]);
@@ -140,7 +175,7 @@ export const InventoryDashboard = () => {
   const formatDate = (dateStr: any) => {
     if (!dateStr) return '-';
     const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? '-' : d.toLocaleDateString();
+    return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('en-GB');
   };
 
   return (
