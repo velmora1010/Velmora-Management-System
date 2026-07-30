@@ -9,6 +9,7 @@ import BarcodeComponent from 'react-barcode';
 import { inventoryService } from '../../../services/inventoryService';
 import { departmentService } from '../../../services/departmentService';
 import { supabase } from '../../../lib/supabase';
+import { barcodeService } from '../../../services/barcodeService';
 
 const normalizeCode = (code: any) => String(code || '').trim().toUpperCase().replace(/\s+/g, '');
 
@@ -172,18 +173,19 @@ export const QCBarcodeList = () => {
     
     setIsProcessingScan(true);
     try {
-      const scanned = scannedCode.trim();
+      const scanned = normalizeCode(scannedCode);
       const latestQCBarcodes = await (inventoryService as any).getQCBarcodes();
 
       const qc = latestQCBarcodes.find((item: any) => {
         const values = [
+          item.scan_code,
+          item.scanCode,
           item.qcBarcode,
+          item.qc_barcode,
           item.displayBarcode,
-          item.barcodeNumber,
-          item.barcode
-        ].filter(Boolean).map(v => String(v).trim());
-
-        return values.includes(scanned);
+          item.barcodeNumber
+        ].map(x => normalizeCode(x));
+        return values.includes(scanned) || normalizeCode(barcodeService.deriveScanCode(item.qcBarcode || item.qc_barcode, 'QC')) === scanned;
       });
       
       if (!qc) {

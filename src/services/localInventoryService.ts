@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { deriveScanCodeFromBarcode } from '../modules/inventory/production/productHelpers';
+import { barcodeService } from './barcodeService';
 
 export const getMasterBarcode = (item: any) => {
   return (
@@ -571,14 +572,19 @@ class LocalInventoryService {
       toast.error('Failed to load raw material barcodes: ' + error.message);
       throw error;
     }
-    return (data || []).map((item: any) => ({
-      ...item,
-      barcodeNumber: item.barcode,
-      displayBarcode: item.barcode,
-      materialName: item.material_name,
-      batchNo: item.batch_no,
-      currentStage: item.current_stage
-    }));
+    return (data || []).map((item: any) => {
+      const scanCode = item.scan_code || barcodeService.deriveScanCode(item.barcode, 'RAW_MATERIAL');
+      return {
+        ...item,
+        scan_code: scanCode,
+        scanCode: scanCode,
+        barcodeNumber: item.barcode,
+        displayBarcode: item.barcode,
+        materialName: item.material_name,
+        batchNo: item.batch_no,
+        currentStage: item.current_stage
+      };
+    });
   }
 
   async getRawMaterialBarcodesFromSupabase(): Promise<any[]> {
@@ -1193,27 +1199,34 @@ class LocalInventoryService {
       toast.error('Failed to load QC barcodes: ' + error.message);
       throw error;
     }
-    return (data || []).map((item: any) => ({
-      ...item,
-      qcBarcode: item.qc_barcode,
-      displayBarcode: item.qc_barcode,
-      productName: item.product_name,
-      productCode: item.product_code,
-      batchId: item.batch_id,
-      microBatchNo: item.micro_batch_no,
-      totalUnits: item.total_units,
-      producedBy: item.produced_by,
-      labeledBy: item.labeled_by,
-      productBarcodes: item.product_barcodes,
-      qcInPerson: item.qc_in_person,
-      qcInAt: item.qc_in_at,
-      currentStage: item.current_stage
-    }));
+    return (data || []).map((item: any) => {
+      const scanCode = item.scan_code || barcodeService.deriveScanCode(item.qc_barcode, 'QC');
+      return {
+        ...item,
+        scan_code: scanCode,
+        scanCode: scanCode,
+        qcBarcode: item.qc_barcode,
+        displayBarcode: item.qc_barcode,
+        productName: item.product_name,
+        productCode: item.product_code,
+        batchId: item.batch_id,
+        microBatchNo: item.micro_batch_no,
+        totalUnits: item.total_units,
+        producedBy: item.produced_by,
+        labeledBy: item.labeled_by,
+        productBarcodes: item.product_barcodes,
+        qcInPerson: item.qc_in_person,
+        qcInAt: item.qc_in_at,
+        currentStage: item.current_stage
+      };
+    });
   }
 
   async addQCBarcode(record: any) {
     const batchId = record.batchId || record.batch_id || '';
     const microBatchNo = String(record.microBatchNo || record.micro_batch_no || '');
+    const qcBarcodeNo = record.qcBarcode || record.qc_barcode;
+    const scanCode = record.scan_code || record.scanCode || barcodeService.generateScanCode('QC', record) || barcodeService.deriveScanCode(qcBarcodeNo, 'QC');
 
     // Check if a QC barcode already exists for this batch + micro batch
     const { data: existing } = await supabase
@@ -1228,7 +1241,8 @@ class LocalInventoryService {
     }
 
     const payload = {
-      qc_barcode: record.qcBarcode || record.qc_barcode,
+      qc_barcode: qcBarcodeNo,
+      scan_code: scanCode,
       product_name: record.productName || record.product_name || '',
       product_code: record.productCode || record.product_code || '',
       batch_id: batchId,
@@ -1243,8 +1257,17 @@ class LocalInventoryService {
     };
     const { error } = await supabase.from(SUPABASE_TABLES.qcBarcodes).insert(payload);
     if (error) {
-      toast.error('Failed to save QC barcode: ' + error.message);
-      throw error;
+      if (error.code === 'PGRST204' || error.message?.includes('scan_code')) {
+        const { scan_code, ...fallbackPayload } = payload;
+        const { error: fallbackError } = await supabase.from(SUPABASE_TABLES.qcBarcodes).insert(fallbackPayload);
+        if (fallbackError) {
+          toast.error('Failed to save QC barcode: ' + fallbackError.message);
+          throw fallbackError;
+        }
+      } else {
+        toast.error('Failed to save QC barcode: ' + error.message);
+        throw error;
+      }
     }
     return { isDuplicate: false };
   }
@@ -1457,29 +1480,36 @@ class LocalInventoryService {
       toast.error('Failed to load combo boxes: ' + error.message);
       throw error;
     }
-    return (data || []).map((item: any) => ({
-      ...item,
-      comboBoxBarcode: item.combo_box_barcode,
-      displayBarcode: item.combo_box_barcode,
-      comboName: item.combo_name,
-      comboType: item.combo_type,
-      packedItems: item.packed_items || [],
-      requiredItems: item.required_items || [],
-      currentStage: item.current_stage,
-      createdAt: item.created_at,
-      generatedBy: item.generated_by,
-      generatedAt: item.generated_at,
-      comboInventoryInPersonName: item.inventory_in_person,
-      comboInventoryOutPersonName: item.inventory_out_person,
-      comboInventoryInAt: item.inventory_in_at,
-      comboInventoryOutAt: item.inventory_out_at
-    }));
+    return (data || []).map((item: any) => {
+      const scanCode = item.scan_code || barcodeService.deriveScanCode(item.combo_box_barcode, 'COMBO');
+      return {
+        ...item,
+        scan_code: scanCode,
+        scanCode: scanCode,
+        comboBoxBarcode: item.combo_box_barcode,
+        displayBarcode: item.combo_box_barcode,
+        comboName: item.combo_name,
+        comboType: item.combo_type,
+        packedItems: item.packed_items || [],
+        requiredItems: item.required_items || [],
+        currentStage: item.current_stage,
+        createdAt: item.created_at,
+        generatedBy: item.generated_by,
+        generatedAt: item.generated_at,
+        comboInventoryInPersonName: item.inventory_in_person,
+        comboInventoryOutPersonName: item.inventory_out_person,
+        comboInventoryInAt: item.inventory_in_at,
+        comboInventoryOutAt: item.inventory_out_at
+      };
+    });
   }
 
   async saveComboBox(box: any) {
     const barcodeValue = box.comboBoxBarcode || box.combo_box_barcode;
+    const scanCode = box.scan_code || box.scanCode || barcodeService.generateScanCode('COMBO', box) || barcodeService.deriveScanCode(barcodeValue, 'COMBO');
     const payload = {
       combo_box_barcode: barcodeValue,
+      scan_code: scanCode,
       combo_name: box.comboName || box.combo_name || '',
       combo_type: box.comboType || box.combo_type || '',
       generated_by: box.generatedBy || box.generated_by || null,
@@ -1495,8 +1525,17 @@ class LocalInventoryService {
     };
     const { error } = await supabase.from(SUPABASE_TABLES.comboBoxes).upsert(payload, { onConflict: 'combo_box_barcode' });
     if (error) {
-      toast.error('Failed to save combo box: ' + error.message);
-      throw error;
+      if (error.code === 'PGRST204' || error.message?.includes('scan_code')) {
+        const { scan_code, ...fallbackPayload } = payload;
+        const { error: fallbackError } = await supabase.from(SUPABASE_TABLES.comboBoxes).upsert(fallbackPayload, { onConflict: 'combo_box_barcode' });
+        if (fallbackError) {
+          toast.error('Failed to save combo box: ' + fallbackError.message);
+          throw fallbackError;
+        }
+      } else {
+        toast.error('Failed to save combo box: ' + error.message);
+        throw error;
+      }
     }
   }
 

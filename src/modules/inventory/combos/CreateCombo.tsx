@@ -5,6 +5,7 @@ import { Plus, Minus, Box, Trash2, ArrowLeft, Barcode, CheckCircle2, X } from 'l
 import { inventoryService } from '../../../services/inventoryService';
 import toast from 'react-hot-toast';
 import ReactBarcode from 'react-barcode';
+import { barcodeService } from '../../../services/barcodeService';
 export const PREDEFINED_COMBOS: any[] = [
   { id: '1B', name: '1B Combo', requirements: { '1B': 1 } },
   { id: '1Y', name: '1Y Combo', requirements: { '1Y': 1 } },
@@ -239,7 +240,12 @@ export const CreateCombo = () => {
       const scannedCode = String(decodedText || "").trim().replace(/\s+/g, "").toUpperCase();
       
       const allProducts = await (inventoryService as any).getProductBarcodes();
-      const product = allProducts.find((p: any) => (p.displayBarcode || p.barcodeNumber || p.barcode || p.code || p.serial_number || p.barcode_no || p.batchNo || p.id || "").toString().trim().toUpperCase().replace(/\s+/g, "") === scannedCode);
+      const product = allProducts.find((p: any) => 
+        [p.scan_code, p.scanCode, p.displayBarcode, p.barcodeNumber, p.barcode, p.code, p.serial_number, p.barcode_no, p.batchNo, p.id]
+          .map(x => (x || "").toString().trim().toUpperCase().replace(/\s+/g, ""))
+          .includes(scannedCode) ||
+        (p.barcode && (barcodeService.deriveScanCode(p.barcode, 'PRODUCT') === scannedCode))
+      );
 
       if (!product) {
         setScanMessage({ type: 'error', text: 'Product not found.' });

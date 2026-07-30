@@ -5,6 +5,7 @@ import Barcode from 'react-barcode';
 import { Printer, Download, Save, CheckCircle2, QrCode, Package } from 'lucide-react';
 import { inventoryService } from '../../../../services/inventoryService';
 import toast from 'react-hot-toast';
+import { barcodeService } from '../../../../services/barcodeService';
 
 const IntakeStep3_Barcode = () => {
   const navigate = useNavigate();
@@ -172,32 +173,11 @@ const IntakeStep3_Barcode = () => {
   const downloadQR = (serial: string) => {
     const wrapper = document.getElementById(`barcode-${serial}`);
     const svg = wrapper?.querySelector('svg');
-    if (!svg) return;
-
-    const svgData = new XMLSerializer().serializeToString(svg);
-    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-    const svgUrl = URL.createObjectURL(svgBlob);
-
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-    img.onload = () => {
-      const scale = 4; // 4x scale for 300+ DPI
-      canvas.width = (img.width || 300) * scale;
-      canvas.height = (img.height || 100) * scale;
-      if (ctx) {
-        ctx.imageSmoothingEnabled = false;
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      }
-      const downloadLink = document.createElement('a');
-      downloadLink.download = `Barcode-${serial}.png`;
-      downloadLink.href = canvas.toDataURL('image/png', 1.0);
-      downloadLink.click();
-      URL.revokeObjectURL(svgUrl);
-    };
-    img.src = svgUrl;
+    if (svg) {
+      barcodeService.downloadSVG(svg as SVGSVGElement, `Barcode-${serial}.svg`);
+    } else if (wrapper) {
+      barcodeService.downloadPNG(wrapper, `Barcode-${serial}.png`);
+    }
   };
 
   const handleDownloadAll = () => {
