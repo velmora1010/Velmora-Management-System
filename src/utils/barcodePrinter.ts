@@ -1,4 +1,5 @@
 import html2canvas from 'html2canvas';
+import { deriveScanCodeFromBarcode } from '../modules/inventory/production/productHelpers';
 
 export interface BarcodePrintOptions {
   barcodeValue: string;
@@ -251,4 +252,155 @@ export function printBarcodeLabel(options: BarcodePrintOptions): void {
 
   // Clean up
   if (container.parentNode) container.parentNode.removeChild(container);
+}
+
+export interface ProductLabel34x20Options {
+  barcode: string;
+  scanCode?: string;
+  svgMarkup?: string;
+}
+
+export function printProductBarcodeLabel34x20(options: ProductLabel34x20Options): void {
+  const fullBarcode = options.barcode;
+  const scanCode = options.scanCode || deriveScanCodeFromBarcode(fullBarcode);
+
+  const printWindow = window.open('', '_blank', 'width=800,height=600');
+  if (!printWindow) {
+    alert('Please allow popups to print product barcode labels.');
+    return;
+  }
+
+  const svgEl = document.querySelector(`[data-scan-code="${scanCode}"] svg`) ||
+                document.querySelector(`[data-barcode-id="${fullBarcode}"] svg`) ||
+                document.querySelector(`svg`);
+
+  let svgMarkup = options.svgMarkup || (svgEl ? svgEl.outerHTML : '');
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Print Product Label - ${scanCode}</title>
+        <style>
+          @page {
+            size: 34mm 20mm;
+            margin: 0;
+          }
+          @media print {
+            html, body {
+              width: 34mm !important;
+              height: 20mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .no-print {
+              display: none !important;
+            }
+            .label {
+              width: 34mm !important;
+              height: 20mm !important;
+              margin: 0 auto !important;
+              padding: 1mm 1.5mm !important;
+              box-sizing: border-box !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+          }
+          body {
+            font-family: Arial, sans-serif;
+            background: #ffffff;
+            color: #000000;
+            margin: 0;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+          }
+          .print-instructions {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            max-width: 450px;
+            font-size: 13px;
+            color: #334155;
+          }
+          .print-instructions h4 { margin: 0 0 6px 0; color: #0f172a; }
+          .print-instructions ul { margin: 0; padding-left: 20px; }
+          .print-btn {
+            background: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+          }
+          .label {
+            width: 34mm;
+            height: 20mm;
+            padding: 1mm 1.5mm;
+            background: #ffffff;
+            border: 1px dashed #cbd5e1;
+            overflow: hidden;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+          }
+          .barcode-container {
+            width: 31mm;
+            height: 12mm;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+          }
+          .barcode-container svg {
+            width: 100% !important;
+            height: 100% !important;
+            max-height: 12mm !important;
+            shape-rendering: crispEdges !important;
+          }
+          .scan-code-text {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 8pt;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            color: #000000;
+            margin-top: 0.5mm;
+            line-height: 1;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="no-print print-instructions">
+          <h4>Product Label (34mm × 20mm) Printing:</h4>
+          <ul>
+            <li>Scale: <strong>Actual Size / 100%</strong></li>
+            <li>Disable <em>Fit to Page / Shrink to Fit</em></li>
+            <li>Print Quality: <strong>High Quality (300+ DPI)</strong></li>
+            <li>Encoded Code: <strong>${scanCode}</strong></li>
+          </ul>
+          <button class="print-btn" onclick="window.print()">Print Label</button>
+        </div>
+
+        <div class="label">
+          <div class="barcode-container">
+            ${svgMarkup}
+          </div>
+          <div class="scan-code-text">${scanCode}</div>
+        </div>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
 }

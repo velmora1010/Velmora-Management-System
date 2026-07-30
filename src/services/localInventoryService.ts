@@ -2,6 +2,7 @@ import { mockInitialState } from '../data/mockInventoryData';
 import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import toast from 'react-hot-toast';
+import { deriveScanCodeFromBarcode } from '../modules/inventory/production/productHelpers';
 
 export const getMasterBarcode = (item: any) => {
   return (
@@ -983,19 +984,24 @@ class LocalInventoryService {
       toast.error('Failed to load product barcodes: ' + error.message);
       throw error;
     }
-    return (data || []).map((item: any) => ({
-      ...item,
-      barcode_no: item.barcode,
-      barcodeNumber: item.barcode,
-      displayBarcode: item.barcode,
-      productName: item.product_name,
-      productCode: item.product_code,
-      batchId: item.batch_id,
-      batch_no: item.batch_id,
-      microBatchNo: item.micro_batch_no,
-      mb_no: item.micro_batch_no,
-      currentStage: item.current_stage || 'Production'
-    }));
+    return (data || []).map((item: any) => {
+      const scanCode = item.scan_code || deriveScanCodeFromBarcode(item.barcode);
+      return {
+        ...item,
+        scan_code: scanCode,
+        scanCode: scanCode,
+        barcode_no: item.barcode,
+        barcodeNumber: item.barcode,
+        displayBarcode: item.barcode,
+        productName: item.product_name,
+        productCode: item.product_code,
+        batchId: item.batch_id,
+        batch_no: item.batch_id,
+        microBatchNo: item.micro_batch_no,
+        mb_no: item.micro_batch_no,
+        currentStage: item.current_stage || 'Production'
+      };
+    });
   }
 
   async getProductBarcodesForMicroBatch(batchId: string, microBatchNo: string | number, altBatchId?: string) {
@@ -1066,21 +1072,26 @@ class LocalInventoryService {
   async saveProductBarcodes(newBarcodes: any[]) {
     if (!newBarcodes || newBarcodes.length === 0) return [];
 
-    const payloads = newBarcodes.map(item => ({
-      id: item.id || crypto.randomUUID(),
-      barcode: item.barcode_no || item.barcode || item.barcodeNumber || item.displayBarcode,
-      product_name: item.productName || item.product_name || '',
-      product_code: item.productCode || item.product_code || '',
-      batch_id: item.batchId || item.batch_id || '',
-      micro_batch_no: String(item.microBatchNo || item.micro_batch_no || '').replace(/^MB/i, ''),
-      quantity: Number(item.quantity || 1),
-      unit: item.unit || 'Unit',
-      produced_by: item.producedBy || item.produced_by || null,
-      labeled_by: item.labeledBy || item.labeled_by || null,
-      current_stage: item.currentStage || item.current_stage || 'READY_FOR_FIRST_SCAN',
-      created_at: item.created_at || new Date().toISOString(),
-      updated_at: item.updated_at || new Date().toISOString()
-    }));
+    const payloads = newBarcodes.map(item => {
+      const fullBarcode = item.barcode_no || item.barcode || item.barcodeNumber || item.displayBarcode;
+      const scanCode = item.scan_code || item.scanCode || deriveScanCodeFromBarcode(fullBarcode);
+      return {
+        id: item.id || crypto.randomUUID(),
+        barcode: fullBarcode,
+        scan_code: scanCode,
+        product_name: item.productName || item.product_name || '',
+        product_code: item.productCode || item.product_code || '',
+        batch_id: item.batchId || item.batch_id || '',
+        micro_batch_no: String(item.microBatchNo || item.micro_batch_no || '').replace(/^MB/i, ''),
+        quantity: Number(item.quantity || 1),
+        unit: item.unit || 'Unit',
+        produced_by: item.producedBy || item.produced_by || null,
+        labeled_by: item.labeledBy || item.labeled_by || null,
+        current_stage: item.currentStage || item.current_stage || 'READY_FOR_FIRST_SCAN',
+        created_at: item.created_at || new Date().toISOString(),
+        updated_at: item.updated_at || new Date().toISOString()
+      };
+    });
 
     const barcodeList = payloads.map(p => p.barcode).filter(Boolean);
     const existingBarcodes = new Set<string>();
@@ -1104,8 +1115,19 @@ class LocalInventoryService {
       const { error } = await supabase
         .from(SUPABASE_TABLES.productBarcodes)
         .upsert(missingPayloads, { onConflict: 'barcode', ignoreDuplicates: true });
+
       if (error) {
-        if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+        if (error.code === 'PGRST204' || error.message?.includes('scan_code')) {
+          console.warn('scan_code column not found in database yet. Falling back to insert without scan_code:', error);
+          const fallbackPayloads = missingPayloads.map(({ scan_code, ...rest }) => rest);
+          const { error: fallbackError } = await supabase
+            .from(SUPABASE_TABLES.productBarcodes)
+            .upsert(fallbackPayloads, { onConflict: 'barcode', ignoreDuplicates: true });
+          if (fallbackError && !fallbackError.message?.includes('duplicate key')) {
+            toast.error('Failed to save product barcodes: ' + fallbackError.message);
+            throw fallbackError;
+          }
+        } else if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
           console.warn('Product barcodes duplicate constraint safely handled by upsert:', error);
         } else {
           toast.error('Failed to save product barcodes: ' + error.message);
@@ -2094,7 +2116,12 @@ class LocalInventoryService {
       }
     } else if (department === 'PRODUCT') {
       const allProducts = await this.getProductBarcodes();
-      record = allProducts.find((item: any) => normalizeBarcode(item.barcode) === scannedCode);
+      record = allProducts.find((item: any) => 
+        normalizeBarcode(item.scan_code) === scannedCode ||
+        normalizeBarcode(item.scanCode) === scannedCode ||
+        normalizeBarcode(item.barcode) === scannedCode ||
+        normalizeBarcode(deriveScanCodeFromBarcode(item.barcode)) === scannedCode
+      );
       if (!record) {
         throw new Error(`Barcode ${barcodeNumber} does not exist in Products.`);
       }

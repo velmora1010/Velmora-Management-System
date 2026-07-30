@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { CheckCircle, PackageSearch, Download, Search, Package, RefreshCcw, ArrowLeft, AlertTriangle, ArrowRight } from 'lucide-react';
+import { CheckCircle, PackageSearch, Download, Search, Package, RefreshCcw, ArrowLeft, AlertTriangle, ArrowRight, Printer } from 'lucide-react';
 import { inventoryService } from '../../../services/inventoryService';
 import { departmentService } from '../../../services/departmentService';
 import Barcode from 'react-barcode';
@@ -9,6 +9,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import toast from 'react-hot-toast';
+import { deriveScanCodeFromBarcode } from '../production/productHelpers';
+import { printProductBarcodeLabel34x20 } from '../../../utils/barcodePrinter';
 
 const PRODUCTS = [
   { code: '1B', name: 'Blue Detergent', theme: { bg: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: 'rgba(59, 130, 246, 0.2)' } },
@@ -246,7 +248,10 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
       }
 
       if (scanAction === 'IN' || scanAction === 'OUT') {
-        const record = productBarcodes.find(b => [b.displayBarcode, b.barcodeNumber, b.barcode, b.code, b.serial_number, b.barcode_no, b.batchNo, b.id].map(x => normalizeCode(x)).includes(scannedCode));
+        const record = productBarcodes.find(b => 
+          [b.scan_code, b.scanCode, b.displayBarcode, b.barcodeNumber, b.barcode, b.code, b.serial_number, b.barcode_no, b.batchNo, b.id].map(x => normalizeCode(x)).includes(scannedCode) ||
+          normalizeCode(deriveScanCodeFromBarcode(b.barcode_no || b.barcode)) === scannedCode
+        );
         if (!record) {
            setScanModal({ open: true, barcode: null, type: 'error', message: 'Product barcode not found in local records.' });
            setIsProcessingScan(false);
@@ -747,7 +752,10 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
                     <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'white', margin: '0 0 4px 0' }}>{selectedName}</h3>
-                    <p style={{ color: selectedTheme.color, fontSize: '14px', fontFamily: 'monospace', margin: 0 }}>{displayBarcode}</p>
+                    <p style={{ color: selectedTheme.color, fontSize: '14px', fontFamily: 'monospace', margin: '0 0 4px 0' }}>{displayBarcode}</p>
+                    <span style={{ fontSize: '12px', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 8px', borderRadius: '4px', fontFamily: 'monospace', fontWeight: 700, border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                      Scan Code: {item.scan_code || deriveScanCodeFromBarcode(displayBarcode)}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <div style={{ background: getProductBadge(item.currentStage, productSubTab).bg, color: getProductBadge(item.currentStage, productSubTab).color, padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 800, letterSpacing: '0.5px', border: `1px solid ${getProductBadge(item.currentStage, productSubTab).border}` }}>
@@ -783,28 +791,30 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
                       </span>
                     </div>
                   )}
-                </div>                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: 'auto' }}>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '6px', marginTop: 'auto' }}>
+                  <button 
+                    onClick={() => printProductBarcodeLabel34x20({ barcode: displayBarcode, scanCode: item.scan_code || deriveScanCodeFromBarcode(displayBarcode) })}
+                    style={{ padding: '8px 4px', borderRadius: '8px', background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.3)', fontWeight: 600, cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                  >
+                    <Printer size={13} /> Print
+                  </button>
                   <button 
                     onClick={() => setScanModal({ open: true, barcode: item, type: 'details' })}
-                    style={{ padding: '10px', borderRadius: '10px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)', fontWeight: 600, cursor: 'pointer', fontSize: '13px' }}
+                    style={{ padding: '8px 4px', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.2)', fontWeight: 600, cursor: 'pointer', fontSize: '12px' }}
                   >
                     Details
                   </button>
                   <button 
                     onClick={() => handleDownloadBarcode(item)}
-                    style={{ padding: '10px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)', fontWeight: 600, cursor: 'pointer', fontSize: '13px' }}
+                    style={{ padding: '8px 4px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)', fontWeight: 600, cursor: 'pointer', fontSize: '12px' }}
                   >
                     Download
                   </button>
                   <button 
-                    onClick={() => { navigator.clipboard.writeText(item.barcode_no); toast.success('Copied!'); }}
-                    style={{ padding: '10px', borderRadius: '10px', background: '#0f172a', color: 'white', border: '1px solid #334155', fontWeight: 600, cursor: 'pointer', fontSize: '13px' }}
-                  >
-                    Copy
-                  </button>
-                  <button 
                     onClick={() => setDeleteModal({ open: true, barcode: item })}
-                    style={{ padding: '10px', borderRadius: '10px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', fontWeight: 600, cursor: 'pointer', fontSize: '13px' }}
+                    style={{ padding: '8px 4px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', fontWeight: 600, cursor: 'pointer', fontSize: '12px' }}
                   >
                     Delete
                   </button>
@@ -824,12 +834,12 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
       )}
 
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
-        <div ref={barcodeDownloadRef} style={{ width: '350px', background: 'white', padding: '24px', color: 'black', fontFamily: 'sans-serif', boxSizing: 'border-box' }}>
-          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-            <Barcode value={downloadTarget?.barcode_no || 'UNKNOWN'} width={1.8} height={70} displayValue={false} margin={0} />
-            <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '8px', fontFamily: 'monospace', letterSpacing: '2px' }}>
-              {downloadTarget?.barcode_no}
-            </div>
+        <div ref={barcodeDownloadRef} style={{ width: '34mm', height: '20mm', background: 'white', padding: '1mm 1.5mm', color: 'black', fontFamily: 'sans-serif', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <div style={{ width: '31mm', height: '12mm', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
+            <Barcode value={downloadTarget?.scan_code || deriveScanCodeFromBarcode(downloadTarget?.barcode_no || '1Y730001')} width={1.4} height={35} displayValue={false} margin={0} />
+          </div>
+          <div style={{ fontSize: '10px', fontWeight: 'bold', marginTop: '2px', fontFamily: 'monospace', letterSpacing: '1px', color: '#000000', lineHeight: 1 }}>
+            {downloadTarget?.scan_code || deriveScanCodeFromBarcode(downloadTarget?.barcode_no || '')}
           </div>
         </div>
       </div>

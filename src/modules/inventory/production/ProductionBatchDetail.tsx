@@ -6,7 +6,7 @@ import { inventoryService } from '../../../services/inventoryService';
 import { departmentService } from '../../../services/departmentService';
 import { calculateRequiredIngredients } from '../../../config/productFormulas';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getProductDisplayName, getProductSubtext, getProductTheme } from './productHelpers';
+import { getProductDisplayName, getProductSubtext, getProductTheme, deriveScanCodeFromBarcode } from './productHelpers';
 import toast from 'react-hot-toast';
 import { supabase } from '../../../lib/supabase';
 import { SUPABASE_TABLES } from '../../../config/supabaseTables';
@@ -28,7 +28,7 @@ const ProductionBatchDetail = () => {
   const [producedBy, setProducedBy] = useState('');
 
   const [pendingBarcodeMB, setPendingBarcodeMB] = useState<any>(null);
-  const [pendingBarcodesList, setPendingBarcodesList] = useState<{ no: string, scanned: boolean }[]>([]);
+  const [pendingBarcodesList, setPendingBarcodesList] = useState<{ no: string; scanCode?: string; scanned: boolean }[]>([]);
   const [forceShowMicroBatches, setForceShowMicroBatches] = useState(false);
   const [productionBatch, setProductionBatch] = useState<any>(null);
   const [ingredients, setIngredients] = useState<any[]>([]);
@@ -289,8 +289,11 @@ const ProductionBatchDetail = () => {
       const expectedList = [];
       for (let i = 1; i <= mbUnits; i++) {
         const serial = i.toString().padStart(3, '0');
+        const fullBarcodeNo = `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`;
+        const scanCode = deriveScanCodeFromBarcode(fullBarcodeNo);
         expectedList.push({
-          no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
+          no: fullBarcodeNo,
+          scanCode: scanCode,
           scanned: false
         });
       }
@@ -356,6 +359,8 @@ const ProductionBatchDetail = () => {
         barcode_no: b.no, 
         displayBarcode: b.no,
         barcode: b.no,
+        scan_code: b.scanCode || deriveScanCodeFromBarcode(b.no),
+        scanCode: b.scanCode || deriveScanCodeFromBarcode(b.no),
         code: b.no,
         currentStage: 'READY_FOR_FIRST_SCAN',
         quantity: 1,
@@ -922,9 +927,12 @@ const ProductionBatchDetail = () => {
                               <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: '#1e293b', borderRadius: '8px', border: '1px solid #334155' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                   <div style={{ background: 'white', padding: '4px', borderRadius: '4px' }}>
-                                    <ReactBarcode value={bc.no} width={1} height={20} fontSize={10} margin={0} displayValue={false} />
+                                    <ReactBarcode value={bc.scanCode || deriveScanCodeFromBarcode(bc.no)} width={1.2} height={25} fontSize={10} margin={0} displayValue={false} />
                                   </div>
-                                  <span style={{ fontFamily: 'monospace', fontSize: '13px', color: 'white' }}>{bc.no}</span>
+                                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontFamily: 'monospace', fontSize: '13px', color: 'white', fontWeight: 'bold' }}>{bc.no}</span>
+                                    <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#38bdf8' }}>Scan Code: {bc.scanCode || deriveScanCodeFromBarcode(bc.no)}</span>
+                                  </div>
                                 </div>
                                 <div>
                                   <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>PENDING</span>
