@@ -11,50 +11,108 @@ export const InventoryDashboard = () => {
   const [finishedGoods, setFinishedGoods] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const [rm, b, pb, fg] = await Promise.all([
+        inventoryService.getMaterials(),
+        inventoryService.getBatches(),
+        inventoryService.getProductionBatches(),
+        inventoryService.getFinishedGoods()
+      ]);
+      
+      setRawMaterials(rm || []);
+      setBatches(b || []);
+      setProductionBatches((pb || []).filter((item: any) => item.status !== 'DELETED'));
+      setFinishedGoods(fg || []);
+
+      // Sort recent raw material intake batches by received_date then created_at
+      const recentBatches = [...(b || [])]
+        .filter((item: any) => item.current_stage !== 'DELETED' && item.status !== 'DELETED')
+        .sort((a: any, b: any) => {
+          const dateA = new Date(a.received_date || a.created_at || 0).getTime();
+          const dateB = new Date(b.received_date || b.created_at || 0).getTime();
+          return dateB - dateA;
+        })
+        .slice(0, 5);
+
+      setInventoryIn(recentBatches);
+    } catch (err: any) {
+      console.error('Failed to load dashboard data from Supabase', err);
+      setErrorMsg(err.message || 'Failed to load inventory dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      setLoading(true);
-      try {
-        const [rm, b, pb, fg] = await Promise.all([
-          inventoryService.getMaterials(),
-          inventoryService.getBatches(),
-          inventoryService.getProductionBatches(),
-          inventoryService.getFinishedGoods()
-        ]);
-        
-        const recentBatches = [...b].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5);
-        
-        setRawMaterials(rm);
-        setBatches(b);
-        setInventoryIn(recentBatches);
-        setProductionBatches(pb);
-        setFinishedGoods(fg);
-
-
-
-      } catch (err) {
-        console.error('Failed to load dashboard data locally', err);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchDashboardData();
+
+    // Auto-refresh when window regains focus
+    window.addEventListener('focus', fetchDashboardData);
+    return () => window.removeEventListener('focus', fetchDashboardData);
   }, []);
 
   // --- MEMOIZED CALCULATIONS ---
-  const activeRmBatches = useMemo(() => batches.filter(b => b.status === 'Active' || b.status === 'Low Stock'), [batches]);
-  const totalRmStockKg = useMemo(() => activeRmBatches.reduce((acc, b) => acc + (b.available_quantity || 0), 0), [activeRmBatches]);
-  const totalRmValue = useMemo(() => activeRmBatches.reduce((acc, b) => acc + ((b.available_quantity || 0) * (b.price_per_kg || 0)), 0), [activeRmBatches]);
-  const lowStockCount = useMemo(() => batches.filter(b => b.status === 'Low Stock').length, [batches]);
-  
+  // Filter out deleted and consumed/moved OUT raw material barcodes for current available stock
+  const validRawBatches = useMemo(() => {
+    return batches.filter(b => {
+      const isDeleted = b.current_stage === 'DELETED' || b.status === 'DELETED' || b.is_deleted === true;
+      return !isDeleted;
+    });
+  }, [batches]);
+
+  // Active in-stock batches (stage is RAW_MATERIAL_IN, READY_FOR_FIRST_SCAN, Incoming, or quantity > 0 and NOT OUT)
+  const activeInStockBatches = useMemo(() => {
+    return validRawBatches.filter(b => {
+      const stage = String(b.current_stage || b.currentStage || '').toUpperCase();
+      const isOut = stage === 'RAW_MATERIAL_OUT' || stage === 'CONSUMED' || b.status === 'Depleted' || b.status === 'Completed';
+      const qty = Number(b.quantity || b.available_quantity || b.original_quantity || 0);
+      return !isOut && qty > 0;
+    });
+  }, [validRawBatches]);
+
+  // Total Stock in KG (excluding water and litre-based materials)
+  const totalRmStockKg = useMemo(() => {
+    return activeInStockBatches.reduce((acc, b) => {
+      const unit = String(b.unit || '').toLowerCase().trim();
+      const matName = String(b.material_name || b.materialName || '').toLowerCase().trim();
+      const isLitre = unit.startsWith('l') || unit === 'litre' || unit === 'litres' || matName.includes('water');
+      if (isLitre) return acc;
+
+      const qty = Number(b.quantity || b.available_quantity || b.original_quantity || 0);
+      return acc + (Number.isFinite(qty) && qty > 0 ? qty : 0);
+    }, 0);
+  }, [activeInStockBatches]);
+
+  // Total Inventory Value (available quantity * price_per_kg)
+  const totalRmValue = useMemo(() => {
+    return activeInStockBatches.reduce((acc, b) => {
+      const qty = Number(b.quantity || b.available_quantity || b.original_quantity || 0);
+      const price = Number(b.price_per_kg || b.price || 0);
+      return acc + (Number.isFinite(qty) && qty > 0 && Number.isFinite(price) ? qty * price : 0);
+    }, 0);
+  }, [activeInStockBatches]);
+
+  // Active Batches Count
+  const activeBatchCount = activeInStockBatches.length;
+
+  // Low Stock Count (< 100 KG or status === 'Low Stock')
+  const lowStockCount = useMemo(() => {
+    return activeInStockBatches.filter(b => {
+      const qty = Number(b.quantity || b.available_quantity || 0);
+      return qty < 100 || b.status === 'Low Stock';
+    }).length;
+  }, [activeInStockBatches]);
+
   const totalProdBatches = useMemo(() => productionBatches.length, [productionBatches]);
-  const inProgressProdBatches = useMemo(() => productionBatches.filter(b => b.status === 'In Progress').length, [productionBatches]);
-  const completedProdBatches = useMemo(() => productionBatches.filter(b => b.status === 'Complete' || b.status === 'Saved').length, [productionBatches]);
+  const inProgressProdBatches = useMemo(() => productionBatches.filter(b => b.status === 'Prep' || b.status === 'In Progress').length, [productionBatches]);
+  const completedProdBatches = useMemo(() => productionBatches.filter(b => b.status === 'Complete' || b.status === 'COMPLETE' || b.status === 'Saved').length, [productionBatches]);
   const finishedGoodsUnits = useMemo(() => finishedGoods.reduce((acc, item) => acc + (item.units || 0), 0), [finishedGoods]);
-  const totalProducedUnits = useMemo(() => productionBatches.reduce((acc, item) => acc + (item.produced_units || 0), 0), [productionBatches]);
-  
-  const efficiency = useMemo(() => totalProducedUnits > 0 ? Math.round((finishedGoodsUnits / totalProducedUnits) * 100) : 0, [totalProducedUnits, finishedGoodsUnits]);
+  const totalProducedUnits = useMemo(() => productionBatches.reduce((acc, item) => acc + (item.produced_units || item.total_units || 0), 0), [productionBatches]);
 
   if (loading) {
     return (
@@ -63,6 +121,27 @@ export const InventoryDashboard = () => {
       </div>
     );
   }
+
+  if (errorMsg) {
+    return (
+      <div className="w-full max-w-7xl mx-auto p-8 text-center space-y-4">
+        <div className="text-red-500 font-bold text-lg">Error Loading Dashboard</div>
+        <p className="text-muted text-sm">{errorMsg}</p>
+        <button
+          onClick={fetchDashboardData}
+          className="px-4 py-2 bg-primary text-white font-medium rounded-lg hover:bg-primary/80 transition-all"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  const formatDate = (dateStr: any) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? '-' : d.toLocaleDateString();
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-8 animate-in fade-in duration-300 pb-16">
@@ -94,7 +173,7 @@ export const InventoryDashboard = () => {
 
           <Card className="p-6 border-t-4 border-t-blue-500 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-300">
             <span className="text-muted text-xs font-semibold uppercase tracking-wider block mb-2">Active Batches</span>
-            <div className="text-3xl font-bold text-white">{activeRmBatches.length}</div>
+            <div className="text-3xl font-bold text-white">{activeBatchCount}</div>
           </Card>
 
           <Card className={`p-6 border-t-4 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-300 ${lowStockCount > 0 ? 'border-t-red-500 bg-red-500/5' : 'border-t-blue-500'}`}>
@@ -133,8 +212,6 @@ export const InventoryDashboard = () => {
         </div>
       </div>
 
-
-
       {/* SECTION 3 & 4: TABLES */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* RECENT RAW MATERIAL ACTIVITY */}
@@ -155,14 +232,16 @@ export const InventoryDashboard = () => {
                 {inventoryIn.length === 0 ? (
                   <tr><td colSpan={5} className="px-4 py-8 text-center text-muted">No recent intake activity</td></tr>
                 ) : inventoryIn.map((item) => {
-                  const batchCount = batches.filter(b => b.inventory_in_id === item.id).length;
+                  const qtyVal = Number(item.quantity || item.original_quantity || 0);
+                  const unitVal = String(item.unit || 'KG').toUpperCase();
+                  const batchDisplay = item.batch_no || item.batchNo || '1';
                   return (
                     <tr key={item.id} className="border-b border-border/50 hover:bg-white/5 transition-colors">
-                      <td className="px-4 py-3 whitespace-nowrap">{new Date(item.date_received).toLocaleDateString()}</td>
-                      <td className="px-4 py-3 font-medium text-white">{item.material_name}</td>
-                      <td className="px-4 py-3">{item.vendor_name}</td>
-                      <td className="px-4 py-3 font-medium text-blue-400">{item.quantity_received} KG</td>
-                      <td className="px-4 py-3">{batchCount}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{formatDate(item.received_date || item.created_at)}</td>
+                      <td className="px-4 py-3 font-medium text-white">{item.material_name || item.materialName || '-'}</td>
+                      <td className="px-4 py-3">{item.vendor || item.vendor_name || '-'}</td>
+                      <td className="px-4 py-3 font-medium text-blue-400">{qtyVal} {unitVal}</td>
+                      <td className="px-4 py-3">{batchDisplay}</td>
                     </tr>
                   );
                 })}
@@ -227,7 +306,7 @@ export const InventoryDashboard = () => {
             </li>
             <li className="flex justify-between items-center text-sm">
               <span className="text-muted">Active Inventory Batches</span>
-              <strong className="text-white font-medium">{activeRmBatches.length}</strong>
+              <strong className="text-white font-medium">{activeBatchCount}</strong>
             </li>
             <li className="flex justify-between items-center text-sm">
               <span className="text-muted">Total Capital Tied In Stock</span>
@@ -252,7 +331,7 @@ export const InventoryDashboard = () => {
             </li>
             <li className="flex justify-between items-center text-sm">
               <span className="text-muted">Production Scanned Efficiency</span>
-              <strong className={`font-medium ${efficiency >= 100 ? 'text-emerald-500' : 'text-orange-500'}`}>{efficiency}%</strong>
+              <strong className={`font-medium ${totalProducedUnits > 0 && finishedGoodsUnits >= totalProducedUnits ? 'text-emerald-500' : 'text-orange-500'}`}>{totalProducedUnits > 0 ? Math.round((finishedGoodsUnits / totalProducedUnits) * 100) : 0}%</strong>
             </li>
           </ul>
         </Card>

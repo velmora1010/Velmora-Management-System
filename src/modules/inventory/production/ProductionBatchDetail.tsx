@@ -103,6 +103,20 @@ const ProductionBatchDetail = () => {
           verifiedMbs.push(updatedMb);
         }
 
+        // Sync completed micro-batch count to Supabase production_batches table
+        const compCount = verifiedMbs.filter(m => m.status === 'Passed' || m.status === 'Barcode Saved' || m.status === 'Failed').length;
+        const totCount = Number(batch.total_micro_batches || verifiedMbs.length || 0);
+        if (totCount > 0 && (batch.completed_micro_batches !== compCount || (compCount >= totCount && batch.status !== 'Complete' && batch.status !== 'Saved'))) {
+          const updates: any = { completed_micro_batches: compCount };
+          if (compCount >= totCount && batch.status !== 'Complete' && batch.status !== 'Saved') {
+            updates.status = 'Complete';
+            updates.completed_at = new Date().toISOString();
+          }
+          await inventoryService.updateProductionBatch(batch.id, updates);
+          batch.completed_micro_batches = compCount;
+          if (updates.status) batch.status = updates.status;
+        }
+
         setIngredients(ings);
         setMicroBatches(verifiedMbs);
         setProductionStock(prodStock);

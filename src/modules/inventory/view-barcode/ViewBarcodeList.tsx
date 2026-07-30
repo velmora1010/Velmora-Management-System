@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import ProductBarcodeList from './ProductBarcodeList';
 
 import { inventoryService } from '../../../services/inventoryService';
@@ -88,6 +89,26 @@ const ViewBarcode = () => {
   const barcodeDownloadRef = useRef<HTMLDivElement>(null);
   const [downloadTarget, setDownloadTarget] = useState<any>(null);
   const [isDownloadingAll, setIsDownloadingAll] = useState<string | null>(null);
+
+  // Body scroll lock when raw material details modal is open
+  useEffect(() => {
+    if (selectedBatch) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [selectedBatch]);
+
+  // Close modal on Escape key
+  useEffect(() => {
+    if (!selectedBatch) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedBatch(null);
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [selectedBatch]);
 
   const handleDownloadAll = async (group: any[], comboName: string, batchId: string) => {
     setIsDownloadingAll(batchId);
@@ -1424,31 +1445,205 @@ const ViewBarcode = () => {
         )}
       </AnimatePresence>
 
-      {/* DETAILS MODALS */}
-      {selectedBatch && (
-        <div className="modal-overlay" onClick={() => setSelectedBatch(null)}>
-          <div className="modal-content" style={{ width: '600px', maxWidth: '95%' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><h2>Barcode Details</h2><button style={{ background: 'none', border: 'none', color: 'var(--text-muted)' }} onClick={() => setSelectedBatch(null)}><X size={24} /></button></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <div className="form-group"><label>Material Name</label><div style={{ padding: '10px', background: 'var(--surface-soft)', borderRadius: '6px' }}>{selectedBatch.material_name}</div></div>
-              <div className="form-group"><label>Barcode Number</label><div style={{ padding: '10px', background: 'var(--surface-soft)', borderRadius: '6px', fontFamily: 'monospace' }}>{selectedBatch.serial_number}</div></div>
-              <div className="form-group"><label>Quantity</label><div style={{ padding: '10px', background: 'var(--surface-soft)', borderRadius: '6px' }}>{selectedBatch.original_quantity} KG</div></div>
-              <div className="form-group"><label>Vendor Name</label><div style={{ padding: '10px', background: 'var(--surface-soft)', borderRadius: '6px' }}>{selectedBatch.vendor_name || '--'}</div></div>
-              <div className="form-group"><label>Batch</label><div style={{ padding: '10px', background: 'var(--surface-soft)', borderRadius: '6px' }}>{selectedBatch.batch_number || '--'}</div></div>
-              <div className="form-group"><label>Received Date</label><div style={{ padding: '10px', background: 'var(--surface-soft)', borderRadius: '6px' }}>{selectedBatch.created_at ? new Date(selectedBatch.created_at).toLocaleString() : '--'}</div></div>
-              {(selectedBatch.inventoryInPersonName || selectedBatch.inventoryInAt) && (
-                <div className="form-group"><label>Scanned IN By/At</label><div style={{ padding: '10px', background: 'var(--surface-soft)', borderRadius: '6px' }}>{selectedBatch.inventoryInPersonName || '--'} <br/><span style={{fontSize: '12px', color: 'var(--text-muted)'}}>{selectedBatch.inventoryInAt ? new Date(selectedBatch.inventoryInAt).toLocaleString() : '--'}</span></div></div>
-              )}
-              {(selectedBatch.inventoryOutPersonName || selectedBatch.inventoryOutAt) && (
-                <div className="form-group"><label>Scanned OUT By/At</label><div style={{ padding: '10px', background: 'var(--surface-soft)', borderRadius: '6px' }}>{selectedBatch.inventoryOutPersonName || '--'} <br/><span style={{fontSize: '12px', color: 'var(--text-muted)'}}>{selectedBatch.inventoryOutAt ? new Date(selectedBatch.inventoryOutAt).toLocaleString() : '--'}</span></div></div>
-              )}
+      {/* RAW MATERIAL BARCODE DETAILS MODAL — rendered via portal */}
+      {selectedBatch && createPortal(
+        <div
+          onClick={() => setSelectedBatch(null)}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999,
+            padding: '16px',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#0f172a',
+              border: '1px solid #1e293b',
+              borderRadius: '20px',
+              width: '600px',
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: 'calc(100vh - 32px)',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.05)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* HEADER */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px',
+              borderBottom: '1px solid #1e293b',
+              flexShrink: 0,
+            }}>
+              <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'white' }}>Barcode Details</h2>
+              <button
+                onClick={() => setSelectedBatch(null)}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid #263244',
+                  borderRadius: '10px',
+                  width: '36px',
+                  height: '36px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#94a3b8',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(239,68,68,0.15)'; (e.currentTarget as HTMLElement).style.color = '#ef4444'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; (e.currentTarget as HTMLElement).style.color = '#94a3b8'; }}
+              >
+                <X size={18} />
+              </button>
             </div>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
-              <button className="btn hover-lift" onClick={() => handleDownloadBarcode(selectedBatch)} style={{ padding: '10px 20px', borderRadius: '8px', color: 'white', background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)' }}><Download size={16} /> Download Barcode</button>
-              <button className="btn btn-primary" onClick={() => handlePrint(selectedBatch.serial_number)}><Printer size={16} /> Print</button>
+
+            {/* SCROLLABLE BODY */}
+            <div style={{
+              overflowY: 'auto',
+              padding: '24px',
+              flex: 1,
+            }}>
+              {/* Barcode Preview */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                padding: '20px',
+                background: '#ffffff',
+                borderRadius: '12px',
+                marginBottom: '24px',
+              }}>
+                <Barcode value={selectedBatch.serial_number || ''} width={1.8} height={60} fontSize={12} background="#ffffff" lineColor="#000000" />
+              </div>
+
+              {/* Details Grid */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '16px',
+              }}>
+                {/* Material Name */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Material Name</span>
+                  <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>{selectedBatch.material_name || '--'}</div>
+                </div>
+                {/* Barcode Number */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Barcode Number</span>
+                  <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: '#60a5fa', fontSize: '14px', fontWeight: 500, fontFamily: 'monospace', border: '1px solid #263244' }}>{selectedBatch.serial_number || '--'}</div>
+                </div>
+                {/* Quantity */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Quantity</span>
+                  <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>{selectedBatch.original_quantity} KG</div>
+                </div>
+                {/* Vendor Name */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Vendor Name</span>
+                  <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>{selectedBatch.vendor_name || '--'}</div>
+                </div>
+                {/* Batch */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Batch</span>
+                  <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>{selectedBatch.batch_number || '--'}</div>
+                </div>
+                {/* Received Date */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Received Date</span>
+                  <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>{selectedBatch.created_at ? new Date(selectedBatch.created_at).toLocaleString() : '--'}</div>
+                </div>
+                {/* Scanned IN */}
+                {(selectedBatch.inventoryInPersonName || selectedBatch.inventoryInAt) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Scanned IN By/At</span>
+                    <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>
+                      {selectedBatch.inventoryInPersonName || '--'}
+                      <br />
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>{selectedBatch.inventoryInAt ? new Date(selectedBatch.inventoryInAt).toLocaleString() : '--'}</span>
+                    </div>
+                  </div>
+                )}
+                {/* Scanned OUT */}
+                {(selectedBatch.inventoryOutPersonName || selectedBatch.inventoryOutAt) && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Scanned OUT By/At</span>
+                    <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>
+                      {selectedBatch.inventoryOutPersonName || '--'}
+                      <br />
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>{selectedBatch.inventoryOutAt ? new Date(selectedBatch.inventoryOutAt).toLocaleString() : '--'}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* FOOTER */}
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '16px 24px',
+              borderTop: '1px solid #1e293b',
+              background: '#0b1120',
+              flexShrink: 0,
+            }}>
+              <button
+                onClick={() => handleDownloadBarcode(selectedBatch)}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  color: 'white',
+                  background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontWeight: 700,
+                  fontSize: '14px',
+                  boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+                  transition: 'transform 0.15s, box-shadow 0.15s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 20px rgba(59,130,246,0.4)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 4px 12px rgba(59,130,246,0.3)'; }}
+              >
+                <Download size={16} /> Download Barcode
+              </button>
+              <button
+                onClick={() => handlePrint(selectedBatch.serial_number)}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  color: 'white',
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid #334155',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.1)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)'; }}
+              >
+                <Printer size={16} /> Print
+              </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {selectedComboBatch && (
