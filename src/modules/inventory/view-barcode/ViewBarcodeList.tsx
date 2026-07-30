@@ -155,10 +155,15 @@ const ViewBarcode = () => {
     setTimeout(async () => {
       if (!barcodeDownloadRef.current || !barcodeData) return;
       try {
-        const canvas = await html2canvas(barcodeDownloadRef.current, { backgroundColor: '#ffffff', scale: 2 });
+        const canvas = await html2canvas(barcodeDownloadRef.current, {
+          backgroundColor: '#ffffff',
+          scale: 4, // 4x scale factor for 300+ DPI high resolution
+          useCORS: true,
+          logging: false
+        });
         const link = document.createElement('a');
         link.download = `${barcodeData.barcode_no || barcodeData.serial_number}.png`;
-        link.href = canvas.toDataURL('image/png');
+        link.href = canvas.toDataURL('image/png', 1.0);
         link.click();
       } catch (err) {
         console.error('Failed to download barcode label', err);
@@ -541,30 +546,163 @@ const ViewBarcode = () => {
     const wrapper = document.getElementById(`view-barcode-${serial}`);
     const svg = wrapper?.querySelector('svg');
     if (!svg) return;
+
+    // Prefer direct SVG download if available
     const svgData = new XMLSerializer().serializeToString(svg);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    
+    // Create high-resolution 300+ DPI PNG fallback
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
     img.onload = () => {
-      canvas.width = img.width; canvas.height = img.height;
-      if (ctx) { ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0); }
-      const downloadLink = document.createElement('a'); downloadLink.download = `Barcode-${serial}.png`;
-      downloadLink.href = canvas.toDataURL('image/png'); downloadLink.click();
+      // 4x high resolution scaling for 300+ DPI
+      const scale = 4;
+      canvas.width = (img.width || 300) * scale;
+      canvas.height = (img.height || 100) * scale;
+      if (ctx) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      }
+      const downloadLink = document.createElement('a');
+      downloadLink.download = `Barcode-${serial}.png`;
+      downloadLink.href = canvas.toDataURL('image/png', 1.0);
+      downloadLink.click();
+      URL.revokeObjectURL(svgUrl);
     };
-    img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
+    img.src = svgUrl;
   };
 
   const handlePrint = (serial: string) => {
-    const w = window.open();
-    w?.document.write(`
+    const wrapper = document.getElementById(`view-barcode-${serial}`);
+    const svgEl = wrapper?.querySelector('svg');
+    const svgMarkup = svgEl ? svgEl.outerHTML : `<svg viewBox="0 0 300 80" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#ffffff"/></svg>`;
+
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
       <html>
-        <head><title>Print Barcode</title></head>
-        <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;">
-          <img src="${document.getElementById(`view-barcode-${serial}`)?.querySelector('canvas')?.toDataURL() || ''}" />
+        <head>
+          <title>Print Barcode - ${serial}</title>
+          <style>
+            @page {
+              size: 60mm 35mm;
+              margin: 0;
+            }
+            @media print {
+              html, body {
+                width: 60mm !important;
+                height: 35mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #ffffff !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+              .print-label {
+                width: 60mm !important;
+                min-height: 25mm !important;
+                margin: 0 auto !important;
+                padding: 2mm 4mm !important;
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+              }
+            }
+            body {
+              font-family: Arial, sans-serif;
+              background: #ffffff;
+              color: #000000;
+              margin: 0;
+              padding: 16px;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+            }
+            .print-instructions {
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 8px;
+              padding: 12px 16px;
+              margin-bottom: 20px;
+              max-width: 500px;
+              font-size: 13px;
+              color: #334155;
+            }
+            .print-btn {
+              background: #2563eb;
+              color: #ffffff;
+              border: none;
+              padding: 8px 20px;
+              border-radius: 6px;
+              font-weight: 600;
+              cursor: pointer;
+              margin-top: 8px;
+            }
+            .print-label {
+              width: 60mm;
+              min-height: 25mm;
+              box-sizing: border-box;
+              padding: 2mm 4mm;
+              background: #ffffff;
+              border: 1px dashed #cbd5e1;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              text-align: center;
+            }
+            .barcode-svg-container {
+              width: 52mm;
+              height: 25mm;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin: 0 auto;
+            }
+            .barcode-svg-container svg {
+              width: 100% !important;
+              height: 100% !important;
+              max-height: 25mm !important;
+            }
+            .barcode-text {
+              font-family: 'Courier New', Courier, monospace;
+              font-size: 10pt;
+              font-weight: bold;
+              letter-spacing: 1px;
+              color: #000000;
+              margin-top: 1.5mm;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="no-print print-instructions">
+            <strong>Printing Instructions:</strong>
+            <ul style="margin: 4px 0 0 0; padding-left: 18px;">
+              <li>Scale: <strong>Actual Size / 100%</strong></li>
+              <li>Page Fit: <strong>No Fit to Page / No Shrink</strong></li>
+              <li>Print Quality: <strong>High Quality (300+ DPI)</strong></li>
+            </ul>
+            <button class="print-btn" onclick="window.print()">Print Label</button>
+          </div>
+
+          <div class="print-label">
+            <div class="barcode-svg-container">
+              ${svgMarkup}
+            </div>
+            <div class="barcode-text">${serial}</div>
+          </div>
         </body>
       </html>
     `);
-    setTimeout(() => w?.print(), 500);
+    printWindow.document.close();
   };
 
   if (loading) return <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading saved barcodes...</div>;

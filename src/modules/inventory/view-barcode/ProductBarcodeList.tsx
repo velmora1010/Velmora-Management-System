@@ -326,10 +326,15 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
     setTimeout(async () => {
       if (!barcodeDownloadRef.current || !barcodeData) return;
       try {
-        const canvas = await html2canvas(barcodeDownloadRef.current, { backgroundColor: '#ffffff', scale: 2 });
+        const canvas = await html2canvas(barcodeDownloadRef.current, {
+          backgroundColor: '#ffffff',
+          scale: 4, // 4x scale factor for 300+ DPI high resolution
+          useCORS: true,
+          logging: false
+        });
         const link = document.createElement('a');
         link.download = `${barcodeData.barcode_no}.png`;
-        link.href = canvas.toDataURL('image/png');
+        link.href = canvas.toDataURL('image/png', 1.0);
         link.click();
       } catch (err) {
         console.error('Failed to download barcode label', err);
@@ -353,8 +358,13 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
         });
 
         if (barcodeDownloadRef.current) {
-          const canvas = await html2canvas(barcodeDownloadRef.current, { backgroundColor: '#ffffff', scale: 2 });
-          const imgData = canvas.toDataURL('image/png').split(',')[1];
+          const canvas = await html2canvas(barcodeDownloadRef.current, {
+            backgroundColor: '#ffffff',
+            scale: 4, // 4x scale factor for 300+ DPI high resolution
+            useCORS: true,
+            logging: false
+          });
+          const imgData = canvas.toDataURL('image/png', 1.0).split(',')[1];
           const fileName = `${barcodeData.barcode_no}.png`;
           const subFolderName = (barcodeData.product_name || barcodeData.product_code || 'Unknown').replace(/\s+/g, '_');
           

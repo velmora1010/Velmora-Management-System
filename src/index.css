@@ -47,3 +47,44 @@
     transition: color 0.3s ease, background-color 0.3s ease;
   }
 }
+
+@media print {
+  @page {
+    size: 60mm 35mm;
+    margin: 0;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  nav, header, sidebar, footer, button, .no-print, [role="navigation"] {
+    display: none !important;
+  }
+
+  .print-label, .print-card {
+    width: 60mm !important;
+    min-height: 25mm !important;
+    box-sizing: border-box !important;
+    padding: 2mm 4mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    transform: none !important;
+    zoom: 1 !important;
+  }
+
+  .print-label svg, .print-card svg {
+    width: 52mm !important;
+    height: 20mm !important;
+    margin: 0 auto !important;
+    background: #ffffff !important;
+  }
+}
