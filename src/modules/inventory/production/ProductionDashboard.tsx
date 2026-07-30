@@ -29,34 +29,29 @@ const ProductionDashboard = () => {
   const [selectedSectionFilter, setSelectedSectionFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
 
-  const fetchProductionData = async () => {
-    setLoading(true);
-    try {
-      const [data, { data: depts }, { data: secs }] = await Promise.all([
-        inventoryService.getProductionBatches(),
-        departmentService.getAllDepartments(),
-        departmentService.getAllSections()
-      ]);
-      // Sort by created_at descending locally
-      if (data) {
-        data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        setProductionBatches(data);
-      }
-      if (depts) setDepartments(depts);
-      if (secs) setSections(secs);
-    } catch (err) {
-      console.error('Failed to load production batches', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const fetchProductionData = async () => {
+      setLoading(true);
+      try {
+        const [data, { data: depts }, { data: secs }] = await Promise.all([
+          inventoryService.getProductionBatches(),
+          departmentService.getAllDepartments(),
+          departmentService.getAllSections()
+        ]);
+        // Sort by created_at descending locally
+        if (data) {
+          data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          setProductionBatches(data);
+        }
+        if (depts) setDepartments(depts);
+        if (secs) setSections(secs);
+      } catch (err) {
+        console.error('Failed to load production batches locally', err);
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchProductionData();
-
-    // Auto-refresh when window regains focus
-    window.addEventListener('focus', fetchProductionData);
-    return () => window.removeEventListener('focus', fetchProductionData);
   }, []);
 
   const getDeptName = (id: string | null) => {
@@ -128,7 +123,9 @@ const ProductionDashboard = () => {
       setDeleteModalOpen(false);
       setBatchToDelete(null);
       // Re-fetch batches
-      fetchProductionData();
+      const data = await inventoryService.getProductionBatches();
+      data.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setProductionBatches(data);
       setToastMessage('Batch deleted successfully');
       setTimeout(() => setToastMessage(''), 3000);
     } catch (err: any) {
@@ -322,13 +319,8 @@ const ProductionDashboard = () => {
           </motion.div>
         ) : (
           filteredBatches.map((batch: any, i) => {
-            const totalMB = Number(batch.total_micro_batches || 0);
-            const completedMB = Number(batch.completed_micro_batches || 0);
-            let rawPct = (Number.isFinite(totalMB) && totalMB > 0 && Number.isFinite(completedMB) && completedMB >= 0) ? (completedMB / totalMB) * 100 : 0;
-            rawPct = Math.min(100, Math.max(0, rawPct));
-            const displayPct = Math.round(rawPct);
-
-            const isComplete = batch.status === 'Complete' || batch.status === 'COMPLETE' || batch.status === 'Saved' || (totalMB > 0 && completedMB >= totalMB);
+            const progress = batch.total_micro_batches > 0 ? Math.round((batch.completed_micro_batches / batch.total_micro_batches) * 100) : 0;
+            const isComplete = batch.status === 'Complete' || batch.status === 'COMPLETE' || batch.status === 'Saved';
             const isDeleted = batch.status === 'DELETED';
             const statusColor = isDeleted ? '#ef4444' : isComplete ? '#10b981' : batch.status === 'Prep' ? '#f59e0b' : '#3b82f6';
             const theme = getProductTheme(batch.product_name);
@@ -363,12 +355,12 @@ const ProductionDashboard = () => {
                         background: `${statusColor}20`, color: statusColor, textTransform: 'uppercase', letterSpacing: '0.5px',
                         border: `1px solid ${statusColor}30`
                       }}>
-                        {isComplete && batch.status !== 'Saved' ? 'COMPLETE' : batch.status}
+                        {batch.status}
                       </span>
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ background: 'var(--surface-soft)', padding: '2px 8px', borderRadius: '4px', color: '#94a3b8', fontFamily: 'monospace' }}>
-                        {batch.production_batch_id || batch.batch_id}
+                        {batch.production_batch_id}
                       </span>
                       <span>•</span>
                       <span>{new Date(batch.created_at).toLocaleDateString('en-GB')}</span>
@@ -380,7 +372,7 @@ const ProductionDashboard = () => {
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
                     <div style={{ textAlign: 'right', background: 'var(--surface-soft)', padding: '8px 16px', borderRadius: '12px' }}>
                       <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '2px' }}>Batch Size</div>
-                      <div style={{ fontSize: '18px', fontWeight: 'bold', color: 'white' }}>{batch.total_units || batch.batch_size || 0} <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 'normal' }}>Units</span></div>
+                      <div style={{ fontSize: '18px', fontWeight: 'bold', color: 'white' }}>{batch.total_units} <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 'normal' }}>Units</span></div>
                     </div>
                     {!isDeleted && (
                       <button 
@@ -404,10 +396,10 @@ const ProductionDashboard = () => {
                 <div style={{ background: '#0b1120', padding: '16px', borderRadius: '16px', marginBottom: '20px', border: '1px solid #1f2937' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '10px' }}>
                     <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Micro Batch Progress</span>
-                    <span style={{ fontWeight: 'bold', color: 'white' }}>{completedMB} / {totalMB} <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({displayPct}%)</span></span>
+                    <span style={{ fontWeight: 'bold', color: 'white' }}>{batch.completed_micro_batches} / {batch.total_micro_batches} <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({progress}%)</span></span>
                   </div>
                   <div style={{ width: '100%', height: '8px', background: '#1f2937', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: `${rawPct}%`, height: '100%', background: '#10b981', transition: 'width 0.5s ease-out', borderRadius: '4px' }} />
+                    <div style={{ width: `${progress}%`, height: '100%', background: isComplete ? '#10b981' : 'linear-gradient(to right, #3b82f6, #8b5cf6)', transition: 'width 0.5s ease-out', borderRadius: '4px' }} />
                   </div>
                 </div>
 
@@ -415,12 +407,12 @@ const ProductionDashboard = () => {
                   <div style={{ display: 'flex', gap: '24px', fontSize: '14px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                       <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', fontWeight: 600 }}>Produced</span>
-                      <strong style={{ color: 'white', fontSize: '16px' }}>{batch.produced_units || 0}</strong>
+                      <strong style={{ color: 'white', fontSize: '16px' }}>{batch.produced_units}</strong>
                     </div>
                     <div style={{ width: '1px', background: '#263244' }}></div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                       <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', fontWeight: 600 }}>Inventory</span>
-                      <strong style={{ color: 'white', fontSize: '16px' }}>{batch.inventory_units || 0}</strong>
+                      <strong style={{ color: 'white', fontSize: '16px' }}>{batch.inventory_units}</strong>
                     </div>
                   </div>
                   <button 

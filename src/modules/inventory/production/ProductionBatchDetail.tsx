@@ -4,7 +4,7 @@ import { QrCode, CheckCircle2, PackagePlus, Boxes, ArrowLeft, Package, Check, X,
 import ReactBarcode from 'react-barcode';
 import { inventoryService } from '../../../services/inventoryService';
 import { departmentService } from '../../../services/departmentService';
-import { calculateRequiredIngredients, PRODUCTS } from '../../../config/productFormulas';
+import { calculateRequiredIngredients } from '../../../config/productFormulas';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getProductDisplayName, getProductSubtext, getProductTheme } from './productHelpers';
 import toast from 'react-hot-toast';
@@ -27,8 +27,6 @@ const ProductionBatchDetail = () => {
 
   const [pendingBarcodeMB, setPendingBarcodeMB] = useState<any>(null);
   const [pendingBarcodesList, setPendingBarcodesList] = useState<{ no: string, scanned: boolean }[]>([]);
-  const [isSavingBarcode, setIsSavingBarcode] = useState(false);
-  const [barcodesAlreadySaved, setBarcodesAlreadySaved] = useState(false);
   const [forceShowMicroBatches, setForceShowMicroBatches] = useState(false);
   const [productionBatch, setProductionBatch] = useState<any>(null);
   const [ingredients, setIngredients] = useState<any[]>([]);
@@ -72,8 +70,8 @@ const ProductionBatchDetail = () => {
       if (batch) {
         const prodBatchId = batch.id;
         const [ings, mbs, prodStock] = await Promise.all([
-          inventoryService.getProductionIngredients(batch.id, batch.batch_id),
-          inventoryService.getMicroBatches(batch.id, batch.batch_id),
+          inventoryService.getProductionIngredients(prodBatchId),
+          inventoryService.getMicroBatches(prodBatchId),
           inventoryService.getProductionMaterialStock()
         ]);
 
@@ -82,13 +80,12 @@ const ProductionBatchDetail = () => {
         
         for (const mb of mbs) {
           let updatedMb = { ...mb };
-          const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
           if (mb.status === 'Barcode Saved' || mb.status === 'Passed') {
              const existingForMB = allBarcodes.filter((b: any) => 
-               (b.batchId === prodBatchId || b.productId === prodBatchId) && String(b.microBatchNo) === String(mb.micro_batch_no)
+               (b.batchId === prodBatchId || b.productId === prodBatchId) && b.microBatchNo === mb.micro_batch_no
              );
              
-             if (existingForMB.length < mbUnits) {
+             if (existingForMB.length < mb.units) {
                updatedMb.status = 'Passed';
                if (mb.status !== 'Passed') {
                  await inventoryService.updateMicroBatch(mb.id, { status: 'Passed' });
@@ -101,20 +98,6 @@ const ProductionBatchDetail = () => {
              }
           }
           verifiedMbs.push(updatedMb);
-        }
-
-        // Sync completed micro-batch count to Supabase production_batches table
-        const compCount = verifiedMbs.filter(m => m.status === 'Passed' || m.status === 'Barcode Saved' || m.status === 'Failed').length;
-        const totCount = Number(batch.total_micro_batches || verifiedMbs.length || 0);
-        if (totCount > 0 && (batch.completed_micro_batches !== compCount || (compCount >= totCount && batch.status !== 'Complete' && batch.status !== 'Saved'))) {
-          const updates: any = { completed_micro_batches: compCount };
-          if (compCount >= totCount && batch.status !== 'Complete' && batch.status !== 'Saved') {
-            updates.status = 'Complete';
-            updates.completed_at = new Date().toISOString();
-          }
-          await inventoryService.updateProductionBatch(batch.id, updates);
-          batch.completed_micro_batches = compCount;
-          if (updates.status) batch.status = updates.status;
         }
 
         setIngredients(ings);
@@ -293,55 +276,21 @@ const ProductionBatchDetail = () => {
       }
     }
 
-    if (!productionBatch) return;
-
-    // Check if barcodes already exist in Supabase for this micro batch
-    try {
-      const existingBarcodes = await (inventoryService as any).getProductBarcodesForMicroBatch(
-        productionBatch.id,
-        mb.micro_batch_no,
-        productionBatch.batch_id
-      );
-
-      if (existingBarcodes.length > 0) {
-        // Barcodes already saved — load them for display instead of generating new ones
-        setPendingBarcodeMB(mb);
-        setPendingBarcodesList(existingBarcodes.map((b: any) => ({
-          no: b.barcodeNumber || b.barcode_no || b.barcode || b.no,
-          scanned: true
-        })));
-        setBarcodesAlreadySaved(true);
-        return;
-      }
-    } catch (err) {
-      console.error('Failed to check existing barcodes:', err);
-    }
-
-    // No existing barcodes — generate new non-colliding barcode strings for review
     setPendingBarcodeMB(mb);
-    setBarcodesAlreadySaved(false);
-    const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
-    const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
-    const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
-    
-    let generatedNos: string[] = [];
-    try {
-      generatedNos = await (inventoryService as any).getNextProductBarcodeSerials(
-        productCode,
-        mb.micro_batch_no,
-        dateStr,
-        mbUnits
-      );
-    } catch (e) {
-      console.error('Failed to fetch next barcode serials:', e);
-      for (let i = 1; i <= mbUnits; i++) {
+    if (productionBatch) {
+      const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
+      const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
+      
+      const list = [];
+      for (let i = 1; i <= mb.units; i++) {
         const serial = i.toString().padStart(3, '0');
-        generatedNos.push(`PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`);
+        list.push({
+          no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
+          scanned: false
+        });
       }
+      setPendingBarcodesList(list);
     }
-
-    const list = generatedNos.map(no => ({ no, scanned: false }));
-    setPendingBarcodesList(list);
   };
 
   const handleCancelBarcode = () => {
@@ -351,73 +300,40 @@ const ProductionBatchDetail = () => {
 
   const handleSaveBarcode = async (mb: any) => {
     if (!productionBatch) return;
-    if (isSavingBarcode) return; // Prevent double-click
 
-    // If barcodes were already saved (loaded from DB), just dismiss
-    if (barcodesAlreadySaved) {
-      toast.success('Barcodes already saved for this micro batch.');
-      await inventoryService.updateMicroBatch(mb.id, { status: 'Barcode Saved' });
-      setPendingBarcodeMB(null);
-      setPendingBarcodesList([]);
-      setBarcodesAlreadySaved(false);
-      fetchData();
-      return;
-    }
-
-    setIsSavingBarcode(true);
+    const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
+    const finalBarcodes = pendingBarcodesList.map((b: any) => ({
+      id: crypto.randomUUID(),
+      type: 'PRODUCT',
+      productId: productionBatch.id,
+      batchId: productionBatch.id,
+      productName: productionBatch.product_name,
+      productCode: productCode,
+      microBatchNo: mb.micro_batch_no,
+      barcodeNumber: b.no,
+      barcode_no: b.no, 
+      displayBarcode: b.no,
+      barcode: b.no,
+      code: b.no,
+      currentStage: 'READY_FOR_FIRST_SCAN',
+      quantity: 1,
+      unit: 'Unit',
+      status: 'NOT_SCANNED', 
+      scan_status: 'NOT_SCANNED', 
+      comboReady: false,
+      createdAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      savedAt: new Date().toISOString(),
+      scannedAt: null,
+      addedToComboAt: null,
+      producedBy: mb.producedBy,
+      producedAt: mb.producedAt
+    }));
     
     try {
-      // Final server-side duplicate check using targeted query
-      const existingForMB = await (inventoryService as any).getProductBarcodesForMicroBatch(
-        productionBatch.id,
-        mb.micro_batch_no,
-        productionBatch.batch_id
-      );
-
-      if (existingForMB.length > 0) {
-        toast.error('Barcodes have already been generated and saved for this micro batch!');
-        await inventoryService.updateMicroBatch(mb.id, { status: 'Barcode Saved' });
-        setPendingBarcodeMB(null);
-        setPendingBarcodesList([]);
-        setBarcodesAlreadySaved(false);
-        fetchData();
-        return;
-      }
-
-      // Build barcode payloads
-      const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
-      const finalBarcodes = pendingBarcodesList.map((b: any) => ({
-        id: crypto.randomUUID(),
-        type: 'PRODUCT',
-        productId: productionBatch.id,
-        batchId: productionBatch.id,
-        productName: productionBatch.product_name,
-        productCode: productCode,
-        microBatchNo: mb.micro_batch_no,
-        barcodeNumber: b.no,
-        barcode_no: b.no, 
-        displayBarcode: b.no,
-        barcode: b.no,
-        code: b.no,
-        currentStage: 'READY_FOR_FIRST_SCAN',
-        quantity: 1,
-        unit: 'Unit',
-        status: 'NOT_SCANNED', 
-        scan_status: 'NOT_SCANNED', 
-        comboReady: false,
-        createdAt: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        savedAt: new Date().toISOString(),
-        scannedAt: null,
-        addedToComboAt: null,
-        producedBy: mb.producedBy,
-        producedAt: mb.producedAt
-      }));
-
-      // Insert product barcodes
       await (inventoryService as any).saveProductBarcodes(finalBarcodes);
 
-      // Generate and save master QC barcode (idempotent — addQCBarcode checks for existing)
+      // --- Generate and save master QC barcode ---
       const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
       const last4BatchId = String(productionBatch.id).slice(-4);
       const qcBarcodeNo = `QC-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${last4BatchId}`;
@@ -441,8 +357,18 @@ const ProductionBatchDetail = () => {
 
       const savedQC = await (inventoryService as any).addQCBarcode(qcRecord);
       const isQCDuplicate = savedQC?.isDuplicate;
+      // -------------------------------------------
+      
+      const checkAll = await inventoryService.getProductBarcodes();
+      const existingForMB = checkAll.filter((item: any) => 
+        (item.batchId === productionBatch.id || item.productId === productionBatch.id) && item.microBatchNo === mb.micro_batch_no
+      );
 
-      // Create inventory transactions
+      if (existingForMB.length < finalBarcodes.length) {
+        toast.error('Barcode save failed. Please try again.');
+        return;
+      }
+
       for (const b of finalBarcodes) {
         await inventoryService.createInventoryTransaction({
           barcodeNumber: b.barcodeNumber,
@@ -459,7 +385,9 @@ const ProductionBatchDetail = () => {
         });
       }
 
-      await inventoryService.updateMicroBatch(mb.id, { status: 'Barcode Saved' });
+      await inventoryService.updateMicroBatch(mb.id, {
+        status: 'Barcode Saved',
+      });
 
       if (isQCDuplicate) {
         toast.success('Product barcodes saved. QC barcode already exists.');
@@ -469,14 +397,11 @@ const ProductionBatchDetail = () => {
 
       setPendingBarcodeMB(null);
       setPendingBarcodesList([]);
-      setBarcodesAlreadySaved(false);
       
       fetchData(); 
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || "Failed to save barcodes");
-    } finally {
-      setIsSavingBarcode(false);
     }
   };
   const handleEditDeptChange = (deptId: string) => {
@@ -540,50 +465,18 @@ const ProductionBatchDetail = () => {
 
   if (!productionBatch) return <div style={{ padding: '48px', textAlign: 'center' }}>Loading...</div>;
 
-  const getSafeRequiredQuantity = (ing: any) => {
-    let reqQty = Number(ing.required_quantity);
-    if (!Number.isFinite(reqQty) || reqQty <= 0) {
-      try {
-        const product = PRODUCTS.find(p => p.name === productionBatch.product_name);
-        if (product) {
-          const reqIngs = calculateRequiredIngredients(product.id, Number(productionBatch.total_units || productionBatch.batch_size || 0));
-          const matchedIng = reqIngs?.find(ri => normalizeMaterialKey(ri.name) === normalizeMaterialKey(ing.material_name));
-          if (matchedIng) {
-            reqQty = Number(matchedIng.required_quantity);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to recalculate required quantity:", err);
-      }
-    }
-    return Number.isFinite(reqQty) && reqQty > 0 ? reqQty : 0;
-  };
-
-  const isIngredientReady = (ing: any) => {
-    const req = getSafeRequiredQuantity(ing);
-    if (req <= 0) return false;
-    const avail = Number(productionStock[normalizeMaterialKey(ing.material_name)]?.availableKg);
-    if (!Number.isFinite(avail)) return false;
-    return avail >= req;
-  };
-
-  const checkedIngredientsCount = ingredients?.filter((i: any) => isIngredientReady(i)).length || 0;
+  const checkedIngredientsCount = ingredients?.filter((i: any) => {
+    const avail = productionStock[normalizeMaterialKey(i.material_name)]?.availableKg || 0;
+    return avail >= i.required_quantity;
+  }).length || 0;
   const allIngredientsPrepared = ingredients && ingredients.length > 0 && checkedIngredientsCount === ingredients.length;
 
   let progress = 0;
   if (productionBatch.status === 'Prep') {
-    const totalIngs = ingredients?.length || 0;
-    progress = totalIngs > 0 ? Math.round((checkedIngredientsCount / totalIngs) * 100) : 0;
+    progress = ingredients.length > 0 ? Math.round((checkedIngredientsCount / ingredients.length) * 100) : 0;
   } else {
-    const completedMB = Number(productionBatch.completed_micro_batches || 0);
-    const totalMBVal = Number(productionBatch.total_micro_batches || 0);
-    if (Number.isFinite(completedMB) && Number.isFinite(totalMBVal) && totalMBVal > 0) {
-      progress = Math.round((completedMB / totalMBVal) * 100);
-    } else {
-      progress = 0;
-    }
+    progress = productionBatch.total_micro_batches > 0 ? Math.round((productionBatch.completed_micro_batches / productionBatch.total_micro_batches) * 100) : 0;
   }
-  progress = Math.max(0, Math.min(100, progress));
 
   const isFullyComplete = productionBatch.status === 'Complete';
 
@@ -789,9 +682,8 @@ const ProductionBatchDetail = () => {
           
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px', marginBottom: '24px' }}>
             {ingredients.map((ing: any) => {
-              const avail = Number(productionStock[normalizeMaterialKey(ing.material_name)]?.availableKg || 0);
-              const isReady = isIngredientReady(ing);
-              const req = getSafeRequiredQuantity(ing);
+              const avail = productionStock[normalizeMaterialKey(ing.material_name)]?.availableKg || 0;
+              const isReady = avail >= ing.required_quantity;
               return (
                 <div key={ing.id} style={{ 
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px', 
@@ -816,7 +708,7 @@ const ProductionBatchDetail = () => {
                     </div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '16px', color: isReady ? 'white' : 'var(--text-primary)', marginBottom: '4px' }}>{ing.material_name}</div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Required: <strong style={{ color: isReady ? '#10b981' : 'white' }}>{req.toFixed(2)} KG</strong> | Available: <strong style={{ color: isReady ? '#10b981' : '#ef4444' }}>{avail.toFixed(2)} KG</strong></div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Required: <strong style={{ color: isReady ? '#10b981' : 'white' }}>{ing.required_quantity} KG</strong> | Available: <strong style={{ color: isReady ? '#10b981' : '#ef4444' }}>{avail} KG</strong></div>
                     </div>
                   </div>
                   
@@ -907,7 +799,7 @@ const ProductionBatchDetail = () => {
                     </div>
                     <div>
                       <div style={{ fontSize: '14px', color: '#94a3b8', marginBottom: '4px' }}>Quantity</div>
-                      <div style={{ fontSize: '18px', fontWeight: 700, color: 'white' }}>{Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0)} <span style={{ fontSize: '14px', fontWeight: 'normal', color: '#64748b' }}>units</span></div>
+                      <div style={{ fontSize: '18px', fontWeight: 700, color: 'white' }}>{mb.units} <span style={{ fontSize: '14px', fontWeight: 'normal', color: '#64748b' }}>units</span></div>
                     </div>
                     {(mb.producedBy || mb.producedAt) && (
                       <div style={{ marginLeft: '16px' }}>
@@ -985,9 +877,7 @@ const ProductionBatchDetail = () => {
                                   <span style={{ fontFamily: 'monospace', fontSize: '13px', color: 'white' }}>{bc.no}</span>
                                 </div>
                                 <div>
-                                  <span style={{ color: barcodesAlreadySaved ? '#10b981' : '#94a3b8', fontSize: '12px', fontWeight: 600 }}>
-                                    {barcodesAlreadySaved ? 'SAVED' : 'PENDING'}
-                                  </span>
+                                  <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>PENDING</span>
                                 </div>
                               </div>
                             ))}
@@ -998,17 +888,15 @@ const ProductionBatchDetail = () => {
                             className="btn hover-lift" 
                             style={{ padding: '8px 16px', borderRadius: '8px', background: 'transparent', color: '#94a3b8', border: '1px solid #334155', fontWeight: 600 }} 
                             onClick={handleCancelBarcode}
-                            disabled={isSavingBarcode}
                           >
                             Cancel
                           </button>
                           <button 
                             className="btn hover-lift" 
-                            style={{ padding: '8px 16px', borderRadius: '8px', background: isSavingBarcode ? '#059669' : '#10b981', color: 'white', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', opacity: isSavingBarcode ? 0.7 : 1, cursor: isSavingBarcode ? 'not-allowed' : 'pointer' }} 
+                            style={{ padding: '8px 16px', borderRadius: '8px', background: '#10b981', color: 'white', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }} 
                             onClick={() => handleSaveBarcode(mb)}
-                            disabled={isSavingBarcode}
                           >
-                            <CheckCircle2 size={16} /> {isSavingBarcode ? 'Saving...' : 'Save Barcode'}
+                            <CheckCircle2 size={16} /> Save Barcode
                           </button>
                         </div>
                       </div>
