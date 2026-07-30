@@ -1064,6 +1064,8 @@ class LocalInventoryService {
   }
 
   async saveProductBarcodes(newBarcodes: any[]) {
+    if (!newBarcodes || newBarcodes.length === 0) return;
+
     const payloads = newBarcodes.map(item => ({
       id: item.id || crypto.randomUUID(),
       barcode: item.barcode_no || item.barcode || item.barcodeNumber || item.displayBarcode,
@@ -1079,8 +1081,36 @@ class LocalInventoryService {
       created_at: item.created_at || new Date().toISOString(),
       updated_at: item.updated_at || new Date().toISOString()
     }));
-    const { error } = await supabase.from(SUPABASE_TABLES.productBarcodes).insert(payloads);
+
+    const barcodeList = payloads.map(p => p.barcode).filter(Boolean);
+    const existingBarcodes = new Set<string>();
+
+    if (barcodeList.length > 0) {
+      const { data: existingData } = await supabase
+        .from(SUPABASE_TABLES.productBarcodes)
+        .select('barcode')
+        .in('barcode', barcodeList);
+
+      if (existingData && existingData.length > 0) {
+        existingData.forEach((row: any) => {
+          if (row.barcode) existingBarcodes.add(row.barcode);
+        });
+      }
+    }
+
+    const missingPayloads = payloads.filter(p => !existingBarcodes.has(p.barcode));
+
+    if (missingPayloads.length === 0) {
+      // All barcodes already exist in Supabase - idempotent completion
+      return;
+    }
+
+    const { error } = await supabase.from(SUPABASE_TABLES.productBarcodes).insert(missingPayloads);
     if (error) {
+      if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+        console.warn('Product barcodes already exist in Supabase, duplicate ignored:', error);
+        return;
+      }
       toast.error('Failed to save product barcodes: ' + error.message);
       throw error;
     }

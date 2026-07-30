@@ -44,6 +44,7 @@ const ProductionBatchDetail = () => {
   const [editSectionsList, setEditSectionsList] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [sections, setSections] = useState<any[]>([]);
+  const [isSavingBarcode, setIsSavingBarcode] = useState(false);
 
   const getDeptName = (deptId: string) => {
     const dept = departments.find(d => String(d.id) === String(deptId));
@@ -276,13 +277,30 @@ const ProductionBatchDetail = () => {
       }
     }
 
-    setPendingBarcodeMB(mb);
     if (productionBatch) {
+      const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
+      try {
+        const existingBarcodes = await (inventoryService as any).getProductBarcodesForMicroBatch(
+          productionBatch.id,
+          mb.micro_batch_no,
+          productionBatch.batch_id
+        );
+        if (existingBarcodes && existingBarcodes.length >= mbUnits) {
+          await inventoryService.updateMicroBatch(mb.id, { status: 'Barcode Saved' });
+          toast.success(`${existingBarcodes.length} product barcodes already exist and are saved.`);
+          await fetchData();
+          return;
+        }
+      } catch (err) {
+        console.error("Check existing barcodes error:", err);
+      }
+
+      setPendingBarcodeMB(mb);
       const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
       const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
       
       const list = [];
-      for (let i = 1; i <= mb.units; i++) {
+      for (let i = 1; i <= mbUnits; i++) {
         const serial = i.toString().padStart(3, '0');
         list.push({
           no: `PROD-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${serial}`,
@@ -300,40 +318,75 @@ const ProductionBatchDetail = () => {
 
   const handleSaveBarcode = async (mb: any) => {
     if (!productionBatch) return;
+    if (isSavingBarcode) return;
+
+    setIsSavingBarcode(true);
 
     const productCode = getProductDisplayName(productionBatch.product_name) || 'XX';
-    const finalBarcodes = pendingBarcodesList.map((b: any) => ({
-      id: crypto.randomUUID(),
-      type: 'PRODUCT',
-      productId: productionBatch.id,
-      batchId: productionBatch.id,
-      productName: productionBatch.product_name,
-      productCode: productCode,
-      microBatchNo: mb.micro_batch_no,
-      barcodeNumber: b.no,
-      barcode_no: b.no, 
-      displayBarcode: b.no,
-      barcode: b.no,
-      code: b.no,
-      currentStage: 'READY_FOR_FIRST_SCAN',
-      quantity: 1,
-      unit: 'Unit',
-      status: 'NOT_SCANNED', 
-      scan_status: 'NOT_SCANNED', 
-      comboReady: false,
-      createdAt: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      savedAt: new Date().toISOString(),
-      scannedAt: null,
-      addedToComboAt: null,
-      producedBy: mb.producedBy,
-      producedAt: mb.producedAt
-    }));
-    
-    try {
-      await (inventoryService as any).saveProductBarcodes(finalBarcodes);
+    const mbUnits = Number(mb.units !== undefined && mb.units !== null ? mb.units : mb.qty !== undefined && mb.qty !== null ? mb.qty : mb.quantity || 0);
 
-      // --- Generate and save master QC barcode ---
+    try {
+      // 1. Fetch existing barcode rows for this micro batch directly from Supabase
+      const existingBarcodes = await (inventoryService as any).getProductBarcodesForMicroBatch(
+        productionBatch.id,
+        mb.micro_batch_no,
+        productionBatch.batch_id
+      );
+      const existingSet = new Set((existingBarcodes || []).map((b: any) => b.barcodeNumber || b.barcode_no || b.barcode || b.no));
+
+      const finalBarcodes = pendingBarcodesList.map((b: any) => ({
+        id: crypto.randomUUID(),
+        type: 'PRODUCT',
+        productId: productionBatch.id,
+        batchId: productionBatch.id,
+        productName: productionBatch.product_name,
+        productCode: productCode,
+        microBatchNo: mb.micro_batch_no,
+        barcodeNumber: b.no,
+        barcode_no: b.no, 
+        displayBarcode: b.no,
+        barcode: b.no,
+        code: b.no,
+        currentStage: 'READY_FOR_FIRST_SCAN',
+        quantity: 1,
+        unit: 'Unit',
+        status: 'NOT_SCANNED', 
+        scan_status: 'NOT_SCANNED', 
+        comboReady: false,
+        createdAt: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        savedAt: new Date().toISOString(),
+        scannedAt: null,
+        addedToComboAt: null,
+        producedBy: mb.producedBy,
+        producedAt: mb.producedAt
+      }));
+
+      // 2. Filter out barcodes that already exist
+      const missingBarcodes = finalBarcodes.filter((b: any) => !existingSet.has(b.barcodeNumber));
+
+      // 3. Insert missing barcode rows only
+      if (missingBarcodes.length > 0) {
+        await (inventoryService as any).saveProductBarcodes(missingBarcodes);
+
+        for (const b of missingBarcodes) {
+          await inventoryService.createInventoryTransaction({
+            barcodeNumber: b.barcodeNumber,
+            itemType: 'PRODUCT',
+            itemName: b.productName,
+            productId: b.productId,
+            quantity: 1,
+            unit: 'Unit',
+            fromLocation: 'PRODUCTION_CONSUMED',
+            toLocation: 'PRODUCT',
+            transactionType: 'IN',
+            referenceType: 'MICRO_BATCH',
+            referenceId: mb.id,
+          });
+        }
+      }
+
+      // 4. Generate and save master QC barcode if missing
       const dateStr = new Date().toISOString().slice(2,10).replace(/-/g,'');
       const last4BatchId = String(productionBatch.id).slice(-4);
       const qcBarcodeNo = `QC-${productCode}-MB${mb.micro_batch_no}-${dateStr}-${last4BatchId}`;
@@ -355,53 +408,35 @@ const ProductionBatchDetail = () => {
         currentStage: 'READY_FOR_QC_IN'
       };
 
-      const savedQC = await (inventoryService as any).addQCBarcode(qcRecord);
-      const isQCDuplicate = savedQC?.isDuplicate;
-      // -------------------------------------------
+      await (inventoryService as any).addQCBarcode(qcRecord);
       
-      const checkAll = await inventoryService.getProductBarcodes();
-      const existingForMB = checkAll.filter((item: any) => 
-        (item.batchId === productionBatch.id || item.productId === productionBatch.id) && item.microBatchNo === mb.micro_batch_no
+      // 5. Verify that total barcode count in Supabase matches required units
+      const checkAll = await (inventoryService as any).getProductBarcodesForMicroBatch(
+        productionBatch.id,
+        mb.micro_batch_no,
+        productionBatch.batch_id
       );
 
-      if (existingForMB.length < finalBarcodes.length) {
-        toast.error('Barcode save failed. Please try again.');
+      if (checkAll.length < mbUnits) {
+        toast.error(`Barcode save incomplete (${checkAll.length}/${mbUnits}). Please try again.`);
         return;
-      }
-
-      for (const b of finalBarcodes) {
-        await inventoryService.createInventoryTransaction({
-          barcodeNumber: b.barcodeNumber,
-          itemType: 'PRODUCT',
-          itemName: b.productName,
-          productId: b.productId,
-          quantity: 1,
-          unit: 'Unit',
-          fromLocation: 'PRODUCTION_CONSUMED',
-          toLocation: 'PRODUCT',
-          transactionType: 'IN',
-          referenceType: 'MICRO_BATCH',
-          referenceId: mb.id,
-        });
       }
 
       await inventoryService.updateMicroBatch(mb.id, {
         status: 'Barcode Saved',
       });
 
-      if (isQCDuplicate) {
-        toast.success('Product barcodes saved. QC barcode already exists.');
-      } else {
-        toast.success(`${finalBarcodes.length} product barcodes & 1 master QC barcode saved successfully`);
-      }
+      toast.success(`${checkAll.length} product barcodes saved successfully`);
 
       setPendingBarcodeMB(null);
       setPendingBarcodesList([]);
       
-      fetchData(); 
+      await fetchData(); 
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || "Failed to save barcodes");
+    } finally {
+      setIsSavingBarcode(false);
     }
   };
   const handleEditDeptChange = (deptId: string) => {
@@ -893,10 +928,23 @@ const ProductionBatchDetail = () => {
                           </button>
                           <button 
                             className="btn hover-lift" 
-                            style={{ padding: '8px 16px', borderRadius: '8px', background: '#10b981', color: 'white', border: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }} 
+                            disabled={isSavingBarcode}
+                            style={{ 
+                              padding: '8px 16px', 
+                              borderRadius: '8px', 
+                              background: isSavingBarcode ? '#4b5563' : '#10b981', 
+                              color: 'white', 
+                              border: 'none', 
+                              fontWeight: 600, 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              gap: '8px',
+                              cursor: isSavingBarcode ? 'not-allowed' : 'pointer',
+                              opacity: isSavingBarcode ? 0.7 : 1
+                            }} 
                             onClick={() => handleSaveBarcode(mb)}
                           >
-                            <CheckCircle2 size={16} /> Save Barcode
+                            <CheckCircle2 size={16} /> {isSavingBarcode ? 'Saving...' : 'Save Barcode'}
                           </button>
                         </div>
                       </div>
