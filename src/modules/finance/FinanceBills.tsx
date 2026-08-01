@@ -3,6 +3,8 @@ import { Search, Edit2, Trash2 } from 'lucide-react';
 import { useBills, type FinanceBill } from '../../hooks/finance/useBills';
 import { BillAnalytics } from './BillAnalytics';
 import { BillForm } from './BillForm';
+import { BillCardEditor } from './BillCardEditor';
+import { FinanceInfoCard } from '../../components/ui/FinanceInfoCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { departmentService } from '../../services/departmentService';
 import { supabase } from '../../lib/supabase';
@@ -15,6 +17,7 @@ export const FinanceBills = () => {
   
   // Form state
   const [editingBill, setEditingBill] = useState<FinanceBill | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Modal state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -66,12 +69,11 @@ export const FinanceBills = () => {
   });
 
   const handleEdit = (bill: FinanceBill) => {
-    setEditingBill(bill);
-    setActiveTab('add');
+    setEditingId(bill.id || null);
   };
 
   const handleAddNew = () => {
-    setEditingBill(null);
+    setEditingId(null);
     setActiveTab('add');
   };
 
@@ -182,72 +184,36 @@ export const FinanceBills = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6 items-start">
                 {filteredBills.map(bill => (
-                  <div key={bill.id} className="bg-card border border-border/50 rounded-2xl p-5 shadow-sm hover:border-border transition-colors group">
-                    <div className="flex flex-col md:flex-row justify-between gap-4">
-                      
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h3 className="text-lg font-semibold text-main">
-                            {getDeptName(bill.main_category)}
-                          </h3>
-                          <span className={`px-2.5 py-1 text-xs font-medium rounded-md ${
-                            bill.bill_status === 'Paid' ? 'bg-green-500/10 text-green-500' :
-                            bill.bill_status === 'Overdue' ? 'bg-red-500/10 text-red-500' :
-                            'bg-yellow-500/10 text-yellow-600 dark:text-yellow-500'
-                          }`}>
-                            {bill.bill_status}
-                          </span>
-                        </div>
-                        <div className="text-sm text-muted mb-4">
-                          {getSectionName(bill.sub_category1)} 
-                          {bill.sub_category2 ? ` › ${bill.sub_category2}` : ''}
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-y-4 gap-x-6">
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Amount</div>
-                            <div className="text-sm font-semibold text-main">₹{bill.amount ?? '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Due Date</div>
-                            <div className="text-sm text-main">{formatDate(bill.due_date)}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Billing Cycle</div>
-                            <div className="text-sm text-main">{bill.billing_cycle || '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Payment Type</div>
-                            <div className="text-sm text-main">{bill.payment_type || '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Account</div>
-                            <div className="text-sm text-main">{bill.account || '-'}</div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-row md:flex-col items-end gap-2 shrink-0">
-                        <button 
-                          onClick={() => handleEdit(bill)}
-                          className="p-2 text-muted hover:text-primary bg-background rounded-lg hover:bg-primary/10 transition-colors"
-                          title="Edit Bill"
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                        <button 
-                          onClick={() => bill.id && handleDelete(bill.id)}
-                          className="p-2 text-muted hover:text-red-500 bg-background rounded-lg hover:bg-red-500/10 transition-colors"
-                          title="Archive Bill"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-
-                    </div>
-                  </div>
+                  <FinanceInfoCard
+                    key={bill.id}
+                    title={getDeptName(bill.main_category)}
+                    subtitle={`${getSectionName(bill.sub_category1)}${bill.sub_category2 ? ` › ${bill.sub_category2}` : ''}`}
+                    badges={[bill.bill_status].filter(Boolean) as string[]}
+                    onEdit={() => handleEdit(bill)}
+                    onDelete={() => bill.id && handleDelete(bill.id)}
+                    editTooltip="Edit Bill"
+                    deleteTooltip="Archive Bill"
+                    isEditing={editingId === bill.id}
+                    formId={`edit-bill-${bill.id}`}
+                    onCancelEdit={() => setEditingId(null)}
+                    renderEditForm={() => (
+                      <BillCardEditor
+                        bill={bill}
+                        formId={`edit-bill-${bill.id}`}
+                        onClose={() => setEditingId(null)}
+                        onSuccess={() => setEditingId(null)}
+                      />
+                    )}
+                    fields={[
+                      { label: "Amount", value: `₹${bill.amount ?? '-'}` },
+                      { label: "Due Date", value: formatDate(bill.due_date) },
+                      { label: "Billing Cycle", value: bill.billing_cycle || '-' },
+                      { label: "Payment Type", value: bill.payment_type || '-' },
+                      { label: "Account", value: bill.account || '-' },
+                    ]}
+                  />
                 ))}
               </div>
             )}

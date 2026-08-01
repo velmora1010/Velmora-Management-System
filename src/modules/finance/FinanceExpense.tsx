@@ -2,21 +2,25 @@ import { useState, useEffect, useMemo } from 'react';
 import { Search, Edit2, Trash2 } from 'lucide-react';
 import { useExpenses, type FinanceExpense as FinanceExpenseType } from '../../hooks/finance/useExpenses';
 import { ExpenseForm } from './ExpenseForm';
+import { ExpenseCardEditor } from './ExpenseCardEditor';
+import { FinanceInfoCard } from '../../components/ui/FinanceInfoCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { departmentService } from '../../services/departmentService';
 import { supabase } from '../../lib/supabase';
 import type { Department, DepartmentSection } from '../../types';
+import { UploadExpense } from './UploadExpense';
 
 export const FinanceExpense = () => {
   const { expenses, isLoading, archiveExpense, refreshExpenses } = useExpenses();
   const [searchQuery, setSearchQuery] = useState('');
   
   // Tab and Form state
-  const [activeTab, setActiveTab] = useState<'view' | 'add' | 'analytics'>('view');
+  const [activeTab, setActiveTab] = useState<'view' | 'add' | 'analytics' | 'upload'>('view');
   const [editingExpense, setEditingExpense] = useState<FinanceExpenseType | null>(null);
 
   // Modal state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null);
 
   // Mappings
@@ -90,12 +94,11 @@ export const FinanceExpense = () => {
   }, [expenses, selectedDeptFilter, selectedSectionFilter, searchQuery, departments, sections]);
 
   const handleEdit = (expense: FinanceExpenseType) => {
-    setEditingExpense(expense);
-    setActiveTab('add');
+    setEditingId(expense.id || null);
   };
 
   const handleAddNew = () => {
-    setEditingExpense(null);
+    setEditingId(null);
     setActiveTab('add');
   };
 
@@ -130,6 +133,16 @@ export const FinanceExpense = () => {
           }`}
         >
           Add Expense
+        </button>
+        <button
+          onClick={() => setActiveTab('upload')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeTab === 'upload'
+              ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110'
+              : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+          }`}
+        >
+          Upload Expense
         </button>
         <button
           onClick={() => setActiveTab('view')}
@@ -206,6 +219,10 @@ export const FinanceExpense = () => {
           />
         )}
 
+        {activeTab === 'upload' && (
+          <UploadExpense onClose={() => setActiveTab('view')} />
+        )}
+
         {activeTab === 'analytics' && (
           <div className="flex flex-col items-center justify-center p-12 text-center bg-card rounded-2xl border border-border/50 shadow-sm mt-4 fade-in">
             <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center text-3xl mb-4">
@@ -237,68 +254,36 @@ export const FinanceExpense = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6 items-start">
                 {filteredExpenses.map(expense => (
-                  <div key={expense.id} className="bg-card border border-border/50 rounded-2xl p-5 shadow-sm hover:border-border transition-colors group">
-                    <div className="flex flex-col md:flex-row justify-between gap-4">
-                      
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h3 className="text-lg font-semibold text-main">
-                            {getDeptName(expense.main_category)}
-                          </h3>
-                          <span className={`px-2.5 py-1 text-xs font-medium rounded-md bg-primary/10 text-primary`}>
-                            {expense.vendor || 'No Vendor'}
-                          </span>
-                        </div>
-                        <div className="text-sm text-muted mb-4">
-                          {getSectionName(expense.sub_category1)} 
-                          {expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-y-4 gap-x-6">
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Amount</div>
-                            <div className="text-sm font-semibold text-main">₹{expense.amount ?? '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Date</div>
-                            <div className="text-sm text-main">{formatDate(expense.created_at)}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Payment Mode</div>
-                            <div className="text-sm text-main">{expense.payment_mode || '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Purchased By</div>
-                            <div className="text-sm text-main">{expense.purchased_by || '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">GST Status</div>
-                            <div className="text-sm text-main">{expense.gst_status || '-'}</div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-row md:flex-col items-end gap-2 shrink-0">
-                        <button 
-                          onClick={() => handleEdit(expense)}
-                          className="p-2 text-muted hover:text-primary bg-background rounded-lg hover:bg-primary/10 transition-colors"
-                          title="Edit Expense"
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                        <button 
-                          onClick={() => expense.id && handleDelete(expense.id)}
-                          className="p-2 text-muted hover:text-red-500 bg-background rounded-lg hover:bg-red-500/10 transition-colors"
-                          title="Archive Expense"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-
-                    </div>
-                  </div>
+                  <FinanceInfoCard
+                    key={expense.id}
+                    title={getDeptName(expense.main_category)}
+                    subtitle={`${getSectionName(expense.sub_category1)}${expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}`}
+                    badges={[expense.vendor || 'No Vendor']}
+                    onEdit={() => handleEdit(expense)}
+                    onDelete={() => expense.id && handleDelete(expense.id)}
+                    editTooltip="Edit Expense"
+                    deleteTooltip="Archive Expense"
+                    isEditing={editingId === expense.id}
+                    formId={`edit-expense-${expense.id}`}
+                    onCancelEdit={() => setEditingId(null)}
+                    renderEditForm={() => (
+                      <ExpenseCardEditor
+                        expense={expense}
+                        formId={`edit-expense-${expense.id}`}
+                        onClose={() => setEditingId(null)}
+                        onSuccess={() => setEditingId(null)}
+                      />
+                    )}
+                    fields={[
+                      { label: "Amount", value: `₹${expense.amount ?? '-'}` },
+                      { label: "Date", value: formatDate(expense.created_at) },
+                      { label: "Payment Mode", value: expense.payment_mode || '-' },
+                      { label: "Purchased By", value: expense.purchased_by || '-' },
+                      { label: "GST Status", value: expense.gst_status || '-' },
+                    ]}
+                  />
                 ))}
               </div>
             )}
