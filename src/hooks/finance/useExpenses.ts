@@ -7,6 +7,8 @@ export interface FinanceExpense {
   main_category: string | null;
   sub_category1: string | null;
   sub_category2: string | null;
+  sub_category3: string | null;
+  sub_category3_values: string[];
   quantity: number | null;
   amount: number | null;
   vendor: string | null;
@@ -81,13 +83,22 @@ export const useExpenses = () => {
 
   const addExpense = async (expenseData: FinanceExpense) => {
     try {
+      const payload = { ...expenseData, status: 'active' };
+      console.log('Expense Payload', payload);
+
       const { data, error } = await supabase
         .from(SUPABASE_TABLES.expenses)
-        .insert([{ ...expenseData, status: 'active' }])
+        .insert([payload])
         .select()
         .single();
         
-      if (error) throw error;
+      console.log('Supabase Error:', error);
+      console.log('Supabase Data:', data);
+
+      if (error) {
+        throw new Error(`${error.message} - ${error.details}`);
+      }
+
       setExpenses(prev => [data, ...prev]);
       return { success: true, data };
     } catch (e: unknown) {
@@ -98,6 +109,7 @@ export const useExpenses = () => {
 
   const updateExpense = async (id: string, updates: Partial<FinanceExpense>) => {
     try {
+      console.log('Expense Update Payload', updates);
       const { data, error } = await supabase
         .from(SUPABASE_TABLES.expenses)
         .update(updates)
@@ -105,7 +117,13 @@ export const useExpenses = () => {
         .select()
         .single();
 
-      if (error) throw error;
+      console.log('Supabase Error:', error);
+      console.log('Supabase Data:', data);
+
+      if (error) {
+        throw new Error(`${error.message} - ${error.details}`);
+      }
+
       setExpenses(prev => prev.map(e => e.id === id ? data : e));
       return { success: true, data };
     } catch (e: unknown) {

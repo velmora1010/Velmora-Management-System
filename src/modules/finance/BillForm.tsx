@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { useBills, type FinanceBill } from '../../hooks/finance/useBills';
-import { useDepartmentSelection } from '../../hooks/tasks/useDepartmentSelection';
 import { supabase } from '../../lib/supabase';
+import { MultiSelect } from '../../components/ui/MultiSelect';
 
 interface BillFormProps {
   bill: FinanceBill | null;
@@ -27,85 +27,102 @@ export const BillForm = ({ bill, onClose, onSuccess }: BillFormProps) => {
       email: '',
       notes: '',
       bill_status: 'Pending',
-      sub_category2: '',
-      sub_category3: '',
     }
   );
 
-  // Init Department Selection hook
-  const {
-    departments,
-    sections,
-    selectedDeptId,
-    selectedSectionId,
-    setSelectedSectionId,
-    handleDepartmentChange,
-    isDeptsLoading,
-    isSectionsLoading,
-    deptsError,
-    sectionsError
-  } = useDepartmentSelection(
-    bill?.main_category || '',
-    bill?.sub_category1 || ''
+  // Hierarchy State
+  const [selectedMain, setSelectedMain] = useState(bill?.main_category || '');
+  const [selectedSub1, setSelectedSub1] = useState(bill?.sub_category1 || '');
+  const [selectedSub2, setSelectedSub2] = useState(bill?.sub_category2 || '');
+  const [selectedSub3, setSelectedSub3] = useState(bill?.sub_category3 || '');
+  const [selectedSub4Values, setSelectedSub4Values] = useState<string[]>(
+    bill?.sub_category3_values || []
   );
 
+  // Options State
+  const [mainOptions, setMainOptions] = useState<string[]>([]);
+  const [sub1Options, setSub1Options] = useState<string[]>([]);
   const [sub2Options, setSub2Options] = useState<string[]>([]);
   const [sub3Options, setSub3Options] = useState<string[]>([]);
+  const [sub4Options, setSub4Options] = useState<string[]>([]);
 
-  // Fetch sub2 options from categories table
+  const [isLoadingLevels, setIsLoadingLevels] = useState(true);
+
+  // Reusable Loader
+  const loadOptions = useCallback(async (
+    targetCol: string, 
+    filters: Record<string, string> = {}
+  ): Promise<string[]> => {
+    try {
+      let query = supabase.from('finance_categories_rows').select(targetCol).eq('status', 'active');
+      for (const [key, val] of Object.entries(filters)) {
+        if (val) query = query.eq(key, val);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      if (!data) return [];
+      
+      const values = data.map((row: any) => row[targetCol]).filter(Boolean);
+      return Array.from(new Set(values)) as string[];
+    } catch (err) {
+      console.error(`Failed to load ${targetCol} options:`, err);
+      return [];
+    }
+  }, []);
+
+  // Preload & Cascade Fetching
   useEffect(() => {
     let mounted = true;
-    const fetchSub2 = async () => {
-      if (!selectedDeptId || !selectedSectionId) {
-        if (mounted) setSub2Options([]);
-        return;
-      }
-      try {
-        const { data, error } = await supabase
-          .from('finance_categories_rows')
-          .select('sub2')
-          .eq('main', selectedDeptId)
-          .eq('sub1', selectedSectionId)
-          .eq('status', 'active');
-        if (!error && data && mounted) {
-          const unique = Array.from(new Set(data.map(d => d.sub2).filter(Boolean))) as string[];
-          setSub2Options(unique);
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    fetchSub2();
-    return () => { mounted = false; };
-  }, [selectedDeptId, selectedSectionId]);
+    const preload = async () => {
+      setIsLoadingLevels(true);
+      
+      const pMain = loadOptions('main');
+      const pSub1 = selectedMain ? loadOptions('sub1', { main: selectedMain }) : Promise.resolve([]);
+      const pSub2 = selectedMain && selectedSub1 ? loadOptions('sub2', { main: selectedMain, sub1: selectedSub1 }) : Promise.resolve([]);
+      const pSub3 = selectedMain && selectedSub1 && selectedSub2 ? loadOptions('sub3', { main: selectedMain, sub1: selectedSub1, sub2: selectedSub2 }) : Promise.resolve([]);
+      const pSub4 = selectedMain && selectedSub1 && selectedSub2 && selectedSub3 ? loadOptions('sub_sub_sub_category', { main: selectedMain, sub1: selectedSub1, sub2: selectedSub2, sub3: selectedSub3 }) : Promise.resolve([]);
 
-  // Fetch sub3 options from categories table
-  useEffect(() => {
-    let mounted = true;
-    const fetchSub3 = async () => {
-      if (!selectedDeptId || !selectedSectionId || !formData.sub_category2) {
-        if (mounted) setSub3Options([]);
-        return;
-      }
-      try {
-        const { data, error } = await supabase
-          .from('finance_categories_rows')
-          .select('sub_sub_sub_category')
-          .eq('main', selectedDeptId)
-          .eq('sub1', selectedSectionId)
-          .eq('sub2', formData.sub_category2)
-          .eq('status', 'active');
-        if (!error && data && mounted) {
-          const unique = Array.from(new Set(data.map((d: any) => d.sub_sub_sub_category || d.sub3).filter(Boolean))) as string[];
-          setSub3Options(unique);
-        }
-      } catch (err) {
-        console.error(err);
+      const [m, s1, s2, s3, s4] = await Promise.all([pMain, pSub1, pSub2, pSub3, pSub4]);
+      
+      if (mounted) {
+        setMainOptions(m);
+        setSub1Options(s1);
+        setSub2Options(s2);
+        setSub3Options(s3);
+        setSub4Options(s4);
+        setIsLoadingLevels(false);
       }
     };
-    fetchSub3();
+    preload();
     return () => { mounted = false; };
-  }, [selectedDeptId, selectedSectionId, formData.sub_category2]);
+  }, [loadOptions, selectedMain, selectedSub1, selectedSub2, selectedSub3]);
+
+  // Hierarchy Reset Handlers
+  const handleMainChange = (val: string) => {
+    setSelectedMain(val);
+    setSelectedSub1('');
+    setSelectedSub2('');
+    setSelectedSub3('');
+    setSelectedSub4Values([]);
+  };
+
+  const handleSub1Change = (val: string) => {
+    setSelectedSub1(val);
+    setSelectedSub2('');
+    setSelectedSub3('');
+    setSelectedSub4Values([]);
+  };
+
+  const handleSub2Change = (val: string) => {
+    setSelectedSub2(val);
+    setSelectedSub3('');
+    setSelectedSub4Values([]);
+  };
+
+  const handleSub3Change = (val: string) => {
+    setSelectedSub3(val);
+    setSelectedSub4Values([]);
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -117,8 +134,8 @@ export const BillForm = ({ bill, onClose, onSuccess }: BillFormProps) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDeptId || !selectedSectionId || !formData.amount) {
-      setError('Please fill in Department, Section, and Amount.');
+    if (!selectedMain || !selectedSub1 || !formData.amount) {
+      setError('Please fill in Department, Category, and Amount.');
       return;
     }
 
@@ -127,10 +144,11 @@ export const BillForm = ({ bill, onClose, onSuccess }: BillFormProps) => {
 
     const payload = {
       ...formData,
-      main_category: selectedDeptId,
-      sub_category1: selectedSectionId,
-      sub_category2: formData.sub_category2 || '',
-      sub_category3: formData.sub_category3 || '',
+      main_category: selectedMain,
+      sub_category1: selectedSub1,
+      sub_category2: selectedSub2,
+      sub_category3: selectedSub3,
+      sub_category3_values: selectedSub4Values,
     };
 
     try {
@@ -187,79 +205,74 @@ export const BillForm = ({ bill, onClose, onSuccess }: BillFormProps) => {
             <h3 className="text-sm font-semibold text-primary uppercase tracking-wider mb-4 border-b border-border pb-2">Categorization</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
-              {/* Department Dropdown */}
+              {/* Department */}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-main">Department *</label>
                 <select
                   required
-                  value={selectedDeptId}
-                  onChange={(e) => handleDepartmentChange(e.target.value)}
-                  disabled={isDeptsLoading}
+                  value={selectedMain}
+                  onChange={(e) => handleMainChange(e.target.value)}
+                  disabled={isLoadingLevels && mainOptions.length === 0}
                   className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
                 >
-                  <option value="">{isDeptsLoading ? 'Loading departments...' : 'Select Department'}</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.department_name}</option>
-                  ))}
+                  <option value="">{isLoadingLevels && mainOptions.length === 0 ? 'Loading departments...' : 'Select Department'}</option>
+                  {mainOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
-                {deptsError && <span className="text-xs text-red-500 mt-1">{deptsError}</span>}
               </div>
 
-              {/* Section Dropdown */}
+              {/* Category */}
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-main">Section *</label>
+                <label className="text-sm font-medium text-main">Category *</label>
                 <select
                   required
-                  value={selectedSectionId}
-                  onChange={(e) => setSelectedSectionId(e.target.value)}
-                  disabled={!selectedDeptId || isSectionsLoading}
+                  value={selectedSub1}
+                  onChange={(e) => handleSub1Change(e.target.value)}
+                  disabled={!selectedMain}
                   className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
                 >
-                  <option value="">
-                    {!selectedDeptId 
-                      ? 'Select a department first' 
-                      : isSectionsLoading 
-                      ? 'Loading sections...' 
-                      : sections.length === 0 
-                      ? 'No sections available' 
-                      : 'Select Section'
-                    }
-                  </option>
-                  {sections.map((s) => (
-                    <option key={s.id} value={s.id}>{s.section_name}</option>
-                  ))}
+                  <option value="">Select Category</option>
+                  {sub1Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
-                {sectionsError && <span className="text-xs text-red-500 mt-1">{sectionsError}</span>}
               </div>
 
-              {/* Sub Category 2 Dropdown */}
+              {/* Sub Category 1 */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-main">Sub Category 1</label>
+                <select
+                  value={selectedSub2}
+                  onChange={(e) => handleSub2Change(e.target.value)}
+                  disabled={!selectedSub1 || sub2Options.length === 0}
+                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+                >
+                  <option value="">Select Sub Category 1</option>
+                  {sub2Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
+
+              {/* Sub Category 2 */}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-main">Sub Category 2</label>
                 <select
-                  name="sub_category2"
-                  value={formData.sub_category2 || ''}
-                  onChange={handleChange}
-                  disabled={!selectedSectionId || sub2Options.length === 0}
+                  value={selectedSub3}
+                  onChange={(e) => handleSub3Change(e.target.value)}
+                  disabled={!selectedSub2 || sub3Options.length === 0}
                   className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
                 >
                   <option value="">Select Sub Category 2</option>
-                  {sub2Options.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+                  {sub3Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
               </div>
 
-              {/* Sub Category 3 Dropdown */}
-              <div className="space-y-1.5">
+              {/* Sub Category 3 (MultiSelect) */}
+              <div className="space-y-1.5 md:col-span-2">
                 <label className="text-sm font-medium text-main">Sub Category 3</label>
-                <select
-                  name="sub_category3"
-                  value={formData.sub_category3 || ''}
-                  onChange={handleChange}
-                  disabled={!formData.sub_category2 || sub3Options.length === 0}
-                  className="w-full bg-background border border-border text-main text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
-                >
-                  <option value="">Select Sub Category 3</option>
-                  {sub3Options.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
-                </select>
+                <MultiSelect
+                  options={sub4Options}
+                  selectedValues={selectedSub4Values}
+                  onChange={setSelectedSub4Values}
+                  placeholder="Select Sub Category 3 Values..."
+                  disabled={!selectedSub3 || sub4Options.length === 0}
+                />
               </div>
 
             </div>

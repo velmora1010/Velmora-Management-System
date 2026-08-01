@@ -8,6 +8,7 @@ export interface FinanceCategoryRow {
   sub1: string | null;
   sub2: string | null;
   sub3: string | null;
+  sub4: string | null;
   status: string;
 }
 
@@ -18,114 +19,104 @@ export const useFinanceCategories = () => {
   const fetchCategories = useCallback(async () => {
     setIsLoading(true);
     try {
-      console.log('Loading', SUPABASE_TABLES.financeCategories, '...');
-      const { data: fetchResult, error } = await supabase
+      console.log('Loading Finance Categories from Supabase...');
+      const { data, error } = await supabase
         .from(SUPABASE_TABLES.financeCategories)
         .select('*')
         .neq('status', 'archived')
         .order('main')
         .order('sub1')
         .order('sub2');
-      
-      let data = fetchResult;
-      console.log("Loaded table:", SUPABASE_TABLES.financeCategories, data?.length, error);
 
-      if (error) {
-        console.error('finance_categories_rows fetch error:', error.message);
-        throw error;
-      }
+      if (error) throw error;
       
-      if (!error && data) {
+      if (data) {
         setCategories(data.map(r => ({
           id: r.id,
           main: r.main,
           sub1: r.sub1,
           sub2: r.sub2,
-          sub3: r.sub_sub_sub_category || r.sub3,
+          sub3: r.sub3,
+          sub4: r.sub_sub_sub_category,
           status: r.status
         })));
       }
     } catch (e) {
-      console.error('Failed to fetch finance categories:', e);
+      console.error('Failed to fetch finance categories from Supabase:', e);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchCategories();
   }, [fetchCategories]);
 
-  // Derived options for UI forms
+  // Derived options for UI
   const uniqueMains = Array.from(new Set(categories.map(c => c.main).filter(Boolean))) as string[];
   const uniqueSub1 = Array.from(new Set(categories.map(c => c.sub1).filter(Boolean))) as string[];
   const uniqueSub2 = Array.from(new Set(categories.map(c => c.sub2).filter(Boolean))) as string[];
+  const uniqueSub3 = Array.from(new Set(categories.map(c => c.sub3).filter(Boolean))) as string[];
 
-  // Helper: Cascade Update
+  // ID-based cascade updates
   const cascadeUpdates = async (oldRow: FinanceCategoryRow, newCat: Partial<FinanceCategoryRow>) => {
-    try {
-      if (oldRow.main && newCat.main && oldRow.main !== newCat.main) {
-        await supabase.from(SUPABASE_TABLES.financeCategories).update({ main: newCat.main }).eq('main', oldRow.main);
+    const promises: Promise<any>[] = [];
+
+    categories.forEach(row => {
+      let needsUpdate = false;
+      const payload: any = {};
+
+      if (oldRow.main && newCat.main && oldRow.main !== newCat.main && row.main === oldRow.main) {
+        payload.main = newCat.main;
+        needsUpdate = true;
       }
-      if (oldRow.sub1 && newCat.sub1 && oldRow.sub1 !== newCat.sub1) {
-        await supabase.from(SUPABASE_TABLES.financeCategories).update({ sub1: newCat.sub1 }).eq('main', oldRow.main).eq('sub1', oldRow.sub1);
+      if (oldRow.sub1 && newCat.sub1 && oldRow.sub1 !== newCat.sub1 && row.main === oldRow.main && row.sub1 === oldRow.sub1) {
+        payload.sub1 = newCat.sub1;
+        needsUpdate = true;
       }
-      if (oldRow.sub2 && newCat.sub2 && oldRow.sub2 !== newCat.sub2) {
-        await supabase.from(SUPABASE_TABLES.financeCategories).update({ sub2: newCat.sub2 }).eq('main', oldRow.main).eq('sub1', oldRow.sub1).eq('sub2', oldRow.sub2);
+      if (oldRow.sub2 && newCat.sub2 && oldRow.sub2 !== newCat.sub2 && row.main === oldRow.main && row.sub1 === oldRow.sub1 && row.sub2 === oldRow.sub2) {
+        payload.sub2 = newCat.sub2;
+        needsUpdate = true;
       }
-    } catch (e) {
-      console.error('Cascade update failed', e);
+      if (oldRow.sub3 && newCat.sub3 && oldRow.sub3 !== newCat.sub3 && row.main === oldRow.main && row.sub1 === oldRow.sub1 && row.sub2 === oldRow.sub2 && row.sub3 === oldRow.sub3) {
+        payload.sub3 = newCat.sub3;
+        needsUpdate = true;
+      }
+
+      // Do not update the exact row being edited by saveCategoryRow (it is updated independently)
+      if (needsUpdate && row.id !== oldRow.id) {
+        promises.push(
+          supabase.from(SUPABASE_TABLES.financeCategories).update(payload).eq('id', row.id)
+        );
+      }
+    });
+
+    if (promises.length > 0) {
+      await Promise.all(promises);
     }
   };
 
-  // Add/Update single row (for edit mode)
   const saveCategoryRow = async (id: string | null, payload: Partial<FinanceCategoryRow>) => {
     const dbPayload = {
       main: payload.main || null,
       sub1: payload.sub1 || null,
       sub2: payload.sub2 || null,
-      sub_sub_sub_category: payload.sub3 || null,
+      sub3: payload.sub3 || null,
+      sub_sub_sub_category: payload.sub4 || null,
       status: 'active'
     };
     
     if (id) {
       const oldRow = categories.find(c => c.id === id);
       await supabase.from(SUPABASE_TABLES.financeCategories).update(dbPayload).eq('id', id);
-      if (oldRow) await cascadeUpdates(oldRow, payload);
+      if (oldRow) {
+        await cascadeUpdates(oldRow, payload);
+      }
     } else {
       await supabase.from(SUPABASE_TABLES.financeCategories).insert([dbPayload]);
     }
-  };
-
-  // Batch Saves for Add Another workflow
-  const addMainCategories = async (names: string[]) => {
-    const payloads = names.map(n => ({ main: n, status: 'active' }));
-    await supabase.from(SUPABASE_TABLES.financeCategories).insert(payloads);
-    await fetchCategories();
-  };
-
-  const addSub1Categories = async (main: string, names: string[]) => {
-    const payloads = names.map(n => ({ main, sub1: n, status: 'active' }));
-    await supabase.from(SUPABASE_TABLES.financeCategories).insert(payloads);
-    await fetchCategories();
-  };
-
-  const addSub2Categories = async (sub1: string, names: string[]) => {
-    const ref = categories.find(c => c.sub1 === sub1);
-    const main = ref ? ref.main : null;
-    const payloads = names.map(n => ({ main, sub1, sub2: n, status: 'active' }));
-    await supabase.from(SUPABASE_TABLES.financeCategories).insert(payloads);
-    await fetchCategories();
-  };
-
-  const addSub3Categories = async (sub2: string, names: string[]) => {
-    const ref = categories.find(c => c.sub2 === sub2);
-    const main = ref ? ref.main : null;
-    const sub1 = ref ? ref.sub1 : null;
-    const payloads = names.map(n => ({ main, sub1, sub2, sub_sub_sub_category: n, status: 'active' }));
-    await supabase.from(SUPABASE_TABLES.financeCategories).insert(payloads);
-    await fetchCategories();
+    
+    await fetchCategories(); // Auto refresh
   };
 
   const archiveCategory = async (id: string) => {
@@ -139,12 +130,9 @@ export const useFinanceCategories = () => {
     uniqueMains,
     uniqueSub1,
     uniqueSub2,
+    uniqueSub3,
     fetchCategories,
     saveCategoryRow,
-    addMainCategories,
-    addSub1Categories,
-    addSub2Categories,
-    addSub3Categories,
     archiveCategory
   };
 };

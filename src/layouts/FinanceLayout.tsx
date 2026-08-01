@@ -69,8 +69,36 @@ export const FinanceLayout = () => {
         </nav>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+      <div className="flex-1 flex flex-col min-w-0 h-full relative">
+        {/* Mobile Navigation (Segmented Control) */}
+        <div className="md:hidden sticky top-0 z-10 bg-background/80 backdrop-blur-xl border-b border-border/50 p-3 pt-4">
+          <div className="flex bg-card/50 border border-border/50 rounded-xl p-1 relative z-20">
+            <Link
+              to="/finance/management"
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px] font-semibold transition-all duration-200 min-h-[44px] ${
+                location.pathname.startsWith('/finance/management')
+                  ? 'bg-background shadow-sm text-primary border border-border/30'
+                  : 'text-muted hover:text-main border border-transparent'
+              }`}
+            >
+              <Receipt size={16} />
+              <span className="truncate">Management</span>
+            </Link>
+            <Link
+              to="/finance/categories"
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px] font-semibold transition-all duration-200 min-h-[44px] ${
+                location.pathname.startsWith('/finance/categories')
+                  ? 'bg-background shadow-sm text-primary border border-border/30'
+                  : 'text-muted hover:text-main border border-transparent'
+              }`}
+            >
+              <ListTree size={16} />
+              <span className="truncate">Categories</span>
+            </Link>
+          </div>
+        </div>
+
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 relative z-0">
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>

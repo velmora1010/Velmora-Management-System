@@ -8,6 +8,7 @@ export interface FinanceBill {
   sub_category1: string | null;
   sub_category2: string | null;
   sub_category3: string | null;
+  sub_category3_values: string[] | null;
   amount: number | null;
   due_date: string | null;
   billing_cycle: string | null;
@@ -83,13 +84,22 @@ export const useBills = () => {
 
   const addBill = async (billData: FinanceBill) => {
     try {
+      const payload = { ...billData, status: 'active' };
+      console.log("Bill Payload", payload);
+
       const { data, error } = await supabase
         .from(SUPABASE_TABLES.financeBills)
-        .insert([{ ...billData, status: 'active' }])
+        .insert([payload])
         .select()
         .single();
         
-      if (error) throw error;
+      console.log(error);
+      console.log(data);
+
+      if (error) {
+        throw new Error(`${error.message} - ${error.details}`);
+      }
+
       setBills(prev => [data, ...prev]);
       return { success: true, data };
     } catch (e: unknown) {
