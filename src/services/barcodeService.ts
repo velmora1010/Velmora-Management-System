@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import toast from 'react-hot-toast';
 
-export type BarcodeModuleType = 'PRODUCT' | 'RAW_MATERIAL' | 'COMBO' | 'QC' | 'INVENTORY';
+export type BarcodeModuleType = 'PRODUCT' | 'RAW_MATERIAL' | 'COMBO' | 'PACKAGING' | 'QC' | 'INVENTORY';
 
 export interface BarcodePrintOptions {
   barcode: string;       // Full ERP reference e.g. PROD-1Y-MB1-260730-002
@@ -54,6 +54,14 @@ export class BarcodeService {
     const qcMatch = str.match(/QC-.*?([A-Z0-9]{3,5})$/i);
     if (qcMatch) {
       return `QC${qcMatch[1]}`.toUpperCase();
+    }
+
+    // Packaging: PKG-BTL-260801-001 -> BTL001, PKG-TAPE-260801-001 -> TAPE001
+    const pkgMatch = str.match(/PKG-([A-Z0-9]+)-(?:\d{6})-(\d+)/i);
+    if (pkgMatch) {
+      const typeCode = pkgMatch[1];
+      const seq = pkgMatch[2];
+      return `${typeCode}${seq.padStart(3, '0')}`.toUpperCase();
     }
 
     // Raw Material: SLES-1000-4066 -> RM4066 or RM-SLES-260730-001 -> RM001

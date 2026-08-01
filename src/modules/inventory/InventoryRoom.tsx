@@ -188,7 +188,7 @@ const InventoryRoom = () => {
     'SLES Paste', 'CAPB', 'Salt', 'AOS', 'Fragrance - Lemon Blast',
     'Fragrance - White Flower', 'Fragrance - Milk Saffron', 'Comfort Base',
     'Sodium Benzoate', 'Phenoxy Ethanol', 'N-Cap', 'Yellow Colour',
-    'Blue Colour', 'Violet Colour', 'Water'
+    'Blue Colour', 'Pink Colour', 'Water'
   ];
 
   const overviewCards = defaultMaterials.map(mat => {

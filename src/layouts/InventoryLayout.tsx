@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Factory, Database, Barcode, Layers, Settings, CheckSquare } from 'lucide-react';
+import { LayoutDashboard, Package, Factory, Database, Barcode, Layers, CheckSquare } from 'lucide-react';
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
 
 export const InventoryLayout = () => {
@@ -8,12 +8,11 @@ export const InventoryLayout = () => {
   const navigation = [
     { name: 'Dashboard', href: '/inventory/dashboard', icon: LayoutDashboard },
     { name: 'Raw Material', href: '/inventory/raw-material', icon: Package },
-    { name: 'Product', href: '/inventory/production', icon: Factory },
+    { name: 'Production', href: '/inventory/production', icon: Factory },
     { name: 'Combos', href: '/inventory/combos', icon: Layers },
     { name: 'Inventory Room', href: '/inventory/inventory-room', icon: Database },
     { name: 'View Barcode', href: '/inventory/view-barcode', icon: Barcode },
-    { name: 'Quality Check', href: '/inventory/quality-check', icon: CheckSquare },
-    { name: 'System', href: '/inventory/system', icon: Settings },
+    { name: 'Quality Control', href: '/inventory/quality-check', icon: CheckSquare },
   ];
 
   return (

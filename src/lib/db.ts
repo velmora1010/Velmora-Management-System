@@ -135,7 +135,7 @@ export const seedDatabase = async () => {
     // Force add missing materials for Liquid B & Conditioner if they don't exist
     const ensureMaterials = [
       { name: 'Yellow Colour', unit: 'KG', category: 'Colorant', color_code: '#eab308', created_at: now },
-      { name: 'Violet Colour', unit: 'KG', category: 'Colorant', color_code: '#8b5cf6', created_at: now },
+      { name: 'Pink Colour', unit: 'KG', category: 'Colorant', color_code: '#ec4899', created_at: now },
       { name: 'Fragrance (White Flower)', unit: 'KG', category: 'Fragrance', color_code: '#d946ef', created_at: now },
       { name: 'Fragrance (Milk Saffron)', unit: 'KG', category: 'Fragrance', color_code: '#f43f5e', created_at: now },
       { name: 'N-Cap', unit: 'KG', category: 'Additive', color_code: '#14b8a6', created_at: now },

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, Beaker, Factory, AlertTriangle, CheckCircle2, AlertCircle, Play } from 'lucide-react';
-import { PRODUCTS, calculateRequiredIngredients } from '../../../config/productFormulas';
+import { PRODUCTS, calculateRequiredIngredients, getProductMicroBatchSize } from '../../../config/productFormulas';
 import { inventoryService } from '../../../services/inventoryService';
 import { useDepartmentSelection } from '../../../hooks/tasks/useDepartmentSelection';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -28,23 +28,24 @@ const NewProductionBatch = () => {
   } = useDepartmentSelection('', '');
 
   const selectedProduct = PRODUCTS.find(p => p.id === selectedProductId);
+  const mbSize = selectedProduct?.microBatchSize || getProductMicroBatchSize(selectedProductId);
 
   // Micro Batch calculations
-  const totalUnits = sizeType === 'Full' ? 500 : sizeType === 'Micro' ? 30 : customUnits;
+  const totalUnits = sizeType === 'Full' ? 500 : sizeType === 'Micro' ? mbSize : customUnits;
   
   const microBatches = useMemo(() => {
     if (!totalUnits || totalUnits <= 0) return [];
-    const count = Math.ceil(totalUnits / 30);
+    const count = Math.ceil(totalUnits / mbSize);
     let currentTotal = 0;
     return Array.from({ length: count }).map((_, i) => {
-      let qty = 30;
+      let qty = mbSize;
       if (i === count - 1) {
         qty = totalUnits - currentTotal;
       }
       currentTotal += qty;
       return { no: i + 1, qty };
     });
-  }, [totalUnits]);
+  }, [totalUnits, mbSize]);
 
   // Ingredients calculation
   const requiredIngredients = useMemo(() => {
@@ -280,7 +281,7 @@ const NewProductionBatch = () => {
               <div className="grid grid-3" style={{ gap: '16px', marginBottom: '32px' }}>
                 {[
                   { id: 'Full', title: 'Full Set', desc: 'Standard 500 units production', units: 500 },
-                  { id: 'Micro', title: 'Micro Batch', desc: 'Small 30 units production', units: 30 },
+                  { id: 'Micro', title: 'Micro Batch', desc: `Small ${mbSize} units production`, units: mbSize },
                   { id: 'Custom', title: 'Custom Units', desc: 'Define your own quantity', units: null }
                 ].map(opt => {
                   const isSelected = sizeType === opt.id;
@@ -422,15 +423,27 @@ const NewProductionBatch = () => {
                           const remaining = ing.available - ing.required;
                           const isSufficient = ing.sufficient;
 
+                          const formatDisplayNumber = (val: number): string => {
+                            if (val === 0) return '0.00';
+                            const str = String(val);
+                            if (str.includes('.')) {
+                              const decimals = str.split('.')[1].length;
+                              if (decimals > 2) {
+                                return val.toFixed(Math.min(decimals, 3));
+                              }
+                            }
+                            return val.toFixed(2);
+                          };
+
                           return (
                             <tr key={i} style={{ borderBottom: '1px solid #1e293b', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
                               <td style={{ padding: '16px', fontWeight: 600, color: 'white' }}>{ing.name}</td>
-                              <td style={{ padding: '16px', fontWeight: 'bold', color: '#e2e8f0' }}>{ing.required.toFixed(2)}</td>
+                              <td style={{ padding: '16px', fontWeight: 'bold', color: '#e2e8f0' }}>{formatDisplayNumber(ing.required)}</td>
                               <td style={{ padding: '16px', color: isSufficient ? '#10b981' : '#ef4444', fontWeight: 600 }}>
-                                {ing.available.toFixed(2)}
+                                {formatDisplayNumber(ing.available)}
                               </td>
                               <td style={{ padding: '16px', color: remaining >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>
-                                {remaining.toFixed(2)}
+                                {formatDisplayNumber(remaining)}
                               </td>
                               <td style={{ padding: '16px' }}>
                                 {isSufficient ? (

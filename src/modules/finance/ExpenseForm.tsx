@@ -60,7 +60,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess }: ExpenseFormProps) =
       for (const [key, val] of Object.entries(filters)) {
         if (val) query = query.eq(key, val);
       }
-      const { data, err } = await query;
+      const { data, error: err } = await query;
       if (err) throw err;
       if (!data) return [];
       

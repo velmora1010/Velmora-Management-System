@@ -23,4 +23,5 @@ export const SUPABASE_TABLES = {
   purchaseOrders: "purchase_orders_rows",
   qcBarcodes: "qc_barcodes",
   rawMaterialBarcodes: "raw_material_barcodes",
+  packagingMaterialBarcodes: "packaging_material_barcodes",
 };

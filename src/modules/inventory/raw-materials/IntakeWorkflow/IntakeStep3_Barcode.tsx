@@ -23,11 +23,45 @@ const IntakeStep3_Barcode = () => {
   const gstAmount = baseAmount * ((Number(formData.gst_percent) || 0) / 100);
   const totalAmount = baseAmount + gstAmount;
 
-  const productCode = selectedMaterial.name.substring(0, 4).toUpperCase();
-  
+  const isPackaging = selectedMaterial.category?.toLowerCase().includes('packaging') || 
+                      selectedMaterial.id?.startsWith('pack-') || 
+                      ['Bottle', 'Cap', 'Blue Brand Sticker', 'Yellow Brand Sticker', 'Pink Brand Sticker', 'Sponge Brand Sticker', 'WAD Seal', 'Shrink Wrap', 'Bubble Wrap', '1B Carton Box', '2B Carton Box', '3B Carton Box', '4B Carton Box', '6B Carton Box', 'Transparent Tape', 'Address Rolls', 'Barcode Sticker', 'Barcode Roll', 'Ink Roll'].includes(selectedMaterial.name);
+
+  const getPackagingCodePrefix = (matName: string) => {
+    const n = matName.toLowerCase();
+    if (n.includes('bottle')) return 'PKG-BTL';
+    if (n.includes('cap')) return 'PKG-CAP';
+    if (n.includes('transparent tape') || n.includes('tape')) return 'PKG-TAPE';
+    if (n.includes('address roll') || n.includes('address')) return 'PKG-ADDR';
+    if (n.includes('barcode sticker') || n.includes('barcode roll')) return 'PKG-BSTK';
+    if (n.includes('ink roll') || n.includes('ink')) return 'PKG-INK';
+    if (n.includes('sticker')) return 'PKG-BST';
+    if (n.includes('wad')) return 'PKG-WAD';
+    if (n.includes('shrink')) return 'PKG-SHR';
+    if (n.includes('bubble')) return 'PKG-BUB';
+    if (n.includes('1b carton')) return 'PKG-1BBOX';
+    if (n.includes('2b carton')) return 'PKG-2BBOX';
+    if (n.includes('3b carton')) return 'PKG-3BBOX';
+    if (n.includes('4b carton')) return 'PKG-4BBOX';
+    if (n.includes('6b carton')) return 'PKG-6BBOX';
+    if (n.includes('carton')) return 'PKG-BOX';
+    return 'PKG-MAT';
+  };
+
+  const dateYYMMDD = new Date().toISOString().slice(2,10).replace(/-/g,'');
+
   const previewBatches = batches.map(b => {
-    const randomCode = Math.floor(1000 + Math.random() * 9000);
-    const serialNumber = (b as any).serialNumber || `${productCode}-${b.quantity}-${randomCode}`;
+    let serialNumber = (b as any).serialNumber;
+    if (!serialNumber) {
+      if (isPackaging) {
+        const pkgPrefix = getPackagingCodePrefix(selectedMaterial.name);
+        serialNumber = `${pkgPrefix}-${dateYYMMDD}-${String(b.batch_no || 1).padStart(3, '0')}`;
+      } else {
+        const productCode = selectedMaterial.name.substring(0, 4).toUpperCase();
+        const randomCode = Math.floor(1000 + Math.random() * 9000);
+        serialNumber = `${productCode}-${b.quantity}-${randomCode}`;
+      }
+    }
     return { ...b, serialNumber };
   });
 
@@ -43,7 +77,7 @@ const IntakeStep3_Barcode = () => {
 
     const parsedPrice = Number(formData.price_per_kg);
     if (isNaN(parsedPrice) || parsedPrice < 0) {
-      toast.error("Price Per KG must be a valid non-negative number.");
+      toast.error("Price Per Unit must be a valid non-negative number.");
       return;
     }
 
@@ -84,71 +118,123 @@ const IntakeStep3_Barcode = () => {
 
     setIsSaving(true);
     try {
-      const existingBatches = await inventoryService.getBatches();
-      const existingSerials = new Set(existingBatches.map(eb => eb.serial_number));
-      
-      const newBatches = previewBatches.filter(b => !existingSerials.has(b.serialNumber));
-      
-      if (newBatches.length > 0) {
-        const baseAmount = parsedQty * parsedPrice;
-        const gstAmount = baseAmount * (parsedGst / 100);
-        const totalAmount = baseAmount + gstAmount;
+      if (isPackaging) {
+        const existingPkg = await (inventoryService as any).getPackagingBarcodes();
+        const existingSerials = new Set(existingPkg.map((eb: any) => eb.barcode || eb.serial_number));
+        const newBatches = previewBatches.filter(b => !existingSerials.has(b.serialNumber));
 
-        const inventoryInRecord = {
-          material_id: selectedMaterial.id, 
-          material_name: selectedMaterial.name,
-          quantity_received: parsedQty,
-          vendor_name: trimmedVendor, 
-          po_reference: trimmedPo,
-          price_per_kg: parsedPrice, 
-          gst_percent: parsedGst,
-          base_amount: baseAmount, 
-          gst_amount: gstAmount, 
-          total_amount: totalAmount,
-          date_received: isoDateReceived,
-          notes: trimmedNotes
-        };
+        if (newBatches.length > 0) {
+          const baseAmount = parsedQty * parsedPrice;
+          const gstAmount = baseAmount * (parsedGst / 100);
+          const totalAmount = baseAmount + gstAmount;
 
-        const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+          const inventoryInRecord = {
+            packaging_name: selectedMaterial.name,
+            packaging_category: selectedMaterial.category || 'Primary Packaging',
+            quantity_received: parsedQty,
+            vendor_name: trimmedVendor,
+            po_reference: trimmedPo,
+            price_per_unit: parsedPrice,
+            gst_percent: parsedGst,
+            base_amount: baseAmount,
+            gst_amount: gstAmount,
+            total_amount: totalAmount,
+            date_received: isoDateReceived,
+            notes: trimmedNotes
+          };
 
-        const finalBatches = newBatches.map(b => {
-          const batchId = `MAT-${dateStr}-${productCode}-${String(b.batch_no).padStart(3, '0')}`;
-          const batchValue = Number(b.quantity) * parsedPrice * (1 + (parsedGst / 100));
-          const qrDataPayload = b.serialNumber;
-
-          return {
+          const finalBatches = newBatches.map(b => ({
             id: crypto.randomUUID(),
-            batch_id: batchId, 
-            serial_number: b.serialNumber,
             barcode: b.serialNumber,
-            material_id: selectedMaterial.id,
+            serial_number: b.serialNumber,
+            packaging_name: selectedMaterial.name,
+            packaging_category: selectedMaterial.category || 'Primary Packaging',
+            batch_no: String(b.batch_no || 1),
+            vendor: trimmedVendor,
+            vendor_name: trimmedVendor,
+            po_reference: trimmedPo,
+            quantity: Number(b.quantity),
+            unit: selectedMaterial.unit || 'PCS',
+            price_per_unit: parsedPrice,
+            gst_percent: parsedGst,
+            scanning_person_name: trimmedPerson,
+            notes: trimmedNotes,
+            received_date: isoDateReceived,
+            created_at: new Date().toISOString(),
+            current_stage: 'Incoming'
+          }));
+
+          const savedIds = await (inventoryService as any).savePackagingIntake(inventoryInRecord, finalBatches);
+          setSavedBatchIds(savedIds as any);
+        }
+      } else {
+        const existingBatches = await inventoryService.getBatches();
+        const existingSerials = new Set(existingBatches.map(eb => eb.serial_number));
+        
+        const newBatches = previewBatches.filter(b => !existingSerials.has(b.serialNumber));
+        
+        if (newBatches.length > 0) {
+          const baseAmount = parsedQty * parsedPrice;
+          const gstAmount = baseAmount * (parsedGst / 100);
+          const totalAmount = baseAmount + gstAmount;
+
+          const inventoryInRecord = {
+            material_id: selectedMaterial.id, 
             material_name: selectedMaterial.name,
-            batch_no: b.batch_no, 
-            quantity: Number(b.quantity), 
-            unit: 'kg', 
-            vendor: trimmedVendor, 
+            quantity_received: parsedQty,
             vendor_name: trimmedVendor, 
             po_reference: trimmedPo,
             price_per_kg: parsedPrice, 
             gst_percent: parsedGst,
-            batch_value: batchValue,
-            barcode_data: qrDataPayload,
-            status: 'Active',
-            inventory_room_saved: false,
-            barcode_status: 'Not Scanned',
-            scanning_person_name: trimmedPerson,
-            scanningPersonName: trimmedPerson,
-            notes: trimmedNotes,
-            received_date: isoDateReceived,
+            base_amount: baseAmount, 
+            gst_amount: gstAmount, 
+            total_amount: totalAmount,
             date_received: isoDateReceived,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            current_stage: 'Incoming'
+            notes: trimmedNotes
           };
-        });
 
-        const savedIds = await inventoryService.saveRawMaterialIntake(inventoryInRecord, finalBatches);
-        setSavedBatchIds(savedIds as any);
+          const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,'');
+
+          const finalBatches = newBatches.map(b => {
+            const productCode = selectedMaterial.name.substring(0, 4).toUpperCase();
+            const batchId = `MAT-${dateStr}-${productCode}-${String(b.batch_no).padStart(3, '0')}`;
+            const batchValue = Number(b.quantity) * parsedPrice * (1 + (parsedGst / 100));
+            const qrDataPayload = b.serialNumber;
+
+            return {
+              id: crypto.randomUUID(),
+              batch_id: batchId, 
+              serial_number: b.serialNumber,
+              barcode: b.serialNumber,
+              material_id: selectedMaterial.id,
+              material_name: selectedMaterial.name,
+              batch_no: b.batch_no, 
+              quantity: Number(b.quantity), 
+              unit: 'kg', 
+              vendor: trimmedVendor, 
+              vendor_name: trimmedVendor, 
+              po_reference: trimmedPo,
+              price_per_kg: parsedPrice, 
+              gst_percent: parsedGst,
+              batch_value: batchValue,
+              barcode_data: qrDataPayload,
+              status: 'Active',
+              inventory_room_saved: false,
+              barcode_status: 'Not Scanned',
+              scanning_person_name: trimmedPerson,
+              scanningPersonName: trimmedPerson,
+              notes: trimmedNotes,
+              received_date: isoDateReceived,
+              date_received: isoDateReceived,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              current_stage: 'Incoming'
+            };
+          });
+
+          const savedIds = await inventoryService.saveRawMaterialIntake(inventoryInRecord, finalBatches);
+          setSavedBatchIds(savedIds as any);
+        }
       }
       
       setIsSaved(true);

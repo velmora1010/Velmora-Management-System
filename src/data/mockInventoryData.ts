@@ -9,7 +9,7 @@ export const defaultMaterials = [
   { id: 'mat-8', name: 'Sodium Benzoate', unit: 'KG', category: 'Preservative', color_code: '#ec4899' },
   { id: 'mat-9', name: 'Blue Colour', unit: 'KG', category: 'Colorant', color_code: '#3b82f6' },
   { id: 'mat-10', name: 'Yellow Colour', unit: 'KG', category: 'Colorant', color_code: '#eab308' },
-  { id: 'mat-11', name: 'Violet Colour', unit: 'KG', category: 'Colorant', color_code: '#8b5cf6' },
+  { id: 'mat-11', name: 'Pink Colour', unit: 'KG', category: 'Colorant', color_code: '#ec4899' },
   { id: 'mat-12', name: 'Water', unit: 'KG', category: 'Solvent', color_code: '#0ea5e9' },
   { id: 'mat-13', name: 'Lemon Blast Fragrance', unit: 'KG', category: 'Fragrance', color_code: '#eab308' },
   { id: 'mat-14', name: 'White Flower Fragrance', unit: 'KG', category: 'Fragrance', color_code: '#fcd34d' },
