@@ -20,7 +20,10 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
     due_date: bill.due_date || '',
     billing_cycle: bill.billing_cycle || '',
     payment_type: bill.payment_type || '',
+    mode_of_pay: bill.mode_of_pay || '',
     account: bill.account || '',
+    email: bill.email || '',
+    notes: bill.notes || '',
     bill_status: bill.bill_status || 'Pending'
   });
 
@@ -166,156 +169,210 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
         </div>
       )}
       
-      <form id={formId} onSubmit={handleSubmit} className="space-y-4">
+      <form id={formId} onSubmit={handleSubmit} className="space-y-6">
         
-        {/* Basic Info */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Amount *</label>
-            <input
-              type="number"
-              name="amount"
-              required
-              value={formData.amount || ''}
-              onChange={handleChange}
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Due Date</label>
-            <input
-              type="date"
-              name="due_date"
-              value={formData.due_date || ''}
-              onChange={handleChange}
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary [color-scheme:dark]"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Billing Cycle</label>
-            <select
-              name="billing_cycle"
-              value={formData.billing_cycle}
-              onChange={handleChange}
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
-            >
-              <option value="">Select Cycle</option>
-              <option value="One Time">One Time</option>
-              <option value="Monthly">Monthly</option>
-              <option value="Quarterly">Quarterly</option>
-              <option value="Annually">Annually</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Payment Type</label>
-            <select
-              name="payment_type"
-              value={formData.payment_type}
-              onChange={handleChange}
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
-            >
-              <option value="">Select Type</option>
-              <option value="Prepaid">Prepaid</option>
-              <option value="Postpaid">Postpaid</option>
-              <option value="On Demand">On Demand</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Account</label>
-            <input
-              type="text"
-              name="account"
-              value={formData.account || ''}
-              onChange={handleChange}
-              placeholder="E.g. JIRA"
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Bill Status</label>
-            <select
-              name="bill_status"
-              value={formData.bill_status}
-              onChange={handleChange}
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
-            >
-              <option value="Pending">Pending</option>
-              <option value="Paid">Paid</option>
-              <option value="Cancelled">Cancelled</option>
-            </select>
+        {/* Section 1: Bill Details */}
+        <div className="space-y-4">
+          <h4 className="text-xs font-semibold text-primary uppercase tracking-wider">Bill Details</h4>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Amount *</label>
+              <input
+                type="number"
+                name="amount"
+                required
+                value={formData.amount || ''}
+                onChange={handleChange}
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Due Date</label>
+              <input
+                type="date"
+                name="due_date"
+                value={formData.due_date || ''}
+                onChange={handleChange}
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary [color-scheme:dark]"
+              />
+            </div>
           </div>
         </div>
 
-        <div className="h-px bg-border w-full my-4"></div>
-
-        {/* Hierarchy */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Department *</label>
-            <select
-              required
-              value={selectedMain}
-              onChange={(e) => handleMainChange(e.target.value)}
-              disabled={isLoadingLevels && mainOptions.length === 0}
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
-            >
-              <option value="">{isLoadingLevels ? '...' : 'Select'}</option>
-              {mainOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Category *</label>
-            <select
-              required
-              value={selectedSub1}
-              onChange={(e) => handleSub1Change(e.target.value)}
-              disabled={!selectedMain}
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
-            >
-              <option value="">Select</option>
-              {sub1Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-          </div>
-
-          {sub2Options.length > 0 && (
+        {/* Section 2: Billing Setup */}
+        <div className="space-y-4">
+          <h4 className="text-xs font-semibold text-primary uppercase tracking-wider">Billing Setup</h4>
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Cat 1</label>
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Billing Cycle</label>
               <select
-                value={selectedSub2}
-                onChange={(e) => handleSub2Change(e.target.value)}
+                name="billing_cycle"
+                value={formData.billing_cycle}
+                onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
-                <option value="">Select</option>
-                {sub2Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                <option value="">Select Cycle</option>
+                <option value="One Time">One Time</option>
+                <option value="Monthly">Monthly</option>
+                <option value="Quarterly">Quarterly</option>
+                <option value="Annually">Annually</option>
               </select>
             </div>
-          )}
-          
-          {sub3Options.length > 0 && (
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Cat 2</label>
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Payment Type</label>
               <select
-                value={selectedSub3}
-                onChange={(e) => handleSub3Change(e.target.value)}
+                name="payment_type"
+                value={formData.payment_type}
+                onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
-                <option value="">Select</option>
-                {sub3Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                <option value="">Select Type</option>
+                <option value="Prepaid">Prepaid</option>
+                <option value="Postpaid">Postpaid</option>
+                <option value="On Demand">On Demand</option>
               </select>
             </div>
-          )}
-          
-          {sub4Options.length > 0 && (
-            <div className="col-span-2 space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Cat 3</label>
-              <MultiSelect
-                options={sub4Options}
-                selectedValues={selectedSub4Values}
-                onChange={setSelectedSub4Values}
-                placeholder="Select Sub Category 3"
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Mode of Pay</label>
+              <select
+                name="mode_of_pay"
+                value={formData.mode_of_pay}
+                onChange={handleChange}
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+              >
+                <option value="">Select Mode</option>
+                <option value="Credit Card">Credit Card</option>
+                <option value="Debit Card">Debit Card</option>
+                <option value="Net Banking">Net Banking</option>
+                <option value="UPI">UPI</option>
+                <option value="Cash">Cash</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Account</label>
+              <input
+                type="text"
+                name="account"
+                value={formData.account || ''}
+                onChange={handleChange}
+                placeholder="E.g. JIRA"
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               />
             </div>
-          )}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Email</label>
+              <input
+                type="email"
+                name="email"
+                value={formData.email || ''}
+                onChange={handleChange}
+                placeholder="E.g. billing@example.com"
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Bill Status</label>
+              <select
+                name="bill_status"
+                value={formData.bill_status}
+                onChange={handleChange}
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+              >
+                <option value="Pending">Pending</option>
+                <option value="Paid">Paid</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Section 3: Categories */}
+        <div className="space-y-4">
+          <h4 className="text-xs font-semibold text-primary uppercase tracking-wider">Categories</h4>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Department *</label>
+              <select
+                required
+                value={selectedMain}
+                onChange={(e) => handleMainChange(e.target.value)}
+                disabled={isLoadingLevels && mainOptions.length === 0}
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+              >
+                <option value="">{isLoadingLevels ? '...' : 'Select'}</option>
+                {mainOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Category *</label>
+              <select
+                required
+                value={selectedSub1}
+                onChange={(e) => handleSub1Change(e.target.value)}
+                disabled={!selectedMain}
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+              >
+                <option value="">Select</option>
+                {sub1Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+              </select>
+            </div>
+
+            {sub2Options.length > 0 && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Cat 1</label>
+                <select
+                  value={selectedSub2}
+                  onChange={(e) => handleSub2Change(e.target.value)}
+                  className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                >
+                  <option value="">Select</option>
+                  {sub2Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
+            )}
+            
+            {sub3Options.length > 0 && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Cat 2</label>
+                <select
+                  value={selectedSub3}
+                  onChange={(e) => handleSub3Change(e.target.value)}
+                  className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                >
+                  <option value="">Select</option>
+                  {sub3Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
+            )}
+            
+            {sub4Options.length > 0 && (
+              <div className="col-span-2 space-y-1">
+                <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Cat 3</label>
+                <MultiSelect
+                  options={sub4Options}
+                  selectedValues={selectedSub4Values}
+                  onChange={setSelectedSub4Values}
+                  placeholder="Select Sub Category 3"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Section 4: Additional */}
+        <div className="space-y-4">
+          <h4 className="text-xs font-semibold text-primary uppercase tracking-wider">Additional</h4>
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Notes</label>
+            <textarea
+              name="notes"
+              value={formData.notes || ''}
+              onChange={handleChange as any}
+              placeholder="Any additional notes..."
+              rows={2}
+              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary resize-none"
+            />
+          </div>
         </div>
       </form>
     </>

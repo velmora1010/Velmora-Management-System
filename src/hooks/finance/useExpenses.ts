@@ -20,11 +20,32 @@ export interface FinanceExpense {
   notes: string | null;
   status?: string;
   created_at?: string;
+  import_batch_id?: string | null;
+  import_file_name?: string | null;
+  import_status?: string | null;
+  imported_at?: string | null;
+}
+
+export interface ExpenseImport {
+  id: string;
+  batch_id: string;
+  file_name: string;
+  file_hash: string;
+  source_type: string;
+  document_type: string;
+  total_rows: number;
+  imported_rows: number;
+  failed_rows: number;
+  imported_by: string | null;
+  imported_at: string;
+  status: string;
 }
 
 export const useExpenses = () => {
   const [expenses, setExpenses] = useState<FinanceExpense[]>([]);
+  const [imports, setImports] = useState<ExpenseImport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingImports, setIsLoadingImports] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchExpenses = useCallback(async () => {
@@ -136,13 +157,120 @@ export const useExpenses = () => {
     return updateExpense(id, { status: 'archived' });
   };
 
+  const fetchImports = useCallback(async () => {
+    setIsLoadingImports(true);
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('expense_imports')
+        .select('*')
+        .order('imported_at', { ascending: false });
+
+      if (fetchError) throw fetchError;
+      setImports(data || []);
+    } catch (e: unknown) {
+      console.error('Failed to load expense imports:', e);
+    } finally {
+      setIsLoadingImports(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchImports();
+  }, [fetchImports]);
+
+  const uploadBatch = async (
+    file_name: string,
+    file_hash: string,
+    source_type: string,
+    imported_by: string | null,
+    expensesData: FinanceExpense[],
+    document_type: string = 'UNKNOWN'
+  ) => {
+    try {
+      // 1. Create tracking record
+      const batch_id = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const trackingRecord = {
+        batch_id,
+        file_name,
+        file_hash,
+        source_type,
+        document_type,
+        total_rows: expensesData.length,
+        imported_rows: expensesData.length,
+        failed_rows: 0,
+        imported_by,
+        status: 'completed'
+      };
+
+      const { error: importError } = await supabase
+        .from('expense_imports')
+        .insert([trackingRecord]);
+
+      if (importError) throw importError;
+
+      // 2. Insert expense rows
+      const rowsToInsert = expensesData.map(exp => ({
+        ...exp,
+        status: 'active',
+        import_batch_id: batch_id,
+        import_file_name: file_name,
+        import_status: 'Imported'
+      }));
+
+      const { error: insertError } = await supabase
+        .from(SUPABASE_TABLES.expenses)
+        .insert(rowsToInsert);
+
+      if (insertError) throw insertError;
+
+      await fetchImports();
+      await fetchExpenses();
+      return { success: true, batch_id };
+    } catch (e: unknown) {
+      console.error('Failed to upload batch:', e);
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+    }
+  };
+
+  const deleteBatch = async (batch_id: string) => {
+    try {
+      // 1. Delete associated expenses
+      const { error: deleteExpError } = await supabase
+        .from(SUPABASE_TABLES.expenses)
+        .delete()
+        .eq('import_batch_id', batch_id);
+
+      if (deleteExpError) throw deleteExpError;
+
+      // 2. Delete tracking record
+      const { error: deleteImportError } = await supabase
+        .from('expense_imports')
+        .delete()
+        .eq('batch_id', batch_id);
+
+      if (deleteImportError) throw deleteImportError;
+
+      await fetchImports();
+      await fetchExpenses();
+      return { success: true };
+    } catch (e: unknown) {
+      console.error('Failed to delete batch:', e);
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+    }
+  };
+
   return {
     expenses,
+    imports,
     isLoading,
+    isLoadingImports,
     error,
     refreshExpenses,
+    fetchImports,
     addExpense,
     updateExpense,
-    archiveExpense
+    archiveExpense,
+    uploadBatch,
+    deleteBatch
   };
 };
