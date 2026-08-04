@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import ProductBarcodeList from './ProductBarcodeList';
 import { PackagingBarcodeList } from './PackagingBarcodeList';
+import ProductionReadyBarcodeList from './ProductionReadyBarcodeList';
 
 import { inventoryService } from '../../../services/inventoryService';
-import { Download, Search, Eye, Copy, AlertTriangle, Printer, Trash2, Box, Boxes, Package, Plus, X, Clock, CheckCircle, Barcode as BarcodeIcon, AlertCircle, History, ArrowLeft } from 'lucide-react';
+import { Download, Search, Eye, Copy, AlertTriangle, Printer, Trash2, Box, Boxes, Package, Plus, X, Clock, CheckCircle, Barcode as BarcodeIcon, AlertCircle, History, ArrowLeft, Sparkles } from 'lucide-react';
 import Barcode from 'react-barcode';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,6 +13,8 @@ import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import toast from 'react-hot-toast';
 import { barcodeService } from '../../../services/barcodeService';
+import { BarcodePreview } from '../../../components/ui/BarcodePreview';
+import { productionReadyBatchService, normalizeRawMaterialStage } from '../../../services/productionReadyBatchService';
 
 
 const normalizeBarcode = (value: any) =>
@@ -36,6 +39,7 @@ const getRawBadge = (stage: string, tab: string) => {
     if (stage === 'RAW_MATERIAL_IN') return { text: 'SCANNED IN', bg: 'rgba(16, 185, 129, 0.1)', color: '#10b981' };
     if (stage === 'RAW_MATERIAL_OUT') return { text: 'SCANNED OUT', bg: 'rgba(139, 92, 246, 0.1)', color: '#8b5cf6' };
   } else if (tab === 'IN') {
+    if (stage === 'READY_FOR_FIRST_SCAN' || !stage) return { text: 'SCAN TO IN', bg: 'rgba(100, 116, 139, 0.1)', color: '#64748b' };
     if (stage === 'RAW_MATERIAL_IN') return { text: 'SCAN TO OUT', bg: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' };
     if (stage === 'RAW_MATERIAL_OUT') return { text: 'SCANNED OUT', bg: 'rgba(16, 185, 129, 0.1)', color: '#10b981' };
   } else if (tab === 'OUT') {
@@ -47,7 +51,7 @@ const getRawBadge = (stage: string, tab: string) => {
 const ViewBarcode = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<'RAW_MATERIAL' | 'PRODUCT' | 'COMBO' | 'PACKAGING' | null>((location.state as any)?.activeTab || null);
+  const [activeTab, setActiveTab] = useState<'RAW_MATERIAL' | 'PRODUCT' | 'COMBO' | 'PACKAGING' | 'PRODUCTION_READY' | null>((location.state as any)?.activeTab || null);
   const [rawMaterialSubTab, setRawMaterialSubTab] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
   const [comboSubTab, setComboSubTab] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
 
@@ -141,27 +145,8 @@ const ViewBarcode = () => {
   };
 
   const handleDownloadBarcode = async (barcodeData: any) => {
-    setDownloadTarget(barcodeData);
-    // Wait for state to apply to the hidden ref
-    setTimeout(async () => {
-      if (!barcodeDownloadRef.current || !barcodeData) return;
-      try {
-        const canvas = await html2canvas(barcodeDownloadRef.current, {
-          backgroundColor: '#ffffff',
-          scale: 4, // 4x scale factor for 300+ DPI high resolution
-          useCORS: true,
-          logging: false
-        });
-        const link = document.createElement('a');
-        link.download = `${barcodeData.barcode_no || barcodeData.serial_number}.png`;
-        link.href = canvas.toDataURL('image/png', 1.0);
-        link.click();
-      } catch (err) {
-        console.error('Failed to download barcode label', err);
-      } finally {
-        setDownloadTarget(null);
-      }
-    }, 100);
+    const modType = activeTab === 'COMBO' ? 'COMBO' : 'RAW_MATERIAL';
+    barcodeService.downloadBarcodeOnlyLabel(barcodeData, modType);
   };
   const [scannerValue, setScannerValue] = useState('');
   const [deleteModal, setDeleteModal] = useState<{
@@ -200,15 +185,16 @@ const ViewBarcode = () => {
         }
       }
 
-      // 2. Fetch the newly deduplicated lists
+      // 2. Fetch raw materials and combo barcodes
       const [data, combos] = await Promise.all([
         inventoryService.getBarcodes(),
         inventoryService.getAllComboBarcodes()
       ]);
+
       setBatches(data || []);
       setComboBatches(combos || []);
     } catch (err) {
-      console.error('Failed to load barcodes locally', err);
+      console.error('Failed to load barcodes', err);
     } finally {
       setLoading(false);
     }
@@ -311,7 +297,6 @@ const ViewBarcode = () => {
       default: return code;
     }
   };
-
   // SCANNER LOGIC
   const handleScan = async (code: string) => {
     const cleanCode = normalizeBarcode(code);
@@ -329,19 +314,74 @@ const ViewBarcode = () => {
 
     try {
       if (activeTab === 'RAW_MATERIAL') {
-         // Skip sub-tab scanAction checking and auto-infer behavior
-         const record = batches.find((item: any) => [item.serial_number, item.barcodeNumber, item.id].map(normalizeBarcode).includes(cleanCode));
+         // Lookup Step 1: ALWAYS query fresh from Supabase first to guarantee live current_stage
+         const freshBatch = await productionReadyBatchService.findAnyRawMaterialBatchByBarcode(cleanCode);
+         let record: any = null;
+
+         if (freshBatch) {
+           record = {
+             ...freshBatch,
+             isProductionReady: Boolean(freshBatch.isProductionReady || (freshBatch.barcode && freshBatch.barcode.startsWith('PRP-'))),
+             serial_number: freshBatch.barcode,
+             barcodeNumber: freshBatch.barcode,
+             displayBarcode: freshBatch.scan_code || freshBatch.barcode,
+             material_name: freshBatch.material_name,
+             materialName: freshBatch.material_name,
+             quantity: freshBatch.quantity || (freshBatch.quantity_grams ? Number((freshBatch.quantity_grams / 1000).toFixed(3)) : 0),
+             unit: freshBatch.unit || 'kg',
+             currentStage: freshBatch.current_stage || 'Incoming',
+             inventoryInPersonName: freshBatch.inventory_in_person || freshBatch.prepared_by,
+             inventoryInAt: freshBatch.inventory_in_at,
+             inventoryOutPersonName: freshBatch.inventory_out_person || freshBatch.issued_by,
+             inventoryOutAt: freshBatch.inventory_out_at,
+           };
+         } else {
+           // Lookup Step 2: Fallback search in state by scan_code, derived scan_code, barcode, serial_number, etc.
+           record = batches.find((item: any) => {
+             const derived = barcodeService.deriveScanCode(item.barcode || '');
+             const candidateCodes = [
+               item.scan_code,
+               item.scanCode,
+               derived,
+               item.serial_number,
+               item.barcodeNumber,
+               item.barcode,
+               item.id
+             ].filter(Boolean).map(normalizeBarcode);
+             return candidateCodes.includes(cleanCode);
+           });
+         }
+
          if (!record) {
-           setScanModal({ type: 'not_found', barcode: null, scannedCode: code });
+           setScanModal({ 
+             type: 'not_found', 
+             barcode: null, 
+             scannedCode: code,
+             message: 'Barcode not found in Raw Materials.' 
+           });
            setIsProcessingScan(false);
            return;
          }
-         
-         if (record.currentStage === 'RAW_MATERIAL_OUT' || record.currentStage === 'DISPATCHED') {
+
+         const stage = record.current_stage || record.currentStage || 'Incoming';
+         const normSt = normalizeRawMaterialStage(stage);
+
+         if (normSt === 'CANCELLED') {
+           toast.error('This pack is cancelled and cannot be scanned.');
+           setIsProcessingScan(false);
+           return;
+         }
+         if (normSt === 'CONSUMED') {
+           toast.error('This pack has already been consumed.');
+           setIsProcessingScan(false);
+           return;
+         }
+
+         if (normSt === 'RAW_MATERIAL_OUT') {
            setSelectedBatch(record);
            setIsProcessingScan(false);
            return;
-         } else if (record.currentStage === 'RAW_MATERIAL_IN') {
+         } else if (normSt === 'RAW_MATERIAL_IN') {
            setPendingRawScan({ code: cleanCode, action: 'OUT', record });
            setIsProcessingScan(false);
            return;
@@ -418,7 +458,7 @@ const ViewBarcode = () => {
         scannedCode: pendingRawScan.code,
         message: result.message || `Successfully scanned ${pendingRawScan.action} for batch!`
       });
-      fetchBatches();
+      await fetchBatches();
     } catch (err: any) {
       toast.error(err.message || 'Failed to process scan');
     } finally {
@@ -499,22 +539,15 @@ const ViewBarcode = () => {
     return matchesSearch && matchesType && matchesStatus;
   });
 
-  const downloadQR = (serial: string) => {
-    const wrapper = document.getElementById(`view-barcode-${serial}`);
-    const svg = wrapper?.querySelector('svg');
-    if (svg) {
-      barcodeService.downloadSVG(svg, `Barcode-${serial}.svg`);
-    } else if (wrapper) {
-      barcodeService.downloadPNG(wrapper, `Barcode-${serial}.png`);
-    }
+  const downloadQR = (serial: string, item?: any) => {
+    const targetItem = item || { serial_number: serial, barcode: serial, scan_code: barcodeService.deriveScanCode(serial) };
+    const modType = activeTab === 'COMBO' ? 'COMBO' : 'RAW_MATERIAL';
+    barcodeService.downloadBarcodeOnlyLabel(targetItem, modType);
   };
 
-  const handlePrint = (serial: string) => {
-    const scanCode = barcodeService.deriveScanCode(serial);
-    barcodeService.printLabel({
-      barcode: serial,
-      scanCode
-    });
+  const handlePrint = (serial: string, item?: any) => {
+    const targetItem = item || { serial_number: serial, barcode: serial, scan_code: barcodeService.deriveScanCode(serial) };
+    barcodeService.printBarcodeOnlyLabel(targetItem);
   };
 
   if (loading) return <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading saved barcodes...</div>;
@@ -526,6 +559,17 @@ const ViewBarcode = () => {
         <ProductBarcodeList onBack={() => setActiveTab(null)} />
       ) : activeTab === 'PACKAGING' ? (
         <PackagingBarcodeList onBack={() => setActiveTab(null)} />
+      ) : activeTab === 'PRODUCTION_READY' ? (
+        <div className="space-y-4">
+          <button 
+            onClick={() => setActiveTab(null)}
+            className="btn hover-lift mb-4"
+            style={{ padding: '10px 16px', borderRadius: '12px', background: '#1e293b', color: 'white', border: '1px solid #263244', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+          >
+            <ArrowLeft size={16} /> Back to View Barcode
+          </button>
+          <ProductionReadyBarcodeList />
+        </div>
       ) : (
         <>
           {/* HEADER */}
@@ -606,6 +650,22 @@ const ViewBarcode = () => {
             <div>
               <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Packaging</h2>
               <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and scan primary, secondary, and tertiary packaging barcodes.</p>
+            </div>
+          </motion.div>
+
+          {/* Card 5: Production-Ready Batches */}
+          <motion.div 
+            whileHover={{ y: -5, boxShadow: '0 20px 40px rgba(6, 182, 212, 0.2)' }}
+            onClick={() => setActiveTab('PRODUCTION_READY')}
+            style={{ background: 'linear-gradient(145deg, #1e293b, #0f172a)', border: '1px solid #06b6d4', borderRadius: '24px', padding: '32px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px', position: 'relative', overflow: 'hidden' }}
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #06b6d4, #38bdf8)' }} />
+            <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'rgba(6, 182, 212, 0.1)', border: '1px solid rgba(6, 182, 212, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Sparkles size={40} color="#06b6d4" />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Production-Ready Batches</h2>
+              <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and manage product-specific raw material batch packs.</p>
             </div>
           </motion.div>
         </div>
@@ -733,16 +793,16 @@ const ViewBarcode = () => {
               
               return (
               <div key={b.id} style={{ display: 'flex', flexDirection: 'column', background: '#111827', borderRadius: '16px', border: `1px solid ${badgeInfo.color}40`, overflow: 'hidden' }}>
-                <div style={{ padding: '20px', background: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                  
-                  <div id={`view-barcode-${displayBarcode}`}>
-                    <Barcode value={displayBarcode} width={1.5} height={50} displayValue={false} margin={0} />
-                  </div>
-                  <div style={{ padding: '6px 12px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', background: badgeInfo.bg, color: badgeInfo.color, width: '100%' }}>
-                    {badgeInfo.text}
-                  </div>
+                <div id={`view-barcode-${displayBarcode}`}>
+                  <BarcodePreview 
+                    record={b} 
+                    scanCode={barcodeService.deriveScanCode(displayBarcode)} 
+                    statusText={badgeInfo.text} 
+                    statusBg={badgeInfo.bg} 
+                    statusColor={badgeInfo.color} 
+                  />
                 </div>
-                <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
+                <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, paddingTop: '12px' }}>
                   <div>
                     <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', color: 'white' }}>{b.material_name}</h3>
                     <div style={{ fontSize: '13px', color: '#94a3b8', fontFamily: 'monospace' }}>{displayBarcode}</div>
@@ -760,7 +820,7 @@ const ViewBarcode = () => {
                 </div>
                 <div style={{ padding: '16px', borderTop: '1px solid #1e293b', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: '#111827' }}>
                   <button onClick={() => setSelectedBatch(b)} className="btn hover-lift" style={{ padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Eye size={14}/> Details</button>
-                  <button onClick={() => downloadQR(b.serial_number)} className="btn hover-lift" style={{ padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Download size={14}/> Label</button>
+                  <button onClick={() => downloadQR(b.serial_number, b)} className="btn hover-lift" style={{ padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Download size={14}/> Label</button>
                   <button onClick={() => { navigator.clipboard.writeText(b.serial_number); toast.success('Copied!'); }} className="btn hover-lift" style={{ padding: '8px', background: '#1e293b', border: 'none', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Copy size={14}/> Copy</button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); e.preventDefault(); setDeleteModal({ type: 'raw_material', barcode: b }); }} 
@@ -823,7 +883,7 @@ const ViewBarcode = () => {
                       </button>
                     )}
                     <button onClick={() => setSelectedComboBatch(b)} className="btn hover-lift" style={{ flex: 1, padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Eye size={14}/> Details</button>
-                    <button onClick={() => downloadQR(b.comboBoxBarcode || b.barcode_no)} className="btn hover-lift" style={{ flex: 1, padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Download size={14}/> Label</button>
+                    <button onClick={() => downloadQR(b.comboBoxBarcode || b.barcode_no, b)} className="btn hover-lift" style={{ flex: 1, padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Download size={14}/> Label</button>
                     <button onClick={() => { navigator.clipboard.writeText(b.comboBoxBarcode || b.barcode_no); toast.success('Copied!'); }} className="btn hover-lift" style={{ flex: 1, padding: '8px', background: '#1e293b', border: 'none', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Copy size={14}/> Copy</button>
                     <button 
                       onClick={(e) => { e.stopPropagation(); e.preventDefault(); setDeleteModal({ type: isBox ? 'combo_box' : 'combo_product', barcode: b }); }} 
@@ -1527,24 +1587,32 @@ const ViewBarcode = () => {
                   <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>{selectedBatch.created_at ? new Date(selectedBatch.created_at).toLocaleString() : '--'}</div>
                 </div>
                 {/* Scanned IN */}
-                {(selectedBatch.inventoryInPersonName || selectedBatch.inventoryInAt) && (
+                {(selectedBatch.inventory_in_person || selectedBatch.inventoryInPersonName || selectedBatch.inventory_in_at || selectedBatch.inventoryInAt || selectedBatch.prepared_by) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Scanned IN By/At</span>
                     <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>
-                      {selectedBatch.inventoryInPersonName || '--'}
+                      {selectedBatch.inventory_in_person || selectedBatch.inventoryInPersonName || selectedBatch.prepared_by || '--'}
                       <br />
-                      <span style={{ fontSize: '12px', color: '#64748b' }}>{selectedBatch.inventoryInAt ? new Date(selectedBatch.inventoryInAt).toLocaleString() : '--'}</span>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                        {(selectedBatch.inventory_in_at || selectedBatch.inventoryInAt || selectedBatch.prepared_at) 
+                          ? new Date(selectedBatch.inventory_in_at || selectedBatch.inventoryInAt || selectedBatch.prepared_at).toLocaleString() 
+                          : '--'}
+                      </span>
                     </div>
                   </div>
                 )}
                 {/* Scanned OUT */}
-                {(selectedBatch.inventoryOutPersonName || selectedBatch.inventoryOutAt) && (
+                {(selectedBatch.inventory_out_person || selectedBatch.inventoryOutPersonName || selectedBatch.inventory_out_at || selectedBatch.inventoryOutAt || selectedBatch.issued_by) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Scanned OUT By/At</span>
                     <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>
-                      {selectedBatch.inventoryOutPersonName || '--'}
+                      {selectedBatch.inventory_out_person || selectedBatch.inventoryOutPersonName || selectedBatch.issued_by || '--'}
                       <br />
-                      <span style={{ fontSize: '12px', color: '#64748b' }}>{selectedBatch.inventoryOutAt ? new Date(selectedBatch.inventoryOutAt).toLocaleString() : '--'}</span>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                        {(selectedBatch.inventory_out_at || selectedBatch.inventoryOutAt || selectedBatch.issued_at) 
+                          ? new Date(selectedBatch.inventory_out_at || selectedBatch.inventoryOutAt || selectedBatch.issued_at).toLocaleString() 
+                          : '--'}
+                      </span>
                     </div>
                   </div>
                 )}

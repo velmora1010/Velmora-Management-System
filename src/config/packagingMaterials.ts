@@ -13,6 +13,172 @@ export interface PackagingMaterial {
   };
 }
 
+export interface PackagingTheme {
+  background: string;
+  isGradientBorder?: boolean;
+  borderGradientHex?: string;
+  borderColorHex?: string;
+  iconBg: string;
+  iconColor: string;
+  badgeBg: string;
+  badgeText: string;
+  arrowBorder: string;
+  arrowColor: string;
+  arrowHoverBg: string;
+  arrowHoverColor: string;
+}
+
+export function getPackagingTheme(matName: string, category: string = ''): PackagingTheme {
+  const name = matName.trim().toLowerCase();
+  const cat = category.trim().toLowerCase();
+
+  // 1. Bottle & Cap (Blue -> Yellow -> Pink Gradient)
+  if (name.includes('bottle') || name.includes('cap')) {
+    return {
+      background: 'linear-gradient(90deg, #DDEBFF 0%, #FFF4B5 50%, #FFE2EE 100%)',
+      isGradientBorder: true,
+      borderGradientHex: 'linear-gradient(90deg, #4F8DFF 0%, #FFC83D 50%, #FF6FA8 100%)',
+      borderColorHex: '#4F8DFF',
+      iconBg: 'bg-gradient-to-r from-[#3B82F6] to-[#EC4899]',
+      iconColor: 'text-white',
+      badgeBg: 'bg-[#4F8DFF]',
+      badgeText: 'text-white font-bold',
+      arrowBorder: 'border-[#FF6FA8]',
+      arrowColor: 'text-[#FF6FA8]',
+      arrowHoverBg: 'group-hover:bg-[#FF6FA8]',
+      arrowHoverColor: 'group-hover:text-white group-hover:border-[#FF6FA8]'
+    };
+  }
+
+  // 2. Blue Brand Sticker
+  if (name.includes('blue brand sticker') || (name.includes('blue') && name.includes('sticker'))) {
+    return {
+      background: '#EAF3FF',
+      borderColorHex: '#4F8DFF',
+      iconBg: 'bg-[#3B82F6]',
+      iconColor: 'text-white',
+      badgeBg: 'bg-[#4F8DFF]',
+      badgeText: 'text-white font-bold',
+      arrowBorder: 'border-[#4F8DFF]',
+      arrowColor: 'text-[#4F8DFF]',
+      arrowHoverBg: 'group-hover:bg-[#4F8DFF]',
+      arrowHoverColor: 'group-hover:text-white group-hover:border-[#4F8DFF]'
+    };
+  }
+
+  // 3. Yellow Brand Sticker
+  if (name.includes('yellow brand sticker') || (name.includes('yellow') && name.includes('sticker'))) {
+    return {
+      background: '#FFF7D9',
+      borderColorHex: '#FFC83D',
+      iconBg: 'bg-[#FFC83D]',
+      iconColor: 'text-white',
+      badgeBg: 'bg-[#FFC83D]',
+      badgeText: 'text-slate-900 font-bold',
+      arrowBorder: 'border-[#FFC83D]',
+      arrowColor: 'text-[#D97706]',
+      arrowHoverBg: 'group-hover:bg-[#FFC83D]',
+      arrowHoverColor: 'group-hover:text-slate-900 group-hover:border-[#FFC83D]'
+    };
+  }
+
+  // 4. Pink Brand Sticker
+  if (name.includes('pink brand sticker') || (name.includes('pink') && name.includes('sticker'))) {
+    return {
+      background: '#FFEAF3',
+      borderColorHex: '#FF6FA8',
+      iconBg: 'bg-[#FF6FA8]',
+      iconColor: 'text-white',
+      badgeBg: 'bg-[#FF6FA8]',
+      badgeText: 'text-white font-bold',
+      arrowBorder: 'border-[#FF6FA8]',
+      arrowColor: 'text-[#FF6FA8]',
+      arrowHoverBg: 'group-hover:bg-[#FF6FA8]',
+      arrowHoverColor: 'group-hover:text-white group-hover:border-[#FF6FA8]'
+    };
+  }
+
+  // 5. Sponge Brand Sticker (Neutral White Theme)
+  if (name.includes('sponge brand sticker') || (name.includes('sponge') && name.includes('sticker'))) {
+    return {
+      background: '#F7F7F7',
+      borderColorHex: '#C8CDD6',
+      iconBg: 'bg-[#9CA3AF]',
+      iconColor: 'text-white',
+      badgeBg: 'bg-[#9CA3AF]',
+      badgeText: 'text-white font-bold',
+      arrowBorder: 'border-[#C8CDD6]',
+      arrowColor: 'text-[#6B7280]',
+      arrowHoverBg: 'group-hover:bg-[#9CA3AF]',
+      arrowHoverColor: 'group-hover:text-white group-hover:border-[#9CA3AF]'
+    };
+  }
+
+  // 6. Secondary Packaging (WAD Seal, Shrink Wrap, Bubble Wrap) -> Blue -> Yellow -> Pink Gradient
+  if (cat.includes('secondary') || name.includes('wad') || name.includes('shrink') || name.includes('bubble')) {
+    return {
+      background: 'linear-gradient(90deg, #DDEBFF 0%, #FFF4B5 50%, #FFE2EE 100%)',
+      isGradientBorder: true,
+      borderGradientHex: 'linear-gradient(90deg, #4F8DFF 0%, #FFC83D 50%, #FF6FA8 100%)',
+      borderColorHex: '#8B5CF6',
+      iconBg: 'bg-gradient-to-r from-[#3B82F6] to-[#EC4899]',
+      iconColor: 'text-white',
+      badgeBg: 'bg-[#8B5CF6]',
+      badgeText: 'text-white font-bold',
+      arrowBorder: 'border-[#8B5CF6]',
+      arrowColor: 'text-[#8B5CF6]',
+      arrowHoverBg: 'group-hover:bg-[#8B5CF6]',
+      arrowHoverColor: 'group-hover:text-white group-hover:border-[#8B5CF6]'
+    };
+  }
+
+  // 7. Tertiary Packaging (Carton Boxes)
+  if (cat.includes('tertiary') || name.includes('carton') || name.includes('box')) {
+    return {
+      background: '#FFF7D9',
+      borderColorHex: '#FFC83D',
+      iconBg: 'bg-[#FFC83D]',
+      iconColor: 'text-white',
+      badgeBg: 'bg-[#FFC83D]',
+      badgeText: 'text-slate-900 font-bold',
+      arrowBorder: 'border-[#FFC83D]',
+      arrowColor: 'text-[#D97706]',
+      arrowHoverBg: 'group-hover:bg-[#FFC83D]',
+      arrowHoverColor: 'group-hover:text-slate-900 group-hover:border-[#FFC83D]'
+    };
+  }
+
+  // 8. Inventory Packaging (Tape, Address Rolls, Barcode Roll, Ink Roll)
+  if (cat.includes('inventory') || name.includes('tape') || name.includes('address') || name.includes('barcode') || name.includes('ink')) {
+    return {
+      background: '#E6F4EA',
+      borderColorHex: '#10B981',
+      iconBg: 'bg-[#10B981]',
+      iconColor: 'text-white',
+      badgeBg: 'bg-[#10B981]',
+      badgeText: 'text-white font-bold',
+      arrowBorder: 'border-[#10B981]',
+      arrowColor: 'text-[#10B981]',
+      arrowHoverBg: 'group-hover:bg-[#10B981]',
+      arrowHoverColor: 'group-hover:text-white group-hover:border-[#10B981]'
+    };
+  }
+
+  // Default Fallback
+  return {
+    background: '#EAF3FF',
+    borderColorHex: '#4F8DFF',
+    iconBg: 'bg-[#3B82F6]',
+    iconColor: 'text-white',
+    badgeBg: 'bg-[#4F8DFF]',
+    badgeText: 'text-white font-bold',
+    arrowBorder: 'border-[#4F8DFF]',
+    arrowColor: 'text-[#3B82F6]',
+    arrowHoverBg: 'group-hover:bg-[#3B82F6]',
+    arrowHoverColor: 'group-hover:text-white group-hover:border-[#3B82F6]'
+  };
+}
+
 export const PRIMARY_PACKAGING: PackagingMaterial[] = [
   {
     id: 'pack-1',

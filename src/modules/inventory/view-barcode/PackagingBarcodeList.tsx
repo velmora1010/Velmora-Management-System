@@ -6,6 +6,7 @@ import Barcode from 'react-barcode';
 import html2canvas from 'html2canvas';
 import { inventoryService } from '../../../services/inventoryService';
 import { barcodeService } from '../../../services/barcodeService';
+import { BarcodePreview } from '../../../components/ui/BarcodePreview';
 
 interface PackagingBarcodeListProps {
   onBack: () => void;
@@ -179,48 +180,11 @@ export const PackagingBarcodeList = ({ onBack }: PackagingBarcodeListProps) => {
   };
 
   const handleDownloadLabel = async (item: any) => {
-    const scanCode = item.scan_code || item.scanCode || barcodeService.deriveScanCode(item.barcode || item.serial_number, 'PACKAGING') || item.barcode || item.serial_number;
-    setDownloadTarget({ ...item, scanCode });
-
-    setTimeout(async () => {
-      if (!barcodeDownloadRef.current) return;
-      try {
-        const canvas = await html2canvas(barcodeDownloadRef.current, {
-          backgroundColor: '#ffffff',
-          scale: 4, // 4x resolution for 300+ DPI crisp black/white rendering
-          useCORS: true,
-          logging: false
-        });
-        const link = document.createElement('a');
-        link.download = `${scanCode}_Label.png`;
-        link.href = canvas.toDataURL('image/png', 1.0);
-        link.click();
-      } catch (err) {
-        console.error('Failed to download barcode label', err);
-        toast.error('Failed to download label');
-      } finally {
-        setDownloadTarget(null);
-      }
-    }, 100);
+    barcodeService.downloadBarcodeOnlyLabel(item, 'PACKAGING');
   };
 
   const handlePrintLabel = (item: any) => {
-    const scanCode = item.scan_code || item.scanCode || barcodeService.deriveScanCode(item.barcode || item.serial_number, 'PACKAGING') || item.barcode || item.serial_number;
-    setDownloadTarget({ ...item, scanCode });
-
-    setTimeout(() => {
-      const svgEl = barcodeDownloadRef.current?.querySelector('svg');
-      const svgMarkup = svgEl ? svgEl.outerHTML : undefined;
-
-      barcodeService.printLabel({
-        barcode: item.barcode || item.serial_number,
-        scanCode: scanCode,
-        moduleType: 'PACKAGING',
-        svgMarkup: svgMarkup
-      });
-
-      setDownloadTarget(null);
-    }, 50);
+    barcodeService.printBarcodeOnlyLabel(item);
   };
 
   // Metrics Calculation
@@ -438,14 +402,15 @@ export const PackagingBarcodeList = ({ onBack }: PackagingBarcodeListProps) => {
 
             return (
               <div key={b.id || displayBarcode} style={{ display: 'flex', flexDirection: 'column', background: '#111827', borderRadius: '16px', border: `1px solid ${badgeInfo.color}40`, overflow: 'hidden' }}>
-                {/* White Barcode Preview Container with Status Pill */}
-                <div style={{ padding: '20px', background: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                  <div id={`view-barcode-${displayBarcode}`}>
-                    <Barcode value={displayBarcode} width={1.5} height={50} displayValue={false} margin={0} />
-                  </div>
-                  <div style={{ padding: '6px 12px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', background: badgeInfo.bg, color: badgeInfo.color, width: '100%' }}>
-                    {badgeInfo.text}
-                  </div>
+                {/* Standardized White Barcode Preview Box */}
+                <div id={`view-barcode-${displayBarcode}`}>
+                  <BarcodePreview 
+                    record={b} 
+                    scanCode={b.scan_code || barcodeService.deriveScanCode(displayBarcode, 'PACKAGING')} 
+                    statusText={badgeInfo.text} 
+                    statusBg={badgeInfo.bg} 
+                    statusColor={badgeInfo.color} 
+                  />
                 </div>
 
                 {/* Card Content */}

@@ -4,93 +4,139 @@ import { inventoryService } from '../../../../services/inventoryService';
 import { useIntakeContext } from './IntakeContext';
 import { Package, X, ArrowRight, Loader2, Box, Layers, Shield, Boxes, Tag } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { PRIMARY_PACKAGING, SECONDARY_PACKAGING, TERTIARY_PACKAGING, INVENTORY_PACKAGING, PackagingMaterial } from '../../../../config/packagingMaterials';
-
-const getCategoryStyles = (matName: string, category: string = '') => {
-  const name = matName.toLowerCase();
-  const cat = category.toLowerCase();
-
-  if (name.includes('sles') || name.includes('capb') || name.includes('aos') || cat.includes('surfactant')) {
-    return { bg: 'from-blue-500/10 to-indigo-900/10', border: 'border-blue-500/30', glow: 'hover:shadow-blue-500/20', iconBg: 'bg-blue-500/20', iconColor: 'text-blue-400', unit: 'KG', badge: 'Surfactant' };
-  }
-  if (name.includes('salt') || cat.includes('thickener')) {
-    return { bg: 'from-slate-400/10 to-slate-800/10', border: 'border-slate-500/30', glow: 'hover:shadow-slate-500/20', iconBg: 'bg-slate-500/20', iconColor: 'text-slate-400', unit: 'KG', badge: 'Thickener' };
-  }
-  if (name.includes('fragrance') || cat.includes('fragrance')) {
-    return { bg: 'from-amber-500/10 to-orange-900/10', border: 'border-amber-500/30', glow: 'hover:shadow-amber-500/20', iconBg: 'bg-amber-500/20', iconColor: 'text-amber-400', unit: 'LTR', badge: 'Fragrance' };
-  }
-  if (name.includes('phenoxy') || name.includes('benzoate') || cat.includes('preservative')) {
-    return { bg: 'from-pink-500/10 to-rose-900/10', border: 'border-pink-500/30', glow: 'hover:shadow-pink-500/20', iconBg: 'bg-pink-500/20', iconColor: 'text-pink-400', unit: 'KG', badge: 'Preservative' };
-  }
-  if (name.includes('colour') || name.includes('color') || cat.includes('colorant')) {
-    let colorCode = 'pink';
-    if (name.includes('yellow')) colorCode = 'yellow';
-    if (name.includes('blue')) colorCode = 'cyan';
-    if (name.includes('pink') || name.includes('violet')) colorCode = 'pink';
-    
-    if (colorCode === 'yellow') {
-      return { bg: 'from-yellow-500/10 to-amber-900/10', border: 'border-yellow-500/30', glow: 'hover:shadow-yellow-500/20', iconBg: 'bg-yellow-500/20', iconColor: 'text-yellow-400', unit: 'KG', badge: 'Colorant' };
-    }
-    if (colorCode === 'cyan') {
-      return { bg: 'from-cyan-500/10 to-blue-900/10', border: 'border-cyan-500/30', glow: 'hover:shadow-cyan-500/20', iconBg: 'bg-cyan-500/20', iconColor: 'text-cyan-400', unit: 'KG', badge: 'Colorant' };
-    }
-    return { bg: 'from-pink-500/15 to-rose-950/40', border: 'border-pink-500/50', glow: 'hover:shadow-pink-500/30', iconBg: 'bg-pink-500/20', iconColor: 'text-pink-400', unit: 'KG', badge: 'Colorant' };
-  }
-  if (name.includes('water') || cat.includes('solvent')) {
-    return { bg: 'from-cyan-500/10 to-teal-900/10', border: 'border-cyan-500/30', glow: 'hover:shadow-cyan-500/20', iconBg: 'bg-cyan-500/20', iconColor: 'text-cyan-400', unit: 'LTR', badge: 'Solvent' };
-  }
-  if (name.includes('base') || name.includes('n-cap') || cat.includes('conditioning')) {
-    return { bg: 'from-green-500/10 to-emerald-900/10', border: 'border-green-500/30', glow: 'hover:shadow-green-500/20', iconBg: 'bg-green-500/20', iconColor: 'text-green-400', unit: 'KG', badge: 'Base/Conditioning' };
-  }
-
-  return { bg: 'from-indigo-500/10 to-violet-900/10', border: 'border-indigo-500/30', glow: 'hover:shadow-indigo-500/20', iconBg: 'bg-indigo-500/20', iconColor: 'text-indigo-400', unit: 'KG', badge: 'Material' };
-};
+import { PRIMARY_PACKAGING, SECONDARY_PACKAGING, TERTIARY_PACKAGING, INVENTORY_PACKAGING, PackagingMaterial, getPackagingTheme } from '../../../../config/packagingMaterials';
+import { getRawMaterialTheme } from '../../../../config/rawMaterialThemes';
 
 const MaterialCard = ({ 
   name, 
-  badge, 
-  unit, 
-  styles, 
+  category, 
+  badge,
+  unit,
+  isPackaging = false,
   onClick 
 }: { 
   name: string; 
-  badge: string; 
-  unit: string; 
-  styles: any; 
+  category?: string; 
+  badge?: string;
+  unit?: string;
+  isPackaging?: boolean;
   onClick: () => void; 
 }) => {
+  if (isPackaging) {
+    const pkgTheme = getPackagingTheme(name, category);
+    const displayBadge = badge || 'PACKAGING';
+    const displayUnit = unit || 'PCS';
+
+    if (pkgTheme.isGradientBorder) {
+      return (
+        <div 
+          onClick={onClick}
+          className="p-[2px] rounded-2xl cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-[0_6px_18px_rgba(0,0,0,0.15)] group h-full select-none"
+          style={{ background: pkgTheme.borderGradientHex }}
+        >
+          <div 
+            className="w-full h-full p-4 rounded-[14px] flex items-center gap-4 relative overflow-hidden"
+            style={{ background: pkgTheme.background }}
+          >
+            {/* Icon Left */}
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${pkgTheme.iconBg} transition-transform duration-200 group-hover:scale-105`}>
+              <Package size={24} className={pkgTheme.iconColor} />
+            </div>
+            
+            {/* Content Middle */}
+            <div className="flex-1 min-w-0 flex flex-col justify-center">
+              <h3 className="font-bold text-[15px] leading-tight text-[#0F172A] truncate mb-1.5">{name}</h3>
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className={`text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md ${pkgTheme.badgeBg} ${pkgTheme.badgeText}`}>
+                  {displayBadge}
+                </span>
+                <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-white/80 text-slate-700 border border-slate-200 shadow-2xs">
+                  {displayUnit}
+                </span>
+              </div>
+            </div>
+            
+            {/* Action Right */}
+            <div className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-white shadow-sm border-2 ${pkgTheme.arrowBorder} ${pkgTheme.arrowColor} ${pkgTheme.arrowHoverBg} ${pkgTheme.arrowHoverColor} transition-all duration-200`}>
+              <ArrowRight size={16} className="transform group-hover:translate-x-0.5 transition-transform duration-200" />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div 
+        onClick={onClick}
+        style={{
+          background: pkgTheme.background,
+          borderColor: pkgTheme.borderColorHex
+        }}
+        className="group flex items-center p-4 rounded-2xl border-2 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-[0_6px_18px_rgba(0,0,0,0.15)] relative overflow-hidden gap-4 h-full select-none"
+      >
+        {/* Icon Left */}
+        <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${pkgTheme.iconBg} transition-transform duration-200 group-hover:scale-105`}>
+          <Package size={24} className={pkgTheme.iconColor} />
+        </div>
+        
+        {/* Content Middle */}
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+          <h3 className="font-bold text-[15px] leading-tight text-[#0F172A] truncate mb-1.5">{name}</h3>
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className={`text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md ${pkgTheme.badgeBg} ${pkgTheme.badgeText}`}>
+              {displayBadge}
+            </span>
+            <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-white/80 text-slate-700 border border-slate-200 shadow-2xs">
+              {displayUnit}
+            </span>
+          </div>
+        </div>
+        
+        {/* Action Right */}
+        <div className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-white shadow-sm border-2 ${pkgTheme.arrowBorder} ${pkgTheme.arrowColor} ${pkgTheme.arrowHoverBg} ${pkgTheme.arrowHoverColor} transition-all duration-200`}>
+          <ArrowRight size={16} className="transform group-hover:translate-x-0.5 transition-transform duration-200" />
+        </div>
+      </div>
+    );
+  }
+
+  // Chemical & Active Raw Materials
+  const themeConfig = getRawMaterialTheme(name, category);
+  const displayBadge = badge || themeConfig?.badge || 'Material';
+  const displayUnit = unit || themeConfig?.unit || 'KG';
+  const displayBadgeStyle = themeConfig?.badgeStyle || 'bg-[#2563eb] text-white font-bold';
+
   return (
     <div 
       onClick={onClick}
-      className={`group flex items-center p-4 rounded-xl border transition-all duration-200 cursor-pointer 
-        bg-gradient-to-r ${styles.bg} ${styles.border} 
-        hover:-translate-y-0.5 hover:shadow-lg ${styles.glow} hover:border-white/30
-        relative overflow-hidden gap-4 h-full
+      style={{ background: themeConfig.theme.background }}
+      className={`group flex items-center p-4 rounded-2xl border cursor-pointer 
+        ${themeConfig.theme.borderColor} shadow-sm 
+        hover:-translate-y-[2px] ${themeConfig.theme.glow} transition-all duration-200
+        relative overflow-hidden gap-4 h-full select-none
       `}
     >
-      <div className={`absolute top-0 left-0 w-1 h-full ${styles.iconBg.replace('bg-', 'bg-').replace('/20', '')}`} style={{ opacity: 0.8 }} />
-      
       {/* Icon Left */}
-      <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 shadow-inner ${styles.iconBg} ring-1 ring-white/10 transition-transform duration-200 group-hover:scale-105`}>
-        <Package size={24} className={styles.iconColor} />
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${themeConfig.theme.iconBg} transition-transform duration-200 group-hover:scale-105`}>
+        <Package size={24} className={themeConfig.theme.iconColor} />
       </div>
       
       {/* Content Middle */}
       <div className="flex-1 min-w-0 flex flex-col justify-center">
-        <h3 className="font-bold text-[15px] leading-tight text-white group-hover:text-white transition-colors truncate mb-1.5">{name}</h3>
+        <h3 className="font-bold text-[15px] leading-tight text-[#0f172a] truncate mb-1.5">{name}</h3>
         <div className="flex flex-wrap gap-2 items-center">
-          <span className={`text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border ${styles.border} ${styles.iconColor} bg-black/20 backdrop-blur-sm`}>
-            {styles.badge}
+          <span className={`text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-md ${displayBadgeStyle}`}>
+            {displayBadge}
           </span>
-          <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-[var(--surface)]/50 text-[var(--text-muted)] border border-[var(--border)] backdrop-blur-sm">
-            {styles.unit}
+          <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md bg-white/80 text-slate-700 border border-slate-200 shadow-2xs">
+            {displayUnit}
           </span>
         </div>
       </div>
       
       {/* Action Right */}
-      <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-[var(--surface-soft)] opacity-60 group-hover:opacity-100 group-hover:bg-white/10 transition-all duration-200 border border-[var(--border)]/50">
-        <ArrowRight size={16} className={`${styles.iconColor} transform group-hover:translate-x-0.5 transition-transform duration-200`} />
+      <div className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-white shadow-sm border ${themeConfig.theme.arrowBorder} ${themeConfig.theme.arrowColor} ${themeConfig.theme.arrowHoverBg} ${themeConfig.theme.arrowHoverColor} transition-all duration-200`}>
+        <ArrowRight size={16} className="transform group-hover:translate-x-0.5 transition-transform duration-200" />
       </div>
     </div>
   );
@@ -133,17 +179,10 @@ const PackagingCategoryBlock = ({
           <MaterialCard 
             key={item.id}
             name={item.name}
+            category={item.category}
             badge={item.badge}
             unit={item.unit}
-            styles={{
-              bg: item.colorTheme.bg,
-              border: item.colorTheme.border,
-              glow: item.colorTheme.glow,
-              iconBg: item.colorTheme.iconBg,
-              iconColor: item.colorTheme.iconColor,
-              badge: item.badge,
-              unit: item.unit
-            }}
+            isPackaging={true}
             onClick={() => onSelect({ id: item.id, name: item.name, category: item.category, unit: item.unit })}
           />
         ))}
@@ -290,14 +329,11 @@ const IntakeStep1_Form = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
             {uniqueMaterials.map((m: any) => {
               const displayMatName = m.name === 'Violet Colour' ? 'Pink Colour' : m.name;
-              const styles = getCategoryStyles(displayMatName, m.category);
               return (
                 <MaterialCard 
                   key={m.id}
                   name={displayMatName}
-                  badge={styles.badge}
-                  unit={styles.unit}
-                  styles={styles}
+                  category={m.category}
                   onClick={() => setSelectedMaterial({ ...m, name: displayMatName })}
                 />
               );

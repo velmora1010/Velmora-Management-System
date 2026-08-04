@@ -4,6 +4,7 @@ import { SUPABASE_TABLES } from '../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { deriveScanCodeFromBarcode } from '../modules/inventory/production/productHelpers';
 import { barcodeService } from './barcodeService';
+import { productionReadyBatchService, normalizeProductionReadyStatus } from './productionReadyBatchService';
 
 export const getMasterBarcode = (item: any) => {
   return (
@@ -662,19 +663,26 @@ class LocalInventoryService {
       toast.error('Failed to load raw material batches: ' + error.message);
       throw error;
     }
-    return (data || []).map((item: any) => ({
-      ...item,
-      serial_number: item.barcode,
-      barcodeNumber: item.barcode,
-      displayBarcode: item.barcode,
-      materialName: item.material_name,
-      material_name: item.material_name,
-      batchNo: item.batch_no,
-      batch_id: item.batch_no,
-      currentStage: item.current_stage || 'Incoming',
-      original_quantity: item.quantity,
-      vendor_name: item.vendor
-    }));
+    return (data || []).map((item: any) => {
+      const derivedScan = barcodeService.deriveScanCode(item.barcode || '');
+      const isPRP = Boolean(item.barcode && String(item.barcode).toUpperCase().startsWith('PRP-'));
+      return {
+        ...item,
+        scan_code: derivedScan,
+        scanCode: derivedScan,
+        isProductionReady: isPRP,
+        serial_number: item.barcode,
+        barcodeNumber: item.barcode,
+        displayBarcode: derivedScan || item.barcode,
+        materialName: item.material_name,
+        material_name: item.material_name,
+        batchNo: item.batch_no,
+        batch_id: item.batch_no,
+        currentStage: item.current_stage || 'Incoming',
+        original_quantity: item.quantity,
+        vendor_name: item.vendor
+      };
+    });
   }
 
   async saveBatch(batch: any) {
@@ -2338,14 +2346,32 @@ class LocalInventoryService {
     const userId = localStorage.getItem('current_user') || 'Warehouse Admin';
 
     let record: any = null;
-    const scannedCode = normalizeBarcode(barcodeNumber);
+    let isProductionReady = false;
+    const scannedCode = String(barcodeNumber || '').trim().replace(/[\r\n\t]/g, '').toUpperCase();
 
     if (department === 'RAW_MATERIAL') {
+      // Lookup Step 1: Search in loaded state by derived scan_code, scanCode property, or full barcode
       const batches = await this.getBatches();
-      record = batches.find((item: any) => normalizeBarcode(item.barcode) === scannedCode);
+      record = batches.find((item: any) => 
+        (item.scan_code && normalizeBarcode(item.scan_code) === scannedCode) ||
+        (item.scanCode && normalizeBarcode(item.scanCode) === scannedCode) ||
+        normalizeBarcode(item.barcode) === scannedCode || 
+        normalizeBarcode(item.serial_number) === scannedCode ||
+        normalizeBarcode(barcodeService.deriveScanCode(item.barcode)) === scannedCode
+      );
+
+      // Lookup Step 2: Query productionReadyBatchService (which queries raw_material_barcodes directly)
       if (!record) {
-        throw new Error(`Barcode ${barcodeNumber} does not exist in Raw Materials.`);
+        const prpBatch = await productionReadyBatchService.findProductionReadyBatchByBarcode(scannedCode);
+        if (prpBatch) {
+          record = prpBatch;
+        }
       }
+
+      if (!record) {
+        throw new Error('Barcode not found in Raw Materials.');
+      }
+      isProductionReady = Boolean(record.isProductionReady || (record.barcode && String(record.barcode).toUpperCase().startsWith('PRP-')));
     } else if (department === 'PRODUCT') {
       const allProducts = await this.getProductBarcodes();
       record = allProducts.find((item: any) => 
@@ -2371,41 +2397,45 @@ class LocalInventoryService {
       }
     }
 
-    const currentStage = record.currentStage || 'READY_FOR_FIRST_SCAN';
+    const currentStage = record.current_stage || record.currentStage || 'Incoming';
     let nextStage = '';
     let successMessage = '';
 
     if (department === 'RAW_MATERIAL') {
+      const normalizedStatus = normalizeProductionReadyStatus(currentStage);
+
+      if (normalizedStatus === 'CANCELLED') {
+        throw new Error('This pack is cancelled and cannot be scanned.');
+      }
+      if (normalizedStatus === 'CONSUMED') {
+        throw new Error('This pack has already been consumed.');
+      }
+
       if (scanAction === 'IN') {
-        if (currentStage === 'READY_FOR_FIRST_SCAN' || currentStage === 'Incoming') {
-          nextStage = 'RAW_MATERIAL_IN';
-          successMessage = 'Raw material received into Inventory IN.';
-          record.inventory_in_person = payload?.personName || userId;
-          record.inventory_in_at = new Date().toISOString();
-        } else {
+        if (normalizedStatus === 'INCOMING') {
+          const updatedRow = await productionReadyBatchService.performInventoryIn(record.id, payload?.personName || userId);
+          return {
+            success: true,
+            message: isProductionReady ? 'Production-ready batch received into Inventory IN.' : 'Raw material batch received into Inventory IN.',
+            stage: 'RAW_MATERIAL_IN',
+            item: updatedRow
+          };
+        } else if (normalizedStatus === 'RAW_MATERIAL_IN') {
           throw new Error('Already scanned to Inventory IN. Go to Inventory OUT to release.');
+        } else {
+          throw new Error('This batch has already been scanned out.');
         }
       } else if (scanAction === 'OUT') {
-        if (currentStage === 'RAW_MATERIAL_IN') {
-          nextStage = 'RAW_MATERIAL_OUT';
-          successMessage = 'Raw material moved to Inventory OUT (Ready for Production).';
-          record.inventory_out_person = payload?.personName || userId;
-          record.inventory_out_at = new Date().toISOString();
-          
-          const released = await this.getRawMaterialsReleasedToProduct();
-          released.push({
-            type: 'RAW_MATERIAL_RELEASED_TO_PRODUCT',
-            sourceBarcode: record.barcode,
-            materialName: record.material_name,
-            quantity: record.quantity || 0,
-            unit: record.unit || 'kg',
-            batch: record.batch_no || '',
-            vendor: record.vendor || '',
-            releasedAt: now
-          });
-          await this.saveSettingsList('raw_material_released_to_product', released);
-        } else if (currentStage === 'RAW_MATERIAL_OUT') {
-          throw new Error('Already scanned to Inventory OUT / Released to Product.');
+        if (normalizedStatus === 'RAW_MATERIAL_IN') {
+          const updatedRow = await productionReadyBatchService.performInventoryOut(record.id, payload?.personName || userId);
+          return {
+            success: true,
+            message: isProductionReady ? 'Production-ready batch issued out (Ready for Production).' : 'Raw material batch issued out.',
+            stage: 'RAW_MATERIAL_OUT',
+            item: updatedRow
+          };
+        } else if (normalizedStatus === 'RAW_MATERIAL_OUT') {
+          throw new Error('This batch has already been scanned out.');
         } else {
           throw new Error('Scan to Inventory IN first.');
         }

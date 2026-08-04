@@ -1,9 +1,11 @@
 import html2canvas from 'html2canvas';
+import JsBarcode from 'jsbarcode';
+import JSZip from 'jszip';
 import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import toast from 'react-hot-toast';
 
-export type BarcodeModuleType = 'PRODUCT' | 'RAW_MATERIAL' | 'COMBO' | 'PACKAGING' | 'QC' | 'INVENTORY';
+export type BarcodeModuleType = 'PRODUCT' | 'RAW_MATERIAL' | 'PRODUCTION_READY' | 'COMBO' | 'PACKAGING' | 'QC' | 'INVENTORY';
 
 export interface BarcodePrintOptions {
   barcode: string;       // Full ERP reference e.g. PROD-1Y-MB1-260730-002
@@ -32,6 +34,17 @@ export class BarcodeService {
       return str;
     }
 
+    // Production-Ready Batch: PRP-SLES-1B-260804-001 -> PB...
+    if (str.startsWith('PRP-')) {
+      const parts = str.split('-');
+      if (parts.length >= 5) {
+        const mat = parts[1];
+        const prod = parts[2];
+        const seq = parts[4];
+        return `PB${mat}${prod}${seq}`.toUpperCase().slice(0, 10);
+      }
+    }
+
     // Product: PROD-1Y-MB1-260730-002 -> 1Y730002
     const prodMatch = str.match(/PROD-([A-Z0-9]+)-MB\d+-(\d{6})-(\d+)/i);
     if (prodMatch) {
@@ -56,7 +69,7 @@ export class BarcodeService {
       return `QC${qcMatch[1]}`.toUpperCase();
     }
 
-    // Packaging: PKG-BTL-260801-001 -> BTL001, PKG-TAPE-260801-001 -> TAPE001
+    // Packaging: PKG-BTL-260801-001 -> BTL001
     const pkgMatch = str.match(/PKG-([A-Z0-9]+)-(?:\d{6})-(\d+)/i);
     if (pkgMatch) {
       const typeCode = pkgMatch[1];
@@ -64,22 +77,17 @@ export class BarcodeService {
       return `${typeCode}${seq.padStart(3, '0')}`.toUpperCase();
     }
 
-    // Raw Material: SLES-1000-4066 -> RM4066 or RM-SLES-260730-001 -> RM001
+    // Raw Material: SLES-1000-4066 -> RM4066 or MAT-260804-SLES-001
     const rmMatch = str.match(/([A-Z0-9]+)-\d+-(\d+)/i) || str.match(/([A-Z0-9]+)-(\d{3,5})$/i);
     if (rmMatch) {
       const lastPart = rmMatch[2] || rmMatch[1];
       return `RM${lastPart.slice(-4)}`.toUpperCase();
     }
 
-    // Generic Inventory: INV-00023456 -> I23456
-    const invMatch = str.match(/INV-0*(\d+)/i);
-    if (invMatch) {
-      return `I${invMatch[1]}`.toUpperCase();
-    }
-
     // Fallback: strip hyphens/spaces and slice first 8 chars
     const cleaned = str.replace(/[^A-Z0-9]/g, '');
     if (cleaned.startsWith('PROD')) return cleaned.replace(/^PROD/, '').slice(0, 8);
+    if (cleaned.startsWith('PRP')) return cleaned.replace(/^PRP/, 'PB').slice(0, 8);
     if (cleaned.startsWith('RM')) return cleaned.slice(0, 8);
     if (cleaned.startsWith('CB')) return cleaned.slice(0, 8);
     if (cleaned.startsWith('QC')) return cleaned.slice(0, 8);
@@ -87,131 +95,223 @@ export class BarcodeService {
   }
 
   /**
-   * Generate short unique scan_code for a specific module
+   * Generate compact scanCode
    */
-  generateScanCode(moduleType: BarcodeModuleType, payload: any): string {
-    switch (moduleType) {
-      case 'PRODUCT': {
-        const productCode = String(payload.productCode || payload.product_code || 'XX').toUpperCase().replace(/[^A-Z0-9]/g, '');
-        let mm = 0;
-        let dd = '00';
-        const dateStr = payload.dateStr || (payload.created_at ? payload.created_at.slice(2,10).replace(/-/g,'') : '');
-        if (dateStr && dateStr.length >= 6) {
-          mm = parseInt(dateStr.slice(2, 4), 10);
-          dd = dateStr.slice(4, 6);
-        } else {
-          const d = new Date();
-          mm = d.getMonth() + 1;
-          dd = String(d.getDate()).padStart(2, '0');
-        }
-        const seq = String(payload.sequenceNo || payload.serialNo || 1).padStart(3, '0');
-        return `${productCode}${mm}${dd}${seq}`.toUpperCase();
-      }
-
-      case 'RAW_MATERIAL': {
-        const batchNum = String(payload.batchId || payload.batch_id || payload.serialNumber || Math.floor(1000 + Math.random() * 9000)).slice(-4);
-        return `RM${batchNum}`.toUpperCase();
-      }
-
-      case 'COMBO': {
-        const comboNum = String(payload.code || payload.comboCode || payload.id || Math.floor(1000 + Math.random() * 9000)).slice(-4);
-        return `CB${comboNum}`.toUpperCase();
-      }
-
-      case 'QC': {
-        const qcNum = String(payload.qcBarcode || payload.batchId || Math.floor(1000 + Math.random() * 9000)).slice(-4).toUpperCase();
-        return `QC${qcNum}`.toUpperCase();
-      }
-
-      case 'INVENTORY':
-      default: {
-        const invNum = String(payload.id || payload.code || Math.floor(10000 + Math.random() * 90000)).slice(-5);
-        return `I${invNum}`.toUpperCase();
-      }
+  generateScanCode(moduleType: BarcodeModuleType, payload?: any): string {
+    if (payload?.scan_code || payload?.scanCode) {
+      return String(payload.scan_code || payload.scanCode).trim().toUpperCase();
     }
+    const ref = payload?.barcode || payload?.qc_barcode || payload?.combo_box_barcode || payload?.id || '';
+    return this.deriveScanCode(String(ref), moduleType);
   }
 
   /**
-   * Generate both full ERP barcode reference & compact physical scan_code
+   * Generate barcode object
    */
   generateBarcode(moduleType: BarcodeModuleType, payload: any): { barcode: string; scan_code: string } {
-    let barcode = payload.barcode || payload.barcode_no || '';
-    if (!barcode) {
-      const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-      const randHex = Math.floor(1000 + Math.random() * 9000);
-      switch (moduleType) {
-        case 'PRODUCT':
-          barcode = `PROD-${payload.productCode || 'XX'}-MB${payload.microBatchNo || 1}-${dateStr}-${String(payload.sequenceNo || 1).padStart(3, '0')}`;
-          break;
-        case 'RAW_MATERIAL':
-          barcode = `RM-${payload.materialCode || 'MAT'}-${dateStr}-${randHex}`;
-          break;
-        case 'COMBO':
-          barcode = `CB-${payload.productCode || 'CB'}-${dateStr}-${randHex}`;
-          break;
-        case 'QC':
-          barcode = `QC-${payload.productCode || 'QC'}-${dateStr}-${randHex}`;
-          break;
-        default:
-          barcode = `INV-${dateStr}-${randHex}`;
-          break;
-      }
-    }
-
-    const scan_code = payload.scan_code || payload.scanCode || this.generateScanCode(moduleType, payload) || this.deriveScanCode(barcode, moduleType);
-
+    const barcode = payload?.barcode || payload?.barcode_no || payload?.qc_barcode || payload?.combo_box_barcode || 'INV-001';
+    const scan_code = this.generateScanCode(moduleType, payload);
     return { barcode, scan_code };
   }
 
   /**
-   * Download high-resolution 300+ DPI PNG label from HTML element
+   * Extract clean scanCode from any record
    */
-  async downloadPNG(element: HTMLElement, filename: string): Promise<void> {
+  extractScanCode(record: any): string {
+    if (!record) return 'BARCODE';
+    if (typeof record === 'string') return this.deriveScanCode(record);
+
+    const val = record.scan_code || record.scanCode || record.scan_number;
+    if (val && String(val).trim()) {
+      return String(val).trim().toUpperCase();
+    }
+
+    const fallback = record.barcode || record.serial_number || record.barcode_no || record.qc_barcode || record.qcBarcode || record.combo_box_barcode || record.serialNumber || record.id || '';
+    return this.deriveScanCode(String(fallback));
+  }
+
+  /**
+   * Generate clean formatted filename (e.g. Blue-Detergent-SLES-PB934471.png)
+   */
+  generateCleanFileName(record: any, moduleType?: BarcodeModuleType): string {
+    if (!record) return 'Barcode.png';
+
+    const parts: string[] = [];
+    const prodName = record.product_name || record.productName;
+    const matName = record.material_name || record.materialName;
+    const pkgName = record.packaging_name || record.packagingName;
+    const comboName = record.combo_name || record.comboName || record.combo_code;
+
+    if (prodName) {
+      const cleanProd = String(prodName).trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9\-]/g, '');
+      if (cleanProd) parts.push(cleanProd);
+    }
+
+    if (matName && matName !== prodName) {
+      const cleanMat = String(matName).trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9\-]/g, '');
+      if (cleanMat && !parts.includes(cleanMat)) parts.push(cleanMat);
+    }
+
+    if (pkgName && !parts.length) {
+      const cleanPkg = String(pkgName).trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9\-]/g, '');
+      if (cleanPkg) parts.push(cleanPkg);
+    }
+
+    if (comboName && !parts.length) {
+      const cleanCombo = String(comboName).trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9\-]/g, '');
+      if (cleanCombo) parts.push(cleanCombo);
+    }
+
+    const scanCode = this.extractScanCode(record);
+    const cleanScan = scanCode.replace(/[^a-zA-Z0-9]/g, '');
+    if (cleanScan && !parts.includes(cleanScan)) {
+      parts.push(cleanScan);
+    }
+
+    const baseName = parts.length > 0 ? parts.join('-') : 'Barcode';
+    return `${baseName}.png`;
+  }
+
+  /**
+   * Render pure 34mm x 20mm barcode-only label canvas (1360px x 800px at 4x resolution)
+   * Contains ONLY Code 128 barcode + short scan code below.
+   */
+  async renderCleanBarcodeOnlyCanvas(scanCode: string): Promise<HTMLCanvasElement> {
+    const width = 1360;
+    const height = 800;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context unavailable');
+
+    // 1. Pure White Background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    // 2. Generate Code 128 SVG string via JsBarcode
+    const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    JsBarcode(svgEl, scanCode, {
+      format: 'CODE128',
+      width: 4,
+      height: 340,
+      displayValue: false,
+      margin: 0,
+      background: '#ffffff',
+      lineColor: '#000000'
+    });
+
+    const svgString = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    // 3. Load SVG onto image & draw onto canvas centered
+    await new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        // Draw barcode image in top 65% area with padding (left/right quiet zones)
+        const targetWidth = Math.min(width - 160, img.width * 2.2);
+        const targetHeight = 440;
+        const targetX = (width - targetWidth) / 2;
+        const targetY = 80;
+
+        ctx.drawImage(img, targetX, targetY, targetWidth, targetHeight);
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      img.onerror = (e) => {
+        URL.revokeObjectURL(url);
+        reject(e);
+      };
+      img.src = url;
+    });
+
+    // 4. Draw bold human-readable scanCode text centered below
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 68px "Courier New", Courier, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(scanCode, width / 2, 690);
+
+    return canvas;
+  }
+
+  /**
+   * Single Barcode-Only Label Download (Image 3 Format)
+   */
+  async downloadBarcodeOnlyLabel(record: any, moduleType?: BarcodeModuleType): Promise<void> {
     try {
-      const canvas = await html2canvas(element, {
-        backgroundColor: '#ffffff',
-        scale: 4, // 4x scale for 300+ DPI
-        useCORS: true,
-        logging: false
-      });
+      const scanCode = this.extractScanCode(record);
+      const fileName = this.generateCleanFileName(record, moduleType);
+
+      const canvas = await this.renderCleanBarcodeOnlyCanvas(scanCode);
+      const dataUrl = canvas.toDataURL('image/png', 1.0);
 
       const link = document.createElement('a');
-      link.download = filename.endsWith('.png') ? filename : `${filename}.png`;
-      link.href = canvas.toDataURL('image/png', 1.0);
+      link.download = fileName;
+      link.href = dataUrl;
       link.click();
-    } catch (err) {
-      console.error('Failed to download barcode PNG:', err);
-      toast.error('Failed to download barcode PNG');
-      throw err;
+
+      toast.success(`Downloaded ${fileName}`);
+    } catch (err: any) {
+      console.error('Failed to download barcode label:', err);
+      toast.error(`Download failed: ${err.message || 'Unknown error'}`);
     }
   }
 
   /**
-   * Download clean vector SVG barcode file
+   * Download All Barcode-Only Labels as ZIP (Image 3 Format for every file)
    */
-  downloadSVG(svgElement: SVGSVGElement, filename: string): void {
+  async downloadMultipleBarcodeOnlyLabels(records: any[], zipName = 'barcodes.zip', moduleType?: BarcodeModuleType): Promise<void> {
+    if (!records || records.length === 0) {
+      toast.error('No barcode records to download.');
+      return;
+    }
+
+    const toastId = toast.loading(`Generating ${records.length} barcode labels...`);
+
     try {
-      const svgData = new XMLSerializer().serializeToString(svgElement);
-      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
+      const zip = new JSZip();
+      const folder = zip.folder('Barcodes') || zip;
+
+      for (let i = 0; i < records.length; i++) {
+        const rec = records[i];
+        const scanCode = this.extractScanCode(rec);
+        const fileName = this.generateCleanFileName(rec, moduleType);
+
+        const canvas = await this.renderCleanBarcodeOnlyCanvas(scanCode);
+        const dataUrl = canvas.toDataURL('image/png', 1.0);
+        const base64Data = dataUrl.split(',')[1];
+
+        // Ensure unique filename inside zip
+        let finalName = fileName;
+        if (folder.file(finalName)) {
+          finalName = `${fileName.replace('.png', '')}_${i + 1}.png`;
+        }
+
+        folder.file(finalName, base64Data, { base64: true });
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
-      link.download = filename.endsWith('.svg') ? filename : `${filename}.svg`;
-      link.href = url;
+      link.href = URL.createObjectURL(zipBlob);
+      link.download = zipName.endsWith('.zip') ? zipName : `${zipName}.zip`;
       link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (err) {
-      console.error('Failed to download barcode SVG:', err);
-      toast.error('Failed to download barcode SVG');
-      throw err;
+
+      toast.success(`Successfully downloaded ${records.length} labels ZIP!`, { id: toastId });
+    } catch (err: any) {
+      console.error('Failed to generate barcode ZIP:', err);
+      toast.error(`ZIP creation failed: ${err.message || 'Unknown error'}`, { id: toastId });
     }
   }
 
   /**
-   * Print 34mm × 20mm physical label sticker
+   * Print 34mm × 20mm physical label sticker (Barcode-Only Output)
    */
-  printLabel(options: BarcodePrintOptions): void {
-    const fullBarcode = options.barcode;
-    const scanCode = options.scanCode || this.deriveScanCode(fullBarcode, options.moduleType);
+  printBarcodeOnlyLabel(record: any): void {
+    const scanCode = this.extractScanCode(record);
 
     const printWindow = window.open('', '_blank', 'width=800,height=600');
     if (!printWindow) {
@@ -219,11 +319,17 @@ export class BarcodeService {
       return;
     }
 
-    const svgEl = document.querySelector(`[data-scan-code="${scanCode}"] svg`) ||
-                  document.querySelector(`[data-barcode-id="${fullBarcode}"] svg`) ||
-                  document.querySelector(`svg`);
-
-    const svgMarkup = options.svgMarkup || (svgEl ? svgEl.outerHTML : `<svg viewBox="0 0 200 60" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#ffffff"/></svg>`);
+    const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    JsBarcode(svgEl, scanCode, {
+      format: 'CODE128',
+      width: 2,
+      height: 60,
+      displayValue: false,
+      margin: 0,
+      background: '#ffffff',
+      lineColor: '#000000'
+    });
+    const svgMarkup = svgEl.outerHTML;
 
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -253,7 +359,7 @@ export class BarcodeService {
                 width: 34mm !important;
                 height: 20mm !important;
                 margin: 0 auto !important;
-                padding: 1mm 1.5mm !important;
+                padding: 1.5mm !important;
                 box-sizing: border-box !important;
                 page-break-inside: avoid !important;
                 break-inside: avoid !important;
@@ -269,18 +375,6 @@ export class BarcodeService {
               flex-direction: column;
               align-items: center;
             }
-            .print-instructions {
-              background: #f8fafc;
-              border: 1px solid #e2e8f0;
-              border-radius: 8px;
-              padding: 12px 16px;
-              margin-bottom: 20px;
-              max-width: 450px;
-              font-size: 13px;
-              color: #334155;
-            }
-            .print-instructions h4 { margin: 0 0 6px 0; color: #0f172a; }
-            .print-instructions ul { margin: 0; padding-left: 20px; }
             .print-btn {
               background: #2563eb;
               color: #ffffff;
@@ -289,12 +383,12 @@ export class BarcodeService {
               border-radius: 6px;
               font-weight: 600;
               cursor: pointer;
-              margin-top: 10px;
+              margin-bottom: 16px;
             }
             .label {
               width: 34mm;
               height: 20mm;
-              padding: 1mm 1.5mm;
+              padding: 1.5mm;
               background: #ffffff;
               border: 1px dashed #cbd5e1;
               overflow: hidden;
@@ -306,7 +400,7 @@ export class BarcodeService {
               text-align: center;
             }
             .barcode-container {
-              width: 31mm;
+              width: 30mm;
               height: 12mm;
               display: flex;
               align-items: center;
@@ -314,7 +408,7 @@ export class BarcodeService {
               margin: 0 auto;
             }
             .barcode-container svg {
-              width: 100% !important;
+              width: 90% !important;
               height: 100% !important;
               max-height: 12mm !important;
               shape-rendering: crispEdges !important;
@@ -325,23 +419,13 @@ export class BarcodeService {
               font-weight: bold;
               letter-spacing: 0.5px;
               color: #000000;
-              margin-top: 0.5mm;
+              margin-top: 1mm;
               line-height: 1;
             }
           </style>
         </head>
         <body>
-          <div class="no-print print-instructions">
-            <h4>Sticker Label (34mm × 20mm) Printing Instructions:</h4>
-            <ul>
-              <li>Scale: <strong>Actual Size / 100%</strong></li>
-              <li>Disable <em>Fit to Page / Shrink to Fit</em></li>
-              <li>Print Quality: <strong>High Quality (300+ DPI)</strong></li>
-              <li>Encoded Code: <strong>${scanCode}</strong></li>
-            </ul>
-            <button class="print-btn" onclick="window.print()">Print Label</button>
-          </div>
-
+          <button class="no-print print-btn" onclick="window.print()">Print Label (34mm × 20mm)</button>
           <div class="label">
             <div class="barcode-container">
               ${svgMarkup}
@@ -355,25 +439,126 @@ export class BarcodeService {
   }
 
   /**
-   * Validate barcode / scan_code format & check uniqueness
+   * Print Multiple 34mm × 20mm Labels
    */
+  printMultipleBarcodeOnlyLabels(records: any[]): void {
+    if (!records || records.length === 0) return;
+
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) {
+      alert('Please allow popups to print barcode labels.');
+      return;
+    }
+
+    const labelHtmls = records.map(r => {
+      const scanCode = this.extractScanCode(r);
+      const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      JsBarcode(svgEl, scanCode, {
+        format: 'CODE128',
+        width: 2,
+        height: 60,
+        displayValue: false,
+        margin: 0,
+        background: '#ffffff',
+        lineColor: '#000000'
+      });
+      return `
+        <div class="label">
+          <div class="barcode-container">
+            ${svgEl.outerHTML}
+          </div>
+          <div class="scan-code-text">${scanCode}</div>
+        </div>
+      `;
+    }).join('\n');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Print ${records.length} Labels</title>
+          <style>
+            @page {
+              size: 34mm 20mm;
+              margin: 0;
+            }
+            @media print {
+              html, body {
+                width: 34mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #ffffff !important;
+              }
+              .no-print { display: none !important; }
+              .label {
+                width: 34mm !important;
+                height: 20mm !important;
+                margin: 0 auto !important;
+                padding: 1.5mm !important;
+                box-sizing: border-box !important;
+                page-break-after: always !important;
+                break-after: always !important;
+              }
+            }
+            body { font-family: Arial, sans-serif; background: #ffffff; padding: 16px; text-align: center; }
+            .print-btn { background: #2563eb; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; margin-bottom: 16px; }
+            .label { width: 34mm; height: 20mm; padding: 1.5mm; background: #ffffff; border: 1px dashed #cbd5e1; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 8px auto; }
+            .barcode-container { width: 30mm; height: 12mm; display: flex; align-items: center; justify-content: center; margin: 0 auto; }
+            .barcode-container svg { width: 90% !important; height: 100% !important; shape-rendering: crispEdges !important; }
+            .scan-code-text { font-family: 'Courier New', monospace; font-size: 8pt; font-weight: bold; color: #000; margin-top: 1mm; }
+          </style>
+        </head>
+        <body>
+          <button class="no-print print-btn" onclick="window.print()">Print All ${records.length} Labels</button>
+          ${labelHtmls}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  }
+
+  /**
+   * Compatibility methods
+   */
+  async downloadPNG(element: HTMLElement, filename: string): Promise<void> {
+    return this.downloadBarcodeOnlyLabel({ barcode: filename }, 'INVENTORY');
+  }
+
+  downloadSVG(svgElement: SVGSVGElement, filename: string): void {
+    return this.downloadSVGDirect(svgElement, filename);
+  }
+
+  private downloadSVGDirect(svgElement: SVGSVGElement, filename: string): void {
+    try {
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = filename.endsWith('.svg') ? filename : `${filename}.svg`;
+      link.href = url;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error('Failed to download barcode SVG:', err);
+      toast.error('Failed to download barcode SVG');
+    }
+  }
+
+  printLabel(options: BarcodePrintOptions): void {
+    return this.printBarcodeOnlyLabel({ scan_code: options.scanCode || options.barcode, barcode: options.barcode });
+  }
+
   validateBarcode(code: string): boolean {
     if (!code) return false;
     const clean = String(code).trim();
     return clean.length >= 4 && clean.length <= 40;
   }
 
-  /**
-   * Universal 2-Step Scanner Lookup Engine
-   * Step 1: Search `scan_code` in target table(s)
-   * Step 2: Search `barcode` in target table(s)
-   * Step 3: Fallback match derived scan_code or normalized barcode
-   */
   async findBarcode(scannedInput: string, targetModule?: BarcodeModuleType): Promise<{ found: boolean; record: any; moduleType?: BarcodeModuleType }> {
     if (!scannedInput) return { found: false, record: null };
     const cleanInput = String(scannedInput).trim().toUpperCase();
 
-    // Map module type to Supabase table
     const tableMap: Array<{ module: BarcodeModuleType; table: string }> = [
       { module: 'PRODUCT', table: SUPABASE_TABLES.productBarcodes },
       { module: 'RAW_MATERIAL', table: SUPABASE_TABLES.rawMaterialBarcodes },
@@ -385,19 +570,15 @@ export class BarcodeService {
       ? tableMap.filter(t => t.module === targetModule) 
       : tableMap;
 
-    // Step 1: Search by scan_code column
     for (const { module, table } of searchTables) {
       try {
         const { data } = await supabase.from(table).select('*').eq('scan_code', cleanInput).limit(1);
         if (data && data.length > 0) {
           return { found: true, record: data[0], moduleType: module };
         }
-      } catch (err) {
-        // Fallback silently if scan_code column query fails
-      }
+      } catch (err) {}
     }
 
-    // Step 2: Search by full barcode column
     for (const { module, table } of searchTables) {
       try {
         const barcodeCol = table === SUPABASE_TABLES.comboBoxes ? 'combo_box_barcode' : table === SUPABASE_TABLES.qcBarcodes ? 'qc_barcode' : 'barcode';
@@ -405,31 +586,10 @@ export class BarcodeService {
         if (data && data.length > 0) {
           return { found: true, record: data[0], moduleType: module };
         }
-      } catch (err) {
-        // Fallback silently
-      }
+      } catch (err) {}
     }
 
-    // Step 3: Fallback derived match across memory/all records
     return { found: false, record: null };
-  }
-
-  /**
-   * Decode barcode or scan_code into parsed object
-   */
-  decodeBarcode(code: string): { fullBarcode: string; scanCode: string; moduleType: BarcodeModuleType | 'UNKNOWN' } {
-    if (!code) return { fullBarcode: '', scanCode: '', moduleType: 'UNKNOWN' };
-    const clean = String(code).trim().toUpperCase();
-    const scanCode = this.deriveScanCode(clean);
-
-    let moduleType: BarcodeModuleType | 'UNKNOWN' = 'UNKNOWN';
-    if (clean.startsWith('PROD-') || scanCode.length === 8) moduleType = 'PRODUCT';
-    else if (clean.startsWith('RM-') || scanCode.startsWith('RM')) moduleType = 'RAW_MATERIAL';
-    else if (clean.startsWith('CB-') || scanCode.startsWith('CB')) moduleType = 'COMBO';
-    else if (clean.startsWith('QC-') || scanCode.startsWith('QC')) moduleType = 'QC';
-    else if (clean.startsWith('INV-') || scanCode.startsWith('I')) moduleType = 'INVENTORY';
-
-    return { fullBarcode: clean, scanCode, moduleType };
   }
 }
 
