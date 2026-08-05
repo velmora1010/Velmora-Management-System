@@ -229,7 +229,7 @@ const IntakeStep3_Barcode = () => {
 
         const savedIds = await inventoryService.saveRawMaterialIntake(inventoryInRecord, finalIntakeBatches);
         if (isPackaging || isSet) {
-          await inventoryService.savePackagingMaterialBarcodes(finalIntakeBatches);
+          await inventoryService.savePackagingBarcodes(finalIntakeBatches);
         }
         setSavedBatchIds(savedIds as any);
       }
@@ -257,14 +257,11 @@ const IntakeStep3_Barcode = () => {
 
   const handleDownloadAll = () => {
     const records = previewBatches.map(b => ({
-      scanCode: b.scanCode || b.serialNumber,
-      fullBarcode: b.serialNumber,
-      materialName: b.material_name || selectedMaterial.name,
-      productName: selectedProduct?.productName,
-      quantity: b.quantity,
-      unit: b.unit || matUnit
+      scan_code: b.scanCode || b.serialNumber,
+      product_name: selectedProduct?.productName,
+      material_name: b.material_name || selectedMaterial.name
     }));
-    barcodeService.downloadBatchBarcodesZIP(records, 'ProductionReady_Barcodes');
+    barcodeService.downloadMultipleBarcodeOnlyLabels(records, 'Production-Ready-Barcodes.zip', 'PRODUCTION_READY');
   };
 
   const handlePrintAll = () => {
