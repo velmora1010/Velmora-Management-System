@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
-import { kgToGrams, gramsToKgString, ProductFormulaConfig } from '../config/productionBatchFormulas';
+import { kgToGrams, gramsToKgString, getMaterialUnit, ProductFormulaConfig } from '../config/productionBatchFormulas';
 import { barcodeService } from './barcodeService';
 
 // ============================================================================
@@ -64,6 +64,7 @@ export interface ProductionReadyBatchRow {
 
 export interface PreparePackInput {
   materialName: string;
+  unit?: string;
   product: ProductFormulaConfig;
   countToPrepare: number;
   requiredGramsPerPack: number;
@@ -384,13 +385,46 @@ export class ProductionReadyBatchService {
     }
   }
 
+  async getNextProductionRemainderSequence(materialName: string, productCode: string, dateYYMMDD?: string): Promise<number> {
+    const matKey = materialName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 4).toUpperCase();
+    const dateCode = dateYYMMDD || new Date().toISOString().slice(2, 10).replace(/-/g, '');
+    const prefix = `PRL-${matKey}-${productCode}-${dateCode}-`;
+
+    try {
+      const { data, error } = await supabase
+        .from(TABLE)
+        .select('barcode')
+        .like('barcode', `${prefix}%`);
+
+      if (error || !data || data.length === 0) {
+        return 1;
+      }
+
+      let maxSeq = 0;
+      for (const r of data) {
+        if (!r.barcode) continue;
+        const parts = r.barcode.split('-');
+        const lastPart = parts[parts.length - 1];
+        const num = parseInt(lastPart, 10);
+        if (!isNaN(num) && num > maxSeq) {
+          maxSeq = num;
+        }
+      }
+
+      return maxSeq + 1;
+    } catch (err) {
+      console.warn('Failed to query max PRL sequence, defaulting to 1:', err);
+      return 1;
+    }
+  }
+
   // --------------------------------------------------------------------------
   // PREPARE: Concurrency-Safe RPC Transaction & Database-Sequenced Generation
   // --------------------------------------------------------------------------
-  async prepareProductionReadyBatches(input: PreparePackInput): Promise<ProductionReadyBatchRow[]> {
+  async prepareProductionReadyBatches(input: PreparePackInput & { customBatches?: any[] }): Promise<ProductionReadyBatchRow[]> {
     const { materialName, product, countToPrepare, requiredGramsPerPack, personName } = input;
 
-    if (countToPrepare <= 0) {
+    if (countToPrepare <= 0 && (!input.customBatches || input.customBatches.length === 0)) {
       throw new Error("Number of packs to prepare must be greater than zero.");
     }
 
@@ -411,31 +445,42 @@ export class ProductionReadyBatchService {
       return existingGroup.map(attachScanCode) as ProductionReadyBatchRow[];
     }
 
-    // Step 2: Try atomic PostgreSQL RPC transaction first
-    try {
-      const { data: rpcData, error: rpcError } = await supabase.rpc('create_production_ready_packs', {
-        p_material_name: materialName,
-        p_material_code: matKey,
-        p_product_code: product.productCode,
-        p_product_name: product.productName,
-        p_quantity: requiredGramsPerPack ? Number((requiredGramsPerPack / 1000).toFixed(3)) : 0,
-        p_quantity_grams: requiredGramsPerPack,
-        p_pack_count: countToPrepare,
-        p_vendor: vendorStr,
-        p_prepared_by: personName || 'Inventory Manager',
-        p_po_reference: poRefStr,
-        p_date_code: dateYYMMDD,
-        p_preparation_group_id: prepGroupId
-      });
+    // Step 2: Custom Batches direct insert (supports complete packs + PRL loose remainder)
+    if (input.customBatches && input.customBatches.length > 0) {
+      const now = new Date().toISOString();
+      const rowsToInsert = input.customBatches.map((b, idx) => ({
+        id: b.id && !b.id.startsWith('bott-') && !b.id.startsWith('cap-') ? b.id : crypto.randomUUID(),
+        barcode: b.serialNumber || b.barcode,
+        material_name: b.material_name || materialName,
+        batch_no: b.serialNumber || b.barcode,
+        vendor: vendorStr,
+        quantity: Number(b.quantity),
+        unit: b.unit || input.unit || getMaterialUnit(materialName),
+        price_per_kg: 0,
+        gst_percent: 0,
+        generated_by: personName || 'Inventory Manager',
+        current_stage: 'Incoming',
+        created_at: now,
+        updated_at: now,
+        received_date: now,
+        po_reference: poRefStr,
+        scanning_person_name: personName || 'Inventory Manager',
+        product_code: product.productCode,
+        product_name: product.productName,
+        quantity_grams: Math.round(Number(b.quantity) * 1000),
+        prepared_by: personName || 'Inventory Manager',
+        prepared_batch_no: b.batch_no || (idx + 1),
+        preparation_group_id: prepGroupId,
+        source_preparation_group_id: prepGroupId,
+        pack_type: b.pack_type || (b.is_loose_remainder ? 'LOOSE_REMAINDER' : 'COMPLETE_PACK'),
+        is_loose_remainder: Boolean(b.is_loose_remainder)
+      }));
 
-      if (!rpcError && rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
-        return (rpcData || []).map(attachScanCode) as ProductionReadyBatchRow[];
+      const { data, error } = await supabase.from(TABLE).insert(rowsToInsert).select('*');
+      if (error) {
+        console.warn('Custom batches insert warning:', error.message);
       }
-      if (rpcError) {
-        console.warn('RPC create_production_ready_packs returned error, using fallback sequence:', rpcError.message);
-      }
-    } catch (err) {
-      console.warn('RPC invocation error, using fallback sequence:', err);
+      return (data || rowsToInsert).map(attachScanCode) as ProductionReadyBatchRow[];
     }
 
     // Step 3: Database-Sequenced fallback insert with Max-Sequence calculation
@@ -455,7 +500,7 @@ export class ProductionReadyBatchService {
         batch_no: `PRP-${dateYYMMDD}-${seqStr}`,
         vendor: vendorStr,
         quantity: requiredGramsPerPack ? Number((requiredGramsPerPack / 1000).toFixed(3)) : 0,
-        unit: 'kg',
+        unit: input.unit || getMaterialUnit(materialName),
         price_per_kg: 0,
         gst_percent: 0,
         generated_by: personName || 'Inventory Manager',
@@ -470,7 +515,10 @@ export class ProductionReadyBatchService {
         quantity_grams: requiredGramsPerPack,
         prepared_by: personName || 'Inventory Manager',
         prepared_batch_no: i + 1,
-        preparation_group_id: prepGroupId
+        preparation_group_id: prepGroupId,
+        source_preparation_group_id: prepGroupId,
+        pack_type: 'COMPLETE_PACK',
+        is_loose_remainder: false
       });
     }
 

@@ -18,7 +18,10 @@ import {
   getEligibleProductsForMaterial, 
   getMaterialRequirementForProduct, 
   kgToGrams, 
-  gramsToKgString, 
+  gramsToKgString,
+  getMaterialUnit,
+  formatMaterialQuantity,
+  formatQuantityWithUnit,
   ProductFormulaConfig 
 } from '../../../../config/productionBatchFormulas';
 import { productionReadyBatchService } from '../../../../services/productionReadyBatchService';
@@ -46,7 +49,12 @@ const IntakeStep2_Split = () => {
   }
 
   const matName = selectedMaterial.name;
+  const matUnit = getMaterialUnit(selectedMaterial);
   const isWater = matName.toLowerCase().includes('water');
+  const isSet = matName.toLowerCase().includes('bottle + cap set') || matName.toLowerCase().includes('set');
+  const isPackaging = selectedMaterial.category?.toLowerCase().includes('packaging') || 
+                      selectedMaterial.id?.startsWith('pack-') || 
+                      isSet;
 
   useEffect(() => {
     const initData = async () => {
@@ -103,8 +111,8 @@ const IntakeStep2_Split = () => {
   const remainingGrams = combinedGrams - totalAllocatedGrams;
 
   const handleProceed = () => {
-    if (isWater) {
-      // Bulk intake for water
+    if (isWater || isPackaging || isSet) {
+      // Direct intake for water and packaging items
       setBatches([{ id: crypto.randomUUID(), batch_no: 1, quantity: Number(formData.quantity_received) || 0 }]);
       navigate('/inventory/raw-material/intake/generate-barcode');
       return;
@@ -114,12 +122,24 @@ const IntakeStep2_Split = () => {
       return;
     }
 
-    // Populate batches for production ready packs
-    const newBatches = Array.from({ length: packsToPrepare }).map((_, i) => ({
+    // Populate batches for complete production ready packs
+    const newBatches: any[] = Array.from({ length: packsToPrepare }).map((_, i) => ({
       id: crypto.randomUUID(),
       batch_no: i + 1,
-      quantity: requiredGramsPerPack / 1000,
+      quantity: Number((requiredGramsPerPack / 1000).toFixed(3)),
+      pack_type: 'COMPLETE_PACK',
+      is_loose_remainder: false
     }));
+
+    if (remainingGrams > 0) {
+      newBatches.push({
+        id: crypto.randomUUID(),
+        batch_no: packsToPrepare + 1,
+        quantity: Number((remainingGrams / 1000).toFixed(3)),
+        pack_type: 'LOOSE_REMAINDER',
+        is_loose_remainder: true
+      });
+    }
 
     setBatches(newBatches);
     setLooseBalanceGrams(existingLooseGrams);
@@ -146,25 +166,35 @@ const IntakeStep2_Split = () => {
           <Package size={20} className="text-cyan-400" />
           <div>
             <div className="text-[10px] text-gray-400 font-medium uppercase">Raw Material</div>
-            <div className="text-sm font-bold text-white">{matName}</div>
+            <div className="text-sm font-bold text-white flex items-center gap-1">
+              {matName} <span className="text-xs text-cyan-300 font-mono">({matUnit})</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {isWater ? (
-        /* WATER BULK INTAKE NOTICE */
-        <div className="p-8 rounded-2xl bg-gradient-to-br from-cyan-950/40 to-slate-900 border border-cyan-500/30 text-center space-y-6">
-          <div className="w-16 h-16 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center mx-auto border border-cyan-500/30">
-            <Droplet size={32} />
+      {isPackaging || isWater ? (
+        /* PACKAGING / BULK INTAKE NOTICE */
+        <div className="p-8 rounded-2xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-900 border border-cyan-500/30 text-center space-y-6 shadow-xl">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-400 flex items-center justify-center mx-auto border border-cyan-500/30">
+            {isWater ? <Droplet size={32} /> : <Package size={32} />}
           </div>
           <div className="max-w-md mx-auto space-y-2">
-            <h2 className="text-xl font-bold text-white">Water Bulk Stock Intake</h2>
+            <h2 className="text-xl font-bold text-white">
+              {isSet ? 'Bottle + Cap Set Receiving' : `${matName} Stock Receiving`}
+            </h2>
             <p className="text-sm text-gray-300">
-              Water has no fixed batch requirement and is stored as bulk inventory stock. It will not be split into production-ready batch barcodes.
+              {isSet ? (
+                <>Receiving <strong>{formData.quantity_received} PCS</strong> of Bottle + Cap Set will automatically generate <strong>{formData.quantity_received} PCS Bottle</strong> and <strong>{formData.quantity_received} PCS Cap</strong> inventory records.</>
+              ) : isWater ? (
+                <>Water has no fixed batch requirement and is stored as bulk inventory stock.</>
+              ) : (
+                <>Packaging items are recorded directly as inventory stock without micro-batch weight splitting.</>
+              )}
             </p>
           </div>
           <div className="p-4 rounded-xl bg-black/40 border border-white/10 inline-block text-left font-mono text-sm text-cyan-300">
-            Intake Quantity: <strong>{formData.quantity_received} LTR</strong>
+            Intake Quantity: <strong>{formData.quantity_received} {matUnit}</strong>
           </div>
           <div>
             <button
@@ -184,15 +214,15 @@ const IntakeStep2_Split = () => {
             <div className="grid grid-cols-3 gap-4">
               <div className="p-4 rounded-xl bg-slate-900/60 border border-white/10">
                 <span className="text-[10px] uppercase font-bold text-gray-400 block mb-1">New Intake</span>
-                <span className="text-xl font-extrabold text-white">{gramsToKgString(newIntakeGrams)} <small className="text-xs text-gray-400">KG</small></span>
+                <span className="text-xl font-extrabold text-white">{formatMaterialQuantity(newIntakeGrams, matUnit)} <small className="text-xs text-gray-400">{matUnit}</small></span>
               </div>
               <div className="p-4 rounded-xl bg-slate-900/60 border border-white/10">
                 <span className="text-[10px] uppercase font-bold text-cyan-400 block mb-1">Loose Balance</span>
-                <span className="text-xl font-extrabold text-cyan-300">{gramsToKgString(existingLooseGrams)} <small className="text-xs text-gray-400">KG</small></span>
+                <span className="text-xl font-extrabold text-cyan-300">{formatMaterialQuantity(existingLooseGrams, matUnit)} <small className="text-xs text-gray-400">{matUnit}</small></span>
               </div>
               <div className="p-4 rounded-xl bg-cyan-950/40 border border-cyan-500/30">
                 <span className="text-[10px] uppercase font-bold text-emerald-400 block mb-1">Combined Stock</span>
-                <span className="text-xl font-extrabold text-emerald-300">{gramsToKgString(combinedGrams)} <small className="text-xs text-gray-400">KG</small></span>
+                <span className="text-xl font-extrabold text-emerald-300">{formatMaterialQuantity(combinedGrams, matUnit)} <small className="text-xs text-gray-400">{matUnit}</small></span>
               </div>
             </div>
 
@@ -245,7 +275,7 @@ const IntakeStep2_Split = () => {
                 <div>
                   <h3 className="text-base font-bold text-white">Number of Packs to Prepare</h3>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    1 pack = {gramsToKgString(requiredGramsPerPack)} KG ({selectedProduct?.productName})
+                    1 pack = {formatMaterialQuantity(requiredGramsPerPack, matUnit)} {matUnit} ({selectedProduct?.productName})
                   </p>
                 </div>
                 <div className="text-right">
@@ -289,7 +319,7 @@ const IntakeStep2_Split = () => {
                 </div>
               ) : (
                 <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm flex items-center gap-2">
-                  <AlertCircle size={18} /> Insufficient stock to prepare 1 complete batch pack ({gramsToKgString(requiredGramsPerPack)} KG required). Intake will carry forward as loose stock.
+                  <AlertCircle size={18} /> Insufficient stock to prepare 1 complete batch pack ({formatMaterialQuantity(requiredGramsPerPack, matUnit)} {matUnit} required). Intake will carry forward as loose stock.
                 </div>
               )}
             </div>
@@ -303,28 +333,46 @@ const IntakeStep2_Split = () => {
                 Allocation Breakdown
               </h3>
 
-              <div className="space-y-4">
+              <div className="space-y-3.5">
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-gray-400">Packs Prepared:</span>
-                  <strong className="text-white font-mono">{packsToPrepare} packs</strong>
+                  <strong className="text-white font-mono">{packsToPrepare} complete packs</strong>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-400">Pack Quantity:</span>
-                  <strong className="text-white font-mono">{gramsToKgString(requiredGramsPerPack)} KG each</strong>
+                  <span className="text-gray-400">Complete Pack Quantity:</span>
+                  <strong className="text-white font-mono">{formatMaterialQuantity(requiredGramsPerPack, matUnit)} {matUnit} each</strong>
                 </div>
-                <div className="flex justify-between items-center text-sm border-t border-white/10 pt-3">
-                  <span className="text-cyan-300 font-semibold">Total Allocated:</span>
-                  <strong className="text-cyan-300 font-mono text-base">{gramsToKgString(totalAllocatedGrams)} KG</strong>
+                <div className="flex justify-between items-center text-sm border-b border-white/10 pb-3">
+                  <span className="text-cyan-300 font-semibold">Complete Quantity Allocated:</span>
+                  <strong className="text-cyan-300 font-mono text-base">{formatMaterialQuantity(totalAllocatedGrams, matUnit)} {matUnit}</strong>
                 </div>
-                <div className="flex justify-between items-center text-sm border-t border-white/10 pt-3">
-                  <span className="text-emerald-400 font-semibold">Remaining Loose Balance:</span>
-                  <strong className="text-emerald-400 font-mono text-base">{gramsToKgString(remainingGrams)} KG</strong>
+
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-amber-400 font-medium">Remainder Pack:</span>
+                  <strong className="text-amber-400 font-mono">{remainingGrams > 0 ? 1 : 0} loose pack</strong>
+                </div>
+                <div className="flex justify-between items-center text-sm border-b border-white/10 pb-3">
+                  <span className="text-amber-300 font-medium">Remainder Quantity:</span>
+                  <strong className="text-amber-300 font-mono text-base">{formatMaterialQuantity(remainingGrams, matUnit)} {matUnit}</strong>
+                </div>
+
+                <div className="flex justify-between items-center text-sm pt-1">
+                  <span className="text-emerald-400 font-bold">Total Represented:</span>
+                  <strong className="text-emerald-400 font-mono text-base">{formatMaterialQuantity(combinedGrams, matUnit)} {matUnit}</strong>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-400 font-medium">Remaining Unbarcoded Quantity:</span>
+                  <strong className="text-gray-400 font-mono">0.000 {matUnit}</strong>
                 </div>
               </div>
 
               <div className="p-3 rounded-xl bg-black/40 border border-white/10 text-xs text-gray-300 flex items-start gap-2">
                 <Info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
-                Remaining loose balance of {gramsToKgString(remainingGrams)} KG will carry forward and automatically add to future intakes.
+                {remainingGrams > 0 ? (
+                  <span>A separate loose-balance barcode will be generated for the remaining <strong>{formatMaterialQuantity(remainingGrams, matUnit)} {matUnit}</strong>. This quantity can be combined with future intake stock.</span>
+                ) : (
+                  <span>All stock is fully allocated to complete production-ready packs.</span>
+                )}
               </div>
 
               <button

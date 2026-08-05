@@ -89,3 +89,53 @@ export const calculateRequiredIngredients = (productId: string, units: number) =
     required_quantity: Number((ing.quantity_for_500_units * scale).toFixed(3))
   }));
 };
+
+export interface RequiredPackaging {
+  name: string;
+  category: string;
+  required_quantity: number;
+  unit: 'PCS';
+}
+
+export const calculateRequiredPackaging = (productId: string, units: number): RequiredPackaging[] | null => {
+  if (!productId || units <= 0) return null;
+
+  const product = PRODUCTS.find(p => p.id === productId || p.name.toLowerCase().includes(productId.toLowerCase()));
+  if (!product) return null;
+
+  const mbSize = product.microBatchSize || getProductMicroBatchSize(productId);
+  const microBatchCount = Math.ceil(units / mbSize);
+
+  const lowerName = (product.name || '').toLowerCase();
+  const pid = (productId || '').toUpperCase();
+
+  const isBlue = pid === 'LA' || pid === '1B' || lowerName.includes('liquid a') || lowerName.includes('blue');
+  const isYellow = pid === 'LB' || pid === '1Y' || lowerName.includes('liquid b') || lowerName.includes('yellow');
+  const isPink = pid === 'COND' || pid === '1P' || lowerName.includes('conditioner') || lowerName.includes('pink');
+
+  let perBatchQty = 30;
+  let stickerName = 'Blue Brand Sticker';
+
+  if (isBlue) {
+    perBatchQty = 30;
+    stickerName = 'Blue Brand Sticker';
+  } else if (isYellow) {
+    perBatchQty = 30;
+    stickerName = 'Yellow Brand Sticker';
+  } else if (isPink) {
+    perBatchQty = 40;
+    stickerName = 'Pink Brand Sticker';
+  } else {
+    perBatchQty = mbSize;
+    stickerName = 'Blue Brand Sticker';
+  }
+
+  const reqQty = perBatchQty * microBatchCount;
+
+  return [
+    { name: 'Bottle', category: 'Primary Packaging', required_quantity: reqQty, unit: 'PCS' },
+    { name: 'Cap', category: 'Primary Packaging', required_quantity: reqQty, unit: 'PCS' },
+    { name: stickerName, category: 'Primary Packaging', required_quantity: reqQty, unit: 'PCS' }
+  ];
+};
+

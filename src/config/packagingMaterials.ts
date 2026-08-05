@@ -32,8 +32,8 @@ export function getPackagingTheme(matName: string, category: string = ''): Packa
   const name = matName.trim().toLowerCase();
   const cat = category.trim().toLowerCase();
 
-  // 1. Bottle & Cap (Blue -> Yellow -> Pink Gradient)
-  if (name.includes('bottle') || name.includes('cap')) {
+  // 1. Bottle & Cap & Set (Blue -> Yellow -> Pink Gradient)
+  if (name.includes('bottle') || name.includes('cap') || name.includes('set')) {
     return {
       background: 'linear-gradient(90deg, #DDEBFF 0%, #FFF4B5 50%, #FFE2EE 100%)',
       isGradientBorder: true,
@@ -181,31 +181,17 @@ export function getPackagingTheme(matName: string, category: string = ''): Packa
 
 export const PRIMARY_PACKAGING: PackagingMaterial[] = [
   {
-    id: 'pack-1',
-    name: 'Bottle',
+    id: 'pack-set-1',
+    name: 'Bottle + Cap Set',
     category: 'Primary Packaging',
     badge: 'PRIMARY',
     unit: 'PCS',
     colorTheme: {
-      bg: 'from-cyan-500/10 to-blue-900/10',
+      bg: 'from-cyan-500/10 via-amber-500/10 to-pink-900/10',
       border: 'border-cyan-500/30',
       glow: 'hover:shadow-cyan-500/20',
-      iconBg: 'bg-cyan-500/20',
-      iconColor: 'text-cyan-400'
-    }
-  },
-  {
-    id: 'pack-2',
-    name: 'Cap',
-    category: 'Primary Packaging',
-    badge: 'PRIMARY',
-    unit: 'PCS',
-    colorTheme: {
-      bg: 'from-cyan-500/10 to-blue-900/10',
-      border: 'border-cyan-500/30',
-      glow: 'hover:shadow-cyan-500/20',
-      iconBg: 'bg-cyan-500/20',
-      iconColor: 'text-cyan-400'
+      iconBg: 'bg-gradient-to-r from-[#3B82F6] to-[#EC4899]',
+      iconColor: 'text-white'
     }
   },
   {

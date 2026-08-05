@@ -7,6 +7,7 @@ import { inventoryService } from '../../../../services/inventoryService';
 import toast from 'react-hot-toast';
 import { barcodeService } from '../../../../services/barcodeService';
 import { productionReadyBatchService } from '../../../../services/productionReadyBatchService';
+import { getMaterialUnit, formatMaterialQuantity } from '../../../../config/productionBatchFormulas';
 import { BarcodePreview } from '../../../../components/ui/BarcodePreview';
 
 const IntakeStep3_Barcode = () => {
@@ -26,13 +27,15 @@ const IntakeStep3_Barcode = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showToast, setShowToast] = useState(false);
-  // Real start sequence fetched from Supabase for PRP preview cards
+  // Real start sequences fetched from Supabase for PRP & PRL preview cards
   const [prpStartSeq, setPrpStartSeq] = useState<number>(1);
+  const [prlStartSeq, setPrlStartSeq] = useState<number>(1);
 
   if (!selectedMaterial || batches.length === 0) {
     return <Navigate to="/inventory/raw-material/intake" replace />;
   }
 
+  const matUnit = getMaterialUnit(selectedMaterial);
   const targetQty = Number(formData.quantity_received) || 0;
   const isPackaging = selectedMaterial.category?.toLowerCase().includes('packaging') || 
                       selectedMaterial.id?.startsWith('pack-');
@@ -40,7 +43,7 @@ const IntakeStep3_Barcode = () => {
   const dateYYMMDD = new Date().toISOString().slice(2, 10).replace(/-/g, '');
   const matKey = selectedMaterial.name.replace(/[^a-zA-Z0-9]/g, '').substring(0, 4).toUpperCase();
 
-  // Fetch real start sequence from Supabase when selectedProduct changes
+  // Fetch real start sequences from Supabase when selectedProduct changes
   useEffect(() => {
     if (!selectedProduct || !selectedMaterial) return;
     let cancelled = false;
@@ -49,22 +52,64 @@ const IntakeStep3_Barcode = () => {
       .then(seq => {
         if (!cancelled) setPrpStartSeq(seq);
       })
-      .catch(() => {
-        // Keep default of 1 on error
-      });
+      .catch(() => {});
+
+    productionReadyBatchService
+      .getNextProductionRemainderSequence(selectedMaterial.name, selectedProduct.productCode, dateYYMMDD)
+      .then(seq => {
+        if (!cancelled) setPrlStartSeq(seq);
+      })
+      .catch(() => {});
+
     return () => { cancelled = true; };
   }, [selectedProduct?.productCode, selectedMaterial?.name, dateYYMMDD]);
 
-  // Preview barcodes — use real DB-sequenced numbers for PRP packs
-  const previewBatches = batches.map((b, idx) => {
+  const isSet = selectedMaterial.name.toLowerCase().includes('bottle + cap set') || selectedMaterial.name.toLowerCase().includes('set');
+
+  // Preview barcodes — use real DB-sequenced numbers for PRP / PRL packs or Set expansion
+  const previewBatches = batches.flatMap((b, idx) => {
+    if (isSet) {
+      const bottleSerial = `MAT-${dateYYMMDD}-BOTT-${String(b.batch_no).padStart(3, '0')}`;
+      const capSerial = `MAT-${dateYYMMDD}-CAP-${String(b.batch_no).padStart(3, '0')}`;
+      return [
+        {
+          ...b,
+          id: `bott-${b.id || idx}`,
+          material_name: 'Bottle',
+          serialNumber: bottleSerial,
+          scanCode: barcodeService.deriveScanCode(bottleSerial),
+          unit: 'PCS',
+          pack_type: 'COMPLETE_PACK',
+          is_loose_remainder: false
+        },
+        {
+          ...b,
+          id: `cap-${b.id || idx}`,
+          material_name: 'Cap',
+          serialNumber: capSerial,
+          scanCode: barcodeService.deriveScanCode(capSerial),
+          unit: 'PCS',
+          pack_type: 'COMPLETE_PACK',
+          is_loose_remainder: false
+        }
+      ];
+    }
+
     let serialNumber = (b as any).serialNumber;
     let scanCode = (b as any).scanCode;
+    const isLooseRemainder = Boolean((b as any).is_loose_remainder || (b as any).pack_type === 'LOOSE_REMAINDER');
+    const packType = isLooseRemainder ? 'LOOSE_REMAINDER' : 'COMPLETE_PACK';
 
     if (!serialNumber) {
       if (selectedProduct) {
-        const currentSeq = prpStartSeq + idx;
-        const seqStr = String(currentSeq).padStart(3, '0');
-        serialNumber = `PRP-${matKey}-${selectedProduct.productCode}-${dateYYMMDD}-${seqStr}`;
+        if (isLooseRemainder) {
+          const seqStr = String(prlStartSeq).padStart(3, '0');
+          serialNumber = `PRL-${matKey}-${selectedProduct.productCode}-${dateYYMMDD}-${seqStr}`;
+        } else {
+          const currentSeq = prpStartSeq + idx;
+          const seqStr = String(currentSeq).padStart(3, '0');
+          serialNumber = `PRP-${matKey}-${selectedProduct.productCode}-${dateYYMMDD}-${seqStr}`;
+        }
         scanCode = barcodeService.deriveScanCode(serialNumber);
       } else {
         const randomCode = Math.floor(1000 + Math.random() * 9000);
@@ -73,7 +118,15 @@ const IntakeStep3_Barcode = () => {
       }
     }
 
-    return { ...b, serialNumber, scanCode: scanCode || serialNumber };
+    return [{
+      ...b,
+      serialNumber,
+      scanCode: scanCode || serialNumber,
+      material_name: selectedMaterial.name,
+      unit: matUnit,
+      pack_type: packType,
+      is_loose_remainder: isLooseRemainder
+    }];
   });
 
   const handleSaveBarcode = async () => {
@@ -122,41 +175,42 @@ const IntakeStep3_Barcode = () => {
         notes: trimmedNotes
       };
 
-      if (selectedProduct) {
+      if (selectedProduct && !isSet) {
         // ── PRODUCTION-READY MODE ──────────────────────────────────────────────
-        // Save only the inventory-in metadata record (no barcode rows here).
-        // The PRP barcode rows are inserted EXCLUSIVELY by prepareProductionReadyBatches
-        // to prevent the duplicate key violation on raw_material_barcodes_barcode_key.
         const invId = crypto.randomUUID();
         await inventoryService.saveRawMaterialIntake(inventoryInRecord, []); // empty batches array
 
         const preparationGroupId = crypto.randomUUID();
+        const matUnit = getMaterialUnit(selectedMaterial);
+        const completeCount = previewBatches.filter(x => !x.is_loose_remainder).length;
         const prpBatches = await productionReadyBatchService.prepareProductionReadyBatches({
           materialName: selectedMaterial.name,
+          unit: matUnit,
           product: selectedProduct,
-          countToPrepare: previewBatches.length,
+          countToPrepare: completeCount,
           requiredGramsPerPack: Math.round(Number(previewBatches[0]?.quantity ?? 0) * 1000),
           intakeQtyKg: parsedQty,
           personName: trimmedPerson,
           preparationGroupId,
           vendorName: trimmedVendor,
           poReference: trimmedPo,
+          customBatches: previewBatches
         });
 
         setSavedBatchIds(prpBatches.map(b => b.id) as any);
       } else {
-        // ── NORMAL RAW MATERIAL MODE ───────────────────────────────────────────
-        // Build and insert standard barcode rows into raw_material_barcodes.
+        // ── NORMAL RAW MATERIAL / PACKAGING MODE ───────────────────────────────
         const finalIntakeBatches = previewBatches.map(b => ({
           id: crypto.randomUUID(),
-          batch_id: `MAT-${dateYYMMDD}-${matKey}-${String(b.batch_no).padStart(3, '0')}`,
+          batch_id: b.serialNumber || `MAT-${dateYYMMDD}-${matKey}-${String(b.batch_no).padStart(3, '0')}`,
           serial_number: b.serialNumber,
           barcode: b.serialNumber,
-          material_id: selectedMaterial.id,
-          material_name: selectedMaterial.name,
+          material_id: b.material_name === 'Bottle' ? 'pack-1' : b.material_name === 'Cap' ? 'pack-2' : selectedMaterial.id,
+          material_name: b.material_name || selectedMaterial.name,
+          packaging_name: b.material_name || selectedMaterial.name,
           batch_no: b.batch_no,
           quantity: Number(b.quantity),
-          unit: selectedMaterial.unit || 'kg',
+          unit: b.unit || matUnit,
           vendor: trimmedVendor,
           vendor_name: trimmedVendor,
           po_reference: trimmedPo,
@@ -168,10 +222,15 @@ const IntakeStep3_Barcode = () => {
           scanning_person_name: trimmedPerson,
           notes: trimmedNotes,
           date_received: formData.date_received || new Date().toISOString(),
-          current_stage: 'Incoming'
+          current_stage: 'Incoming',
+          pack_type: b.pack_type || 'COMPLETE_PACK',
+          is_loose_remainder: Boolean(b.is_loose_remainder)
         }));
 
         const savedIds = await inventoryService.saveRawMaterialIntake(inventoryInRecord, finalIntakeBatches);
+        if (isPackaging || isSet) {
+          await inventoryService.savePackagingMaterialBarcodes(finalIntakeBatches);
+        }
         setSavedBatchIds(savedIds as any);
       }
 
@@ -191,25 +250,28 @@ const IntakeStep3_Barcode = () => {
     barcodeService.downloadBarcodeOnlyLabel({
       scanCode: b.scanCode || b.serialNumber,
       productName: selectedProduct?.productName,
-      materialName: selectedMaterial.name,
+      materialName: b.material_name || selectedMaterial.name,
       moduleType: 'PRODUCTION_READY'
     });
   };
 
   const handleDownloadAll = () => {
     const records = previewBatches.map(b => ({
-      scan_code: b.scanCode || b.serialNumber,
-      product_name: selectedProduct?.productName,
-      material_name: selectedMaterial.name
+      scanCode: b.scanCode || b.serialNumber,
+      fullBarcode: b.serialNumber,
+      materialName: b.material_name || selectedMaterial.name,
+      productName: selectedProduct?.productName,
+      quantity: b.quantity,
+      unit: b.unit || matUnit
     }));
-    barcodeService.downloadMultipleBarcodeOnlyLabels(records, 'Production-Ready-Barcodes.zip', 'PRODUCTION_READY');
+    barcodeService.downloadBatchBarcodesZIP(records, 'ProductionReady_Barcodes');
   };
 
   const handlePrintAll = () => {
     const records = previewBatches.map(b => ({
       scan_code: b.scanCode || b.serialNumber,
       product_name: selectedProduct?.productName,
-      material_name: selectedMaterial.name
+      material_name: b.material_name || selectedMaterial.name
     }));
     barcodeService.printMultipleBarcodeOnlyLabels(records);
   };
@@ -267,9 +329,9 @@ const IntakeStep3_Barcode = () => {
             <div id={`barcode-${b.serialNumber}`}>
               <BarcodePreview 
                 scanCode={b.scanCode || b.serialNumber} 
-                statusText="INCOMING" 
-                statusBg="rgba(100, 116, 139, 0.1)" 
-                statusColor="#64748b" 
+                statusText={b.is_loose_remainder ? "LOOSE REMAINDER" : "INCOMING"} 
+                statusBg={b.is_loose_remainder ? "rgba(245, 158, 11, 0.15)" : "rgba(100, 116, 139, 0.1)"} 
+                statusColor={b.is_loose_remainder ? "#f59e0b" : "#64748b"} 
               />
             </div>
 
@@ -277,19 +339,25 @@ const IntakeStep3_Barcode = () => {
               {/* Pack Info */}
               <div className="space-y-2 mb-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400 font-medium">Pack #{b.batch_no}</span>
-                  {selectedProduct && (
+                  <span className="text-xs text-gray-400 font-medium">
+                    {b.is_loose_remainder ? 'Remainder Pack' : `Pack #${b.batch_no}`}
+                  </span>
+                  {b.is_loose_remainder ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      LOOSE REMAINDER
+                    </span>
+                  ) : selectedProduct ? (
                     <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                       {selectedProduct.productName}
                     </span>
-                  )}
+                  ) : null}
                 </div>
-                <h3 className="text-base font-bold text-white truncate" title={selectedMaterial.name}>
-                  {selectedMaterial.name}
+                <h3 className="text-base font-bold text-white truncate" title={b.material_name || selectedMaterial.name}>
+                  {b.material_name || selectedMaterial.name}
                 </h3>
                 <div className="flex items-center justify-between text-xs pt-2 border-t border-white/10">
-                  <span className="text-gray-400">Pack Weight:</span>
-                  <span className="font-extrabold text-white font-mono">{b.quantity} KG</span>
+                  <span className="text-gray-400">Pack Quantity:</span>
+                  <span className="font-extrabold text-white font-mono">{formatMaterialQuantity(Number(b.quantity) * 1000, b.unit || matUnit)} {b.unit || matUnit}</span>
                 </div>
               </div>
             </div>

@@ -246,6 +246,7 @@ const ProductionBatchDetail = () => {
         await inventoryService.saveMicroBatches(newMicroBatches);
       }
 
+      await (inventoryService as any).issuePackagingToProduction(productionBatch.id, productionBatch.production_batch_id);
       await inventoryService.updateProductionBatch(productionBatch.id, { status: 'In Progress' });
 
       await fetchData();
@@ -514,6 +515,7 @@ const ProductionBatchDetail = () => {
 
   const handleFinishProduction = async () => {
     if (!productionBatch) return;
+    await (inventoryService as any).consumePackagingForProduction(productionBatch.id, productionBatch.production_batch_id);
     await inventoryService.updateProductionBatch(productionBatch.id, { status: 'Saved' });
     await fetchData();
   };

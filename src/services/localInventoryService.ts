@@ -2656,6 +2656,204 @@ class LocalInventoryService {
     await this.saveInventoryTransactions(list);
     return true;
   }
+
+  async getPackagingCommittedStock(): Promise<Record<string, number>> {
+    const transactions = await this.getInventoryTransactions();
+    const normalize = normalizeMaterialKey;
+    const batchMaterialCommitted: Record<string, number> = {};
+
+    transactions.forEach((tx: any) => {
+      if (!tx.transactionType || !tx.transactionType.startsWith('PACKAGING_')) return;
+      const batchId = tx.production_batch_id || tx.batch_id || 'general';
+      const matKey = normalize(tx.itemName || tx.material_name || tx.name);
+      const qty = Number(tx.quantity || 0);
+      if (!matKey) return;
+      const compositeKey = `${batchId}:${matKey}`;
+      batchMaterialCommitted[compositeKey] = Math.max(batchMaterialCommitted[compositeKey] || 0, qty);
+    });
+
+    const committedStock: Record<string, number> = {};
+    Object.keys(batchMaterialCommitted).forEach((compKey) => {
+      const matKey = compKey.split(':')[1];
+      const qty = batchMaterialCommitted[compKey];
+      committedStock[matKey] = (committedStock[matKey] || 0) + qty;
+    });
+
+    return committedStock;
+  }
+
+  async validatePackagingAvailability(requiredPackaging: any[]) {
+    if (!requiredPackaging || requiredPackaging.length === 0) return [];
+
+    let supabaseRecords: any[] = [];
+    try {
+      const { data, error } = await supabase
+        .from(SUPABASE_TABLES.packagingMaterialBarcodes || 'packaging_material_barcodes')
+        .select('*');
+      if (!error && data) {
+        supabaseRecords = data;
+      }
+    } catch (err) {
+      console.warn('Error fetching packaging_material_barcodes from Supabase', err);
+    }
+
+    const normalize = normalizeMaterialKey;
+
+    const stockMap: Record<string, number> = {};
+    (supabaseRecords || []).forEach((item: any) => {
+      const nameKey = normalize(item.packaging_name || item.material_name || item.name);
+      const qty = Number(item.quantity || item.original_quantity || 0);
+      if (nameKey && qty > 0) {
+        stockMap[nameKey] = (stockMap[nameKey] || 0) + qty;
+      }
+    });
+
+    const committedMap = await this.getPackagingCommittedStock();
+
+    const status = [];
+    for (const pkg of requiredPackaging) {
+      const key = normalize(pkg.name);
+      const totalInStock = stockMap[key] || 0;
+      const committed = committedMap[key] || 0;
+      const availablePcs = Math.max(0, totalInStock - committed);
+      const requiredQty = Number(pkg.required_quantity || pkg.required || 0);
+      const remaining = availablePcs - requiredQty;
+      const isSufficient = availablePcs >= requiredQty && requiredQty > 0;
+
+      status.push({
+        name: pkg.name,
+        category: pkg.category || 'Primary Packaging',
+        required: requiredQty,
+        available: availablePcs,
+        remaining: remaining,
+        sufficient: isSufficient,
+        status: isSufficient ? 'SUFFICIENT' : 'INSUFFICIENT'
+      });
+    }
+
+    return status;
+  }
+
+  async reserveProductionMaterials(
+    ingredients: any[],
+    packaging: any[],
+    productionBatchId: string,
+    productCode: string
+  ) {
+    // 1. Validate raw materials
+    const rawStatus = await this.validateIngredientAvailability(ingredients);
+    for (const item of rawStatus) {
+      if (!item.sufficient) {
+        throw new Error(`Insufficient stock or material not linked for ${item.name}. Required: ${item.required}, Available: ${item.available}`);
+      }
+    }
+
+    // 2. Validate packaging
+    const pkgStatus = await this.validatePackagingAvailability(packaging);
+    for (const item of pkgStatus) {
+      if (!item.sufficient) {
+        throw new Error(`One or more required packaging materials are unavailable or insufficient in Inventory.`);
+      }
+    }
+
+    // 3. Atomically perform BOTH raw material deduction and packaging reservation
+    const list = await this.getInventoryTransactions();
+    const now = new Date().toISOString();
+
+    for (const ing of ingredients) {
+      list.push({
+        id: crypto.randomUUID(),
+        transactionType: "PRODUCTION_CONSUME",
+        itemName: ing.name,
+        quantity: ing.required_quantity,
+        fromStage: "RAW_MATERIAL_OUT",
+        toStage: "PRODUCTION_CONSUMED",
+        production_batch_id: productionBatchId,
+        product_code: productCode,
+        createdAt: now
+      });
+    }
+
+    for (const pkg of packaging) {
+      list.push({
+        id: crypto.randomUUID(),
+        transactionType: "PACKAGING_RESERVE",
+        itemName: pkg.name,
+        quantity: pkg.required_quantity,
+        unit: pkg.unit || 'PCS',
+        fromStage: "Available",
+        toStage: "Reserved",
+        production_batch_id: productionBatchId,
+        product_code: productCode,
+        createdAt: now
+      });
+    }
+
+    await this.saveInventoryTransactions(list);
+    return true;
+  }
+
+  async saveProductionPackaging(packaging: any[]) {
+    const list = await this.getSettingsList('production_packaging');
+    list.push(...packaging.map(x => ({ ...x, id: x.id || crypto.randomUUID() })));
+    await this.saveSettingsList('production_packaging', list);
+  }
+
+  async getProductionPackaging(batchId?: string) {
+    const list = await this.getSettingsList('production_packaging');
+    if (batchId) {
+      return list.filter((x: any) => x.production_batch_id === batchId);
+    }
+    return list;
+  }
+
+  async issuePackagingToProduction(batchId: string, humanReadableBatchId?: string) {
+    const list = await this.getInventoryTransactions();
+    const now = new Date().toISOString();
+    const pkgList = await this.getProductionPackaging(batchId || humanReadableBatchId);
+
+    if (pkgList.length > 0) {
+      for (const pkg of pkgList) {
+        list.push({
+          id: crypto.randomUUID(),
+          transactionType: "PACKAGING_ISSUE",
+          itemName: pkg.material_name || pkg.name,
+          quantity: pkg.required_quantity || pkg.quantity,
+          unit: pkg.unit || 'PCS',
+          fromStage: "Reserved",
+          toStage: "Issued to Production",
+          production_batch_id: batchId,
+          createdAt: now
+        });
+      }
+      await this.saveInventoryTransactions(list);
+    }
+    return true;
+  }
+
+  async consumePackagingForProduction(batchId: string, humanReadableBatchId?: string) {
+    const list = await this.getInventoryTransactions();
+    const now = new Date().toISOString();
+    const pkgList = await this.getProductionPackaging(batchId || humanReadableBatchId);
+
+    if (pkgList.length > 0) {
+      for (const pkg of pkgList) {
+        list.push({
+          id: crypto.randomUUID(),
+          transactionType: "PACKAGING_CONSUME",
+          itemName: pkg.material_name || pkg.name,
+          quantity: pkg.required_quantity || pkg.quantity,
+          unit: pkg.unit || 'PCS',
+          fromStage: "Issued to Production",
+          toStage: "Consumed",
+          production_batch_id: batchId,
+          createdAt: now
+        });
+      }
+      await this.saveInventoryTransactions(list);
+    }
+    return true;
+  }
 }
 
 export const inventoryService = new LocalInventoryService();

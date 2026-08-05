@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, Beaker, Factory, AlertTriangle, CheckCircle2, AlertCircle, Play } from 'lucide-react';
-import { PRODUCTS, calculateRequiredIngredients, getProductMicroBatchSize } from '../../../config/productFormulas';
+import { PRODUCTS, calculateRequiredIngredients, calculateRequiredPackaging, getProductMicroBatchSize } from '../../../config/productFormulas';
 import { inventoryService } from '../../../services/inventoryService';
 import { useDepartmentSelection } from '../../../hooks/tasks/useDepartmentSelection';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -47,53 +47,55 @@ const NewProductionBatch = () => {
     });
   }, [totalUnits, mbSize]);
 
-  // Ingredients calculation
+  // Ingredients & Packaging calculation
   const requiredIngredients = useMemo(() => {
     if (!selectedProductId || totalUnits <= 0) return null;
     return calculateRequiredIngredients(selectedProductId, totalUnits);
+  }, [selectedProductId, totalUnits]);
+
+  const requiredPackaging = useMemo(() => {
+    if (!selectedProductId || totalUnits <= 0) return null;
+    return calculateRequiredPackaging(selectedProductId, totalUnits);
   }, [selectedProductId, totalUnits]);
 
   // Stock check states
   const [isLoadingStock, setIsLoadingStock] = useState<boolean>(false);
   const [stockLoadError, setStockLoadError] = useState<string | null>(null);
   const [ingredientStatus, setIngredientStatus] = useState<any[]>([]);
+  const [packagingStatus, setPackagingStatus] = useState<any[]>([]);
   const [isStartingBatch, setIsStartingBatch] = useState<boolean>(false);
 
   useEffect(() => {
     const checkStock = async () => {
-      if (!requiredIngredients) {
+      if (!requiredIngredients || !requiredPackaging) {
         setIngredientStatus([]);
+        setPackagingStatus([]);
         setStockLoadError(null);
         return;
       }
       setIsLoadingStock(true);
       setStockLoadError(null);
       try {
-        const status = await (inventoryService as any).validateIngredientAvailability(requiredIngredients);
-        setIngredientStatus(status);
+        const [ingStatus, pkgStatus] = await Promise.all([
+          (inventoryService as any).validateIngredientAvailability(requiredIngredients),
+          (inventoryService as any).validatePackagingAvailability(requiredPackaging)
+        ]);
+        setIngredientStatus(ingStatus || []);
+        setPackagingStatus(pkgStatus || []);
       } catch (err: any) {
         console.error(err);
         setStockLoadError(err.message || String(err));
         setIngredientStatus([]);
+        setPackagingStatus([]);
       } finally {
         setIsLoadingStock(false);
       }
     };
     checkStock();
-  }, [requiredIngredients]);
+  }, [requiredIngredients, requiredPackaging]);
 
-  // Validation logic:
-  // Ready for Production only when:
-  // - The formula contains at least one valid ingredient.
-  // - Every ingredient is successfully matched with a Supabase raw material record (ing.hasMapping is true).
-  // - Every required quantity is greater than zero.
-  // - Every available stock quantity is loaded successfully.
-  // - Available quantity is greater than or equal to required quantity for every ingredient.
-  const isValidProduction = useMemo(() => {
-    if (isLoadingStock || stockLoadError || requiredIngredients === null) return false;
-    if (!requiredIngredients || requiredIngredients.length === 0) return false;
-    if (ingredientStatus.length === 0) return false;
-    
+  const isRawMaterialsSufficient = useMemo(() => {
+    if (!requiredIngredients || requiredIngredients.length === 0 || ingredientStatus.length === 0) return false;
     return ingredientStatus.every((ing: any) => 
       ing.hasMapping && 
       ing.required > 0 && 
@@ -101,7 +103,23 @@ const NewProductionBatch = () => {
       ing.available !== null && 
       ing.available >= ing.required
     );
-  }, [isLoadingStock, stockLoadError, requiredIngredients, ingredientStatus]);
+  }, [requiredIngredients, ingredientStatus]);
+
+  const isPackagingSufficient = useMemo(() => {
+    if (!requiredPackaging || requiredPackaging.length === 0 || packagingStatus.length === 0) return false;
+    return packagingStatus.every((pkg: any) => 
+      pkg.required > 0 && 
+      pkg.available !== undefined && 
+      pkg.available !== null && 
+      pkg.available >= pkg.required &&
+      pkg.sufficient === true
+    );
+  }, [requiredPackaging, packagingStatus]);
+
+  const isValidProduction = useMemo(() => {
+    if (isLoadingStock || stockLoadError || requiredIngredients === null || requiredPackaging === null) return false;
+    return isRawMaterialsSufficient && isPackagingSufficient;
+  }, [isLoadingStock, stockLoadError, requiredIngredients, requiredPackaging, isRawMaterialsSufficient, isPackagingSufficient]);
 
   const canStart = selectedProduct && sizeType && isValidProduction && selectedDeptId && selectedSectionId && !isStartingBatch;
 
@@ -115,7 +133,7 @@ const NewProductionBatch = () => {
       return;
     }
 
-    if (!canStart || !selectedProduct || isStartingBatch || !requiredIngredients) return;
+    if (!canStart || !selectedProduct || isStartingBatch || !requiredIngredients || !requiredPackaging) return;
 
     setIsStartingBatch(true);
     try {
@@ -123,14 +141,19 @@ const NewProductionBatch = () => {
       const prodBatchId = `PROD-${dateStr}-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
       const dbBatchId = crypto.randomUUID();
 
-      // 0. Deduct Raw Materials (Atomic Transaction Block)
+      // 0. Reserve BOTH Raw Materials AND Packaging Materials (Atomic Transaction Block)
       try {
-        await (inventoryService as any).deductRawMaterialsForProduction(requiredIngredients, prodBatchId, selectedProduct.id);
+        await (inventoryService as any).reserveProductionMaterials(
+          requiredIngredients,
+          requiredPackaging,
+          prodBatchId,
+          selectedProduct.id
+        );
       } catch (err: any) {
-        console.error("Deduction failed:", err);
-        toast.error("Cannot start batch. Required raw materials are not available.");
+        console.error("Reservation failed:", err);
+        toast.error(err.message || "Cannot start batch. Required materials or packaging are not available.");
         setIsStartingBatch(false);
-        return; // Abort transaction
+        return; // Abort transaction completely
       }
 
       // 1. Create Production Batch
@@ -163,7 +186,18 @@ const NewProductionBatch = () => {
       }));
       await inventoryService.saveProductionIngredients(ingredientsData);
 
-      // 3. Setup Micro Batches
+      // 3. Setup Packaging
+      const packagingData = requiredPackaging.map((pkg: any) => ({
+        production_batch_id: prodBatchId,
+        material_name: pkg.name,
+        required_quantity: pkg.required_quantity,
+        unit: 'PCS',
+        status: 'Reserved',
+        available_quantity_at_start: packagingStatus.find(s => s.name === pkg.name)?.available || 0,
+      }));
+      await (inventoryService as any).saveProductionPackaging(packagingData);
+
+      // 4. Setup Micro Batches
       const microBatchesData = microBatches.map(mb => ({
         production_batch_id: prodBatchId,
         micro_batch_no: mb.no,
@@ -172,7 +206,7 @@ const NewProductionBatch = () => {
       }));
       await inventoryService.saveMicroBatches(microBatchesData);
 
-      toast.success("Raw materials deducted successfully");
+      toast.success("Raw materials & packaging reserved successfully");
       navigate(`/inventory/production/batch/${dbBatchId}`);
     } catch (err) {
       console.error("Failed to start batch:", err);
@@ -201,7 +235,7 @@ const NewProductionBatch = () => {
             New Production Batch
           </h1>
           <p style={{ margin: '8px 0 0 0', color: 'var(--text-muted)', fontSize: '15px' }}>
-            Configure product, size, and verify raw materials.
+            Configure product, size, and verify raw materials & packaging.
           </p>
         </div>
       </div>
@@ -379,7 +413,7 @@ const NewProductionBatch = () => {
           )}
         </AnimatePresence>
 
-        {/* Step 3: Ingredients & Stock Check */}
+        {/* Step 3: Ingredients & Packaging Stock Check */}
         <AnimatePresence>
           {sizeType && selectedProduct && (
             <motion.div 
@@ -406,61 +440,114 @@ const NewProductionBatch = () => {
                   <p style={{ margin: 0, fontSize: '14px', color: '#fca5a5' }}>Product formula or raw material stock could not be loaded. Production cannot continue.</p>
                 </div>
               ) : (
-                <div className="table-responsive">
-                  <div style={{ borderRadius: '16px', border: '1px solid #263244', overflow: 'hidden', marginBottom: '24px', background: '#0b1120' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                      <thead>
-                        <tr style={{ background: '#1e293b', textAlign: 'left' }}>
-                          <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Ingredient Name</th>
-                          <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Required (KG)</th>
-                          <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Available (KG)</th>
-                          <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Remaining After Batch</th>
-                          <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ingredientStatus.map((ing: any, i: any) => {
-                          const remaining = ing.available - ing.required;
-                          const isSufficient = ing.sufficient;
+                <>
+                  <div className="table-responsive">
+                    <div style={{ borderRadius: '16px', border: '1px solid #263244', overflow: 'hidden', marginBottom: '24px', background: '#0b1120' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                        <thead>
+                          <tr style={{ background: '#1e293b', textAlign: 'left' }}>
+                            <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Ingredient Name</th>
+                            <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Required (KG)</th>
+                            <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Available (KG)</th>
+                            <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Remaining After Batch</th>
+                            <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ingredientStatus.map((ing: any, i: any) => {
+                            const remaining = ing.available - ing.required;
+                            const isSufficient = ing.sufficient;
 
-                          const formatDisplayNumber = (val: number): string => {
-                            if (val === 0) return '0.00';
-                            const str = String(val);
-                            if (str.includes('.')) {
-                              const decimals = str.split('.')[1].length;
-                              if (decimals > 2) {
-                                return val.toFixed(Math.min(decimals, 3));
+                            const formatDisplayNumber = (val: number): string => {
+                              if (val === 0) return '0.00';
+                              const str = String(val);
+                              if (str.includes('.')) {
+                                const decimals = str.split('.')[1].length;
+                                if (decimals > 2) {
+                                  return val.toFixed(Math.min(decimals, 3));
+                                }
                               }
-                            }
-                            return val.toFixed(2);
-                          };
+                              return val.toFixed(2);
+                            };
 
-                          return (
-                            <tr key={i} style={{ borderBottom: '1px solid #1e293b', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
-                              <td style={{ padding: '16px', fontWeight: 600, color: 'white' }}>{ing.name}</td>
-                              <td style={{ padding: '16px', fontWeight: 'bold', color: '#e2e8f0' }}>{formatDisplayNumber(ing.required)}</td>
-                              <td style={{ padding: '16px', color: isSufficient ? '#10b981' : '#ef4444', fontWeight: 600 }}>
-                                {formatDisplayNumber(ing.available)}
-                              </td>
-                              <td style={{ padding: '16px', color: remaining >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>
-                                {formatDisplayNumber(remaining)}
-                              </td>
-                              <td style={{ padding: '16px' }}>
-                                {isSufficient ? (
-                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '12px', fontWeight: 'bold', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
-                                    <CheckCircle2 size={14} /> SUFFICIENT
-                                  </span>
-                                ) : (
-                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
-                                    <AlertTriangle size={14} /> INSUFFICIENT
-                                  </span>
-                                )}
-                              </td>
+                            return (
+                              <tr key={i} style={{ borderBottom: '1px solid #1e293b', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                                <td style={{ padding: '16px', fontWeight: 600, color: 'white' }}>{ing.name}</td>
+                                <td style={{ padding: '16px', fontWeight: 'bold', color: '#e2e8f0' }}>{formatDisplayNumber(ing.required)}</td>
+                                <td style={{ padding: '16px', color: isSufficient ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                                  {formatDisplayNumber(ing.available)}
+                                </td>
+                                <td style={{ padding: '16px', color: remaining >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                                  {formatDisplayNumber(remaining)}
+                                </td>
+                                <td style={{ padding: '16px' }}>
+                                  {isSufficient ? (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '12px', fontWeight: 'bold', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
+                                      <CheckCircle2 size={14} /> SUFFICIENT
+                                    </span>
+                                  ) : (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
+                                      <AlertTriangle size={14} /> INSUFFICIENT
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Packaging Material Review Table */}
+                  <div style={{ marginTop: '32px', marginBottom: '24px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                      <h3 style={{ fontSize: '18px', margin: 0, color: 'white', fontWeight: 700 }}>Packaging Material Review</h3>
+                    </div>
+
+                    <div className="table-responsive">
+                      <div style={{ borderRadius: '16px', border: '1px solid #263244', overflow: 'hidden', background: '#0b1120' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                          <thead>
+                            <tr style={{ background: '#1e293b', textAlign: 'left' }}>
+                              <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Packaging Material</th>
+                              <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Required</th>
+                              <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Available</th>
+                              <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Remaining</th>
+                              <th style={{ padding: '16px', fontWeight: 600, color: '#94a3b8', fontSize: '13px', textTransform: 'uppercase' }}>Status</th>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                          </thead>
+                          <tbody>
+                            {packagingStatus.map((pkg: any, i: number) => {
+                              const isSufficient = pkg.sufficient;
+                              const reqDisplay = `${pkg.required || 0} PCS`;
+                              const availDisplay = `${pkg.available || 0} PCS`;
+                              const remDisplay = `${pkg.remaining || 0} PCS`;
+
+                              return (
+                                <tr key={i} style={{ borderBottom: '1px solid #1e293b', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+                                  <td style={{ padding: '16px', fontWeight: 600, color: 'white' }}>{pkg.name}</td>
+                                  <td style={{ padding: '16px', fontWeight: 'bold', color: '#e2e8f0' }}>{reqDisplay}</td>
+                                  <td style={{ padding: '16px', color: isSufficient ? '#10b981' : '#ef4444', fontWeight: 600 }}>{availDisplay}</td>
+                                  <td style={{ padding: '16px', color: pkg.remaining >= 0 ? '#10b981' : '#ef4444', fontWeight: 600 }}>{remDisplay}</td>
+                                  <td style={{ padding: '16px' }}>
+                                    {isSufficient ? (
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#10b981', fontSize: '12px', fontWeight: 'bold', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
+                                        <CheckCircle2 size={14} /> SUFFICIENT
+                                      </span>
+                                    ) : (
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>
+                                        <AlertTriangle size={14} /> INSUFFICIENT
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   </div>
 
                   {!isValidProduction ? (
@@ -474,7 +561,14 @@ const NewProductionBatch = () => {
                       </div>
                       <div>
                         <div style={{ fontWeight: 'bold', fontSize: '16px', marginBottom: '4px' }}>Cannot Start Batch</div>
-                        <div style={{ color: '#fca5a5', fontSize: '14px' }}>Material is not available in Inventory Room. Scan barcode first to release stock for production.</div>
+                        <div style={{ color: '#fca5a5', fontSize: '14px' }}>
+                          {!isRawMaterialsSufficient && !isPackagingSufficient
+                            ? "Required raw materials and packaging materials are unavailable or insufficient."
+                            : !isPackagingSufficient
+                            ? "One or more required packaging materials are unavailable or insufficient in Inventory."
+                            : "Material is not available in Inventory Room. Scan barcode first to release stock for production."
+                          }
+                        </div>
                       </div>
                     </motion.div>
                   ) : (
@@ -488,7 +582,7 @@ const NewProductionBatch = () => {
                       </div>
                       <div>
                         <div style={{ fontWeight: 'bold', fontSize: '16px' }}>Ready for Production</div>
-                        <div style={{ color: '#6ee7b7', fontSize: '14px' }}>All required raw materials are safely in inventory.</div>
+                        <div style={{ color: '#6ee7b7', fontSize: '14px' }}>All required raw materials and packaging materials are safely in inventory.</div>
                       </div>
                     </motion.div>
                   )}
@@ -566,7 +660,7 @@ const NewProductionBatch = () => {
                     >
                       Cancel
                     </button>
-                    <div style={{ position: 'relative', cursor: !canStart ? 'not-allowed' : 'pointer' }} title={!canStart ? "Scan required raw materials into Inventory Room first" : ""}>
+                    <div style={{ position: 'relative', cursor: !canStart ? 'not-allowed' : 'pointer' }} title={!canStart ? "Required raw materials or packaging are not available" : ""}>
                       <button 
                         type="button"
                         className="btn hover-lift" 
@@ -592,7 +686,7 @@ const NewProductionBatch = () => {
                       </button>
                     </div>
                   </div>
-                </div>
+                </>
               )}
             </motion.div>
           )}

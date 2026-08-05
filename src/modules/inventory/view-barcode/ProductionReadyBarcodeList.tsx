@@ -22,6 +22,7 @@ import {
   ProductionReadyBatchRow 
 } from '../../../services/productionReadyBatchService';
 import { barcodeService } from '../../../services/barcodeService';
+import { formatQuantityWithUnit } from '../../../config/productionBatchFormulas';
 import { BarcodePreview } from '../../../components/ui/BarcodePreview';
 
 const ProductionReadyBarcodeList = () => {
@@ -241,7 +242,7 @@ const ProductionReadyBarcodeList = () => {
                 <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-black/40 border border-white/10 text-xs">
                   <div>
                     <span className="text-[10px] uppercase font-bold text-gray-500 block">Quantity</span>
-                    <span className="font-extrabold text-white font-mono">{((b.quantity_grams || 0) / 1000).toFixed(3)} KG</span>
+                    <span className="font-extrabold text-white font-mono">{formatQuantityWithUnit(b.quantity_grams || (b.quantity ? b.quantity * 1000 : 0), b.unit || b.material_name)}</span>
                   </div>
                   <div>
                     <span className="text-[10px] uppercase font-bold text-gray-500 block">Prepared By</span>
@@ -297,7 +298,7 @@ const ProductionReadyBarcodeList = () => {
             <div className="p-4 rounded-xl bg-black/40 border border-white/10 text-xs space-y-2">
               <div className="flex justify-between"><span className="text-gray-400">Barcode:</span> <strong className="font-mono text-cyan-300">{cancelModalBatch.barcode}</strong></div>
               <div className="flex justify-between"><span className="text-gray-400">Material:</span> <strong className="text-white">{cancelModalBatch.material_name}</strong></div>
-              <div className="flex justify-between"><span className="text-gray-400">Quantity Return:</span> <strong className="text-emerald-400 font-mono">{((cancelModalBatch.quantity_grams || 0) / 1000).toFixed(3)} KG</strong></div>
+              <div className="flex justify-between"><span className="text-gray-400">Quantity Return:</span> <strong className="text-emerald-400 font-mono">{formatQuantityWithUnit(cancelModalBatch.quantity_grams || (cancelModalBatch.quantity ? cancelModalBatch.quantity * 1000 : 0), cancelModalBatch.unit || cancelModalBatch.material_name)}</strong></div>
             </div>
 
             <div className="space-y-2">
