@@ -3,6 +3,7 @@ import { Upload, FileSpreadsheet, FileText, X, Trash2, RefreshCw, AlertCircle } 
 import { useExpenses } from '../../hooks/finance/useExpenses';
 import { PipelineEngine } from '../../utils/documentPipeline/PipelineEngine';
 import { DocumentType } from '../../utils/documentPipeline/types';
+import { ExpenseRuleEngine } from '../../utils/rules/ExpenseRuleEngine';
 
 interface UploadExpenseProps {
   onClose: () => void;
@@ -51,20 +52,26 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
       console.log(`[UploadExpense] PipelineEngine returned Document Type: ${documentType}`);
       console.log(`[UploadExpense] PipelineEngine returned Transactions Count: ${transactions?.length}`);
 
-      // 4. If replacing, delete old batch first
+      // 4. Apply Expense Rules
+      console.log(`[UploadExpense] 4. Fetching and applying Expense Rules...`);
+      const activeRules = await ExpenseRuleEngine.fetchActiveRules();
+      const ruledTransactions = transactions.map(tx => ExpenseRuleEngine.applyExpenseRules(tx, activeRules));
+
+      // 5. If replacing, delete old batch first
       if (replacingBatchId) {
         console.log(`[UploadExpense] Replacing existing batch: ${replacingBatchId}`);
         await deleteBatch(replacingBatchId);
       }
 
-      // 5. Upload Batch
+      // 6. Upload Batch
       console.log(`[UploadExpense] 10. Calling uploadBatch() request...`);
       const extension = file.name.split('.').pop()?.toLowerCase();
       const sourceType = extension === 'pdf' ? 'pdf' : 'excel';
 
-      const mappedTransactions = transactions.map(tx => {
+      const mappedTransactions = ruledTransactions.map(tx => {
         // Handle custom date formats (e.g. 01/07/2026 or 01/Jul/2026)
-        let parsedDate = new Date();
+        let parsedDate: Date | null = null;
+        
         if (tx.date) {
           const parts = tx.date.split(/[\/\-]/);
           if (parts.length === 3) {
@@ -77,28 +84,28 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
           } else {
             parsedDate = new Date(tx.date);
           }
-        }
-        
-        if (isNaN(parsedDate.getTime())) {
-          parsedDate = new Date();
+          
+          if (isNaN(parsedDate.getTime())) {
+            parsedDate = null;
+          }
         }
         
         return {
-          created_at: parsedDate.toISOString(),
+          created_at: parsedDate ? parsedDate.toISOString() : null,
           amount: tx.amount,
           notes: tx.notes || '',
           vendor: tx.vendor || 'Unknown Vendor',
-          main_category: tx.category || 'Uncategorized',
+          main_category: tx.main_category || 'Uncategorized',
           sub_category1: tx.sub_category1 || null,
-          sub_category2: null,
-          sub_category3: null,
+          sub_category2: tx.sub_category2 || null,
+          sub_category3: tx.sub_category3 || null,
           sub_category3_values: [],
           quantity: 1,
-          gst_status: 'Unregistered',
+          gst_status: tx.gst_status || 'Unregistered',
           payment_mode: tx.payment_mode || 'Bank Transfer',
           bank_account: null,
-          purchased_by: null,
-          approved_by: null
+          purchased_by: tx.purchased_by || null,
+          approved_by: tx.approved_by || null
         };
       });
       
@@ -197,7 +204,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
   console.log("=====================");
   
   // Create virtual headers based on transactions mapping
-  const previewHeaders = ['Date', 'Amount', 'Description', 'Vendor', 'Department', 'Category', 'Sub Category 1'];
+  const previewHeaders = ['Date', 'Amount', 'Description', 'Vendor', 'Main Category', 'Sub Category 1', 'Sub Category 2'];
 
   return (
     <div className="bg-card w-full rounded-2xl shadow-sm border border-border flex flex-col fade-in text-slate-200 h-full">

@@ -1,134 +1,336 @@
 import { DocumentParser, NormalizedTransaction, PdfTextItem } from '../types';
 
+interface LogicalRow {
+  valueDate: string;
+  transactionDate: string;
+  postedDate: string;
+  chequeRef: string;
+  remarks: string;
+  withdrawal: string;
+  deposit: string;
+  balance: string;
+}
+
+const DATE_PATTERN = /(\d{2}[\/\-][A-Za-z]{3}[\/\-]\d{2,4}|\d{2}[\/\-]\d{2}[\/\-]\d{2,4})/;
+
 export class IciciBankStatementPdfParser implements DocumentParser {
   async parse(rawContent: PdfTextItem[], file: File): Promise<NormalizedTransaction[]> {
+    console.log('================ PARSER START ================');
+    console.log(`Total PdfTextItems: ${rawContent?.length || 0}`);
+
     if (!rawContent || rawContent.length === 0) {
       throw new Error(`The PDF ${file.name} appears to be empty or scanned.`);
     }
 
-    // Sort items top-to-bottom, then left-to-right
-    const sortedItems = [...rawContent].sort((a, b) => {
-      if (Math.abs(b.y - a.y) > 12) {
-        return b.y - a.y; 
-      }
-      return a.x - b.x; 
-    });
+    // ── Stage 1: Extract PDF Items ──
+    const pages: PdfTextItem[][] = [];
+    let currentPage: PdfTextItem[] = [];
+    let lastY = rawContent[0].y;
 
-    const lines: string[][] = [];
-    let currentLine: string[] = [];
-    let currentY = sortedItems.length > 0 ? sortedItems[0].y : 0;
-
-    for (const item of sortedItems) {
-      const text = item.text.trim();
-      if (!text) continue;
-
-      if (Math.abs(item.y - currentY) > 12) {
-        if (currentLine.length > 0) {
-          lines.push([...currentLine]);
+    for (const item of rawContent) {
+      if (item.y - lastY > 300) {
+        if (currentPage.length > 0) {
+          pages.push(currentPage);
         }
-        currentLine = [text];
-        currentY = item.y;
-      } else {
-        currentLine.push(text);
+        currentPage = [];
       }
+      currentPage.push(item);
+      lastY = item.y;
     }
-    if (currentLine.length > 0) {
-      lines.push([...currentLine]);
+    if (currentPage.length > 0) {
+      pages.push(currentPage);
     }
 
-    const transactions: NormalizedTransaction[] = [];
-    let currentTx: NormalizedTransaction | null = null;
+    // ── Shared Diagnostics & State ──
+    let globalColBounds: Record<keyof LogicalRow, { xMin: number, xMax: number } | null> | null = null;
+    let reachedEndOfStatement = false;
+    
+    let diagTotalGroupedRows = 0;
+    let diagHeaderRowIndex = -1;
+    let diagLogicalRowsBuilt = 0;
+    let diagMergedRemarkRows = 0;
 
-    const isDate = (str: string) => {
-      return /^\d{2}[\/\-][A-Za-z]{3}[\/\-]\d{4}$/.test(str) || /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(str);
+    const allLogicalRows: LogicalRow[] = [];
+
+    const isNoiseRow = (rowTextLower: string): boolean => {
+      return (
+        rowTextLower.includes('opening balance') ||
+        rowTextLower.includes('closing balance') ||
+        (rowTextLower.includes('page') && /\d+\s*(of|\/)\s*\d+/.test(rowTextLower)) ||
+        rowTextLower.includes('generated on') ||
+        rowTextLower.includes('this is a computer generated') ||
+        rowTextLower.includes('contents of this') ||
+        rowTextLower.includes('icici bank') ||
+        rowTextLower.includes('account no') ||
+        rowTextLower.includes('cifno')
+      );
     };
 
-    const isTime = (str: string) => {
-      return /^\d{2}:\d{2}:\d{2}$/.test(str) || /^(AM|PM)$/i.test(str);
+    const normalizeRowText = (row: PdfTextItem[]): string => {
+      return row.map(item => item.text).join(' ').toLowerCase().replace(/\s+/g, ' ').trim();
     };
 
-    const isIgnoredLine = (lineArr: string[]) => {
-      const str = lineArr.join(' ').toLowerCase();
-      if (str.includes('page') && str.includes('of')) return true;
-      if (str.includes('sl no') && str.includes('tran id')) return true;
-      if (str.includes('value date') && str.includes('transaction date')) return true;
-      if (str.includes('withdrawal (dr)') || str.includes('deposit (cr)')) return true;
-      if (str.includes('balance') && str.includes('transaction remarks')) return true;
-      return false;
-    };
+    for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
+      if (reachedEndOfStatement) break;
 
-    console.log("=== ICICI PDF PARSER DEBUG ===");
-    console.log("Total Raw Items:", rawContent.length);
-    console.log("Grouped Lines:", lines);
+      const pageItems = pages[pageIdx];
 
-    for (const line of lines) {
-      const fullLineStr = line.join(' ');
-      const strippedStr = fullLineStr.replace(/\s+/g, '');
+      // ── Stage 2: Build Visual Rows ──
+      pageItems.sort((a, b) => b.y - a.y);
 
-      // Check if this line is a new transaction by searching for a date anywhere in the condensed string
-      const dateMatch = strippedStr.match(/(\d{2}[\/\-][A-Za-z]{3}[\/\-]\d{4}|\d{2}[\/\-]\d{2}[\/\-]\d{4})/);
-      const hasDate = dateMatch !== null;
+      const rows: PdfTextItem[][] = [];
+      let currentRow: PdfTextItem[] = [];
+      let currentY = pageItems[0].y;
 
-      if (hasDate) {
-        if (currentTx) {
-          transactions.push(currentTx);
+      for (const item of pageItems) {
+        if (Math.abs(item.y - currentY) > 6) {
+          if (currentRow.length > 0) {
+            rows.push([...currentRow].sort((a, b) => a.x - b.x));
+          }
+          currentRow = [item];
+          currentY = item.y;
+        } else {
+          currentRow.push(item);
         }
+      }
+      if (currentRow.length > 0) {
+        rows.push([...currentRow].sort((a, b) => a.x - b.x));
+      }
 
-        const dateStr = dateMatch![1];
+      diagTotalGroupedRows += rows.length;
 
-        let balanceStr = '';
-        let amountStr = '';
-        let remarksStartIdx = 0;
-        let remarksEndIdx = line.length - 1;
+      // ── Stage 3: Detect Table Header ──
+      let headerStartRow = -1;
+      let headerRowIndex = -1;
 
-        for (let i = 0; i < line.length; i++) {
-          if (isDate(line[i]) || isTime(line[i])) {
-            remarksStartIdx = i + 1;
+      for (let i = 0; i < rows.length - 2; i++) {
+        const mergedText = normalizeRowText(rows[i]) + ' ' + normalizeRowText(rows[i+1]) + ' ' + normalizeRowText(rows[i+2]);
+        const hasDate = mergedText.includes('date');
+        const hasRemarks = mergedText.includes('remark') || mergedText.includes('particular');
+        const hasWithdrawal = mergedText.includes('withdra') || mergedText.includes('withdraw');
+        
+        if (hasDate && hasRemarks && hasWithdrawal) {
+          headerStartRow = i;
+          headerRowIndex = i + 2;
+          if (diagHeaderRowIndex === -1) {
+            diagHeaderRowIndex = headerRowIndex;
+          }
+          break;
+        }
+      }
+
+      // ── Stage 4: Detect ALL Column Boundaries ──
+      if (headerStartRow !== -1) {
+        let valDateX = -1, transDateX = -1, postedDateX = -1, chequeX = -1, remarksX = -1, withdrawalX = -1, depositX = -1, balanceX = -1;
+
+        for (let i = headerStartRow; i <= headerRowIndex; i++) {
+          for (const item of rows[i]) {
+            const t = item.text.toLowerCase().trim();
+            if (valDateX === -1 && t.includes('value')) valDateX = item.x;
+            if (postedDateX === -1 && t.includes('posted')) postedDateX = item.x;
+            if (chequeX === -1 && (t.includes('cheque') || t.includes('ref'))) chequeX = item.x;
+            if (remarksX === -1 && (t.includes('remark') || t.includes('particular'))) remarksX = item.x;
+            if (withdrawalX === -1 && (t.includes('withdra') || t.includes('withdraw'))) withdrawalX = item.x;
+            if (depositX === -1 && t.includes('deposit')) depositX = item.x;
+            if (balanceX === -1 && t.includes('balance')) balanceX = item.x;
+          }
+        }
+        
+        // Find Transaction Date reliably
+        for (let i = headerStartRow; i <= headerRowIndex; i++) {
+          for (const item of rows[i]) {
+            const t = item.text.toLowerCase().trim();
+            if (t.includes('date') || t.includes('transact')) {
+              const rightBound = postedDateX !== -1 ? postedDateX : (remarksX !== -1 ? remarksX : 9999);
+              if (item.x > valDateX + 20 && item.x < rightBound - 20) {
+                if (transDateX === -1) transDateX = item.x;
+              }
+            }
           }
         }
 
-        const isNumber = (str: string) => /^[\d,]+\.\d{2}$/.test(str);
+        type ColName = keyof LogicalRow;
+        const validCols = [
+          { name: 'valueDate' as ColName, x: valDateX },
+          { name: 'transactionDate' as ColName, x: transDateX },
+          { name: 'postedDate' as ColName, x: postedDateX },
+          { name: 'chequeRef' as ColName, x: chequeX },
+          { name: 'remarks' as ColName, x: remarksX },
+          { name: 'withdrawal' as ColName, x: withdrawalX },
+          { name: 'deposit' as ColName, x: depositX },
+          { name: 'balance' as ColName, x: balanceX }
+        ].filter(c => c.x !== -1).sort((a, b) => a.x - b.x);
 
-        if (isNumber(line[line.length - 1])) {
-          balanceStr = line[line.length - 1];
-          remarksEndIdx = line.length - 2;
-          
-          if (remarksEndIdx >= 0 && isNumber(line[remarksEndIdx])) {
-            amountStr = line[remarksEndIdx];
-            remarksEndIdx--;
+        const bounds = {} as Record<ColName, { xMin: number, xMax: number } | null>;
+        
+        ['valueDate', 'transactionDate', 'postedDate', 'chequeRef', 'remarks', 'withdrawal', 'deposit', 'balance'].forEach(k => {
+          bounds[k as ColName] = null;
+        });
+
+        for (let i = 0; i < validCols.length; i++) {
+          const current = validCols[i];
+          const prev = i > 0 ? validCols[i - 1] : null;
+          const next = i < validCols.length - 1 ? validCols[i + 1] : null;
+
+          const xMin = prev ? prev.x + (current.x - prev.x) / 2 : 0;
+          const xMax = next ? current.x + (next.x - current.x) / 2 : 9999;
+
+          bounds[current.name] = { xMin, xMax };
+        }
+        
+        globalColBounds = bounds;
+      }
+
+      if (headerRowIndex === -1 && !globalColBounds) {
+        continue; // Skip noise pages before table starts
+      }
+
+      const dataRows = headerRowIndex !== -1 ? rows.slice(headerRowIndex + 1) : rows;
+
+      const getColumnFromBounds = (x: number): keyof LogicalRow | null => {
+        if (!globalColBounds) return null;
+        for (const [col, bounds] of Object.entries(globalColBounds)) {
+          if (bounds && x >= bounds.xMin && x < bounds.xMax) {
+            return col as keyof LogicalRow;
           }
         }
+        return null;
+      };
 
-        const notes = line.slice(remarksStartIdx, remarksEndIdx + 1).join(' ');
-        const amount = parseFloat(amountStr.replace(/,/g, '')) || 0;
-        const balance = parseFloat(balanceStr.replace(/,/g, '')) || 0;
+      // ── Stage 5: Build LogicalRow Objects ──
+      for (const row of dataRows) {
+        const rowText = row.map(item => item.text).join(' ');
+        const lowerRow = rowText.toLowerCase();
 
-        currentTx = {
-          date: dateStr,
-          amount: amount,
-          notes: notes.trim(),
-          vendor: 'ICICI Bank Transaction', 
-          payment_mode: 'Bank Transfer'
+        if (lowerRow.includes('end of statement')) {
+          reachedEndOfStatement = true;
+          break;
+        }
+
+        const stripped = rowText.replace(/[\s\-]/g, '');
+        if (row.length === 0 || stripped.length === 0) {
+          continue;
+        }
+
+        if (isNoiseRow(lowerRow)) {
+          continue;
+        }
+
+        if (lowerRow.includes('withdra') && (lowerRow.includes('deposit') || lowerRow.includes('remark'))) {
+          continue; // Repeated header
+        }
+
+        const logicalRow: LogicalRow = {
+          valueDate: '',
+          transactionDate: '',
+          postedDate: '',
+          chequeRef: '',
+          remarks: '',
+          withdrawal: '',
+          deposit: '',
+          balance: ''
         };
-      } else {
-        // Not a new transaction line, append to notes of currentTx
-        if (currentTx && !isIgnoredLine(line)) {
-          const additionalNotes = fullLineStr.trim();
-          if (additionalNotes) {
-            currentTx.notes += ' ' + additionalNotes;
+
+        for (const item of row) {
+          const colName = getColumnFromBounds(item.x);
+          if (colName) {
+            logicalRow[colName] += (logicalRow[colName] ? ' ' : '') + item.text;
           }
         }
+
+        allLogicalRows.push(logicalRow);
+        diagLogicalRowsBuilt++;
       }
     }
 
-    if (currentTx) {
-      transactions.push(currentTx);
+    // ── Stage 6: Merge Wrapped Remarks ──
+    const mergedRows: LogicalRow[] = [];
+    for (const row of allLogicalRows) {
+      if (!row.transactionDate.trim() && !row.withdrawal.trim() && row.remarks.trim()) {
+        if (mergedRows.length > 0) {
+          mergedRows[mergedRows.length - 1].remarks += ' ' + row.remarks.trim();
+          diagMergedRemarkRows++;
+        }
+      } else if (row.transactionDate.trim() || row.withdrawal.trim() || row.deposit.trim()) {
+        mergedRows.push(row);
+      }
     }
 
-    if (transactions.length === 0) {
-      throw new Error(`Could not find any valid transaction rows in ${file.name}. Please ensure this is an ICICI bank statement.`);
+    // ── Stage 7: Convert to NormalizedTransaction ──
+    const extractDate = (str: string): string | null => {
+      const match = str.match(DATE_PATTERN);
+      return match ? match[1] : null;
+    };
+
+    const cleanMoney = (str: string): number => {
+      const cleaned = str.replace(/,/g, '').replace(/[^\d.]/g, '');
+      if (cleaned === '' || cleaned === '.') return 0;
+      const val = parseFloat(cleaned);
+      return isNaN(val) ? 0 : val;
+    };
+
+    const validTransactions: NormalizedTransaction[] = [];
+
+    for (const row of mergedRows) {
+      if (!row.transactionDate.trim()) {
+        continue;
+      }
+      
+      const withdrawalAmt = cleanMoney(row.withdrawal);
+      if (withdrawalAmt <= 0) {
+        continue;
+      }
+
+      validTransactions.push({
+        date: extractDate(row.transactionDate) || row.transactionDate,
+        amount: withdrawalAmt,
+        notes: row.remarks.trim() || '-'
+      });
     }
 
-    return transactions;
+    // ── Stage 8: Diagnostics ──
+    console.log('========== RECONSTRUCTED LOGICAL TABLE (FIRST 10) ==========');
+    
+    for (let idx = 0; idx < Math.min(10, mergedRows.length); idx++) {
+      const row = mergedRows[idx];
+      console.log('--------------------------------------------------');
+      console.log(`LogicalRow ${idx}`);
+      console.log(`transactionDate: ${row.transactionDate}`);
+      console.log(`valueDate: ${row.valueDate}`);
+      console.log(`postedDate: ${row.postedDate}`);
+      console.log(`remarks: ${row.remarks}`);
+      console.log(`withdrawal: ${row.withdrawal}`);
+      
+      const withdrawalAmt = cleanMoney(row.withdrawal);
+      const parsedDate = extractDate(row.transactionDate) || row.transactionDate;
+      
+      console.log(`↓`);
+      console.log(`NormalizedTransaction`);
+      console.log(`date             : ${parsedDate}`);
+      console.log(`amount           : ${withdrawalAmt}`);
+      console.log(`notes            : ${row.remarks.trim() || '-'}`);
+    }
+    console.log('--------------------------------------------------');
+
+    console.log('========== PARSER DIAGNOSTICS ==========');
+    console.log(`Total PDF items               : ${rawContent.length}`);
+    console.log(`Total grouped rows            : ${diagTotalGroupedRows}`);
+    console.log(`Header row index (Page 1)     : ${diagHeaderRowIndex}`);
+    console.log(`Detected column bounds        : ${JSON.stringify(globalColBounds, null, 2)}`);
+    console.log(`Logical rows built            : ${diagLogicalRowsBuilt}`);
+    console.log(`Merged remark rows            : ${diagMergedRemarkRows}`);
+    console.log(`Normalized transactions built : ${validTransactions.length}`);
+    console.log('========================================');
+
+    // ── VALIDATION ──
+    if (validTransactions.length === 0) {
+      throw new Error(
+        `Could not find any valid withdrawal transactions in ${file.name}. ` +
+        `Reconstructed ${mergedRows.length} logical rows but none passed validation. ` +
+        `Please ensure this is an ICICI bank debit statement.`
+      );
+    }
+
+    return validTransactions;
   }
 }
