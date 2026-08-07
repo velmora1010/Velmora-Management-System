@@ -155,7 +155,7 @@ function App() {
 
                   {/* Sales Department */}
                   <Route path="/sales" element={<SalesHome />} />
-                  <Route path="/sales/website" element={<WebsiteSales />} />
+                  <Route path="/sales/website/*" element={<WebsiteSales />} />
                   <Route path="/sales/amazon" element={<AmazonSales />} />
                   <Route path="/sales/flipkart" element={<FlipkartSales />} />
                   <Route path="/sales/meesho" element={<MeeshoSales />} />
