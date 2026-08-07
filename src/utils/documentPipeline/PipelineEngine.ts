@@ -3,6 +3,7 @@ import { DocumentClassifier } from './DocumentClassifier';
 import { ExcelExpenseParser } from './parsers/ExcelExpenseParser';
 import { BankStatementPdfParser } from './parsers/BankStatementPdfParser';
 import { IciciBankStatementPdfParser } from './parsers/IciciBankStatementPdfParser';
+import { IciciBankStatementExcelParser } from './parsers/IciciBankStatementExcelParser';
 import * as xlsx from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -40,6 +41,10 @@ export class PipelineEngine {
         case DocumentType.ICICI_BANK_STATEMENT:
           console.log(`[PipelineEngine] Selecting specialized IciciBankStatementPdfParser...`);
           parser = new IciciBankStatementPdfParser();
+          break;
+        case DocumentType.ICICI_BANK_STATEMENT_EXCEL:
+          console.log(`[PipelineEngine] Selecting specialized IciciBankStatementExcelParser...`);
+          parser = new IciciBankStatementExcelParser();
           break;
         default:
           throw new Error(`No parser implemented for document type: ${documentType}`);

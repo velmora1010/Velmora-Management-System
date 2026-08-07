@@ -3,7 +3,22 @@ import { DocumentType, FileType, DocumentSource } from './types';
 export class DocumentClassifier {
   static classify(source: DocumentSource): DocumentType {
     if (source.fileType === FileType.EXCEL) {
-      // For now, any Excel uploaded through this module is assumed to be an Excel template
+      if (Array.isArray(source.rawContent)) {
+        // Flatten the first 20 rows to check for ICICI specific headers
+        const sampleText = source.rawContent.slice(0, 20).flat().join(' ').toLowerCase();
+        
+        if (
+          sampleText.includes('icici bank') || 
+          (sampleText.includes('transaction date') && 
+           sampleText.includes('transaction posted date') && 
+           sampleText.includes('withdrawal') && 
+           sampleText.includes('deposit'))
+        ) {
+          return DocumentType.ICICI_BANK_STATEMENT_EXCEL;
+        }
+      }
+      
+      // For now, any other Excel uploaded through this module is assumed to be an Excel template
       return DocumentType.EXCEL_TEMPLATE;
     }
 
