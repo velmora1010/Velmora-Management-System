@@ -90,6 +90,7 @@ export interface WebsiteConsolidatedOrder {
   order_date: string; // Normalized YYYY-MM-DD
   original_order_date?: string;
   upload_batch_id: string;
+  batch_file_name?: string;
   data_conflict?: boolean;
   conflict_details?: string;
   created_at: string;

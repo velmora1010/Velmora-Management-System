@@ -21,18 +21,29 @@ import {
   LayoutGrid,
   Check,
   CalendarRange,
-  X
+  X,
+  Eye,
+  Download,
+  Search,
+  User,
+  Phone,
+  SlidersHorizontal
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch, WebsiteOrderItem } from './types';
 import { websiteSalesService } from './websiteSalesService';
 import { MultiSelectDropdown, OptionItem } from './components/MultiSelectDropdown';
 import { AnalyticsSegmentedControl, SegmentOption } from './components/AnalyticsSegmentedControl';
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
+import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
+import { OrderDetailsModal } from './components/OrderDetailsModal';
+import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
 import { 
   getTodayInBusinessTimezone, 
   formatSalesDateDisplay, 
   formatSalesDateShort,
-  shiftDateString 
+  shiftDateString,
+  formatPhoneNumber,
+  getUploadBatchesForAnalyticsPeriod
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -168,6 +179,31 @@ export const WebsiteAnalytics: React.FC = () => {
   // Filter States
   const [draftFilters, setDraftFilters] = useState<MultiSelectFilterState>(DEFAULT_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<MultiSelectFilterState>(DEFAULT_FILTERS);
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState<boolean>(false);
+
+  // Active filter count computation
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (appliedFilters.batchIds && appliedFilters.batchIds.length > 0) count += appliedFilters.batchIds.length;
+    if (appliedFilters.states && appliedFilters.states.length > 0) count += appliedFilters.states.length;
+    if (appliedFilters.cities && appliedFilters.cities.length > 0) count += appliedFilters.cities.length;
+    if (appliedFilters.pincodes && appliedFilters.pincodes.length > 0) count += appliedFilters.pincodes.length;
+    if (appliedFilters.paymentModes && appliedFilters.paymentModes.length > 0) count += appliedFilters.paymentModes.length;
+    if (appliedFilters.offers && appliedFilters.offers.length > 0) count += appliedFilters.offers.length;
+    if (appliedFilters.products && appliedFilters.products.length > 0) count += appliedFilters.products.length;
+    if (appliedFilters.orderTypes && appliedFilters.orderTypes.length > 0) count += appliedFilters.orderTypes.length;
+    return count;
+  }, [appliedFilters]);
+
+  // Remove individual active filter chip
+  const handleRemoveChip = (key: keyof MultiSelectFilterState, val?: string) => {
+    const nextFilters = { ...appliedFilters };
+    if (val && Array.isArray(nextFilters[key])) {
+      (nextFilters[key] as string[]) = ((nextFilters[key] as string[]) || []).filter(v => v !== val);
+    }
+    setDraftFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+  };
 
   // Metric Switcher States
   const [revenueMixGroup, setRevenueMixGroup] = useState<'Payment Mode' | 'State' | 'Product' | 'Offer' | 'Order Value Range'>('Order Value Range');
@@ -178,10 +214,25 @@ export const WebsiteAnalytics: React.FC = () => {
   const [offerMetric, setOfferMetric] = useState<'orders' | 'revenue' | 'units'>('orders');
   const [orderValueMetric, setOrderValueMetric] = useState<'orders' | 'revenue'>('orders');
 
-  // Chart Drill-down filters
+  // Chart Drill-down filters & Card-level Slice Selections
   const [drillDownPaymentMode, setDrillDownPaymentMode] = useState<string | null>(null);
   const [drillDownState, setDrillDownState] = useState<string | null>(null);
   const [drillDownCity, setDrillDownCity] = useState<string | null>(null);
+
+  // Card-specific slice selection states
+  const [revenueMixCardSlice, setRevenueMixCardSlice] = useState<string | null>(null);
+  const [pincodeCardSlice, setPincodeCardSlice] = useState<string | null>(null);
+  const [productCardSlice, setProductCardSlice] = useState<string | null>(null);
+  const [offerCardSlice, setOfferCardSlice] = useState<string | null>(null);
+  const [orderValueCardSlice, setOrderValueCardSlice] = useState<string | null>(null);
+  const [prodCompCardSlice, setProdCompCardSlice] = useState<string | null>(null);
+  const [qtyCompCardSlice, setQtyCompCardSlice] = useState<string | null>(null);
+  const [codCardSlice, setCodCardSlice] = useState<string | null>(null);
+
+  // Filtered Orders section states
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedOrderForModal, setSelectedOrderForModal] = useState<WebsiteConsolidatedOrder | null>(null);
+  const [showAllFilteredOrders, setShowAllFilteredOrders] = useState<boolean>(false);
 
   // Collapsible Secondary Tables
   const [showStateTable, setShowStateTable] = useState<boolean>(false);
@@ -370,8 +421,7 @@ export const WebsiteAnalytics: React.FC = () => {
     return `${formatSalesDateShort(start)} – ${formatSalesDateShort(end)}`;
   };
 
-  // Filter Dropdown Options
-  const batchOptions: OptionItem[] = useMemo(() => batches.map(b => ({ label: b.file_name, value: b.id })), [batches]);
+
   const stateOptions: OptionItem[] = useMemo(() => {
     const set = new Set<string>();
     allOrders.forEach(o => set.add((o.state || 'Unspecified').trim()));
@@ -423,21 +473,30 @@ export const WebsiteAnalytics: React.FC = () => {
   const orderTypeOptions: OptionItem[] = ORDER_TYPE_OPTIONS.map(ot => ({ label: ot, value: ot }));
 
   const handleApplyFilters = () => {
-    setApplying(true);
     setAppliedFilters(draftFilters);
-    setTimeout(() => {
-      setApplying(false);
-      toast.success('Analytics updated!');
-    }, 200);
+    setIsFilterDrawerOpen(false);
+    toast.success('Analytics filters applied!');
   };
 
   const handleResetFilters = () => {
-    setDraftFilters(DEFAULT_FILTERS);
-    setAppliedFilters(DEFAULT_FILTERS);
+    const resetBusinessFilters = {
+      ...appliedFilters,
+      batchIds: [],
+      states: [],
+      cities: [],
+      pincodes: [],
+      paymentModes: [],
+      offers: [],
+      products: [],
+      orderTypes: []
+    };
+    setDraftFilters(resetBusinessFilters);
+    setAppliedFilters(resetBusinessFilters);
     setDrillDownPaymentMode(null);
     setDrillDownState(null);
     setDrillDownCity(null);
-    toast.success('Filters reset to Today defaults');
+    setIsFilterDrawerOpen(false);
+    toast.success('Analytics filters cleared');
   };
 
   // FILTERING ENGINE
@@ -506,6 +565,171 @@ export const WebsiteAnalytics: React.FC = () => {
 
   const fullCodReceivable = useMemo(() => codOrders.reduce((sum, o) => sum + (Number(o.remaining_payable ?? o.price) || 0), 0), [codOrders]);
   const totalCodReceivable = partialCodRemaining + fullCodReceivable;
+
+  // SEARCH LOGIC FOR FILTERED ORDERS SECTION (Order ID & Customer Name only)
+  const searchedOrders = useMemo(() => {
+    if (!searchQuery.trim()) return filteredOrders;
+    const q = searchQuery.toLowerCase().trim();
+    return filteredOrders.filter(o => 
+      o.order_id.toLowerCase().includes(q) ||
+      (o.customer_name && o.customer_name.toLowerCase().includes(q))
+    );
+  }, [filteredOrders, searchQuery]);
+
+  const visibleOrders = useMemo(() => {
+    if (showAllFilteredOrders) return searchedOrders;
+    return searchedOrders.slice(0, 5);
+  }, [searchedOrders, showAllFilteredOrders]);
+
+  // Reset Revenue Mix card slice when grouping changes
+  useEffect(() => {
+    setRevenueMixCardSlice(null);
+  }, [revenueMixGroup]);
+
+  // CARD-SPECIFIC MATCHING ORDERS COMPUTATIONS
+
+  // 1. Payment Mode Breakdown matching orders
+  const paymentMatchingOrders = useMemo(() => {
+    if (!drillDownPaymentMode) return filteredOrders;
+    return filteredOrders.filter(o => o.payment_mode === drillDownPaymentMode);
+  }, [filteredOrders, drillDownPaymentMode]);
+
+  // 2. Revenue Mix matching orders
+  const revenueMixMatchingOrders = useMemo(() => {
+    if (!revenueMixCardSlice) return filteredOrders;
+    return filteredOrders.filter(o => {
+      if (revenueMixGroup === 'Payment Mode') return o.payment_mode === revenueMixCardSlice;
+      if (revenueMixGroup === 'State') return (o.state || 'Unspecified') === revenueMixCardSlice;
+      if (revenueMixGroup === 'Product') {
+        return o.items 
+          ? o.items.some(i => i.product_name === revenueMixCardSlice) 
+          : (o.product_name || '').includes(revenueMixCardSlice);
+      }
+      if (revenueMixGroup === 'Offer') {
+        const off = o.offer && o.offer !== '-' ? o.offer : 'No Offer';
+        return off === revenueMixCardSlice;
+      }
+      if (revenueMixGroup === 'Order Value Range') {
+        const p = Number(o.price) || 0;
+        if (revenueMixCardSlice === 'Below ₹500') return p < 500;
+        if (revenueMixCardSlice === '₹500–₹749') return p >= 500 && p < 750;
+        if (revenueMixCardSlice === '₹750–₹999') return p >= 750 && p < 1000;
+        if (revenueMixCardSlice === '₹1,000–₹1,299') return p >= 1000 && p < 1300;
+        if (revenueMixCardSlice === '₹1,300–₹1,499') return p >= 1300 && p < 1500;
+        if (revenueMixCardSlice === '₹1,500 and above') return p >= 1500;
+      }
+      return true;
+    });
+  }, [filteredOrders, revenueMixGroup, revenueMixCardSlice]);
+
+  // 5. Pincode Performance matching orders (statePieData and cityDonutData are defined below)
+  const pincodeMatchingOrders = useMemo(() => {
+    if (!pincodeCardSlice) return filteredOrders;
+    return filteredOrders.filter(o => (o.pincode || 'Unspecified') === pincodeCardSlice);
+  }, [filteredOrders, pincodeCardSlice]);
+
+  // 6. Product Performance matching orders
+  const productMatchingOrders = useMemo(() => {
+    if (!productCardSlice) return filteredOrders;
+    return filteredOrders.filter(o => {
+      if (o.items) return o.items.some(i => i.product_name === productCardSlice);
+      return (o.product_name || '').includes(productCardSlice);
+    });
+  }, [filteredOrders, productCardSlice]);
+
+  // 7. Offer Performance matching orders
+  const offerMatchingOrders = useMemo(() => {
+    if (!offerCardSlice) return filteredOrders;
+    if (offerCardSlice === 'Others' || offerCardSlice === 'No Offer') {
+      return filteredOrders.filter(o => !o.offer || o.offer === '-' || o.offer === 'No Offer');
+    }
+    return filteredOrders.filter(o => o.offer === offerCardSlice);
+  }, [filteredOrders, offerCardSlice]);
+
+  // 8. Order Value Distribution matching orders
+  const orderValueMatchingOrders = useMemo(() => {
+    if (!orderValueCardSlice) return filteredOrders;
+    return filteredOrders.filter(o => {
+      const p = Number(o.price) || 0;
+      if (orderValueCardSlice === 'Below ₹500') return p < 500;
+      if (orderValueCardSlice === '₹500–₹749') return p >= 500 && p < 750;
+      if (orderValueCardSlice === '₹750–₹999') return p >= 750 && p < 1000;
+      if (orderValueCardSlice === '₹1,000–₹1,299') return p >= 1000 && p < 1300;
+      if (orderValueCardSlice === '₹1,300–₹1,499') return p >= 1300 && p < 1500;
+      if (orderValueCardSlice === '₹1,500 and above') return p >= 1500;
+      return true;
+    });
+  }, [filteredOrders, orderValueCardSlice]);
+
+  // 9. Order Composition matching orders
+  const prodCompMatchingOrders = useMemo(() => {
+    if (!prodCompCardSlice) return filteredOrders;
+    return filteredOrders.filter(o => {
+      const count = o.items ? o.items.length : 1;
+      if (prodCompCardSlice === 'Single Product Orders') return count === 1;
+      if (prodCompCardSlice === 'Multi Product Orders') return count > 1;
+      return true;
+    });
+  }, [filteredOrders, prodCompCardSlice]);
+
+  const qtyCompMatchingOrders = useMemo(() => {
+    if (!qtyCompCardSlice) return filteredOrders;
+    return filteredOrders.filter(o => {
+      const itemCount = o.items ? o.items.length : 1;
+      const totalQty = o.total_quantity || 1;
+      if (qtyCompCardSlice === 'Single Unit Orders') return totalQty === 1;
+      if (qtyCompCardSlice === 'Multi Unit Orders') return totalQty > 1;
+      if (qtyCompCardSlice === '1 Prod, Multi Qty') return itemCount === 1 && totalQty > 1;
+      if (qtyCompCardSlice === 'Multi Prod & Qty') return itemCount > 1 && totalQty > 1;
+      return true;
+    });
+  }, [filteredOrders, qtyCompCardSlice]);
+
+  // 10. COD Receivable Overview matching orders
+  const codMatchingOrders = useMemo(() => {
+    if (!codCardSlice) return filteredOrders.filter(o => o.payment_mode === 'PARTIAL COD' || o.payment_mode === 'COD');
+    return filteredOrders.filter(o => {
+      if (codCardSlice === 'Partial COD Advance') return o.payment_mode === 'PARTIAL COD' && (o.advance_paid ?? 0) > 0;
+      if (codCardSlice === 'Partial COD Remaining') return o.payment_mode === 'PARTIAL COD' && (o.remaining_payable ?? 0) > 0;
+      if (codCardSlice === 'Full COD Receivable') return o.payment_mode === 'COD';
+      return true;
+    });
+  }, [filteredOrders, codCardSlice]);
+
+  const handleRemoveFilterChip = (type: string, val?: string) => {
+    if (type === 'drillDownPayment') setDrillDownPaymentMode(null);
+    else if (type === 'drillDownState') setDrillDownState(null);
+    else if (type === 'drillDownCity') setDrillDownCity(null);
+    else if (type === 'paymentModes' && val) {
+      const updated = appliedFilters.paymentModes.filter(v => v !== val);
+      setAppliedFilters(prev => ({ ...prev, paymentModes: updated }));
+      setDraftFilters(prev => ({ ...prev, paymentModes: updated }));
+    } else if (type === 'states' && val) {
+      const updated = appliedFilters.states.filter(v => v !== val);
+      setAppliedFilters(prev => ({ ...prev, states: updated }));
+      setDraftFilters(prev => ({ ...prev, states: updated }));
+    } else if (type === 'cities' && val) {
+      const updated = appliedFilters.cities.filter(v => v !== val);
+      setAppliedFilters(prev => ({ ...prev, cities: updated }));
+      setDraftFilters(prev => ({ ...prev, cities: updated }));
+    } else if (type === 'pincodes' && val) {
+      const updated = appliedFilters.pincodes.filter(v => v !== val);
+      setAppliedFilters(prev => ({ ...prev, pincodes: updated }));
+      setDraftFilters(prev => ({ ...prev, pincodes: updated }));
+    } else if (type === 'offers' && val) {
+      const updated = appliedFilters.offers.filter(v => v !== val);
+      setAppliedFilters(prev => ({ ...prev, offers: updated }));
+      setDraftFilters(prev => ({ ...prev, offers: updated }));
+    } else if (type === 'products' && val) {
+      const updated = appliedFilters.products.filter(v => v !== val);
+      setAppliedFilters(prev => ({ ...prev, products: updated }));
+      setDraftFilters(prev => ({ ...prev, products: updated }));
+    } else if (type === 'orderTypes' && val) {
+      const updated = appliedFilters.orderTypes.filter(v => v !== val);
+      setAppliedFilters(prev => ({ ...prev, orderTypes: updated }));
+      setDraftFilters(prev => ({ ...prev, orderTypes: updated }));
+    }
+  };
 
   // 1. PAYMENT MODE DONUT DATA
   const paymentDonutData = useMemo(() => {
@@ -649,6 +873,26 @@ export const WebsiteAnalytics: React.FC = () => {
       }
     ];
   }, [filteredOrders, cityMetric]);
+
+  // 3. State-wise Sales matching orders
+  const stateMatchingOrders = useMemo(() => {
+    if (!drillDownState) return filteredOrders;
+    if (drillDownState === 'Others') {
+      const topStates = statePieData.filter(d => d.state !== 'Others').map(d => d.state);
+      return filteredOrders.filter(o => !topStates.includes(o.state));
+    }
+    return filteredOrders.filter(o => o.state === drillDownState);
+  }, [filteredOrders, drillDownState, statePieData]);
+
+  // 4. City-wise Sales matching orders
+  const cityMatchingOrders = useMemo(() => {
+    if (!drillDownCity) return filteredOrders;
+    if (drillDownCity === 'Others') {
+      const topCityStates = cityDonutData.filter(d => d.cityState !== 'Others').map(d => d.cityState);
+      return filteredOrders.filter(o => !topCityStates.includes(`${o.city || 'Unspecified'}, ${o.state || 'Unspecified'}`));
+    }
+    return filteredOrders.filter(o => `${o.city || 'Unspecified'}, ${o.state || 'Unspecified'}` === drillDownCity);
+  }, [filteredOrders, drillDownCity, cityDonutData]);
 
   // 5. PINCODE PERFORMANCE PIE DATA (Top 6 + Others)
   const pincodePieData = useMemo(() => {
@@ -963,6 +1207,29 @@ export const WebsiteAnalytics: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* COMPACT ANALYTICS FILTER DRAWER TRIGGER BUTTON */}
+          <button
+            type="button"
+            onClick={() => {
+              setDraftFilters(appliedFilters);
+              setIsFilterDrawerOpen(true);
+            }}
+            aria-label="Open Analytics Filters"
+            className={`h-[40px] px-3.5 rounded-xl font-bold text-xs border transition-all cursor-pointer flex items-center gap-1.5 shadow-sm ${
+              activeFilterCount > 0
+                ? 'bg-indigo-500/20 border-indigo-500/60 text-indigo-300'
+                : 'bg-slate-950 hover:bg-slate-900 border-slate-800 text-slate-300'
+            }`}
+          >
+            <SlidersHorizontal size={14} />
+            <span>Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-500 text-slate-950 font-extrabold font-mono">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -1075,103 +1342,77 @@ export const WebsiteAnalytics: React.FC = () => {
         </div>
       )}
 
-      {/* MULTI-SELECT FILTER PANEL */}
-      <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-6 shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2.5 text-sm font-bold text-white">
-            <Filter size={18} className="text-indigo-400" />
-            <span>Multi-Select Filters</span>
+      {/* ACTIVE FILTER CHIPS BAR & MATCHING COUNT */}
+      {activeFilterCount > 0 && (
+        <div className="p-3.5 bg-slate-900/90 border border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-md">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-2.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-extrabold text-[10px] uppercase tracking-wider border border-indigo-500/30">
+              FILTERED
+            </span>
+            <span className="text-slate-300 font-mono font-bold text-xs pl-1">
+              {totalOrdersCount} {totalOrdersCount === 1 ? 'Order' : 'Orders'} Matching
+            </span>
+            <span className="text-slate-700">|</span>
+
+            {appliedFilters.states?.map(st => (
+              <span key={st} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px]">
+                State: {st}
+                <button onClick={() => handleRemoveChip('states', st)} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            ))}
+
+            {appliedFilters.cities?.map(ct => (
+              <span key={ct} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px]">
+                City: {ct}
+                <button onClick={() => handleRemoveChip('cities', ct)} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            ))}
+
+            {appliedFilters.pincodes?.map(pin => (
+              <span key={pin} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono">
+                Pincode: {pin}
+                <button onClick={() => handleRemoveChip('pincodes', pin)} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            ))}
+
+            {appliedFilters.paymentModes?.map(pm => (
+              <span key={pm} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[11px] font-bold">
+                Payment: {pm}
+                <button onClick={() => handleRemoveChip('paymentModes', pm)} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            ))}
+
+            {appliedFilters.products?.map(p => (
+              <span key={p} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px]">
+                Product: {p}
+                <button onClick={() => handleRemoveChip('products', p)} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            ))}
+
+            {appliedFilters.offers?.map(off => (
+              <span key={off} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[11px]">
+                Offer: {off}
+                <button onClick={() => handleRemoveChip('offers', off)} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            ))}
+
+            {appliedFilters.orderTypes?.map(ot => (
+              <span key={ot} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/40 text-[11px]">
+                Type: {ot}
+                <button onClick={() => handleRemoveChip('orderTypes', ot)} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            ))}
           </div>
-          <span className="text-xs text-slate-400">Click Apply Filters to refresh visualizations</span>
+
+          <button
+            onClick={handleResetFilters}
+            className="text-xs text-indigo-400 hover:underline font-bold cursor-pointer flex items-center gap-1 shrink-0 ml-auto"
+          >
+            <RotateCcw size={13} /> Clear All
+          </button>
         </div>
+      )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MultiSelectDropdown
-            label="Upload Batch"
-            options={batchOptions}
-            selectedValues={draftFilters.batchIds}
-            onChange={vals => setDraftFilters({ ...draftFilters, batchIds: vals })}
-            placeholder="All Batches"
-          />
-
-          <MultiSelectDropdown
-            label="State"
-            options={stateOptions}
-            selectedValues={draftFilters.states}
-            onChange={vals => setDraftFilters({ ...draftFilters, states: vals, cities: [] })}
-            placeholder="All States"
-          />
-
-          <MultiSelectDropdown
-            label="City"
-            options={cityOptions}
-            selectedValues={draftFilters.cities}
-            onChange={vals => setDraftFilters({ ...draftFilters, cities: vals })}
-            placeholder="All Cities"
-          />
-
-          <MultiSelectDropdown
-            label="Pincode"
-            options={pincodeOptions}
-            selectedValues={draftFilters.pincodes}
-            onChange={vals => setDraftFilters({ ...draftFilters, pincodes: vals })}
-            placeholder="All Pincodes"
-          />
-
-          <MultiSelectDropdown
-            label="Payment Mode"
-            options={paymentModeOptions}
-            selectedValues={draftFilters.paymentModes}
-            onChange={vals => setDraftFilters({ ...draftFilters, paymentModes: vals })}
-            placeholder="All Payment Modes"
-          />
-
-          <MultiSelectDropdown
-            label="Offer"
-            options={offerOptions}
-            selectedValues={draftFilters.offers}
-            onChange={vals => setDraftFilters({ ...draftFilters, offers: vals })}
-            placeholder="All Offers"
-          />
-
-          <MultiSelectDropdown
-            label="Product"
-            options={productOptions}
-            selectedValues={draftFilters.products}
-            onChange={vals => setDraftFilters({ ...draftFilters, products: vals })}
-            placeholder="All Products"
-          />
-
-          <MultiSelectDropdown
-            label="Order Type"
-            options={orderTypeOptions}
-            selectedValues={draftFilters.orderTypes}
-            onChange={vals => setDraftFilters({ ...draftFilters, orderTypes: vals })}
-            placeholder="All Order Types"
-          />
-        </div>
-
-        <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-slate-400">
-            Filtered Orders: <strong className="text-white font-mono text-sm">{totalOrdersCount}</strong>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleResetFilters}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-1.5"
-            >
-              <RotateCcw size={14} /> Reset Filters
-            </button>
-            <button
-              disabled={applying}
-              onClick={handleApplyFilters}
-              className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              {applying ? <RefreshCw size={14} className="animate-spin" /> : <Filter size={14} />} Apply Filters
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* ROW 1: SUMMARY CARDS (OVERVIEW SECTION) */}
       <div 
@@ -1251,7 +1492,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <CreditCard size={18} className="text-purple-400" />
                   <span>Payment Mode Breakdown</span>
                 </div>
-                <span className="text-xs text-slate-400">Click slice to filter page</span>
+                <span className="text-xs text-slate-400">Click slice to filter matching orders</span>
               </div>
 
               <AnalyticsDonutChart
@@ -1259,9 +1500,11 @@ export const WebsiteAnalytics: React.FC = () => {
                 centerValue={totalOrdersCount}
                 centerLabel="TOTAL ORDERS"
                 selectedSliceName={drillDownPaymentMode}
-                onSliceClick={entry => setDrillDownPaymentMode(entry.name)}
+                onSliceClick={entry => setDrillDownPaymentMode(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No payment data available for the selected filters"
               />
+
+              <CardMatchingOrdersList orders={paymentMatchingOrders} />
             </div>
 
             {/* REVENUE MIX DONUT CHART */}
@@ -1290,8 +1533,12 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={revenueMixData}
                 centerValue={`₹${totalRevenue.toLocaleString()}`}
                 centerLabel="TOTAL REVENUE"
+                selectedSliceName={revenueMixCardSlice}
+                onSliceClick={entry => setRevenueMixCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No revenue data available for the selected filters"
               />
+
+              <CardMatchingOrdersList orders={revenueMixMatchingOrders} />
             </div>
           </div>
 
@@ -1324,9 +1571,16 @@ export const WebsiteAnalytics: React.FC = () => {
                 centerValue={stateMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : stateMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={stateMetric === 'revenue' ? "TOTAL REVENUE" : stateMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
                 selectedSliceName={drillDownState}
-                onSliceClick={entry => entry.state && entry.state !== 'Others' && setDrillDownState(entry.state)}
+                onSliceClick={entry => {
+                  if (entry.state && entry.state !== 'Others') {
+                    const st = entry.state;
+                    setDrillDownState(prev => prev === st ? null : st);
+                  }
+                }}
                 emptyMessage="No state data available for the selected filters"
               />
+
+              <CardMatchingOrdersList orders={stateMatchingOrders} />
 
               {/* State Table Toggle */}
               <div className="pt-1">
@@ -1391,9 +1645,16 @@ export const WebsiteAnalytics: React.FC = () => {
                 centerValue={cityMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : cityMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={cityMetric === 'revenue' ? "TOTAL REVENUE" : cityMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
                 selectedSliceName={drillDownCity}
-                onSliceClick={entry => entry.city && entry.city !== 'Others' && setDrillDownCity(entry.city)}
+                onSliceClick={entry => {
+                  if (entry.cityState && entry.cityState !== 'Others') {
+                    const cs = entry.cityState;
+                    setDrillDownCity(prev => prev === cs ? null : cs);
+                  }
+                }}
                 emptyMessage="No city data available for the selected filters"
               />
+
+              <CardMatchingOrdersList orders={cityMatchingOrders} />
             </div>
           </div>
 
@@ -1425,8 +1686,12 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={pincodePieData}
                 centerValue={pincodeMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : pincodeMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={pincodeMetric === 'revenue' ? "TOTAL REVENUE" : pincodeMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                selectedSliceName={pincodeCardSlice}
+                onSliceClick={entry => setPincodeCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No pincode data available for the selected filters"
               />
+
+              <CardMatchingOrdersList orders={pincodeMatchingOrders} />
             </div>
 
             {/* PRODUCT PERFORMANCE DONUT CHART */}
@@ -1455,8 +1720,12 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={productDonutData}
                 centerValue={productMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : productMetric === 'orders' ? totalOrdersCount : totalUnits}
                 centerLabel={productMetric === 'revenue' ? "TOTAL REVENUE" : productMetric === 'orders' ? "TOTAL ORDERS" : "TOTAL UNITS"}
+                selectedSliceName={productCardSlice}
+                onSliceClick={entry => setProductCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No product data available for the selected filters"
               />
+
+              <CardMatchingOrdersList orders={productMatchingOrders} />
             </div>
           </div>
 
@@ -1488,8 +1757,12 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={offerPieData}
                 centerValue={offerMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : offerMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={offerMetric === 'revenue' ? "TOTAL REVENUE" : offerMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                selectedSliceName={offerCardSlice}
+                onSliceClick={entry => setOfferCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No offer data available for the selected filters"
               />
+
+              <CardMatchingOrdersList orders={offerMatchingOrders} />
             </div>
 
             {/* ORDER VALUE DISTRIBUTION DONUT CHART */}
@@ -1518,8 +1791,12 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={orderValueDonutData}
                 centerValue={orderValueMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : totalOrdersCount}
                 centerLabel={orderValueMetric === 'revenue' ? "TOTAL REVENUE" : "TOTAL ORDERS"}
+                selectedSliceName={orderValueCardSlice}
+                onSliceClick={entry => setOrderValueCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No order value data available for the selected filters"
               />
+
+              <CardMatchingOrdersList orders={orderValueMatchingOrders} />
             </div>
           </div>
 
@@ -1549,8 +1826,12 @@ export const WebsiteAnalytics: React.FC = () => {
                   height={220}
                   innerRadius={45}
                   outerRadius={75}
+                  selectedSliceName={prodCompCardSlice}
+                  onSliceClick={entry => setProdCompCardSlice(prev => prev === entry.name ? null : entry.name)}
                   emptyMessage="No product composition data available"
                 />
+
+                <CardMatchingOrdersList title="Product Composition Orders" orders={prodCompMatchingOrders} />
               </div>
 
               {/* DONUT 2: QUANTITY COMPOSITION */}
@@ -1563,8 +1844,12 @@ export const WebsiteAnalytics: React.FC = () => {
                   height={220}
                   innerRadius={45}
                   outerRadius={75}
+                  selectedSliceName={qtyCompCardSlice}
+                  onSliceClick={entry => setQtyCompCardSlice(prev => prev === entry.name ? null : entry.name)}
                   emptyMessage="No quantity composition data available"
                 />
+
+                <CardMatchingOrdersList title="Quantity Composition Orders" orders={qtyCompMatchingOrders} />
               </div>
             </div>
           </div>
@@ -1588,11 +1873,34 @@ export const WebsiteAnalytics: React.FC = () => {
               data={codReceivableDonutData}
               centerValue={`₹${(partialCodAdvance + totalCodReceivable).toLocaleString()}`}
               centerLabel="TOTAL COD VALUE"
+              selectedSliceName={codCardSlice}
+              onSliceClick={entry => setCodCardSlice(prev => prev === entry.name ? null : entry.name)}
               emptyMessage="No COD data available for the selected filters"
             />
+
+            <CardMatchingOrdersList orders={codMatchingOrders} />
           </div>
         </>
       )}
+
+      {/* ANALYTICS FILTER DRAWER */}
+      <AnalyticsFilterDrawer
+        isOpen={isFilterDrawerOpen}
+        onClose={() => setIsFilterDrawerOpen(false)}
+        activePeriodDisplay={getResolvedDateLabel()}
+        allOrders={allOrders}
+        batches={batches}
+        draftFilters={draftFilters}
+        setDraftFilters={setDraftFilters}
+        onApply={handleApplyFilters}
+        onResetAll={handleResetFilters}
+      />
+
+      {/* ORDER DETAILS MODAL */}
+      <OrderDetailsModal
+        order={selectedOrderForModal}
+        onClose={() => setSelectedOrderForModal(null)}
+      />
     </div>
   );
 };

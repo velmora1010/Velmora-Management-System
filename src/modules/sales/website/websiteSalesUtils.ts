@@ -5,8 +5,10 @@ import type {
   PriceInterpretationMode, 
   WebsiteConsolidatedOrder, 
   WebsiteOrderItem, 
-  WebsiteRawOrderRow 
+  WebsiteRawOrderRow,
+  WebsiteUploadBatch 
 } from './types';
+import type { OptionItem } from './components/MultiSelectDropdown';
 
 // ============================================================================
 // 1. COLUMN MATCHING UTILITIES WITH PRECISE HEADER DETECTION
@@ -405,6 +407,8 @@ export function normalizeIndianPhoneNumber(val: any): string {
 
   return digits || str;
 }
+
+export const formatPhoneNumber = normalizeIndianPhoneNumber;
 
 export function normalizePaymentMode(val: any): PaymentModeCategory {
   if (val === null || val === undefined) return 'UNKNOWN';
@@ -1133,4 +1137,68 @@ export function exportOrdersToXLSX(orders: WebsiteConsolidatedOrder[], fileName:
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Consolidated Orders');
   XLSX.writeFile(workbook, fileName);
+}
+
+export function getUploadBatchesForAnalyticsPeriod(
+  batches: WebsiteUploadBatch[],
+  allOrders: WebsiteConsolidatedOrder[],
+  startDate: string,
+  endDate: string
+): OptionItem[] {
+  if (!batches || batches.length === 0) return [];
+
+  // Group consolidated orders by upload_batch_id
+  const ordersByBatch = new Map<string, WebsiteConsolidatedOrder[]>();
+  allOrders.forEach(o => {
+    if (!o.upload_batch_id) return;
+    if (!ordersByBatch.has(o.upload_batch_id)) {
+      ordersByBatch.set(o.upload_batch_id, []);
+    }
+    ordersByBatch.get(o.upload_batch_id)!.push(o);
+  });
+
+  const periodOptions: OptionItem[] = [];
+
+  batches.forEach(b => {
+    const batchOrders = ordersByBatch.get(b.id) || [];
+
+    if (batchOrders.length > 0) {
+      // Find orders in this batch falling strictly within [startDate, endDate]
+      const ordersInPeriod = batchOrders.filter(o => {
+        const d = o.order_date;
+        return d && d >= startDate && d <= endDate;
+      });
+
+      if (ordersInPeriod.length > 0) {
+        const datesInBatch = batchOrders.map(o => o.order_date).filter(Boolean).sort();
+        const minDate = datesInBatch[0] || startDate;
+        const maxDate = datesInBatch[datesInBatch.length - 1] || endDate;
+
+        const dateRangeStr = minDate === maxDate
+          ? formatSalesDateShort(minDate)
+          : `${formatSalesDateShort(minDate)} – ${formatSalesDateShort(maxDate)}`;
+
+        const countStr = `${ordersInPeriod.length} ${ordersInPeriod.length === 1 ? 'Order' : 'Orders'}`;
+        const label = `${b.file_name} (${dateRangeStr} • ${countStr})`;
+
+        periodOptions.push({
+          label,
+          value: b.id
+        });
+      }
+    } else {
+      // Fallback check if batch has no linked orders in allOrders
+      const fallbackDate = b.order_date || (b.uploaded_at ? b.uploaded_at.split('T')[0] : '');
+      if (fallbackDate && fallbackDate >= startDate && fallbackDate <= endDate) {
+        const countStr = `${b.total_unique_orders || 0} Orders`;
+        const label = `${b.file_name} (${formatSalesDateShort(fallbackDate)} • ${countStr})`;
+        periodOptions.push({
+          label,
+          value: b.id
+        });
+      }
+    }
+  });
+
+  return periodOptions;
 }

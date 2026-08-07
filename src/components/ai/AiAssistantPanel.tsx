@@ -98,19 +98,20 @@ export const AiAssistantPanel: React.FC = () => {
 
   return (
     <>
-      {/* Floating Trigger Button */}
+      {/* Floating Trigger Button (Moved to Bottom-Left to avoid covering content, tables & charts) */}
       <button
         onClick={() => setIsOpen(prev => !prev)}
-        className="fixed bottom-6 right-6 z-50 p-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-full shadow-2xl transition-all duration-300 flex items-center gap-2 group hover:scale-105"
+        className="fixed bottom-6 left-6 z-40 p-3 sm:px-3.5 sm:py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-full shadow-2xl transition-all duration-300 flex items-center gap-2 group hover:scale-105"
         title="Velmora AI Business Assistant"
+        aria-label="Open Velmora AI Business Assistant"
       >
-        <Sparkles size={22} className="animate-spin-slow group-hover:rotate-12 transition-transform" />
+        <Sparkles size={20} className="animate-spin-slow group-hover:rotate-12 transition-transform" />
         <span className="text-xs font-bold pr-1 hidden sm:inline">AI Assistant</span>
       </button>
 
       {/* Slide-Out AI Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-20 right-4 sm:right-6 w-96 max-w-[calc(100vw-2rem)] bg-card border border-border rounded-2xl shadow-2xl z-50 flex flex-col h-[560px] max-h-[80vh] overflow-hidden animate-in slide-in-from-bottom-5 duration-300">
+        <div className="fixed bottom-20 left-4 sm:left-6 w-96 max-w-[calc(100vw-2rem)] bg-card border border-border rounded-2xl shadow-2xl z-50 flex flex-col h-[560px] max-h-[80vh] overflow-hidden animate-in slide-in-from-bottom-5 duration-300">
           
           {/* Panel Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-slate-900/80 backdrop-blur-md">
