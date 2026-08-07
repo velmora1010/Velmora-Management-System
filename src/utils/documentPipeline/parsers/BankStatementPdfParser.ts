@@ -39,6 +39,7 @@ export class BankStatementPdfParser implements DocumentParser {
     const transactions: NormalizedTransaction[] = [];
     // Date formats: DD/MM/YYYY, DD-MMM-YYYY, DD/MM/YY, etc.
     const dateRegex = /^(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{1,2}[\s\-][a-zA-Z]{3}[\s\-]\d{2,4})$/;
+    let sequenceCounter = 1;
 
     for (const line of lines) {
       // Filter out empty spaces
@@ -68,6 +69,9 @@ export class BankStatementPdfParser implements DocumentParser {
 
         if (amount !== 0) {
           transactions.push({
+            sequence: sequenceCounter++,
+            transactionDate: date,
+            postedDateTime: undefined,
             date,
             amount,
             notes,

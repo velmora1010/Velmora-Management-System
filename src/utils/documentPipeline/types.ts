@@ -29,6 +29,9 @@ export interface DocumentSource {
 }
 
 export interface NormalizedTransaction extends Partial<FinanceExpense> {
+  sequence: number;
+  transactionDate?: string;
+  postedDateTime?: string;
   amount: number;
   date?: string; // Formatted date
   notes?: string; 

@@ -18,6 +18,7 @@ export class ExcelExpenseParser implements DocumentParser {
 
     const rows = rawContent.slice(1);
     const transactions: NormalizedTransaction[] = [];
+    let sequenceCounter = 1;
 
     for (const row of rows) {
       // Check if row is completely empty
@@ -48,6 +49,9 @@ export class ExcelExpenseParser implements DocumentParser {
       }
 
       transactions.push({
+        sequence: sequenceCounter++,
+        transactionDate: dateStr || undefined,
+        postedDateTime: undefined,
         date: dateStr || undefined,
         amount,
         quantity,

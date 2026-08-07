@@ -24,6 +24,9 @@ export interface FinanceExpense {
   import_file_name?: string | null;
   import_status?: string | null;
   imported_at?: string | null;
+  sequence?: number;
+  transaction_date?: string | null;
+  posted_datetime?: string | null;
 }
 
 export interface ExpenseImport {
@@ -56,14 +59,14 @@ export const useExpenses = () => {
         .from(SUPABASE_TABLES.expenses)
         .select('*')
         .eq('status', 'active')
-        .order('created_at', { ascending: false });
+        .order('transaction_date', { ascending: false });
 
       // Fallback if status column doesn't exist
       if (fetchError && fetchError.code === '42703') {
         const retry = await supabase
           .from(SUPABASE_TABLES.expenses)
           .select('*')
-          .order('created_at', { ascending: false });
+          .order('transaction_date', { ascending: false });
         fetchResult = retry.data;
         fetchError = retry.error;
       }
@@ -209,13 +212,15 @@ export const useExpenses = () => {
       if (importError) throw importError;
 
       // 2. Insert expense rows
-      const rowsToInsert = expensesData.map(exp => ({
-        ...exp,
-        status: 'active',
-        import_batch_id: batch_id,
-        import_file_name: file_name,
-        import_status: 'Imported'
-      }));
+      const rowsToInsert = expensesData.map(exp => {
+        return {
+          ...exp,
+          status: 'active',
+          import_batch_id: batch_id,
+          import_file_name: file_name,
+          import_status: 'Imported'
+        };
+      });
 
       const { error: insertError } = await supabase
         .from(SUPABASE_TABLES.expenses)
@@ -228,7 +233,7 @@ export const useExpenses = () => {
       return { success: true, batch_id };
     } catch (e: unknown) {
       console.error('Failed to upload batch:', e);
-      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+      return { success: false, error: (e as any)?.message || 'Unknown error' };
     }
   };
 

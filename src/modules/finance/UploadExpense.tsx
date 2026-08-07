@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { Upload, FileSpreadsheet, FileText, X, Trash2, RefreshCw, AlertCircle } from 'lucide-react';
-import { useExpenses } from '../../hooks/finance/useExpenses';
+import { useExpenses, FinanceExpense } from '../../hooks/finance/useExpenses';
 import { PipelineEngine } from '../../utils/documentPipeline/PipelineEngine';
 import { DocumentType } from '../../utils/documentPipeline/types';
 import { ExpenseRuleEngine } from '../../utils/rules/ExpenseRuleEngine';
@@ -70,28 +70,69 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
 
       const mappedTransactions = ruledTransactions.map(tx => {
         // Handle custom date formats (e.g. 01/07/2026 or 01/Jul/2026)
-        let parsedDate: Date | null = null;
+        let parsedDateForCreatedAt: Date | null = null;
+        let pureTransactionDate: string | null = null;
         
         if (tx.date) {
           const parts = tx.date.split(/[\/\-]/);
           if (parts.length === 3) {
-            // Check if it's DD/MM/YYYY
+            // For created_at (existing behavior)
             if (!isNaN(Number(parts[1]))) {
-              parsedDate = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+              parsedDateForCreatedAt = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
             } else {
-              parsedDate = new Date(tx.date);
+              parsedDateForCreatedAt = new Date(tx.date);
             }
+
+            // For transaction_date (PURE STRING, NO JS DATE OBJECT)
+            const day = parts[0].padStart(2, '0');
+            let month = parts[1];
+            const year = parts[2];
+            
+            if (isNaN(Number(month))) {
+              const monthMap: Record<string, string> = {
+                jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+                jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+              };
+              month = monthMap[month.toLowerCase()] || '01';
+            } else {
+              month = month.padStart(2, '0');
+            }
+            pureTransactionDate = `${year}-${month}-${day}`;
           } else {
-            parsedDate = new Date(tx.date);
+            parsedDateForCreatedAt = new Date(tx.date);
+            pureTransactionDate = tx.date; // Fallback
           }
           
-          if (isNaN(parsedDate.getTime())) {
-            parsedDate = null;
+          if (parsedDateForCreatedAt && isNaN(parsedDateForCreatedAt.getTime())) {
+            parsedDateForCreatedAt = null;
+          }
+        }
+        
+        // Convert posted_datetime into a proper ISO timestamp using Date object
+        let validIsoPostedDateTime: string | null = null;
+        if (tx.postedDateTime) {
+          // E.g. "01/07/2026 09:48:15 AM" -> rewrite to standard parseable format "07/01/2026 09:48:15 AM" or just manually parse
+          const match = tx.postedDateTime.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s+(.*)/);
+          if (match) {
+            const day = match[1];
+            const month = match[2];
+            const year = match[3];
+            const time = match[4];
+            const d = new Date(`${month}/${day}/${year} ${time}`);
+            if (!isNaN(d.getTime())) {
+              validIsoPostedDateTime = d.toISOString();
+            }
+          } else {
+            const d = new Date(tx.postedDateTime);
+            if (!isNaN(d.getTime())) validIsoPostedDateTime = d.toISOString();
           }
         }
         
         return {
-          created_at: parsedDate ? parsedDate.toISOString() : null,
+          sequence: tx.sequence || 0,
+          transaction_date: pureTransactionDate,
+          posted_datetime: validIsoPostedDateTime,
+          created_at: parsedDateForCreatedAt ? parsedDateForCreatedAt.toISOString() : null,
           amount: tx.amount,
           notes: tx.notes || '',
           vendor: tx.vendor || 'Unknown Vendor',
@@ -187,7 +228,20 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
   };
 
   const activeImport = imports.find(i => i.batch_id === activeBatchId);
-  const activeFileExpenses = expenses.filter(e => e.import_batch_id === activeBatchId);
+  const activeFileExpenses = expenses
+    .filter(e => e.import_batch_id === activeBatchId)
+    .sort((a, b) => {
+      // Sort by sequence ASC
+      if (a.sequence && b.sequence && a.sequence !== b.sequence) {
+        return a.sequence - b.sequence;
+      }
+      // Fallback to transaction_date ASC
+      if (a.transaction_date && b.transaction_date) {
+        return new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime();
+      }
+      // Preserve existing order if both are missing
+      return 0;
+    });
   
   // Debug Preview Binding
   console.log("=== PREVIEW DEBUG ===");
@@ -385,7 +439,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
                           <td className="p-3 text-xs text-muted border-r border-border/50 sticky left-0 bg-background group-hover:bg-card transition-colors z-10 text-center font-medium shadow-[1px_0_0_0_rgba(255,255,255,0.05)] dark:shadow-[1px_0_0_0_rgba(0,0,0,0.1)]">
                             {rowIdx + 1}
                           </td>
-                          <td className="p-3 text-sm text-main whitespace-nowrap">{formatDate(expense.created_at, false)}</td>
+                          <td className="p-3 text-sm text-main whitespace-nowrap">{formatDate(expense.transaction_date, false)}</td>
                           <td className="p-3 text-sm text-main whitespace-nowrap">{expense.amount}</td>
                           <td className="p-3 text-sm text-main max-w-xs truncate" title={expense.notes || ''}>{expense.notes || '-'}</td>
                           <td className="p-3 text-sm text-main whitespace-nowrap">{expense.vendor || '-'}</td>

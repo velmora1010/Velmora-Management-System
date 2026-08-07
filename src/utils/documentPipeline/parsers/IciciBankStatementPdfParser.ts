@@ -1,6 +1,7 @@
 import { DocumentParser, NormalizedTransaction, PdfTextItem } from '../types';
 
 interface LogicalRow {
+  sequence: number;
   valueDate: string;
   transactionDate: string;
   postedDate: string;
@@ -49,8 +50,8 @@ export class IciciBankStatementPdfParser implements DocumentParser {
     let diagHeaderRowIndex = -1;
     let diagLogicalRowsBuilt = 0;
     let diagMergedRemarkRows = 0;
-
     const allLogicalRows: LogicalRow[] = [];
+    let globalSequence = 1;
 
     const isNoiseRow = (rowTextLower: string): boolean => {
       return (
@@ -221,6 +222,7 @@ export class IciciBankStatementPdfParser implements DocumentParser {
         }
 
         const logicalRow: LogicalRow = {
+          sequence: globalSequence++,
           valueDate: '',
           transactionDate: '',
           postedDate: '',
@@ -252,7 +254,7 @@ export class IciciBankStatementPdfParser implements DocumentParser {
           diagMergedRemarkRows++;
         }
       } else if (row.transactionDate.trim() || row.withdrawal.trim() || row.deposit.trim()) {
-        mergedRows.push(row);
+        mergedRows.push({ ...row });
       }
     }
 
@@ -282,6 +284,9 @@ export class IciciBankStatementPdfParser implements DocumentParser {
       }
 
       validTransactions.push({
+        sequence: row.sequence,
+        transactionDate: row.transactionDate.trim(),
+        postedDateTime: row.postedDate.trim(),
         date: extractDate(row.transactionDate) || row.transactionDate,
         amount: withdrawalAmt,
         notes: row.remarks.trim() || '-'
@@ -295,6 +300,7 @@ export class IciciBankStatementPdfParser implements DocumentParser {
       const row = mergedRows[idx];
       console.log('--------------------------------------------------');
       console.log(`LogicalRow ${idx}`);
+      console.log(`sequence: ${row.sequence}`);
       console.log(`transactionDate: ${row.transactionDate}`);
       console.log(`valueDate: ${row.valueDate}`);
       console.log(`postedDate: ${row.postedDate}`);
@@ -306,6 +312,9 @@ export class IciciBankStatementPdfParser implements DocumentParser {
       
       console.log(`↓`);
       console.log(`NormalizedTransaction`);
+      console.log(`sequence         : ${row.sequence}`);
+      console.log(`transactionDate  : ${row.transactionDate.trim()}`);
+      console.log(`postedDateTime   : ${row.postedDate.trim()}`);
       console.log(`date             : ${parsedDate}`);
       console.log(`amount           : ${withdrawalAmt}`);
       console.log(`notes            : ${row.remarks.trim() || '-'}`);
