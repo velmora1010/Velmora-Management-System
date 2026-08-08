@@ -383,7 +383,9 @@ export class WebsiteSalesService {
     if (filters?.batchId) {
       query = query.eq('upload_id', filters.batchId);
     }
-    if (filters?.selectedDate) {
+    if (filters?.startDate && filters?.endDate) {
+      query = query.gte('order_date', filters.startDate).lte('order_date', filters.endDate);
+    } else if (filters?.selectedDate) {
       query = query.eq('order_date', filters.selectedDate);
     }
 
@@ -476,7 +478,11 @@ export class WebsiteSalesService {
 
     return orders.filter(o => {
       if (filters.batchId && o.upload_batch_id !== filters.batchId) return false;
-      if (filters.selectedDate && o.order_date !== filters.selectedDate) return false;
+      if (filters.startDate && filters.endDate) {
+        if (!o.order_date || o.order_date < filters.startDate || o.order_date > filters.endDate) return false;
+      } else if (filters.selectedDate && o.order_date !== filters.selectedDate) {
+        return false;
+      }
 
       if (filters.orderIdSearch) {
         const q = filters.orderIdSearch.toLowerCase().trim();

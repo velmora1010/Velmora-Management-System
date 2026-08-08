@@ -375,6 +375,46 @@ export function shiftDateString(dateStr: string, daysDelta: number): string {
   return getTodayInBusinessTimezone();
 }
 
+export function calculateDaysBetween(startDate: string, endDate: string): number {
+  if (!startDate || !endDate) return 1;
+  const p1 = startDate.split('-').map(Number);
+  const p2 = endDate.split('-').map(Number);
+  const dt1 = new Date(p1[0], p1[1] - 1, p1[2]);
+  const dt2 = new Date(p2[0], p2[1] - 1, p2[2]);
+  const diffTime = Math.abs(dt2.getTime() - dt1.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays + 1; // Inclusive count
+}
+
+export function shiftDateRange(startDate: string, endDate: string, direction: -1 | 1): { startDate: string; endDate: string } {
+  if (startDate === endDate) {
+    const s = shiftDateString(startDate, direction);
+    return { startDate: s, endDate: s };
+  }
+  const span = calculateDaysBetween(startDate, endDate);
+  const delta = span * direction;
+  return {
+    startDate: shiftDateString(startDate, delta),
+    endDate: shiftDateString(endDate, delta)
+  };
+}
+
+export function formatDateRangeDisplay(startDate: string, endDate: string): string {
+  if (!startDate) return '';
+  if (!endDate || startDate === endDate) {
+    return formatSalesDateDisplay(startDate);
+  }
+  return `${formatSalesDateShort(startDate)} - ${formatSalesDateShort(endDate)}`;
+}
+
+export function formatSectionDateHeader(title: string, startDate: string, endDate: string): string {
+  if (!startDate) return title;
+  if (!endDate || startDate === endDate) {
+    return `${title} (${formatSalesDateShort(startDate).toUpperCase()})`;
+  }
+  return `${title} (${formatSalesDateShort(startDate).toUpperCase()} - ${formatSalesDateShort(endDate).toUpperCase()})`;
+}
+
 // ============================================================================
 // 3. NORMALIZATION & HELPER UTILITIES
 // ============================================================================

@@ -15,12 +15,15 @@ import {
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch, WebsiteSalesFilterState } from '../types';
 import { MultiSelectDropdown, OptionItem } from './MultiSelectDropdown';
-import { formatSalesDateDisplay } from '../websiteSalesUtils';
+import { formatSalesDateDisplay, formatSalesDateShort } from '../websiteSalesUtils';
 
 interface DashboardFilterDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  selectedDate: string;
+  selectedDate?: string;
+  startDate?: string;
+  endDate?: string;
+  activePeriodDisplay?: string;
   allOrders: WebsiteConsolidatedOrder[];
   batches: WebsiteUploadBatch[];
   draftFilters: WebsiteSalesFilterState;
@@ -57,6 +60,9 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
   isOpen,
   onClose,
   selectedDate,
+  startDate,
+  endDate,
+  activePeriodDisplay,
   allOrders,
   batches,
   draftFilters,
@@ -85,10 +91,7 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
 
   const stateOptions: OptionItem[] = useMemo(() => {
     const set = new Set<string>();
-    allOrders.forEach(o => {
-      const st = (o.state || 'Unspecified').trim();
-      set.add(st);
-    });
+    allOrders.forEach(o => set.add((o.state || 'Unspecified').trim()));
     return Array.from(set).sort().map(s => ({ label: s, value: s }));
   }, [allOrders]);
 
@@ -97,8 +100,7 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
     const selectedStates = draftFilters.states || [];
     allOrders.forEach(o => {
       if (selectedStates.length === 0 || selectedStates.includes(o.state)) {
-        const ct = (o.city || 'Unspecified').trim();
-        set.add(ct);
+        set.add((o.city || 'Unspecified').trim());
       }
     });
     return Array.from(set).sort().map(c => ({ label: c, value: c }));
@@ -161,6 +163,11 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
 
   if (!isOpen) return null;
 
+  const displayPeriodText = activePeriodDisplay || 
+    (startDate && endDate && startDate !== endDate
+      ? `${formatSalesDateShort(startDate)} - ${formatSalesDateShort(endDate)}`
+      : formatSalesDateDisplay(startDate || selectedDate || ''));
+
   return (
     <div 
       className="fixed inset-0 z-50 flex justify-end bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200"
@@ -181,10 +188,10 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
               <SlidersHorizontal size={18} className="text-cyan-400" />
               <span>Dashboard Filters</span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">Refine the selected date's Website Sales data.</p>
+            <p className="text-xs text-slate-400 mt-0.5">Refine Website Sales dashboard data.</p>
             <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-300 text-[11px] font-mono border border-cyan-500/20">
               <Calendar size={12} />
-              <span>Selected Date: {formatSalesDateDisplay(selectedDate)}</span>
+              <span>Period: {displayPeriodText}</span>
             </div>
           </div>
 

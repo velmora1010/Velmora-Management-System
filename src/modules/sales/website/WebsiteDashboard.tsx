@@ -24,12 +24,17 @@ import { websiteSalesService } from './websiteSalesService';
 import { 
   getTodayInBusinessTimezone, 
   formatSalesDateDisplay, 
+  formatSalesDateShort,
   shiftDateString,
-  formatSalesDateShort
+  calculateDaysBetween,
+  shiftDateRange,
+  formatDateRangeDisplay,
+  formatSectionDateHeader
 } from './websiteSalesUtils';
 import { DashboardFilterDrawer } from './components/DashboardFilterDrawer';
 import { ProductDispatchModal } from './components/ProductDispatchModal';
 import { ComboDispatchModal } from './components/ComboDispatchModal';
+import { DateRangePickerModal } from './components/DateRangePickerModal';
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import toast from 'react-hot-toast';
@@ -67,12 +72,28 @@ export const WebsiteDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Date State synced with URL ?date=YYYY-MM-DD
   const todayStr = getTodayInBusinessTimezone();
-  const urlDate = searchParams.get('date');
-  const initialDate = (urlDate && urlDate.match(/^\d{4}-\d{2}-\d{2}$/)) ? urlDate : todayStr;
 
-  const [selectedSalesDate, setSelectedSalesDate] = useState<string>(initialDate);
+  // Sync date range state from URL parameters (?from=YYYY-MM-DD&to=YYYY-MM-DD or ?date=YYYY-MM-DD)
+  const urlFrom = searchParams.get('from');
+  const urlTo = searchParams.get('to');
+  const urlDate = searchParams.get('date');
+
+  let initialStart = todayStr;
+  let initialEnd = todayStr;
+
+  if (urlFrom && urlTo && urlFrom.match(/^\d{4}-\d{2}-\d{2}$/) && urlTo.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    initialStart = urlFrom;
+    initialEnd = urlTo;
+  } else if (urlDate && urlDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    initialStart = urlDate;
+    initialEnd = urlDate;
+  }
+
+  const [salesStartDate, setSalesStartDate] = useState<string>(initialStart);
+  const [salesEndDate, setSalesEndDate] = useState<string>(initialEnd);
+  const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
+
   const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
   const [allOrders, setAllOrders] = useState<WebsiteConsolidatedOrder[]>([]);
   const [orders, setOrders] = useState<WebsiteConsolidatedOrder[]>([]);
@@ -91,29 +112,54 @@ export const WebsiteDashboard: React.FC = () => {
   const [dashboardOfferCardSlice, setDashboardOfferCardSlice] = useState<string | null>(null);
   const [dashboardStateCardSlice, setDashboardStateCardSlice] = useState<string | null>(null);
 
-  // Sync state when URL parameter changes
+  // Sync state when URL parameters change externally
   useEffect(() => {
+    const qFrom = searchParams.get('from');
+    const qTo = searchParams.get('to');
     const qDate = searchParams.get('date');
-    if (qDate && qDate.match(/^\d{4}-\d{2}-\d{2}$/) && qDate !== selectedSalesDate) {
-      setSelectedSalesDate(qDate);
+
+    let s = todayStr;
+    let e = todayStr;
+
+    if (qFrom && qTo && qFrom.match(/^\d{4}-\d{2}-\d{2}$/) && qTo.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      s = qFrom;
+      e = qTo;
+    } else if (qDate && qDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      s = qDate;
+      e = qDate;
+    }
+
+    if (s !== salesStartDate || e !== salesEndDate) {
+      setSalesStartDate(s);
+      setSalesEndDate(e);
     }
   }, [searchParams]);
 
-  // Load dataset on date change or applied filter change
+  // Load dataset on date range change or applied filter change
   useEffect(() => {
     setDashboardPaymentCardSlice(null);
     setDashboardProductCardSlice(null);
     setDashboardOfferCardSlice(null);
     setDashboardStateCardSlice(null);
     loadData();
-  }, [selectedSalesDate, appliedFilters]);
+  }, [salesStartDate, salesEndDate, appliedFilters]);
 
-  const updateDateParam = (newDate: string) => {
-    setSelectedSalesDate(newDate);
-    if (newDate === todayStr) {
+  const updateDateRangeParams = (newStart: string, newEnd: string) => {
+    setSalesStartDate(newStart);
+    setSalesEndDate(newEnd);
+
+    if (newStart === todayStr && newEnd === todayStr) {
       searchParams.delete('date');
+      searchParams.delete('from');
+      searchParams.delete('to');
+    } else if (newStart === newEnd) {
+      searchParams.set('date', newStart);
+      searchParams.delete('from');
+      searchParams.delete('to');
     } else {
-      searchParams.set('date', newDate);
+      searchParams.delete('date');
+      searchParams.set('from', newStart);
+      searchParams.set('to', newEnd);
     }
     setSearchParams(searchParams, { replace: true });
   };
@@ -123,14 +169,15 @@ export const WebsiteDashboard: React.FC = () => {
     const bList = await websiteSalesService.getUploadBatches();
     setBatches(bList);
 
-    // Fetch orders for dataset
+    // Fetch full dataset for dropdown options
     const fullDataset = await websiteSalesService.getConsolidatedOrders();
     setAllOrders(fullDataset);
 
-    // Filter using selected date + applied dashboard filters
+    // Filter using selected date range + applied dashboard filters
     const ordList = await websiteSalesService.getConsolidatedOrders({
       ...appliedFilters,
-      selectedDate: selectedSalesDate
+      startDate: salesStartDate,
+      endDate: salesEndDate
     });
 
     setOrders(ordList);
@@ -144,24 +191,18 @@ export const WebsiteDashboard: React.FC = () => {
     }
   };
 
-  const handlePrevDay = () => {
-    const prev = shiftDateString(selectedSalesDate, -1);
-    updateDateParam(prev);
+  const handlePrevRange = () => {
+    const { startDate, endDate } = shiftDateRange(salesStartDate, salesEndDate, -1);
+    updateDateRangeParams(startDate, endDate);
   };
 
-  const handleNextDay = () => {
-    const next = shiftDateString(selectedSalesDate, 1);
-    updateDateParam(next);
+  const handleNextRange = () => {
+    const { startDate, endDate } = shiftDateRange(salesStartDate, salesEndDate, 1);
+    updateDateRangeParams(startDate, endDate);
   };
 
   const handleResetToday = () => {
-    updateDateParam(todayStr);
-  };
-
-  const handleSelectDate = (val: string) => {
-    if (val) {
-      updateDateParam(val);
-    }
+    updateDateRangeParams(todayStr, todayStr);
   };
 
   const handleApplyDrawerFilters = () => {
@@ -189,7 +230,7 @@ export const WebsiteDashboard: React.FC = () => {
     setAppliedFilters(nextDraft);
   };
 
-  const isSelectedToday = selectedSalesDate === todayStr;
+  const isSelectedToday = salesStartDate === todayStr && salesEndDate === todayStr;
 
   // Active filter count computation
   const activeFilterCount = useMemo(() => {
@@ -215,13 +256,13 @@ export const WebsiteDashboard: React.FC = () => {
 
   const hasActiveDashboardFilters = activeFilterCount > 0;
 
-  // Filtered Date Sales Metrics
+  // Filtered Date Range Sales Metrics
   const totalOrdersCount = orders.length;
   const totalRevenue = orders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
   const totalUnits = orders.reduce((sum, o) => sum + (Number(o.total_quantity) || 0), 0);
   const avgOrderValue = totalOrdersCount > 0 ? Math.round(totalRevenue / totalOrdersCount) : 0;
 
-  // Payment Breakdown for Selected Date & Applied Filters
+  // Payment Breakdown for Selected Date Range & Applied Filters
   const prepaidOrdersCount = orders.filter(o => o.payment_mode === 'PREPAID').length;
   const partialCodOrders = orders.filter(o => o.payment_mode === 'PARTIAL COD');
   const partialCodOrdersCount = partialCodOrders.length;
@@ -353,9 +394,11 @@ export const WebsiteDashboard: React.FC = () => {
     return orders.filter(o => (o.state || 'Unspecified') === dashboardStateCardSlice);
   }, [orders, dashboardStateCardSlice]);
 
-  // Batches for Selected Date & Applied Filters
+  // Batches for Selected Date Range & Applied Filters
   const dateBatches = batches.filter(b => {
-    if (b.order_date !== selectedSalesDate && (!b.uploaded_at || !b.uploaded_at.startsWith(selectedSalesDate))) return false;
+    const bMinDate = b.order_date || (b.uploaded_at ? b.uploaded_at.split('T')[0] : '');
+    const bMaxDate = b.order_date || bMinDate;
+    if (bMaxDate < salesStartDate || bMinDate > salesEndDate) return false;
     if (appliedFilters.batchIds && appliedFilters.batchIds.length > 0 && !appliedFilters.batchIds.includes(b.id)) return false;
     return true;
   });
@@ -365,57 +408,60 @@ export const WebsiteDashboard: React.FC = () => {
 
   return (
     <div className="w-full space-y-8 animate-in fade-in duration-300">
-      {/* HEADER & DATE SELECTOR BAR WITH FILTER DRAWER BUTTON */}
+      {/* HEADER & DATE RANGE SELECTOR BAR WITH FILTER DRAWER BUTTON */}
       <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-6 shadow-xl">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-extrabold text-white tracking-tight">Website Sales Dashboard</h1>
-            {isSelectedToday ? (
+            {salesStartDate === todayStr && salesEndDate === todayStr ? (
               <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase tracking-wider">
                 Today
               </span>
-            ) : (
+            ) : salesStartDate === salesEndDate ? (
               <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700 uppercase tracking-wider">
                 Selected Date
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase tracking-wider">
+                Selected Range
               </span>
             )}
           </div>
           <p className="text-cyan-400 font-semibold text-sm mt-1">
-            {formatSalesDateDisplay(selectedSalesDate)}
+            {formatDateRangeDisplay(salesStartDate, salesEndDate)}
           </p>
         </div>
 
         {/* COMPACT DATE CONTROLS & FILTER DRAWER BUTTON */}
         <div className="flex flex-wrap items-center gap-2 bg-slate-950/80 border border-slate-800 p-2 rounded-2xl">
-          {/* Previous Day */}
+          {/* Previous Range / Day */}
           <button
             type="button"
-            onClick={handlePrevDay}
-            title="Previous Day"
-            aria-label="Previous Day"
+            onClick={handlePrevRange}
+            title="Previous Range / Day"
+            aria-label="Previous Range / Day"
             className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded-xl transition-colors cursor-pointer flex items-center justify-center border border-slate-800"
           >
             <ChevronLeft size={16} />
           </button>
 
-          {/* Calendar Date Input */}
-          <div className="relative flex items-center">
-            <Calendar size={15} className="absolute left-3 text-cyan-400 pointer-events-none" />
-            <input
-              type="date"
-              value={selectedSalesDate}
-              onChange={e => handleSelectDate(e.target.value)}
-              className="pl-9 pr-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-cyan-400 font-mono font-bold cursor-pointer"
-            />
-          </div>
-
-          {/* Next Day */}
+          {/* Date Range Picker Trigger Button */}
           <button
             type="button"
-            onClick={handleNextDay}
-            disabled={selectedSalesDate >= todayStr}
-            title="Next Day"
-            aria-label="Next Day"
+            onClick={() => setIsDateModalOpen(true)}
+            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-cyan-400 font-mono font-bold cursor-pointer flex items-center gap-2 transition-colors"
+          >
+            <Calendar size={15} className="text-cyan-400 shrink-0" />
+            <span>{formatDateRangeDisplay(salesStartDate, salesEndDate)}</span>
+          </button>
+
+          {/* Next Range / Day */}
+          <button
+            type="button"
+            onClick={handleNextRange}
+            disabled={salesEndDate >= todayStr}
+            title="Next Range / Day"
+            aria-label="Next Range / Day"
             className="p-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-200 rounded-xl transition-colors cursor-pointer flex items-center justify-center border border-slate-800"
           >
             <ChevronRight size={16} />
@@ -452,20 +498,16 @@ export const WebsiteDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ACTIVE FILTER SUMMARY STRIP */}
-      {activeFilterCount > 0 && (
-        <div className="p-3.5 bg-slate-900/90 border border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-md">
+      {/* ACTIVE DASHBOARD FILTER CHIPS BAR */}
+      {hasActiveDashboardFilters && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-xs shadow-md animate-in fade-in duration-200">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-md bg-cyan-500/20 text-cyan-300 font-extrabold text-[10px] uppercase tracking-wider border border-cyan-500/30">
-              Filtered View
+            <span className="font-extrabold text-cyan-300 uppercase tracking-wider font-mono flex items-center gap-1.5 pr-1">
+              <Filter size={13} /> FILTERED ({orders.length} ORDERS):
             </span>
-            <span className="text-slate-300 font-mono font-bold text-xs pl-1">
-              {totalOrdersCount} {totalOrdersCount === 1 ? 'Order' : 'Orders'} Matching
-            </span>
-            <span className="text-slate-700">|</span>
 
             {appliedFilters.orderIdSearch && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono text-[11px]">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px]">
                 Order ID: {appliedFilters.orderIdSearch}
                 <button onClick={() => handleRemoveChip('orderIdSearch')} className="hover:text-white cursor-pointer"><X size={12} /></button>
               </span>
@@ -479,7 +521,7 @@ export const WebsiteDashboard: React.FC = () => {
             )}
 
             {appliedFilters.phoneSearch && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono text-[11px]">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px]">
                 Phone: {appliedFilters.phoneSearch}
                 <button onClick={() => handleRemoveChip('phoneSearch')} className="hover:text-white cursor-pointer"><X size={12} /></button>
               </span>
@@ -500,7 +542,7 @@ export const WebsiteDashboard: React.FC = () => {
             ))}
 
             {appliedFilters.paymentModes?.map(pm => (
-              <span key={pm} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[11px] font-bold">
+              <span key={pm} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[11px]">
                 Payment: {pm}
                 <button onClick={() => handleRemoveChip('paymentModes', pm)} className="hover:text-white cursor-pointer"><X size={12} /></button>
               </span>
@@ -519,13 +561,20 @@ export const WebsiteDashboard: React.FC = () => {
                 <button onClick={() => handleRemoveChip('offers', off)} className="hover:text-white cursor-pointer"><X size={12} /></button>
               </span>
             ))}
+
+            {appliedFilters.orderTypes?.map(ot => (
+              <span key={ot} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/40 text-[11px]">
+                Type: {ot}
+                <button onClick={() => handleRemoveChip('orderTypes', ot)} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            ))}
           </div>
 
           <button
             onClick={handleResetDrawerFilters}
             className="text-xs text-cyan-400 hover:underline font-bold cursor-pointer flex items-center gap-1 shrink-0 ml-auto"
           >
-            <RotateCcw size={13} /> Clear Filters
+            <RotateCcw size={13} /> Reset Filters
           </button>
         </div>
       )}
@@ -534,89 +583,88 @@ export const WebsiteDashboard: React.FC = () => {
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-blue-400">
           <TrendingUp size={20} />
-          <h2 className="text-lg font-bold uppercase tracking-wider">Sales Summary ({formatSalesDateShort(selectedSalesDate)})</h2>
+          <h2 className="text-lg font-bold uppercase tracking-wider">
+            {formatSectionDateHeader('Sales Summary', salesStartDate, salesEndDate)}
+          </h2>
         </div>
 
         {totalOrdersCount === 0 && !loading ? (
           <div className="p-10 text-center rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
             <AlertCircle size={36} className="text-slate-600 mx-auto" />
-            <h3 className="text-base font-bold text-slate-300">No website orders match the selected date and filters.</h3>
+            <h3 className="text-base font-bold text-slate-300">No website orders match the selected date range and filters.</h3>
             <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Try editing your filter criteria or navigating to another date using the date controls above.
+              Try editing your filter criteria or choosing a different date range using the date controls above.
             </p>
             <div className="flex items-center justify-center gap-3 pt-2">
               <button
                 onClick={() => setIsFilterDrawerOpen(true)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-1.5"
               >
-                <SlidersHorizontal size={14} /> Edit Filters
+                <SlidersHorizontal size={14} /> Adjust Filters
               </button>
               <button
-                onClick={handleResetDrawerFilters}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                onClick={handleResetToday}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
               >
-                <RotateCcw size={14} /> Reset Filters
+                <Clock size={14} /> View Today
               </button>
             </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Card 1: TOTAL ORDERS */}
-            <div className="p-6 border-t-4 border-t-blue-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total Orders</span>
-              <div className="text-3xl font-bold text-white">{totalOrdersCount}</div>
-            </div>
-            
-            {/* Card 2: TOTAL REVENUE */}
-            <div className="p-6 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total Revenue</span>
-              <div className="text-3xl font-bold text-emerald-400">₹{totalRevenue.toLocaleString()}</div>
+            <div className="p-5 border-t-4 border-t-blue-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Orders</span>
+              <div className="text-2xl font-bold text-white">{totalOrdersCount}</div>
             </div>
 
-            {/* Card 3: TOTAL UNITS */}
-            <div className="p-6 border-t-4 border-t-cyan-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total Units</span>
-              <div className="text-3xl font-bold text-cyan-300">{totalUnits}</div>
+            <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Revenue</span>
+              <div className="text-2xl font-bold text-emerald-400">₹{totalRevenue.toLocaleString()}</div>
             </div>
 
-            {/* Card 4: AVG ORDER VALUE */}
-            <div className="p-6 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Avg Order Value</span>
-              <div className="text-3xl font-bold text-purple-300">₹{avgOrderValue.toLocaleString()}</div>
+            <div className="p-5 border-t-4 border-t-cyan-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Units</span>
+              <div className="text-2xl font-bold text-cyan-400">{totalUnits}</div>
+            </div>
+
+            <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Average Order Value</span>
+              <div className="text-2xl font-bold text-purple-400">₹{avgOrderValue.toLocaleString()}</div>
             </div>
           </div>
         )}
       </div>
 
-      {/* SECTION 2: PAYMENT & COD BREAKDOWN CARDS */}
+      {/* SECTION 2: PAYMENT & RECEIVABLE BREAKDOWN */}
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-purple-400">
           <CreditCard size={20} />
           <h2 className="text-lg font-bold uppercase tracking-wider">Payment & Receivable Breakdown</h2>
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: PREPAID ORDERS */}
-          <div className="p-6 border-t-4 border-t-emerald-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Prepaid Orders</span>
-            <div className="text-3xl font-bold text-emerald-400">{prepaidOrdersCount}</div>
+          <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Prepaid Orders</span>
+            <div className="text-2xl font-bold text-emerald-400">{prepaidOrdersCount}</div>
+            <span className="text-[11px] text-slate-500 mt-1 block">Full payment received</span>
           </div>
 
-          {/* Card 2: PARTIAL COD ORDERS */}
-          <div className="p-6 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Partial COD Orders</span>
-            <div className="text-3xl font-bold text-purple-300">{partialCodOrdersCount}</div>
+          <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Partial COD Orders</span>
+            <div className="text-2xl font-bold text-purple-400">{partialCodOrdersCount}</div>
+            <span className="text-[11px] text-purple-400/90 mt-1 block font-medium">₹{partialCodRemaining.toLocaleString()} remaining COD</span>
           </div>
 
-          {/* Card 3: FULL COD ORDERS */}
-          <div className="p-6 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Full COD Orders</span>
-            <div className="text-3xl font-bold text-amber-400">{fullCodOrdersCount}</div>
+          <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Full COD Orders</span>
+            <div className="text-2xl font-bold text-amber-400">{fullCodOrdersCount}</div>
+            <span className="text-[11px] text-amber-400/90 mt-1 block font-medium">₹{fullCodReceivable.toLocaleString()} full COD</span>
           </div>
 
-          {/* Card 4: TOTAL COD RECEIVABLE */}
-          <div className="p-6 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total COD Receivable</span>
-            <div className="text-3xl font-bold text-pink-300">₹{totalCodReceivable.toLocaleString()}</div>
+          <div className="p-5 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total COD Receivable</span>
+            <div className="text-2xl font-bold text-pink-400">₹{totalCodReceivable.toLocaleString()}</div>
+            <span className="text-[11px] text-slate-500 mt-1 block">Partial + Full COD pending</span>
           </div>
         </div>
       </div>
@@ -627,260 +675,279 @@ export const WebsiteDashboard: React.FC = () => {
           <Truck size={20} />
           <h2 className="text-lg font-bold uppercase tracking-wider">Dispatch Summary</h2>
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Card 1: UNITS DISPATCHED */}
-          <div className="p-6 border-t-4 border-t-cyan-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Units Dispatched</span>
-            <div className="text-3xl font-bold text-cyan-300">{totalUnits} Units</div>
+          <div className="p-5 border-t-4 border-t-cyan-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Units Dispatched</span>
+            <div className="text-2xl font-bold text-cyan-400">{dispatchedProductUnits}</div>
+            <span className="text-[11px] text-slate-500 mt-1 block">Total items dispatched</span>
           </div>
 
-          {/* Card 2: PRODUCTS DISPATCHED (CLICKABLE) */}
-          <div 
-            onClick={() => setIsProductModalOpen(true)}
-            className="p-6 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 cursor-pointer group"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Products Dispatched</span>
-              <span className="text-[10px] text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity font-bold">View Breakdown →</span>
-            </div>
-            <div className="text-3xl font-bold text-emerald-400">{dispatchedProductUnits} Units</div>
+          <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Products Dispatched</span>
+            <div className="text-2xl font-bold text-emerald-400">{dispatchedProductsList.length}</div>
+            <span className="text-[11px] text-slate-500 mt-1 block">Distinct products</span>
           </div>
 
-          {/* Card 3: COMBOS DISPATCHED (CLICKABLE) */}
-          <div 
-            onClick={() => setIsComboModalOpen(true)}
-            className="p-6 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 cursor-pointer group"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Combos Dispatched</span>
-              <span className="text-[10px] text-purple-300 opacity-0 group-hover:opacity-100 transition-opacity font-bold">View Breakdown →</span>
-            </div>
-            <div className="text-3xl font-bold text-purple-300">{dispatchedComboOrdersCount}</div>
+          <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Combos Dispatched</span>
+            <div className="text-2xl font-bold text-purple-400">{dispatchedComboOrdersCount}</div>
+            <span className="text-[11px] text-slate-500 mt-1 block">Combo / offer orders</span>
           </div>
 
-          {/* Card 4: ORDERS DISPATCHED */}
-          <div className="p-6 border-t-4 border-t-blue-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Orders Dispatched</span>
-            <div className="text-3xl font-bold text-white">{totalOrdersCount}</div>
+          <div className="p-5 border-t-4 border-t-blue-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Orders Dispatched</span>
+            <div className="text-2xl font-bold text-white">{totalOrdersCount}</div>
+            <span className="text-[11px] text-slate-500 mt-1 block">Unique order dispatches</span>
           </div>
         </div>
       </div>
 
-      {/* SECTION 4: FILTERED VISUALIZATION — SHOWN ONLY WHEN DASHBOARD FILTERS ARE ACTIVE */}
+      {/* FILTERED VISUALIZATION (SHOWN ONLY WHEN 1 OR MORE DASHBOARD FILTERS ARE ACTIVE) */}
       {hasActiveDashboardFilters && (
-        <div className="space-y-4">
+        <div className="space-y-6 pt-2 border-t border-slate-800">
           <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-pink-400">
-                <PieIcon size={20} />
-                <h2 className="text-lg font-bold uppercase tracking-wider">Filtered Visualization</h2>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30">
-                  FILTERED
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Visual breakdown of the currently applied dashboard filters.
-              </p>
+            <div className="flex items-center gap-2 text-cyan-400">
+              <PieIcon size={20} />
+              <h2 className="text-lg font-bold uppercase tracking-wider">Filtered Visualization</h2>
             </div>
+            <span className="text-xs text-slate-400 font-mono">
+              Dataset: {orders.length} orders
+            </span>
           </div>
 
-          {totalOrdersCount === 0 ? (
-            <div className="p-8 text-center rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2">
-              <AlertCircle size={28} className="mx-auto text-slate-600" />
-              <p className="text-xs text-slate-400 font-medium">No visualization available because no orders match the selected filters.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-              {/* 1. Payment Mode Donut Card */}
-              <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <span className="text-sm font-bold text-white">Payment Mode</span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* 1. Payment Mode Filtered Donut */}
+            <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white">Payment Mode</h3>
                   {dashboardPaymentCardSlice && (
-                    <button
-                      onClick={() => setDashboardPaymentCardSlice(null)}
-                      className="text-[10px] text-cyan-400 hover:underline font-bold cursor-pointer"
-                    >
-                      Clear Slice ({dashboardPaymentCardSlice})
-                    </button>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase">
+                      Slice: {dashboardPaymentCardSlice}
+                    </span>
                   )}
                 </div>
+                {dashboardPaymentCardSlice && (
+                  <button
+                    onClick={() => setDashboardPaymentCardSlice(null)}
+                    className="text-xs text-cyan-400 hover:underline cursor-pointer font-semibold"
+                  >
+                    Clear Slice
+                  </button>
+                )}
+              </div>
+
+              {dashboardPaymentDonutData.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">No payment data for active filter.</div>
+              ) : (
                 <AnalyticsDonutChart
                   data={dashboardPaymentDonutData}
-                  centerValue={totalOrdersCount}
-                  centerLabel="ORDERS"
-                  height={220}
-                  innerRadius={45}
-                  outerRadius={75}
                   selectedSliceName={dashboardPaymentCardSlice}
-                  onSliceClick={entry => setDashboardPaymentCardSlice(prev => prev === entry.name ? null : entry.name)}
-                  emptyMessage="No payment mode data available"
+                  onSliceClick={entry => {
+                    const sliceName = String(entry.name || '');
+                    setDashboardPaymentCardSlice(prev => prev === sliceName ? null : sliceName);
+                  }}
                 />
-                <CardMatchingOrdersList
-                  orders={dashboardPaymentMatchingOrders}
-                  title={dashboardPaymentCardSlice ? `Matching Orders (${dashboardPaymentCardSlice})` : 'Matching Orders'}
-                />
-              </div>
+              )}
 
-              {/* 2. Product Mix Donut Card */}
-              <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <span className="text-sm font-bold text-white">Product Mix</span>
+              <CardMatchingOrdersList
+                orders={dashboardPaymentMatchingOrders}
+                title="Matching Orders"
+              />
+            </div>
+
+            {/* 2. Product Mix Filtered Donut */}
+            <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white">Product Mix</h3>
                   {dashboardProductCardSlice && (
-                    <button
-                      onClick={() => setDashboardProductCardSlice(null)}
-                      className="text-[10px] text-cyan-400 hover:underline font-bold cursor-pointer"
-                    >
-                      Clear Slice ({dashboardProductCardSlice})
-                    </button>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase">
+                      Slice: {dashboardProductCardSlice}
+                    </span>
                   )}
                 </div>
+                {dashboardProductCardSlice && (
+                  <button
+                    onClick={() => setDashboardProductCardSlice(null)}
+                    className="text-xs text-cyan-400 hover:underline cursor-pointer font-semibold"
+                  >
+                    Clear Slice
+                  </button>
+                )}
+              </div>
+
+              {dashboardProductDonutData.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">No product data for active filter.</div>
+              ) : (
                 <AnalyticsDonutChart
                   data={dashboardProductDonutData}
-                  centerValue={totalUnits}
-                  centerLabel="UNITS"
-                  height={220}
-                  innerRadius={45}
-                  outerRadius={75}
                   selectedSliceName={dashboardProductCardSlice}
-                  onSliceClick={entry => setDashboardProductCardSlice(prev => prev === entry.name ? null : entry.name)}
-                  emptyMessage="No product mix data available"
+                  onSliceClick={entry => {
+                    const sliceName = String(entry.name || '');
+                    setDashboardProductCardSlice(prev => prev === sliceName ? null : sliceName);
+                  }}
                 />
-                <CardMatchingOrdersList
-                  orders={dashboardProductMatchingOrders}
-                  title={dashboardProductCardSlice ? `Matching Orders (${dashboardProductCardSlice})` : 'Matching Orders'}
-                />
-              </div>
+              )}
 
-              {/* 3. Offer / Combo Mix Donut Card */}
-              <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <span className="text-sm font-bold text-white">Offer / Combo Mix</span>
+              <CardMatchingOrdersList
+                orders={dashboardProductMatchingOrders}
+                title="Matching Orders"
+              />
+            </div>
+
+            {/* 3. Offer / Combo Mix Filtered Donut */}
+            <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white">Offer / Combo Mix</h3>
                   {dashboardOfferCardSlice && (
-                    <button
-                      onClick={() => setDashboardOfferCardSlice(null)}
-                      className="text-[10px] text-cyan-400 hover:underline font-bold cursor-pointer"
-                    >
-                      Clear Slice ({dashboardOfferCardSlice})
-                    </button>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase">
+                      Slice: {dashboardOfferCardSlice}
+                    </span>
                   )}
                 </div>
+                {dashboardOfferCardSlice && (
+                  <button
+                    onClick={() => setDashboardOfferCardSlice(null)}
+                    className="text-xs text-cyan-400 hover:underline cursor-pointer font-semibold"
+                  >
+                    Clear Slice
+                  </button>
+                )}
+              </div>
+
+              {dashboardOfferDonutData.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">No offer data for active filter.</div>
+              ) : (
                 <AnalyticsDonutChart
                   data={dashboardOfferDonutData}
-                  centerValue={totalOrdersCount}
-                  centerLabel="ORDERS"
-                  height={220}
-                  innerRadius={45}
-                  outerRadius={75}
                   selectedSliceName={dashboardOfferCardSlice}
-                  onSliceClick={entry => setDashboardOfferCardSlice(prev => prev === entry.name ? null : entry.name)}
-                  emptyMessage="No offer mix data available"
+                  onSliceClick={entry => {
+                    const sliceName = String(entry.name || '');
+                    setDashboardOfferCardSlice(prev => prev === sliceName ? null : sliceName);
+                  }}
                 />
-                <CardMatchingOrdersList
-                  orders={dashboardOfferMatchingOrders}
-                  title={dashboardOfferCardSlice ? `Matching Orders (${dashboardOfferCardSlice})` : 'Matching Orders'}
-                />
-              </div>
+              )}
 
-              {/* 4. State Mix Donut Card */}
-              <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <span className="text-sm font-bold text-white">State Mix</span>
+              <CardMatchingOrdersList
+                orders={dashboardOfferMatchingOrders}
+                title="Matching Orders"
+              />
+            </div>
+
+            {/* 4. State Mix Filtered Donut */}
+            <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white">State Mix</h3>
                   {dashboardStateCardSlice && (
-                    <button
-                      onClick={() => setDashboardStateCardSlice(null)}
-                      className="text-[10px] text-cyan-400 hover:underline font-bold cursor-pointer"
-                    >
-                      Clear Slice ({dashboardStateCardSlice})
-                    </button>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase">
+                      Slice: {dashboardStateCardSlice}
+                    </span>
                   )}
                 </div>
+                {dashboardStateCardSlice && (
+                  <button
+                    onClick={() => setDashboardStateCardSlice(null)}
+                    className="text-xs text-cyan-400 hover:underline cursor-pointer font-semibold"
+                  >
+                    Clear Slice
+                  </button>
+                )}
+              </div>
+
+              {dashboardStateDonutData.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-500">No state data for active filter.</div>
+              ) : (
                 <AnalyticsDonutChart
                   data={dashboardStateDonutData}
-                  centerValue={totalOrdersCount}
-                  centerLabel="ORDERS"
-                  height={220}
-                  innerRadius={45}
-                  outerRadius={75}
                   selectedSliceName={dashboardStateCardSlice}
-                  onSliceClick={entry => setDashboardStateCardSlice(prev => prev === entry.name ? null : entry.name)}
-                  emptyMessage="No state mix data available"
+                  onSliceClick={entry => {
+                    const sliceName = String(entry.name || '');
+                    setDashboardStateCardSlice(prev => prev === sliceName ? null : sliceName);
+                  }}
                 />
-                <CardMatchingOrdersList
-                  orders={dashboardStateMatchingOrders}
-                  title={dashboardStateCardSlice ? `Matching Orders (${dashboardStateCardSlice})` : 'Matching Orders'}
-                />
-              </div>
+              )}
+
+              <CardMatchingOrdersList
+                orders={dashboardStateMatchingOrders}
+                title="Matching Orders"
+              />
             </div>
-          )}
+          </div>
         </div>
       )}
 
-      {/* SECTION 5: PRODUCT DISPATCH TODAY & COMBO DISPATCH TODAY */}
+      {/* LOWER DISPATCH BREAKDOWN CARDS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* PRODUCT DISPATCH TODAY */}
+        {/* PRODUCT-WISE DISPATCH CARD */}
         <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
-              <Package size={18} className="text-emerald-400" />
-              <span>Product Dispatch Today</span>
+            <div className="flex items-center gap-2 text-emerald-400">
+              <Package size={18} />
+              <h3 className="text-base font-extrabold text-white">Product-wise Dispatch</h3>
             </div>
             <button
               onClick={() => setIsProductModalOpen(true)}
-              className="text-xs text-emerald-400 hover:underline font-bold cursor-pointer"
+              className="text-xs text-cyan-400 hover:underline font-bold cursor-pointer"
             >
-              View All Products ({dispatchedProductsList.length})
+              View Full Breakdown
             </button>
           </div>
 
-          {dispatchedProductsList.length === 0 ? (
-            <p className="text-xs text-slate-500 py-4 text-center">No products dispatched for selected date/filters.</p>
-          ) : (
-            <div className="space-y-2">
-              {dispatchedProductsList.slice(0, 5).map(p => (
-                <div key={p.product} className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
-                  <span className="font-bold text-white truncate max-w-[240px]">{p.product}</span>
-                  <span className="font-mono font-bold text-emerald-400">{p.units} Units</span>
+          <div className="space-y-3">
+            {dispatchedProductsList.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500">No product dispatches for the selected date/filters.</div>
+            ) : (
+              dispatchedProductsList.slice(0, 5).map(p => (
+                <div key={p.product} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <span className="text-xs font-semibold text-slate-200 truncate max-w-[240px]">{p.product}</span>
+                  <span className="text-xs font-bold text-emerald-400 font-mono">{p.units} units</span>
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </div>
 
-        {/* COMBO DISPATCH TODAY */}
+        {/* COMBO-WISE DISPATCH CARD */}
         <div className="p-6 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
-              <Layers size={18} className="text-purple-400" />
-              <span>Combo Dispatch Today</span>
+            <div className="flex items-center gap-2 text-purple-400">
+              <Layers size={18} />
+              <h3 className="text-base font-extrabold text-white">Combo-wise Dispatch</h3>
             </div>
             <button
               onClick={() => setIsComboModalOpen(true)}
-              className="text-xs text-purple-400 hover:underline font-bold cursor-pointer"
+              className="text-xs text-cyan-400 hover:underline font-bold cursor-pointer"
             >
-              View All Combos ({dispatchedCombosList.length})
+              View Full Breakdown
             </button>
           </div>
 
-          {dispatchedCombosList.length === 0 ? (
-            <p className="text-xs text-slate-500 py-4 text-center">No combos dispatched for selected date/filters.</p>
-          ) : (
-            <div className="space-y-2">
-              {dispatchedCombosList.slice(0, 5).map(c => (
-                <div key={c.combo} className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
-                  <span className="font-bold text-white truncate max-w-[240px]">{c.combo}</span>
-                  <span className="font-mono font-bold text-purple-300">{c.orders} {c.orders === 1 ? 'Order' : 'Orders'}</span>
+          <div className="space-y-3">
+            {dispatchedCombosList.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500">No combo dispatches for the selected date/filters.</div>
+            ) : (
+              dispatchedCombosList.slice(0, 5).map(c => (
+                <div key={c.combo} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <span className="text-xs font-semibold text-slate-200 truncate max-w-[240px]">{c.combo}</span>
+                  <span className="text-xs font-bold text-purple-400 font-mono">{c.orders} orders ({c.units} units)</span>
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </div>
       </div>
 
-      {/* RECENT UPLOAD PANEL */}
+      {/* ORDER UPLOAD BATCHES AUDIT SUMMARY */}
       <div className="p-6 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div>
-            <h3 className="text-lg font-bold text-white">Order Upload Batches ({formatSalesDateShort(selectedSalesDate)})</h3>
+            <h3 className="text-lg font-bold text-white">
+              {formatSectionDateHeader('Order Upload Batches', salesStartDate, salesEndDate)}
+            </h3>
             <p className="text-xs text-slate-400">Order date and upload timestamp audit records</p>
           </div>
           <button
@@ -892,41 +959,52 @@ export const WebsiteDashboard: React.FC = () => {
         </div>
 
         {dateBatches.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">No upload batches recorded for {formatSalesDateShort(selectedSalesDate)}.</div>
+          <div className="p-8 text-center text-slate-400 text-sm">
+            No upload batches recorded for {formatDateRangeDisplay(salesStartDate, salesEndDate)}.
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left text-slate-400">
               <thead className="text-xs uppercase bg-slate-950/80 text-slate-400 border-b border-slate-800">
                 <tr className="border-b border-slate-800">
-                  <th className="px-4 py-3 font-semibold">File Name</th>
-                  <th className="px-4 py-3 font-semibold">Order Date</th>
-                  <th className="px-4 py-3 font-semibold">Upload Date</th>
-                  <th className="px-4 py-3 font-semibold">Source Rows</th>
-                  <th className="px-4 py-3 font-semibold">Unique Orders</th>
-                  <th className="px-4 py-3 font-semibold">Price Mode</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                  <th scope="col" className="px-4 py-3">File Name</th>
+                  <th scope="col" className="px-4 py-3">Upload Time</th>
+                  <th scope="col" className="px-4 py-3">Order Date Range</th>
+                  <th scope="col" className="px-4 py-3 text-right">Source Rows</th>
+                  <th scope="col" className="px-4 py-3 text-right">Unique Orders</th>
+                  <th scope="col" className="px-4 py-3 text-right">Duplicates Merged</th>
+                  <th scope="col" className="px-4 py-3 text-center">Status</th>
+                  <th scope="col" className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {dateBatches.map(b => (
-                  <tr key={b.id} className="border-b border-slate-800/50 hover:bg-white/5 transition-colors">
-                    <td className="px-4 py-3 font-medium text-white">{b.file_name}</td>
-                    <td className="px-4 py-3 font-semibold text-cyan-300 whitespace-nowrap">
-                      {b.order_date_range || (b.order_date ? formatSalesDateShort(b.order_date) : '-')}
+              <tbody>
+                {dateBatches.map((b) => (
+                  <tr key={b.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
+                    <td className="px-4 py-3.5 font-semibold text-white flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      {b.file_name}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-400 font-mono text-xs">
-                      {new Date(b.uploaded_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}
+                    <td className="px-4 py-3.5 text-slate-300 text-xs font-mono">
+                      {new Date(b.uploaded_at).toLocaleString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true
+                      })}
                     </td>
-                    <td className="px-4 py-3 font-medium text-blue-400">{b.total_source_rows}</td>
-                    <td className="px-4 py-3 font-medium text-emerald-400">{b.total_unique_orders}</td>
-                    <td className="px-4 py-3 text-slate-400">{b.price_interpretation}</td>
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-1 text-[10px] font-bold uppercase rounded-md bg-emerald-500/20 text-emerald-400">
+                    <td className="px-4 py-3.5 text-slate-300 text-xs font-mono">
+                      {b.order_date_range || b.order_date}
+                    </td>
+                    <td className="px-4 py-3.5 text-right text-slate-300 font-mono">{b.total_source_rows}</td>
+                    <td className="px-4 py-3.5 text-right font-bold text-cyan-400 font-mono">{b.total_unique_orders}</td>
+                    <td className="px-4 py-3.5 text-right text-amber-400/90 font-mono">{b.duplicate_order_count}</td>
+                    <td className="px-4 py-3.5 text-center">
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                         {b.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3.5 text-right">
                       <button
                         onClick={() => handleDeleteBatch(b.id, b.file_name)}
                         className="p-1 text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
@@ -943,11 +1021,14 @@ export const WebsiteDashboard: React.FC = () => {
         )}
       </div>
 
-      {/* ADVANCED DASHBOARD FILTER DRAWER COMPONENT */}
+      {/* FILTER DRAWER */}
       <DashboardFilterDrawer
         isOpen={isFilterDrawerOpen}
         onClose={() => setIsFilterDrawerOpen(false)}
-        selectedDate={selectedSalesDate}
+        selectedDate={salesStartDate}
+        startDate={salesStartDate}
+        endDate={salesEndDate}
+        activePeriodDisplay={formatDateRangeDisplay(salesStartDate, salesEndDate)}
         allOrders={allOrders}
         batches={batches}
         draftFilters={draftFilters}
@@ -956,19 +1037,29 @@ export const WebsiteDashboard: React.FC = () => {
         onResetAll={handleResetDrawerFilters}
       />
 
-      {/* DISPATCH BREAKDOWN MODALS */}
+      {/* PRODUCT DISPATCH MODAL */}
       <ProductDispatchModal
         isOpen={isProductModalOpen}
         onClose={() => setIsProductModalOpen(false)}
         products={dispatchedProductsList}
-        selectedDate={selectedSalesDate}
+        selectedDate={formatDateRangeDisplay(salesStartDate, salesEndDate)}
       />
 
+      {/* COMBO DISPATCH MODAL */}
       <ComboDispatchModal
         isOpen={isComboModalOpen}
         onClose={() => setIsComboModalOpen(false)}
         combos={dispatchedCombosList}
-        selectedDate={selectedSalesDate}
+        selectedDate={formatDateRangeDisplay(salesStartDate, salesEndDate)}
+      />
+
+      {/* DATE RANGE PICKER MODAL */}
+      <DateRangePickerModal
+        isOpen={isDateModalOpen}
+        onClose={() => setIsDateModalOpen(false)}
+        startDate={salesStartDate}
+        endDate={salesEndDate}
+        onApply={(start, end) => updateDateRangeParams(start, end)}
       />
     </div>
   );
