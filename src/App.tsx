@@ -54,6 +54,13 @@ const TicketDetails = lazy(() => import('./modules/customer-tickets/TicketDetail
 // Logistics
 const LogisticsPage = lazy(() => import('./modules/Logistics/LogisticsPage').then(module => ({ default: module.LogisticsPage })));
 
+// Sales Department
+const SalesHome = lazy(() => import('./modules/sales/SalesHome').then(module => ({ default: module.SalesHome })));
+const WebsiteSales = lazy(() => import('./modules/sales/WebsiteSales').then(module => ({ default: module.WebsiteSales })));
+const AmazonSales = lazy(() => import('./modules/sales/AmazonSales').then(module => ({ default: module.AmazonSales })));
+const FlipkartSales = lazy(() => import('./modules/sales/FlipkartSales').then(module => ({ default: module.FlipkartSales })));
+const MeeshoSales = lazy(() => import('./modules/sales/MeeshoSales').then(module => ({ default: module.MeeshoSales })));
+
 // Fallback loader
 const RouteLoader = () => (
   <div className="flex h-[calc(100vh-64px)] w-full items-center justify-center">
@@ -146,7 +153,12 @@ function App() {
                   {/* Logistics Department */}
                   <Route path="/logistics" element={<LogisticsPage />} />
 
-                  <Route path="/sales" element={<PlaceholderPage title="Sales" icon={<TrendingUp size={32} />} />} />
+                  {/* Sales Department */}
+                  <Route path="/sales" element={<SalesHome />} />
+                  <Route path="/sales/website/*" element={<WebsiteSales />} />
+                  <Route path="/sales/amazon" element={<AmazonSales />} />
+                  <Route path="/sales/flipkart" element={<FlipkartSales />} />
+                  <Route path="/sales/meesho" element={<MeeshoSales />} />
                   <Route path="/documents" element={<PlaceholderPage title="Document Room" icon={<FolderOpen size={32} />} />} />
                   <Route path="/marketing" element={<MarketingHome />} />
                   <Route path="/tasks" element={<TaskManager />} />
