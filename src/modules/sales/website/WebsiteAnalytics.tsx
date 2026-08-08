@@ -45,7 +45,10 @@ import {
   formatSalesDateShort,
   shiftDateString,
   formatPhoneNumber,
-  getUploadBatchesForAnalyticsPeriod
+  getUploadBatchesForAnalyticsPeriod,
+  formatIndianNumber,
+  formatIndianCurrency,
+  formatMetricValue
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -426,6 +429,7 @@ export const WebsiteAnalytics: React.FC = () => {
   const partialCodAdvance = useMemo(() => partialCodOrders.reduce((sum, o) => sum + (Number(o.advance_paid) || 0), 0), [partialCodOrders]);
   const partialCodRemaining = useMemo(() => partialCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable) || 0), 0), [partialCodOrders]);
 
+  const fullCodValue = useMemo(() => codOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0), [codOrders]);
   const fullCodReceivable = useMemo(() => codOrders.reduce((sum, o) => sum + (Number(o.remaining_payable ?? o.price) || 0), 0), [codOrders]);
   const totalCodReceivable = partialCodRemaining + fullCodReceivable;
 
@@ -1178,42 +1182,49 @@ export const WebsiteAnalytics: React.FC = () => {
       >
         <div className="p-5 border-t-4 border-t-blue-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Orders</span>
-          <div className="text-2xl font-bold text-white">{totalOrdersCount}</div>
+          <div className="text-2xl font-bold text-white">{formatIndianNumber(totalOrdersCount)}</div>
         </div>
         
         <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Revenue</span>
-          <div className="text-2xl font-bold text-emerald-400">₹{totalRevenue.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-emerald-400">{formatIndianCurrency(totalRevenue)}</div>
         </div>
 
         <div className="p-5 border-t-4 border-t-cyan-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Units</span>
-          <div className="text-2xl font-bold text-cyan-300">{totalUnits}</div>
+          <div className="text-2xl font-bold text-cyan-300">{formatIndianNumber(totalUnits)}</div>
         </div>
 
         <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Avg Order Value</span>
-          <div className="text-2xl font-bold text-purple-300">₹{avgOrderValue.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-purple-300">{formatIndianCurrency(avgOrderValue)}</div>
         </div>
 
         <div className="p-5 border-t-4 border-t-emerald-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Prepaid Orders</span>
-          <div className="text-2xl font-bold text-emerald-400">{prepaidOrders.length}</div>
+          <div className="text-2xl font-bold text-emerald-400">{formatIndianNumber(prepaidOrders.length)}</div>
+          <div className="text-sm font-bold text-emerald-300 mt-1">{formatIndianCurrency(prepaidRevenue)}</div>
+          <span className="text-[10px] text-slate-500 block">Full payment received</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-purple-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Partial COD Orders</span>
-          <div className="text-2xl font-bold text-purple-300">{partialCodOrders.length}</div>
+          <div className="text-2xl font-bold text-purple-300">{formatIndianNumber(partialCodOrders.length)}</div>
+          <div className="text-sm font-bold text-purple-300 mt-1">{formatIndianCurrency(partialCodValue)}</div>
+          <span className="text-[10px] text-purple-400/90 block font-medium">{formatIndianCurrency(partialCodRemaining)} remaining COD</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Full COD Orders</span>
-          <div className="text-2xl font-bold text-amber-400">{codOrders.length}</div>
+          <div className="text-2xl font-bold text-amber-400">{formatIndianNumber(codOrders.length)}</div>
+          <div className="text-sm font-bold text-amber-300 mt-1">{formatIndianCurrency(fullCodValue)}</div>
+          <span className="text-[10px] text-amber-400/90 block font-medium">{formatIndianCurrency(fullCodReceivable)} full COD</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total COD Receivable</span>
-          <div className="text-2xl font-bold text-pink-300">₹{totalCodReceivable.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-pink-300">{formatIndianCurrency(totalCodReceivable)}</div>
+          <span className="text-[10px] text-slate-500 block">Partial + Full COD pending</span>
         </div>
       </div>
 
@@ -1323,7 +1334,8 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={statePieData}
-                centerValue={stateMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : stateMetric === 'units' ? totalUnits : totalOrdersCount}
+                metricType={stateMetric}
+                centerValue={formatMetricValue(stateMetric === 'revenue' ? totalRevenue : stateMetric === 'units' ? totalUnits : totalOrdersCount, stateMetric, { appendUnitsSuffix: true })}
                 centerLabel={stateMetric === 'revenue' ? "TOTAL REVENUE" : stateMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
                 selectedSliceName={drillDownState}
                 onSliceClick={entry => {
@@ -1361,9 +1373,9 @@ export const WebsiteAnalytics: React.FC = () => {
                         {statePieData.map(s => (
                           <tr key={s.name} className="hover:bg-slate-800/40 transition-colors">
                             <td className="py-2 px-3 font-bold text-white font-sans">{s.name}</td>
-                            <td className="py-2 px-3 text-cyan-300">{s.orders}</td>
-                            <td className="py-2 px-3 text-emerald-400">₹{s.revenue.toLocaleString()}</td>
-                            <td className="py-2 px-3 text-slate-300">{s.units}</td>
+                            <td className="py-2 px-3 text-cyan-300">{formatIndianNumber(s.orders)}</td>
+                            <td className="py-2 px-3 text-emerald-400">{formatIndianCurrency(s.revenue)}</td>
+                            <td className="py-2 px-3 text-slate-300">{formatIndianNumber(s.units)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1397,7 +1409,8 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={cityDonutData}
-                centerValue={cityMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : cityMetric === 'units' ? totalUnits : totalOrdersCount}
+                metricType={cityMetric}
+                centerValue={formatMetricValue(cityMetric === 'revenue' ? totalRevenue : cityMetric === 'units' ? totalUnits : totalOrdersCount, cityMetric, { appendUnitsSuffix: true })}
                 centerLabel={cityMetric === 'revenue' ? "TOTAL REVENUE" : cityMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
                 selectedSliceName={drillDownCity}
                 onSliceClick={entry => {
@@ -1439,7 +1452,8 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={pincodePieData}
-                centerValue={pincodeMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : pincodeMetric === 'units' ? totalUnits : totalOrdersCount}
+                metricType={pincodeMetric}
+                centerValue={formatMetricValue(pincodeMetric === 'revenue' ? totalRevenue : pincodeMetric === 'units' ? totalUnits : totalOrdersCount, pincodeMetric, { appendUnitsSuffix: true })}
                 centerLabel={pincodeMetric === 'revenue' ? "TOTAL REVENUE" : pincodeMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
                 selectedSliceName={pincodeCardSlice}
                 onSliceClick={entry => setPincodeCardSlice(prev => prev === entry.name ? null : entry.name)}
@@ -1473,7 +1487,8 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={productDonutData}
-                centerValue={productMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : productMetric === 'orders' ? totalOrdersCount : totalUnits}
+                metricType={productMetric}
+                centerValue={formatMetricValue(productMetric === 'revenue' ? totalRevenue : productMetric === 'orders' ? totalOrdersCount : totalUnits, productMetric, { appendUnitsSuffix: true })}
                 centerLabel={productMetric === 'revenue' ? "TOTAL REVENUE" : productMetric === 'orders' ? "TOTAL ORDERS" : "TOTAL UNITS"}
                 selectedSliceName={productCardSlice}
                 onSliceClick={entry => setProductCardSlice(prev => prev === entry.name ? null : entry.name)}
@@ -1510,7 +1525,8 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={offerPieData}
-                centerValue={offerMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : offerMetric === 'units' ? totalUnits : totalOrdersCount}
+                metricType={offerMetric}
+                centerValue={formatMetricValue(offerMetric === 'revenue' ? totalRevenue : offerMetric === 'units' ? totalUnits : totalOrdersCount, offerMetric, { appendUnitsSuffix: true })}
                 centerLabel={offerMetric === 'revenue' ? "TOTAL REVENUE" : offerMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
                 selectedSliceName={offerCardSlice}
                 onSliceClick={entry => setOfferCardSlice(prev => prev === entry.name ? null : entry.name)}
@@ -1544,7 +1560,8 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={orderValueDonutData}
-                centerValue={orderValueMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : totalOrdersCount}
+                metricType={orderValueMetric}
+                centerValue={formatMetricValue(orderValueMetric === 'revenue' ? totalRevenue : totalOrdersCount, orderValueMetric, { appendUnitsSuffix: true })}
                 centerLabel={orderValueMetric === 'revenue' ? "TOTAL REVENUE" : "TOTAL ORDERS"}
                 selectedSliceName={orderValueCardSlice}
                 onSliceClick={entry => setOrderValueCardSlice(prev => prev === entry.name ? null : entry.name)}
@@ -1576,7 +1593,8 @@ export const WebsiteAnalytics: React.FC = () => {
                 <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider text-center">Product Composition</h4>
                 <AnalyticsDonutChart
                   data={orderCompositionDonuts.productDonut}
-                  centerValue={totalOrdersCount}
+                  metricType="orders"
+                  centerValue={formatIndianNumber(totalOrdersCount)}
                   centerLabel="TOTAL ORDERS"
                   height={220}
                   innerRadius={45}
@@ -1594,7 +1612,8 @@ export const WebsiteAnalytics: React.FC = () => {
                 <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider text-center">Quantity Composition</h4>
                 <AnalyticsDonutChart
                   data={orderCompositionDonuts.quantityDonut}
-                  centerValue={totalOrdersCount}
+                  metricType="orders"
+                  centerValue={formatIndianNumber(totalOrdersCount)}
                   centerLabel="TOTAL ORDERS"
                   height={220}
                   innerRadius={45}
@@ -1626,7 +1645,8 @@ export const WebsiteAnalytics: React.FC = () => {
 
             <AnalyticsDonutChart
               data={codReceivableDonutData}
-              centerValue={`₹${(partialCodAdvance + totalCodReceivable).toLocaleString()}`}
+              metricType="revenue"
+              centerValue={formatIndianCurrency(partialCodAdvance + totalCodReceivable)}
               centerLabel="TOTAL COD VALUE"
               selectedSliceName={codCardSlice}
               onSliceClick={entry => setCodCardSlice(prev => prev === entry.name ? null : entry.name)}

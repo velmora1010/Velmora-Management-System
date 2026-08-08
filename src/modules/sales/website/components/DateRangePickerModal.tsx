@@ -20,6 +20,7 @@ export type DateRangePreset =
   | 'this_week'
   | '7days'
   | 'this_month'
+  | 'previous_month'
   | '30days'
   | 'this_year'
   | 'custom';
@@ -63,6 +64,59 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
   const [viewYear, setViewYear] = useState<number>(initialYearMonth.year);
   const [viewMonth, setViewMonth] = useState<number>(initialYearMonth.month);
 
+  // Dynamically compute exact date range bounds for all 8 quick range presets
+  const presetsList = useMemo(() => {
+    const parts = todayStr.split('-').map(Number);
+    const curYear = parts[0] || 2026;
+    const curMonth = parts[1] || 8;
+    const curDay = parts[2] || 8;
+
+    // Yesterday
+    const yestStr = shiftDateString(todayStr, -1);
+
+    // This Week (Monday of current week to today)
+    const dt = new Date(curYear, curMonth - 1, curDay);
+    const day = dt.getDay(); // 0 is Sunday
+    const diffToMon = day === 0 ? -6 : 1 - day;
+    const monDt = new Date(dt);
+    monDt.setDate(dt.getDate() + diffToMon);
+    const monStr = `${monDt.getFullYear()}-${String(monDt.getMonth() + 1).padStart(2, '0')}-${String(monDt.getDate()).padStart(2, '0')}`;
+
+    // Last 7 Days (Inclusive 7-day window)
+    const last7Str = shiftDateString(todayStr, -6);
+
+    // This Month (1st of current month to today)
+    const thisMonthStart = `${curYear}-${String(curMonth).padStart(2, '0')}-01`;
+
+    // Previous Month (Full previous calendar month)
+    let prevYear = curYear;
+    let prevMonth = curMonth - 1;
+    if (prevMonth === 0) {
+      prevMonth = 12;
+      prevYear = curYear - 1;
+    }
+    const daysInPrev = new Date(prevYear, prevMonth, 0).getDate();
+    const prevMonthStart = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`;
+    const prevMonthEnd = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(daysInPrev).padStart(2, '0')}`;
+
+    // Last 30 Days (Rolling 30-day window)
+    const last30Str = shiftDateString(todayStr, -29);
+
+    // This Year (Jan 1 of current year to today)
+    const thisYearStart = `${curYear}-01-01`;
+
+    return [
+      { id: 'today' as DateRangePreset, label: 'Today', start: todayStr, end: todayStr, icon: true },
+      { id: 'yesterday' as DateRangePreset, label: 'Yesterday', start: yestStr, end: yestStr },
+      { id: 'this_week' as DateRangePreset, label: 'This Week', start: monStr, end: todayStr },
+      { id: '7days' as DateRangePreset, label: 'Last 7 Days', start: last7Str, end: todayStr },
+      { id: 'this_month' as DateRangePreset, label: 'This Month', start: thisMonthStart, end: todayStr },
+      { id: 'previous_month' as DateRangePreset, label: 'Previous Month', start: prevMonthStart, end: prevMonthEnd },
+      { id: '30days' as DateRangePreset, label: 'Last 30 Days', start: last30Str, end: todayStr },
+      { id: 'this_year' as DateRangePreset, label: 'This Year', start: thisYearStart, end: todayStr }
+    ];
+  }, [todayStr]);
+
   useEffect(() => {
     if (isOpen) {
       setDraftStart(startDate || todayStr);
@@ -85,55 +139,23 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Quick Preset Helper
-  const applyPreset = (preset: DateRangePreset) => {
-    let start = todayStr;
-    let end = todayStr;
+  // Apply Quick Preset
+  const applyPreset = (presetId: DateRangePreset) => {
+    const presetObj = presetsList.find(p => p.id === presetId);
+    if (!presetObj) return;
 
-    if (preset === 'today') {
-      start = todayStr;
-      end = todayStr;
-    } else if (preset === 'yesterday') {
-      const yest = shiftDateString(todayStr, -1);
-      start = yest;
-      end = yest;
-    } else if (preset === 'this_week') {
-      const parts = todayStr.split('-').map(Number);
-      const dt = new Date(parts[0], parts[1] - 1, parts[2]);
-      const day = dt.getDay(); // 0 is Sunday
-      const diffToMon = day === 0 ? -6 : 1 - day;
-      const monDt = new Date(dt);
-      monDt.setDate(dt.getDate() + diffToMon);
-      
-      const monStr = `${monDt.getFullYear()}-${String(monDt.getMonth() + 1).padStart(2, '0')}-${String(monDt.getDate()).padStart(2, '0')}`;
-      start = monStr;
-      end = todayStr;
-    } else if (preset === '7days') {
-      start = shiftDateString(todayStr, -6);
-      end = todayStr;
-    } else if (preset === 'this_month') {
-      const parts = todayStr.split('-').map(Number);
-      start = `${parts[0]}-${String(parts[1]).padStart(2, '0')}-01`;
-      end = todayStr;
-    } else if (preset === '30days') {
-      start = shiftDateString(todayStr, -29);
-      end = todayStr;
-    } else if (preset === 'this_year') {
-      const parts = todayStr.split('-').map(Number);
-      start = `${parts[0]}-01-01`;
-      end = todayStr;
-    }
+    const { start, end } = presetObj;
 
     setDraftStart(start);
     setDraftEnd(end);
 
-    // Update view to preset start date
+    // Update calendar view to preset start date
     const startParts = start.split('-').map(Number);
     setViewYear(startParts[0]);
     setViewMonth(startParts[1] - 1);
 
-    // Immediately apply for presets
-    onApply(start, end, preset);
+    // Immediately apply preset and close modal
+    onApply(start, end, presetId);
     onClose();
   };
 
@@ -258,59 +280,24 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block px-3 py-1 mb-1">
               Quick Ranges
             </span>
-            <button
-              onClick={() => applyPreset('today')}
-              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                draftStart === todayStr && draftEnd === todayStr
-                  ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-              }`}
-            >
-              <span>Today</span>
-              <Clock size={13} className="text-cyan-400" />
-            </button>
-
-            <button
-              onClick={() => applyPreset('yesterday')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Yesterday
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_week')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Week
-            </button>
-
-            <button
-              onClick={() => applyPreset('7days')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Last 7 Days
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_month')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Month
-            </button>
-
-            <button
-              onClick={() => applyPreset('30days')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Last 30 Days
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_year')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Year
-            </button>
+            {presetsList.map(preset => {
+              const isSelected = draftStart === preset.start && draftEnd === preset.end;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => applyPreset(preset.id)}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm'
+                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white border border-transparent'
+                  }`}
+                >
+                  <span>{preset.label}</span>
+                  {preset.icon && <Clock size={13} className="text-cyan-400" />}
+                </button>
+              );
+            })}
           </div>
 
           {/* DUAL CALENDAR MONTH VIEWS */}

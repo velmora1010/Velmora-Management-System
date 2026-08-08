@@ -1242,3 +1242,49 @@ export function getUploadBatchesForAnalyticsPeriod(
 
   return periodOptions;
 }
+
+// ============================================================================
+// CENTRAL METRIC FORMATTING HELPERS
+// ============================================================================
+
+/**
+ * Format a number using Indian locale formatting (e.g., 1,034 or 17,68,829)
+ */
+export function formatIndianNumber(val: number): string {
+  if (isNaN(val) || val === null || val === undefined) return '0';
+  return Math.round(val).toLocaleString('en-IN');
+}
+
+/**
+ * Format currency using Indian Rupee format (e.g., ₹17,68,829)
+ */
+export function formatIndianCurrency(val: number): string {
+  if (isNaN(val) || val === null || val === undefined) return '₹0';
+  return `₹${Math.round(val).toLocaleString('en-IN')}`;
+}
+
+/**
+ * Formats a metric value cleanly based on metric type:
+ * - 'orders' | 'count' -> Integer count formatted with Indian locale, NO ₹ symbol (e.g., "1,034")
+ * - 'revenue' | 'aov' | 'cod' | 'price' -> Currency formatted with ₹ symbol (e.g., "₹17,68,829")
+ * - 'units' -> Quantity with optional units suffix, NO ₹ symbol (e.g., "4,389" or "4,389 units")
+ */
+export function formatMetricValue(
+  val: number, 
+  metric: 'orders' | 'revenue' | 'units' | 'aov' | 'cod' | string,
+  options?: { appendUnitsSuffix?: boolean }
+): string {
+  const metricLower = (metric || '').toLowerCase();
+  
+  if (metricLower === 'revenue' || metricLower === 'aov' || metricLower === 'cod' || metricLower === 'price' || metricLower === 'amount') {
+    return formatIndianCurrency(val);
+  }
+  
+  if (metricLower === 'units') {
+    const formatted = formatIndianNumber(val);
+    return options?.appendUnitsSuffix ? `${formatted} units` : formatted;
+  }
+  
+  // Default to integer count for 'orders', 'count', or unknown metrics (NO ₹ SYMBOL!)
+  return formatIndianNumber(val);
+}

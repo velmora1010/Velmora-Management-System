@@ -1,6 +1,7 @@
 import React from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { PieChart as PieIcon, AlertCircle } from 'lucide-react';
+import { formatMetricValue, formatIndianCurrency, formatIndianNumber } from '../websiteSalesUtils';
 
 export interface DonutSliceData {
   name: string;
@@ -33,6 +34,7 @@ export interface AnalyticsDonutChartProps {
   data: DonutSliceData[];
   centerValue?: string | number;
   centerLabel?: string;
+  metricType?: 'orders' | 'revenue' | 'units' | string;
   valueFormatter?: (value: number, item: DonutSliceData) => string;
   onSliceClick?: (item: DonutSliceData) => void;
   selectedSliceName?: string | null;
@@ -46,6 +48,7 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
   data,
   centerValue,
   centerLabel = 'TOTAL',
+  metricType,
   valueFormatter,
   onSliceClick,
   selectedSliceName,
@@ -77,9 +80,7 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
 
       const mainValFormatted = valueFormatter 
         ? valueFormatter(d.value, d)
-        : typeof d.value === 'number' && (d.revenue !== undefined || d.name?.toLowerCase().includes('revenue') || d.name?.toLowerCase().includes('receivable') || d.name?.toLowerCase().includes('advance'))
-          ? `₹${d.value.toLocaleString()}`
-          : d.value.toLocaleString();
+        : formatMetricValue(d.value, metricType || (d.revenue !== undefined || d.name?.toLowerCase().includes('revenue') || d.name?.toLowerCase().includes('receivable') || d.name?.toLowerCase().includes('advance') ? 'revenue' : 'orders'));
 
       return (
         <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl text-xs space-y-1 font-mono z-50 min-w-[150px]">
@@ -90,10 +91,10 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
             <p className="text-cyan-300">
               Value: <strong>{mainValFormatted}</strong> ({pct}%)
             </p>
-            {d.orders !== undefined && <p className="text-slate-300">Orders: <strong>{d.orders}</strong></p>}
-            {d.revenue !== undefined && <p className="text-emerald-400">Revenue: <strong>₹{d.revenue.toLocaleString()}</strong></p>}
-            {d.units !== undefined && <p className="text-purple-300">Units: <strong>{d.units}</strong></p>}
-            {d.aov !== undefined && <p className="text-pink-300">AOV: <strong>₹{d.aov.toLocaleString()}</strong></p>}
+            {d.orders !== undefined && <p className="text-slate-300">Orders: <strong>{formatIndianNumber(d.orders)}</strong></p>}
+            {d.revenue !== undefined && <p className="text-emerald-400">Revenue: <strong>{formatIndianCurrency(d.revenue)}</strong></p>}
+            {d.units !== undefined && <p className="text-purple-300">Units: <strong>{formatIndianNumber(d.units)}</strong></p>}
+            {d.aov !== undefined && <p className="text-pink-300">AOV: <strong>{formatIndianCurrency(d.aov)}</strong></p>}
             {d.city !== undefined && d.city !== d.name && <p className="text-slate-400">City: <strong>{d.city}</strong></p>}
             {d.state !== undefined && d.state !== d.name && <p className="text-slate-400">State: <strong>{d.state}</strong></p>}
           </div>
@@ -143,7 +144,7 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
         {centerValue !== undefined && (
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-2">
             <span className="text-xl sm:text-2xl font-extrabold text-white tracking-tight drop-shadow-md">
-              {typeof centerValue === 'number' ? centerValue.toLocaleString() : centerValue}
+              {typeof centerValue === 'number' ? formatMetricValue(centerValue, metricType || 'orders') : centerValue}
             </span>
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mt-0.5">
               {centerLabel}
@@ -161,9 +162,7 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
 
           const formattedVal = valueFormatter 
             ? valueFormatter(item.value, item)
-            : typeof item.value === 'number' && (item.revenue !== undefined || item.name?.toLowerCase().includes('revenue') || item.name?.toLowerCase().includes('receivable') || item.name?.toLowerCase().includes('advance'))
-              ? `₹${item.value.toLocaleString()}`
-              : item.value.toLocaleString();
+            : formatMetricValue(item.value, metricType || (item.revenue !== undefined || item.name?.toLowerCase().includes('revenue') || item.name?.toLowerCase().includes('receivable') || item.name?.toLowerCase().includes('advance') ? 'revenue' : 'orders'));
 
           return (
             <div
