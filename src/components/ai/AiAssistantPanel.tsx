@@ -16,8 +16,23 @@ export const AiAssistantPanel: React.FC = () => {
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [prompts, setPrompts] = useState<SuggestedPrompt[]>([]);
+  const [hasRightDrawerOpen, setHasRightDrawerOpen] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Monitor DOM for open right-side drawers to reposition AI Assistant launcher
+  useEffect(() => {
+    const checkRightDrawer = () => {
+      const drawerEl = document.querySelector('[data-right-drawer="true"]') || document.querySelector('.fixed.inset-y-0.right-0');
+      setHasRightDrawerOpen(!!drawerEl);
+    };
+
+    checkRightDrawer();
+    const observer = new MutationObserver(checkRightDrawer);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+
+    return () => observer.disconnect();
+  }, []);
 
   // Initial welcome message and route prompts
   useEffect(() => {
@@ -101,7 +116,9 @@ export const AiAssistantPanel: React.FC = () => {
       {/* Floating Trigger Button */}
       <button
         onClick={() => setIsOpen(prev => !prev)}
-        className="fixed bottom-6 right-6 z-50 p-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-full shadow-2xl transition-all duration-300 flex items-center gap-2 group hover:scale-105"
+        className={`fixed bottom-6 z-50 p-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-full shadow-2xl transition-all duration-300 flex items-center gap-2 group hover:scale-105 ${
+          hasRightDrawerOpen ? 'left-6 right-auto' : 'right-6'
+        }`}
         title="Velmora AI Business Assistant"
       >
         <Sparkles size={22} className="animate-spin-slow group-hover:rotate-12 transition-transform" />
@@ -110,7 +127,9 @@ export const AiAssistantPanel: React.FC = () => {
 
       {/* Slide-Out AI Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-20 right-4 sm:right-6 w-96 max-w-[calc(100vw-2rem)] bg-card border border-border rounded-2xl shadow-2xl z-50 flex flex-col h-[560px] max-h-[80vh] overflow-hidden animate-in slide-in-from-bottom-5 duration-300">
+        <div className={`fixed bottom-20 z-50 w-96 max-w-[calc(100vw-2rem)] bg-card border border-border rounded-2xl shadow-2xl flex flex-col h-[560px] max-h-[80vh] overflow-hidden animate-in slide-in-from-bottom-5 duration-300 ${
+          hasRightDrawerOpen ? 'left-4 sm:left-6 right-auto' : 'right-4 sm:right-6'
+        }`}>
           
           {/* Panel Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-slate-900/80 backdrop-blur-md">

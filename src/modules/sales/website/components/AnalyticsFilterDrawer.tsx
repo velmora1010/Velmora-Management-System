@@ -12,6 +12,7 @@ import type { WebsiteConsolidatedOrder, WebsiteUploadBatch } from '../types';
 import type { MultiSelectFilterState } from '../WebsiteAnalytics';
 import { MultiSelectDropdown, OptionItem } from './MultiSelectDropdown';
 import { getUploadBatchesForAnalyticsPeriod, getTodayInBusinessTimezone } from '../websiteSalesUtils';
+import { useWebsiteSalesDateRange } from '../context/WebsiteSalesDateRangeContext';
 
 interface AnalyticsFilterDrawerProps {
   isOpen: boolean;
@@ -52,6 +53,9 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
   onApply,
   onResetAll
 }) => {
+  // Shared Website Sales Date Range Context
+  const { startDate, endDate } = useWebsiteSalesDateRange();
+
   // Listen for Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -65,20 +69,20 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
 
   // Orders falling strictly within the selected Analytics date/period
   const periodOrders = useMemo(() => {
-    const start = draftFilters.startDate || getTodayInBusinessTimezone();
-    const end = draftFilters.endDate || getTodayInBusinessTimezone();
+    const start = startDate || getTodayInBusinessTimezone();
+    const end = endDate || getTodayInBusinessTimezone();
     return allOrders.filter(o => {
       const d = o.order_date;
       return d && d >= start && d <= end;
     });
-  }, [allOrders, draftFilters.startDate, draftFilters.endDate]);
+  }, [allOrders, startDate, endDate]);
 
   // Count of automatically included upload batch files for the selected period
   const periodBatchesCount = useMemo(() => {
-    const start = draftFilters.startDate || getTodayInBusinessTimezone();
-    const end = draftFilters.endDate || getTodayInBusinessTimezone();
+    const start = startDate || getTodayInBusinessTimezone();
+    const end = endDate || getTodayInBusinessTimezone();
     return getUploadBatchesForAnalyticsPeriod(batches, allOrders, start, end).length;
-  }, [batches, allOrders, draftFilters.startDate, draftFilters.endDate]);
+  }, [batches, allOrders, startDate, endDate]);
 
   // Dynamic filter options derived strictly from active period orders
   const stateOptions: OptionItem[] = useMemo(() => {
@@ -134,6 +138,27 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
     return Array.from(set).sort().map(p => ({ label: p, value: p }));
   }, [periodOrders]);
 
+  // Auto-clean invalid child filter selections when parent filters change
+  useEffect(() => {
+    if (draftFilters.states && draftFilters.states.length > 0) {
+      const validCityValues = new Set(cityOptions.map(c => c.value));
+      const filteredCities = draftFilters.cities.filter(c => validCityValues.has(c));
+      if (filteredCities.length !== draftFilters.cities.length) {
+        setDraftFilters(prev => ({ ...prev, cities: filteredCities, pincodes: [] }));
+      }
+    }
+  }, [draftFilters.states, cityOptions]);
+
+  useEffect(() => {
+    if (draftFilters.cities && draftFilters.cities.length > 0) {
+      const validPinValues = new Set(pincodeOptions.map(p => p.value));
+      const filteredPins = draftFilters.pincodes.filter(p => validPinValues.has(p));
+      if (filteredPins.length !== draftFilters.pincodes.length) {
+        setDraftFilters(prev => ({ ...prev, pincodes: filteredPins }));
+      }
+    }
+  }, [draftFilters.cities, pincodeOptions]);
+
   if (!isOpen) return null;
 
   return (
@@ -142,6 +167,7 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
       role="dialog"
       aria-modal="true"
       aria-label="Open Analytics Filters"
+      data-right-drawer="true"
     >
       <div className="absolute inset-0" onClick={onClose} />
 
