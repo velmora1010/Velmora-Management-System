@@ -84,7 +84,17 @@ export class WebsiteSalesService {
     file: File,
     uploadedBy: string = 'Current User',
     priceMode: PriceInterpretationMode = 'Order Total'
-  ): Promise<{ batch: WebsiteUploadBatch; consolidatedOrders: WebsiteConsolidatedOrder[] }> {
+  ): Promise<{ 
+    batch: WebsiteUploadBatch; 
+    consolidatedOrders: WebsiteConsolidatedOrder[];
+    metrics: {
+      sourceRowsProcessed: number;
+      totalUniqueOrders: number;
+      newOrdersCount: number;
+      updatedOrdersCount: number;
+      itemsCount: number;
+    };
+  }> {
     const { headers, rows: rawJsonRows } = await parseFileToRawRows(file);
     const mapping = detectColumnMapping(headers);
 
@@ -121,10 +131,20 @@ export class WebsiteSalesService {
     };
 
     // Save transactional records into public.sales_uploads, public.sales_raw_data, public.sales_orders, public.sales_order_items
-    await this.saveUploadRecords(batch, rawRowsProcessed, consolidatedOrders);
+    const metrics = await this.saveUploadRecords(batch, rawRowsProcessed, consolidatedOrders);
 
     batch.status = 'COMPLETED';
-    return { batch, consolidatedOrders };
+    return { 
+      batch, 
+      consolidatedOrders,
+      metrics: {
+        sourceRowsProcessed: rawJsonRows.length,
+        totalUniqueOrders: consolidatedOrders.length,
+        newOrdersCount: metrics.newOrdersCount,
+        updatedOrdersCount: metrics.updatedOrdersCount,
+        itemsCount: metrics.itemsCount
+      }
+    };
   }
 
   // Transactional Save into Supabase sales_uploads, sales_raw_data, sales_orders, sales_order_items
@@ -132,13 +152,13 @@ export class WebsiteSalesService {
     batch: WebsiteUploadBatch,
     rawRows: WebsiteRawOrderRow[],
     consolidatedOrders: WebsiteConsolidatedOrder[]
-  ): Promise<void> {
+  ): Promise<{ newOrdersCount: number; updatedOrdersCount: number; itemsCount: number }> {
     const uploadId = batch.id;
     const fileExt = batch.file_name.split('.').pop()?.toLowerCase() || 'csv';
     const minDate = batch.order_date || getTodayInBusinessTimezone();
     const maxDate = batch.order_date || minDate;
 
-    // STEP 3: Insert sales_uploads (status = 'PROCESSING')
+    // STEP 1: Insert sales_uploads (status = 'PROCESSING')
     const uploadPayload = {
       id: uploadId,
       channel: 'WEBSITE',
@@ -164,7 +184,7 @@ export class WebsiteSalesService {
     }
 
     try {
-      // STEP 4: Insert raw spreadsheet rows into sales_raw_data
+      // STEP 2: Insert raw spreadsheet rows into sales_raw_data
       if (rawRows && rawRows.length > 0) {
         const rawPayloads = rawRows.map(r => ({
           upload_id: uploadId,
@@ -183,12 +203,46 @@ export class WebsiteSalesService {
         }
       }
 
-      // STEP 5: Insert / Upsert consolidated orders into sales_orders
+      // STEP 3: PRE-FETCH EXISTING ORDERS FROM `sales_orders` TO PRESERVE STABLE PRIMARY KEY UUIDs
+      let newOrdersCount = 0;
+      let updatedOrdersCount = 0;
+      let itemsCount = 0;
+
       if (consolidatedOrders && consolidatedOrders.length > 0) {
+        const orderIdsInUpload = consolidatedOrders.map(o => o.order_id);
+        const existingOrdersMap = new Map<string, { id: string }>();
+
+        for (let i = 0; i < orderIdsInUpload.length; i += 500) {
+          const chunkOrderIds = orderIdsInUpload.slice(i, i + 500);
+          const { data: existingRows, error: fetchErr } = await supabase
+            .from('sales_orders')
+            .select('id, order_id')
+            .eq('channel', 'WEBSITE')
+            .in('order_id', chunkOrderIds);
+
+          if (!fetchErr && existingRows) {
+            existingRows.forEach(row => {
+              existingOrdersMap.set(row.order_id, row);
+            });
+          }
+        }
+
         const orderIdToUuid = new Map<string, string>();
 
         const orderPayloads = consolidatedOrders.map(o => {
-          const orderUuid = o.id || crypto.randomUUID();
+          const existingRecord = existingOrdersMap.get(o.order_id);
+          let orderUuid: string;
+
+          if (existingRecord) {
+            // PRESERVE STABLE INTERNAL DATABASE PRIMARY KEY UUID
+            orderUuid = existingRecord.id;
+            updatedOrdersCount++;
+          } else {
+            // NEW ORDER GENERATES NEW STABLE UUID
+            orderUuid = o.id || crypto.randomUUID();
+            newOrdersCount++;
+          }
+
           orderIdToUuid.set(o.order_id, orderUuid);
 
           return {
@@ -225,6 +279,7 @@ export class WebsiteSalesService {
           };
         });
 
+        // STEP 4: Upsert parent sales_orders without changing sales_orders.id
         for (let i = 0; i < orderPayloads.length; i += 500) {
           const chunk = orderPayloads.slice(i, i + 500);
           const { error: orderErr } = await supabase
@@ -237,7 +292,7 @@ export class WebsiteSalesService {
           }
         }
 
-        // STEP 6: Insert product lines into sales_order_items
+        // STEP 5: Prepare child line item payloads
         const itemPayloads: any[] = [];
         consolidatedOrders.forEach(o => {
           const salesOrderId = orderIdToUuid.get(o.order_id) || o.id;
@@ -269,8 +324,10 @@ export class WebsiteSalesService {
           }
         });
 
+        itemsCount = itemPayloads.length;
+
+        // STEP 6: Safely synchronize child items (sales_order_items)
         if (itemPayloads.length > 0) {
-          // Remove existing items for these orders before inserting to avoid duplicates
           const salesOrderIds = Array.from(orderIdToUuid.values());
           for (let i = 0; i < salesOrderIds.length; i += 500) {
             const chunkIds = salesOrderIds.slice(i, i + 500);
@@ -298,6 +355,11 @@ export class WebsiteSalesService {
         console.error('[Supabase Error] Table: sales_uploads, Op: UPDATE, Code:', completeErr.code, 'Message:', completeErr.message, 'Details:', completeErr.details);
       }
 
+      return {
+        newOrdersCount,
+        updatedOrdersCount,
+        itemsCount
+      };
     } catch (err: any) {
       // Mark sales_uploads status as FAILED if processing crashed
       await supabase
