@@ -38,6 +38,7 @@ import { DateRangePickerModal, DateRangePreset } from './components/DateRangePic
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
+import { useWebsiteSalesData } from './context/WebsiteSalesDataContext';
 import toast from 'react-hot-toast';
 
 const DISTINCT_COLORS = [
@@ -84,12 +85,15 @@ export const WebsiteDashboard: React.FC = () => {
     shiftRange 
   } = useWebsiteSalesDateRange();
 
-  const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
+  // Shared Cached Sales Data Context
+  const { 
+    orders: rawPeriodOrders, 
+    batches, 
+    loading, 
+    refreshData 
+  } = useWebsiteSalesData();
 
-  const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
-  const [allOrders, setAllOrders] = useState<WebsiteConsolidatedOrder[]>([]);
-  const [orders, setOrders] = useState<WebsiteConsolidatedOrder[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
 
   // Drawer & Filter state
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState<boolean>(false);
@@ -121,42 +125,64 @@ export const WebsiteDashboard: React.FC = () => {
     }
   }, [searchParams]);
 
-  // Load dataset on date range change or applied filter change
+  // Reset card slices when date range changes
   useEffect(() => {
     setDashboardPaymentCardSlice(null);
     setDashboardProductCardSlice(null);
     setDashboardOfferCardSlice(null);
     setDashboardStateCardSlice(null);
-    loadData();
-  }, [salesStartDate, salesEndDate, appliedFilters]);
+  }, [salesStartDate, salesEndDate]);
 
-  const loadData = async () => {
-    setLoading(true);
-    const bList = await websiteSalesService.getUploadBatches();
-    setBatches(bList);
+  const allOrders = rawPeriodOrders;
 
-    // Fetch full period dataset for dropdown options
-    const periodDataset = await websiteSalesService.getConsolidatedOrders({
-      startDate: salesStartDate,
-      endDate: salesEndDate
+  // Fast In-memory filtered orders based on applied Dashboard filters
+  const orders = useMemo(() => {
+    return rawPeriodOrders.filter(o => {
+      if (appliedFilters.orderIdSearch && !o.order_id.toLowerCase().includes(appliedFilters.orderIdSearch.toLowerCase())) {
+        return false;
+      }
+      if (appliedFilters.customerNameSearch && !o.customer_name.toLowerCase().includes(appliedFilters.customerNameSearch.toLowerCase())) {
+        return false;
+      }
+      if (appliedFilters.phoneSearch && !o.phone.includes(appliedFilters.phoneSearch)) {
+        return false;
+      }
+      if (appliedFilters.batchIds && appliedFilters.batchIds.length > 0 && !appliedFilters.batchIds.includes(o.upload_batch_id)) {
+        return false;
+      }
+      if (appliedFilters.states && appliedFilters.states.length > 0 && !appliedFilters.states.includes(o.state)) {
+        return false;
+      }
+      if (appliedFilters.cities && appliedFilters.cities.length > 0 && !appliedFilters.cities.includes(o.city)) {
+        return false;
+      }
+      if (appliedFilters.pincodes && appliedFilters.pincodes.length > 0 && !appliedFilters.pincodes.includes(o.pincode)) {
+        return false;
+      }
+      if (appliedFilters.paymentModes && appliedFilters.paymentModes.length > 0 && !appliedFilters.paymentModes.includes(o.payment_mode)) {
+        return false;
+      }
+      if (appliedFilters.products && appliedFilters.products.length > 0) {
+        const itemNames = (o.items || []).map(i => i.product_name);
+        const matchesProduct = appliedFilters.products.some(p => itemNames.includes(p) || o.product_name.includes(p));
+        if (!matchesProduct) return false;
+      }
+      if (appliedFilters.orderTypes && appliedFilters.orderTypes.length > 0) {
+        const isMulti = o.items && o.items.length > 1;
+        const typeStr = isMulti ? 'Multi Product Order' : 'Single Product Order';
+        if (!appliedFilters.orderTypes.includes(typeStr)) return false;
+      }
+      if (appliedFilters.offers && appliedFilters.offers.length > 0 && !appliedFilters.offers.includes(o.offer)) {
+        return false;
+      }
+      return true;
     });
-    setAllOrders(periodDataset);
-
-    // Filter using selected date range + applied dashboard filters
-    const ordList = await websiteSalesService.getConsolidatedOrders({
-      ...appliedFilters,
-      startDate: salesStartDate,
-      endDate: salesEndDate
-    });
-
-    setOrders(ordList);
-    setLoading(false);
-  };
+  }, [rawPeriodOrders, appliedFilters]);
 
   const handleDeleteBatch = async (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to delete batch "${name}" and all its raw & consolidated data?`)) {
       await websiteSalesService.deleteUploadBatch(id);
-      loadData();
+      await refreshData();
     }
   };
 

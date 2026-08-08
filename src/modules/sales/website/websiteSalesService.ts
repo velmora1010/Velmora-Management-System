@@ -503,16 +503,22 @@ export class WebsiteSalesService {
     const salesOrderIds = orderRows.map(o => o.id);
     let itemRows: any[] = [];
 
+    const chunkPromises: Promise<any[]>[] = [];
     for (let i = 0; i < salesOrderIds.length; i += 300) {
       const chunkIds = salesOrderIds.slice(i, i + 300);
-      const chunkItems = await this.fetchAllPages<any>((start, end) =>
-        supabase
-          .from('sales_order_items')
-          .select('*')
-          .in('sales_order_id', chunkIds)
-          .order('id', { ascending: true })
-          .range(start, end)
+      chunkPromises.push(
+        this.fetchAllPages<any>((start, end) =>
+          supabase
+            .from('sales_order_items')
+            .select('*')
+            .in('sales_order_id', chunkIds)
+            .order('id', { ascending: true })
+            .range(start, end)
+        )
       );
+    }
+    const chunkResults = await Promise.all(chunkPromises);
+    for (const chunkItems of chunkResults) {
       itemRows = itemRows.concat(chunkItems);
     }
 

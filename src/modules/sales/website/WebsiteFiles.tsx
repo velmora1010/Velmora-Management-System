@@ -11,12 +11,14 @@ import {
 } from 'lucide-react';
 import type { WebsiteUploadBatch } from './types';
 import { websiteSalesService } from './websiteSalesService';
+import { useWebsiteSalesData } from './context/WebsiteSalesDataContext';
 import { WebsiteRawData } from './WebsiteRawData';
 import { WebsiteUpdatedData } from './WebsiteUpdatedData';
 import toast from 'react-hot-toast';
 
 export const WebsiteFiles: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { refreshData } = useWebsiteSalesData();
   const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [reprocessing, setReprocessing] = useState<boolean>(false);
@@ -63,6 +65,7 @@ export const WebsiteFiles: React.FC = () => {
     setReprocessing(true);
     try {
       await websiteSalesService.reprocessUploadBatch(selectedFileId);
+      await refreshData();
       toast.success('File reprocessed successfully! Customer Name and State mappings updated.');
       await loadBatches();
     } catch (err: any) {

@@ -24,11 +24,13 @@ import {
   getTodayInBusinessTimezone
 } from './websiteSalesUtils';
 import { websiteSalesService } from './websiteSalesService';
+import { useWebsiteSalesData } from './context/WebsiteSalesDataContext';
 import toast from 'react-hot-toast';
 
 export const WebsiteUpload: React.FC = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { refreshData } = useWebsiteSalesData();
 
   // Uploaded batches list from Supabase / local
   const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
@@ -182,6 +184,7 @@ export const WebsiteUpload: React.FC = () => {
 
       const result = await websiteSalesService.processAndUploadFile(file!, 'Sales Manager', priceMode);
       setProcessingProgress(100);
+      await refreshData();
 
       toast.success(
         `Orders successfully uploaded & saved!\n` +
@@ -204,6 +207,7 @@ export const WebsiteUpload: React.FC = () => {
   const handleDeleteBatch = async (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to delete batch "${name}"?`)) {
       await websiteSalesService.deleteUploadBatch(id);
+      await refreshData();
       loadBatches();
     }
   };
