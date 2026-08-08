@@ -14,20 +14,17 @@ import { websiteSalesService } from './websiteSalesService';
 import { WebsiteRawData } from './WebsiteRawData';
 import { WebsiteUpdatedData } from './WebsiteUpdatedData';
 import toast from 'react-hot-toast';
+import { useWebsiteSalesData } from './context/WebsiteSalesDataContext';
 
 export const WebsiteFiles: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { refreshData } = useWebsiteSalesData();
   const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [reprocessing, setReprocessing] = useState<boolean>(false);
 
-  const fileIdParam = searchParams.get('fileId');
-  const viewParam = searchParams.get('view') || 'raw';
-
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(fileIdParam);
-  const [selectedFileView, setSelectedFileView] = useState<'raw' | 'updated'>(
-    viewParam === 'updated' ? 'updated' : 'raw'
-  );
+  const selectedFileId = searchParams.get('fileId');
+  const selectedFileView = (searchParams.get('view') as 'raw' | 'updated') || 'raw';
 
   useEffect(() => {
     loadBatches();
@@ -35,24 +32,20 @@ export const WebsiteFiles: React.FC = () => {
 
   const loadBatches = async () => {
     setLoading(true);
-    const list = await websiteSalesService.getUploadBatches();
-    setBatches(list);
+    const bList = await websiteSalesService.getUploadBatches();
+    setBatches(bList);
     setLoading(false);
   };
 
-  const handleOpenFile = (id: string) => {
-    setSelectedFileId(id);
-    setSelectedFileView('raw');
-    setSearchParams({ fileId: id, view: 'raw' });
+  const handleOpenFile = (batchId: string) => {
+    setSearchParams({ fileId: batchId, view: 'raw' });
   };
 
-  const handleCloseFile = () => {
-    setSelectedFileId(null);
+  const handleBackToFiles = () => {
     setSearchParams({});
   };
 
   const handleViewChange = (view: 'raw' | 'updated') => {
-    setSelectedFileView(view);
     if (selectedFileId) {
       setSearchParams({ fileId: selectedFileId, view });
     }
@@ -64,6 +57,7 @@ export const WebsiteFiles: React.FC = () => {
     try {
       await websiteSalesService.reprocessUploadBatch(selectedFileId);
       toast.success('File reprocessed successfully! Customer Name and State mappings updated.');
+      await refreshData();
       await loadBatches();
     } catch (err: any) {
       console.error('Reprocess error:', err);
@@ -191,7 +185,7 @@ export const WebsiteFiles: React.FC = () => {
               </button>
 
               <button
-                onClick={handleCloseFile}
+                onClick={handleBackToFiles}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-2 shadow-sm"
               >
                 <ArrowLeft size={15} /> Back to Files

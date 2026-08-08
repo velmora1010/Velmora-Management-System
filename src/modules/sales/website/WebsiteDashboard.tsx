@@ -38,6 +38,7 @@ import { DateRangePickerModal, DateRangePreset } from './components/DateRangePic
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
+import { useWebsiteSalesData } from './context/WebsiteSalesDataContext';
 import toast from 'react-hot-toast';
 
 const DISTINCT_COLORS = [
@@ -47,7 +48,7 @@ const DISTINCT_COLORS = [
   '#ec4899', // Pink
   '#f59e0b', // Amber
   '#10b981', // Emerald
-  '#64748b'  // Slate
+  '#64748b'  // Others (Slate)
 ];
 
 const DEFAULT_DASHBOARD_FILTERS: WebsiteSalesFilterState = {
@@ -73,23 +74,25 @@ export const WebsiteDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const todayStr = getTodayInBusinessTimezone();
-
-  // Shared Website Sales Date Range State
+  // Shared Date Range Context
   const { 
     startDate: salesStartDate, 
     endDate: salesEndDate, 
     setDateRange, 
-    resetToToday: handleResetToday, 
+    resetToToday: handleResetToday,
     shiftRange 
   } = useWebsiteSalesDateRange();
 
-  const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
+  // Shared Cached Sales Data Context
+  const { 
+    orders: rawPeriodOrders, 
+    batches, 
+    loading,
+    refreshData 
+  } = useWebsiteSalesData();
 
-  const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
-  const [allOrders, setAllOrders] = useState<WebsiteConsolidatedOrder[]>([]);
-  const [orders, setOrders] = useState<WebsiteConsolidatedOrder[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const todayStr = getTodayInBusinessTimezone();
+  const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
 
   // Drawer & Filter state
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState<boolean>(false);
@@ -121,42 +124,47 @@ export const WebsiteDashboard: React.FC = () => {
     }
   }, [searchParams]);
 
-  // Load dataset on date range change or applied filter change
+  // Reset card slices when filters change
   useEffect(() => {
     setDashboardPaymentCardSlice(null);
     setDashboardProductCardSlice(null);
     setDashboardOfferCardSlice(null);
     setDashboardStateCardSlice(null);
-    loadData();
   }, [salesStartDate, salesEndDate, appliedFilters]);
 
-  const loadData = async () => {
-    setLoading(true);
-    const bList = await websiteSalesService.getUploadBatches();
-    setBatches(bList);
+  // All Period Orders (Raw dataset for period dropdowns)
+  const allOrders = rawPeriodOrders;
 
-    // Fetch full period dataset for dropdown options
-    const periodDataset = await websiteSalesService.getConsolidatedOrders({
-      startDate: salesStartDate,
-      endDate: salesEndDate
+  // Filtered Orders for the active Dashboard View
+  const orders = useMemo(() => {
+    return rawPeriodOrders.filter(o => {
+      if (appliedFilters.orderIdSearch && !o.order_id.toLowerCase().includes(appliedFilters.orderIdSearch.toLowerCase())) return false;
+      if (appliedFilters.customerNameSearch && !(o.customer_name || '').toLowerCase().includes(appliedFilters.customerNameSearch.toLowerCase())) return false;
+      if (appliedFilters.phoneSearch && !(o.phone || '').includes(appliedFilters.phoneSearch)) return false;
+      if (appliedFilters.batchIds && appliedFilters.batchIds.length > 0 && !appliedFilters.batchIds.includes(o.upload_batch_id)) return false;
+      if (appliedFilters.states && appliedFilters.states.length > 0 && !appliedFilters.states.includes(o.state || 'Unspecified')) return false;
+      if (appliedFilters.cities && appliedFilters.cities.length > 0 && !appliedFilters.cities.includes(o.city || 'Unspecified')) return false;
+      if (appliedFilters.pincodes && appliedFilters.pincodes.length > 0 && !appliedFilters.pincodes.includes(o.pincode || 'Unspecified')) return false;
+      if (appliedFilters.paymentModes && appliedFilters.paymentModes.length > 0 && !appliedFilters.paymentModes.includes(o.payment_mode)) return false;
+      if (appliedFilters.offers && appliedFilters.offers.length > 0 && !appliedFilters.offers.includes(o.offer || 'No Offer')) return false;
+      if (appliedFilters.products && appliedFilters.products.length > 0) {
+        const matchesProd = o.items 
+          ? o.items.some(i => appliedFilters.products!.includes(i.product_name)) 
+          : appliedFilters.products.includes(o.product_name || '');
+        if (!matchesProd) return false;
+      }
+      if (appliedFilters.minPrice && o.price < Number(appliedFilters.minPrice)) return false;
+      if (appliedFilters.maxPrice && o.price > Number(appliedFilters.maxPrice)) return false;
+      if (appliedFilters.minRemainingCod && (o.remaining_payable || 0) < Number(appliedFilters.minRemainingCod)) return false;
+      if (appliedFilters.maxRemainingCod && (o.remaining_payable || 0) > Number(appliedFilters.maxRemainingCod)) return false;
+      return true;
     });
-    setAllOrders(periodDataset);
-
-    // Filter using selected date range + applied dashboard filters
-    const ordList = await websiteSalesService.getConsolidatedOrders({
-      ...appliedFilters,
-      startDate: salesStartDate,
-      endDate: salesEndDate
-    });
-
-    setOrders(ordList);
-    setLoading(false);
-  };
+  }, [rawPeriodOrders, appliedFilters]);
 
   const handleDeleteBatch = async (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to delete batch "${name}" and all its raw & consolidated data?`)) {
       await websiteSalesService.deleteUploadBatch(id);
-      loadData();
+      await refreshData();
     }
   };
 
