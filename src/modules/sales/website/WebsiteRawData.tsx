@@ -6,7 +6,9 @@ import {
   AlertTriangle, 
   CheckCircle2, 
   X,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import type { WebsiteRawOrderRow, WebsiteUploadBatch } from './types';
 import { websiteSalesService } from './websiteSalesService';
@@ -22,9 +24,18 @@ export const WebsiteRawData: React.FC<WebsiteRawDataProps> = ({ selectedBatchId 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedRow, setSelectedRow] = useState<WebsiteRawOrderRow | null>(null);
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+
   useEffect(() => {
     loadData();
   }, [selectedBatchId]);
+
+  // Reset page to 1 when search or batch changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedBatchId]);
 
   const loadData = async () => {
     if (!selectedBatchId) {
@@ -52,6 +63,11 @@ export const WebsiteRawData: React.FC<WebsiteRawDataProps> = ({ selectedBatchId 
     const prodMatch = r.product_name?.toLowerCase().includes(q);
     return orderIdMatch || nameMatch || prodMatch;
   });
+
+  const totalRowsCount = filteredRows.length;
+  const totalPages = Math.ceil(totalRowsCount / pageSize) || 1;
+  const startIndex = (currentPage - 1) * pageSize;
+  const paginatedRows = filteredRows.slice(startIndex, startIndex + pageSize);
 
   if (!selectedBatchId) {
     return (
@@ -128,7 +144,7 @@ export const WebsiteRawData: React.FC<WebsiteRawDataProps> = ({ selectedBatchId 
           />
         </div>
         <span className="text-xs text-slate-400">
-          Showing <strong>{filteredRows.length}</strong> of <strong>{rawRows.length}</strong> source rows
+          Showing <strong>{startIndex + 1}–{Math.min(startIndex + pageSize, totalRowsCount)}</strong> of <strong>{totalRowsCount.toLocaleString()}</strong> source rows
         </span>
       </div>
 
@@ -161,7 +177,7 @@ export const WebsiteRawData: React.FC<WebsiteRawDataProps> = ({ selectedBatchId 
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {filteredRows.map((r) => (
+                {paginatedRows.map((r) => (
                   <tr key={r.id} className="hover:bg-slate-800/40 transition-colors">
                     <td className="py-3 px-4 font-mono text-slate-500">{r.row_number}</td>
                     <td className="py-3 px-4 font-mono font-bold text-white">{r.order_id || '-'}</td>
@@ -196,6 +212,51 @@ export const WebsiteRawData: React.FC<WebsiteRawDataProps> = ({ selectedBatchId 
           </div>
         )}
       </div>
+
+      {/* PAGINATION FOOTER */}
+      {filteredRows.length > 0 && (
+        <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
+          <div className="text-slate-400 font-medium">
+            Showing <span className="font-bold text-white">{startIndex + 1}–{Math.min(startIndex + pageSize, totalRowsCount)}</span> of <span className="font-bold text-white">{totalRowsCount.toLocaleString()}</span> source rows
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="p-2 bg-slate-950 hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-slate-950 text-slate-300 border border-slate-800 rounded-xl transition-colors cursor-pointer"
+            >
+              <ChevronLeft size={16} />
+            </button>
+
+            <span className="px-3 py-1 font-mono font-bold text-slate-300 bg-slate-950 border border-slate-800 rounded-xl">
+              Page {currentPage} of {totalPages}
+            </span>
+
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="p-2 bg-slate-950 hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-slate-950 text-slate-300 border border-slate-800 rounded-xl transition-colors cursor-pointer"
+            >
+              <ChevronRight size={16} />
+            </button>
+
+            <select
+              value={pageSize}
+              onChange={e => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="px-3 py-1 bg-slate-950 border border-slate-800 text-slate-300 rounded-xl text-xs outline-none cursor-pointer"
+            >
+              <option value={50}>50 per page</option>
+              <option value={100}>100 per page</option>
+              <option value={250}>250 per page</option>
+              <option value={500}>500 per page</option>
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* RAW JSON ROW INSPECTOR MODAL */}
       {selectedRow && (

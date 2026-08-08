@@ -135,9 +135,12 @@ export const WebsiteDashboard: React.FC = () => {
     const bList = await websiteSalesService.getUploadBatches();
     setBatches(bList);
 
-    // Fetch full dataset for dropdown options
-    const fullDataset = await websiteSalesService.getConsolidatedOrders();
-    setAllOrders(fullDataset);
+    // Fetch full period dataset for dropdown options
+    const periodDataset = await websiteSalesService.getConsolidatedOrders({
+      startDate: salesStartDate,
+      endDate: salesEndDate
+    });
+    setAllOrders(periodDataset);
 
     // Filter using selected date range + applied dashboard filters
     const ordList = await websiteSalesService.getConsolidatedOrders({

@@ -372,20 +372,55 @@ export class WebsiteSalesService {
     }
   }
 
+  /**
+   * Helper function to execute paginated/batched Supabase queries to bypass PostgREST 1000-row limit.
+   */
+  private async fetchAllPages<T>(
+    buildQuery: (start: number, end: number) => any,
+    pageSize = 1000
+  ): Promise<T[]> {
+    let allRows: T[] = [];
+    let page = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const rangeStart = page * pageSize;
+      const rangeEnd = rangeStart + pageSize - 1;
+
+      const query = buildQuery(rangeStart, rangeEnd);
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('[Supabase Error] Batched query execution failed:', error);
+        throw new Error(error.message || 'Database fetch failed');
+      }
+
+      const rows = (data || []) as T[];
+      allRows = allRows.concat(rows);
+
+      if (rows.length < pageSize) {
+        hasMore = false;
+      } else {
+        page++;
+      }
+    }
+
+    return allRows;
+  }
+
   // STEP 9: Get Upload Batches from sales_uploads
   async getUploadBatches(): Promise<WebsiteUploadBatch[]> {
     await this.checkAndMigrateLocalStorage();
 
-    const { data, error } = await supabase
-      .from('sales_uploads')
-      .select('*')
-      .eq('channel', 'WEBSITE')
-      .order('uploaded_at', { ascending: false });
-
-    if (error) {
-      console.error('[Supabase Error] Table: sales_uploads, Op: SELECT, Code:', error.code, 'Message:', error.message);
-      throw new Error(`Failed to fetch upload batches: ${error.message}`);
-    }
+    const data = await this.fetchAllPages<any>((start, end) =>
+      supabase
+        .from('sales_uploads')
+        .select('*')
+        .eq('channel', 'WEBSITE')
+        .order('uploaded_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(start, end)
+    );
 
     return (data || []).map(b => {
       const minDate = b.order_date_from || getTodayInBusinessTimezone();
@@ -416,15 +451,17 @@ export class WebsiteSalesService {
   async getRawOrderRows(batchId?: string): Promise<WebsiteRawOrderRow[]> {
     await this.checkAndMigrateLocalStorage();
 
-    let query = supabase.from('sales_raw_data').select('*').order('row_number', { ascending: true });
-    if (batchId) {
-      query = query.eq('upload_id', batchId);
-    }
-    const { data, error } = await query;
-    if (error) {
-      console.error('[Supabase Error] Table: sales_raw_data, Op: SELECT, Code:', error.code, 'Message:', error.message);
-      throw new Error(`Failed to fetch raw rows: ${error.message}`);
-    }
+    const data = await this.fetchAllPages<any>((start, end) => {
+      let query = supabase
+        .from('sales_raw_data')
+        .select('*')
+        .order('row_number', { ascending: true })
+        .order('id', { ascending: true });
+      if (batchId) {
+        query = query.eq('upload_id', batchId);
+      }
+      return query.range(start, end);
+    });
 
     return (data || []).map(r => ({
       id: r.id,
@@ -440,41 +477,43 @@ export class WebsiteSalesService {
   async getConsolidatedOrders(filters?: WebsiteSalesFilterState & { batchId?: string; selectedDate?: string }): Promise<WebsiteConsolidatedOrder[]> {
     await this.checkAndMigrateLocalStorage();
 
-    let query = supabase.from('sales_orders').select('*').eq('channel', 'WEBSITE').order('order_date', { ascending: false });
+    const orderRows = await this.fetchAllPages<any>((start, end) => {
+      let query = supabase
+        .from('sales_orders')
+        .select('*')
+        .eq('channel', 'WEBSITE')
+        .order('order_date', { ascending: false })
+        .order('id', { ascending: true });
 
-    if (filters?.batchId) {
-      query = query.eq('upload_id', filters.batchId);
-    }
-    if (filters?.startDate && filters?.endDate) {
-      query = query.gte('order_date', filters.startDate).lte('order_date', filters.endDate);
-    } else if (filters?.selectedDate) {
-      query = query.eq('order_date', filters.selectedDate);
-    }
+      if (filters?.batchId) {
+        query = query.eq('upload_id', filters.batchId);
+      }
+      if (filters?.startDate && filters?.endDate) {
+        query = query.gte('order_date', filters.startDate).lte('order_date', filters.endDate);
+      } else if (filters?.selectedDate) {
+        query = query.eq('order_date', filters.selectedDate);
+      }
 
-    const { data: orderRows, error: orderErr } = await query;
-    if (orderErr) {
-      console.error('[Supabase Error] Table: sales_orders, Op: SELECT, Code:', orderErr.code, 'Message:', orderErr.message);
-      throw new Error(`Failed to fetch consolidated orders: ${orderErr.message}`);
-    }
+      return query.range(start, end);
+    });
 
     if (!orderRows || orderRows.length === 0) return [];
 
-    // Fetch matching sales_order_items for product details
+    // Fetch matching sales_order_items for product details using chunked parent order IDs
     const salesOrderIds = orderRows.map(o => o.id);
     let itemRows: any[] = [];
 
-    for (let i = 0; i < salesOrderIds.length; i += 500) {
-      const chunkIds = salesOrderIds.slice(i, i + 500);
-      const { data: itemsChunk, error: itemErr } = await supabase
-        .from('sales_order_items')
-        .select('*')
-        .in('sales_order_id', chunkIds);
-
-      if (itemErr) {
-        console.error('[Supabase Error] Table: sales_order_items, Op: SELECT, Code:', itemErr.code, 'Message:', itemErr.message);
-      } else if (itemsChunk) {
-        itemRows = itemRows.concat(itemsChunk);
-      }
+    for (let i = 0; i < salesOrderIds.length; i += 300) {
+      const chunkIds = salesOrderIds.slice(i, i + 300);
+      const chunkItems = await this.fetchAllPages<any>((start, end) =>
+        supabase
+          .from('sales_order_items')
+          .select('*')
+          .in('sales_order_id', chunkIds)
+          .order('id', { ascending: true })
+          .range(start, end)
+      );
+      itemRows = itemRows.concat(chunkItems);
     }
 
     // Group items by sales_order_id
@@ -692,16 +731,20 @@ export class WebsiteSalesService {
   // Delete an upload batch and all associated records from Supabase
   async deleteUploadBatch(batchId: string): Promise<boolean> {
     try {
-      const { data: orders } = await supabase
-        .from('sales_orders')
-        .select('id')
-        .eq('upload_id', batchId)
-        .eq('channel', 'WEBSITE');
+      const orders = await this.fetchAllPages<{ id: string }>((start, end) =>
+        supabase
+          .from('sales_orders')
+          .select('id')
+          .eq('upload_id', batchId)
+          .eq('channel', 'WEBSITE')
+          .order('id', { ascending: true })
+          .range(start, end)
+      );
 
       if (orders && orders.length > 0) {
         const salesOrderIds = orders.map(o => o.id);
-        for (let i = 0; i < salesOrderIds.length; i += 500) {
-          await supabase.from('sales_order_items').delete().in('sales_order_id', salesOrderIds.slice(i, i + 500));
+        for (let i = 0; i < salesOrderIds.length; i += 300) {
+          await supabase.from('sales_order_items').delete().in('sales_order_id', salesOrderIds.slice(i, i + 300));
         }
       }
 

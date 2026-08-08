@@ -255,7 +255,10 @@ export const WebsiteAnalytics: React.FC = () => {
     const bList = await websiteSalesService.getUploadBatches();
     setBatches(bList);
 
-    const orders = await websiteSalesService.getConsolidatedOrders();
+    const orders = await websiteSalesService.getConsolidatedOrders({
+      startDate: analyticsStartDate,
+      endDate: analyticsEndDate
+    });
     setAllOrders(orders);
     setLoading(false);
   };
