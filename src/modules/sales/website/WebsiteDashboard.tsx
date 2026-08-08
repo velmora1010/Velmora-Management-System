@@ -230,14 +230,18 @@ export const WebsiteDashboard: React.FC = () => {
   const avgOrderValue = totalOrdersCount > 0 ? Math.round(totalRevenue / totalOrdersCount) : 0;
 
   // Payment Breakdown for Selected Date Range & Applied Filters
-  const prepaidOrdersCount = orders.filter(o => o.payment_mode === 'PREPAID').length;
+  const prepaidOrders = orders.filter(o => o.payment_mode === 'PREPAID');
+  const prepaidOrdersCount = prepaidOrders.length;
+  const prepaidRevenue = prepaidOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+
   const partialCodOrders = orders.filter(o => o.payment_mode === 'PARTIAL COD');
   const partialCodOrdersCount = partialCodOrders.length;
+  const partialCodRemaining = partialCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable) || 0), 0);
+
   const fullCodOrders = orders.filter(o => o.payment_mode === 'COD');
   const fullCodOrdersCount = fullCodOrders.length;
-
-  const partialCodRemaining = partialCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable) || 0), 0);
   const fullCodReceivable = fullCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable ?? o.price) || 0), 0);
+
   const totalCodReceivable = partialCodRemaining + fullCodReceivable;
 
   // Product Dispatch Breakdown (Order items or product names)
@@ -613,7 +617,8 @@ export const WebsiteDashboard: React.FC = () => {
           <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
             <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Prepaid Orders</span>
             <div className="text-2xl font-bold text-emerald-400">{prepaidOrdersCount}</div>
-            <span className="text-[11px] text-slate-500 mt-1 block">Full payment received</span>
+            <span className="text-[11px] text-emerald-400/90 mt-1 block font-medium">₹{prepaidRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="text-[10px] text-slate-500 mt-0.5 block">Full payment received</span>
           </div>
 
           <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
