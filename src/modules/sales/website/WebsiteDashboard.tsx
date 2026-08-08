@@ -34,9 +34,10 @@ import {
 import { DashboardFilterDrawer } from './components/DashboardFilterDrawer';
 import { ProductDispatchModal } from './components/ProductDispatchModal';
 import { ComboDispatchModal } from './components/ComboDispatchModal';
-import { DateRangePickerModal } from './components/DateRangePickerModal';
+import { DateRangePickerModal, DateRangePreset } from './components/DateRangePickerModal';
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
+import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
 import toast from 'react-hot-toast';
 
 const DISTINCT_COLORS = [
@@ -74,24 +75,15 @@ export const WebsiteDashboard: React.FC = () => {
 
   const todayStr = getTodayInBusinessTimezone();
 
-  // Sync date range state from URL parameters (?from=YYYY-MM-DD&to=YYYY-MM-DD or ?date=YYYY-MM-DD)
-  const urlFrom = searchParams.get('from');
-  const urlTo = searchParams.get('to');
-  const urlDate = searchParams.get('date');
+  // Shared Website Sales Date Range State
+  const { 
+    startDate: salesStartDate, 
+    endDate: salesEndDate, 
+    setDateRange, 
+    resetToToday: handleResetToday, 
+    shiftRange 
+  } = useWebsiteSalesDateRange();
 
-  let initialStart = todayStr;
-  let initialEnd = todayStr;
-
-  if (urlFrom && urlTo && urlFrom.match(/^\d{4}-\d{2}-\d{2}$/) && urlTo.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    initialStart = urlFrom;
-    initialEnd = urlTo;
-  } else if (urlDate && urlDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    initialStart = urlDate;
-    initialEnd = urlDate;
-  }
-
-  const [salesStartDate, setSalesStartDate] = useState<string>(initialStart);
-  const [salesEndDate, setSalesEndDate] = useState<string>(initialEnd);
   const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
 
   const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
@@ -112,26 +104,20 @@ export const WebsiteDashboard: React.FC = () => {
   const [dashboardOfferCardSlice, setDashboardOfferCardSlice] = useState<string | null>(null);
   const [dashboardStateCardSlice, setDashboardStateCardSlice] = useState<string | null>(null);
 
-  // Sync state when URL parameters change externally
+  // Sync date range if URL parameters are explicitly provided
   useEffect(() => {
     const qFrom = searchParams.get('from');
     const qTo = searchParams.get('to');
     const qDate = searchParams.get('date');
 
-    let s = todayStr;
-    let e = todayStr;
-
     if (qFrom && qTo && qFrom.match(/^\d{4}-\d{2}-\d{2}$/) && qTo.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      s = qFrom;
-      e = qTo;
+      if (qFrom !== salesStartDate || qTo !== salesEndDate) {
+        setDateRange(qFrom, qTo, 'custom');
+      }
     } else if (qDate && qDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      s = qDate;
-      e = qDate;
-    }
-
-    if (s !== salesStartDate || e !== salesEndDate) {
-      setSalesStartDate(s);
-      setSalesEndDate(e);
+      if (qDate !== salesStartDate || qDate !== salesEndDate) {
+        setDateRange(qDate, qDate, qDate === todayStr ? 'today' : 'custom');
+      }
     }
   }, [searchParams]);
 
@@ -143,26 +129,6 @@ export const WebsiteDashboard: React.FC = () => {
     setDashboardStateCardSlice(null);
     loadData();
   }, [salesStartDate, salesEndDate, appliedFilters]);
-
-  const updateDateRangeParams = (newStart: string, newEnd: string) => {
-    setSalesStartDate(newStart);
-    setSalesEndDate(newEnd);
-
-    if (newStart === todayStr && newEnd === todayStr) {
-      searchParams.delete('date');
-      searchParams.delete('from');
-      searchParams.delete('to');
-    } else if (newStart === newEnd) {
-      searchParams.set('date', newStart);
-      searchParams.delete('from');
-      searchParams.delete('to');
-    } else {
-      searchParams.delete('date');
-      searchParams.set('from', newStart);
-      searchParams.set('to', newEnd);
-    }
-    setSearchParams(searchParams, { replace: true });
-  };
 
   const loadData = async () => {
     setLoading(true);
@@ -191,18 +157,16 @@ export const WebsiteDashboard: React.FC = () => {
     }
   };
 
+  const updateDateRangeParams = (newStart: string, newEnd: string, preset?: DateRangePreset) => {
+    setDateRange(newStart, newEnd, preset);
+  };
+
   const handlePrevRange = () => {
-    const { startDate, endDate } = shiftDateRange(salesStartDate, salesEndDate, -1);
-    updateDateRangeParams(startDate, endDate);
+    shiftRange(-1);
   };
 
   const handleNextRange = () => {
-    const { startDate, endDate } = shiftDateRange(salesStartDate, salesEndDate, 1);
-    updateDateRangeParams(startDate, endDate);
-  };
-
-  const handleResetToday = () => {
-    updateDateRangeParams(todayStr, todayStr);
+    shiftRange(1);
   };
 
   const handleApplyDrawerFilters = () => {

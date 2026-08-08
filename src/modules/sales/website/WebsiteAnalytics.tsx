@@ -37,6 +37,8 @@ import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
+import { DateRangePickerModal } from './components/DateRangePickerModal';
+import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
 import { 
   getTodayInBusinessTimezone, 
   formatSalesDateDisplay, 
@@ -109,17 +111,6 @@ const ANALYTICS_VIEW_OPTIONS = [
   { id: 'analytics-cod-receivable', label: 'COD Receivable Overview' }
 ];
 
-const DATE_PRESET_OPTIONS = [
-  { id: 'today', label: 'Today' },
-  { id: 'yesterday', label: 'Yesterday' },
-  { id: '7days', label: 'Last 7 Days' },
-  { id: '30days', label: 'Last 30 Days' },
-  { id: 'this_month', label: 'This Month' },
-  { id: 'prev_month', label: 'Previous Month' },
-  { id: 'custom_date', label: 'Custom Date' },
-  { id: 'custom_range', label: 'Custom Date Range' }
-];
-
 const DISTINCT_COLORS = [
   '#06b6d4', // Cyan
   '#3b82f6', // Blue
@@ -160,21 +151,21 @@ export const WebsiteAnalytics: React.FC = () => {
   const [allOrders, setAllOrders] = useState<WebsiteConsolidatedOrder[]>([]);
   const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [applying, setApplying] = useState<boolean>(false);
+
+  // Shared Website Sales Date Range State
+  const { 
+    startDate: analyticsStartDate, 
+    endDate: analyticsEndDate, 
+    setDateRange 
+  } = useWebsiteSalesDateRange();
+
+  const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
 
   // Navigation Dropdown State
   const [selectedViewId, setSelectedViewId] = useState<string>('analytics-overview');
   const [isViewDropdownOpen, setIsViewDropdownOpen] = useState<boolean>(false);
   const [highlightedSectionId, setHighlightedSectionId] = useState<string | null>(null);
   const viewDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Date Range Dropdown State
-  const [isDateDropdownOpen, setIsDateDropdownOpen] = useState<boolean>(false);
-  const [showCustomRangePanel, setShowCustomRangePanel] = useState<boolean>(false);
-  const [showCustomDateInput, setShowCustomDateInput] = useState<boolean>(false);
-  const [customFromDate, setCustomFromDate] = useState<string>(getTodayInBusinessTimezone());
-  const [customToDate, setCustomToDate] = useState<string>(getTodayInBusinessTimezone());
-  const dateDropdownRef = useRef<HTMLDivElement>(null);
 
   // Filter States
   const [draftFilters, setDraftFilters] = useState<MultiSelectFilterState>(DEFAULT_FILTERS);
@@ -239,26 +230,13 @@ export const WebsiteAnalytics: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    // Initialize date from URL query parameters if present
-    const period = searchParams.get('period');
     const from = searchParams.get('from');
     const to = searchParams.get('to');
 
     if (from && to && from.match(/^\d{4}-\d{2}-\d{2}$/) && to.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      const presetKey = from === to ? 'custom_date' : 'custom_range';
-      const initialDateState = {
-        ...DEFAULT_FILTERS,
-        dateRangePreset: presetKey,
-        selectedDate: from,
-        startDate: from,
-        endDate: to
-      };
-      setDraftFilters(initialDateState);
-      setAppliedFilters(initialDateState);
-      setCustomFromDate(from);
-      setCustomToDate(to);
-    } else if (period) {
-      applyPresetDate(period, true);
+      if (from !== analyticsStartDate || to !== analyticsEndDate) {
+        setDateRange(from, to, 'custom');
+      }
     }
   }, []);
 
@@ -266,9 +244,6 @@ export const WebsiteAnalytics: React.FC = () => {
     const handleClickOutside = (event: MouseEvent) => {
       if (viewDropdownRef.current && !viewDropdownRef.current.contains(event.target as Node)) {
         setIsViewDropdownOpen(false);
-      }
-      if (dateDropdownRef.current && !dateDropdownRef.current.contains(event.target as Node)) {
-        setIsDateDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -299,126 +274,11 @@ export const WebsiteAnalytics: React.FC = () => {
     }
   };
 
-  // Centralized Date Preset Calculation Function
-  const applyPresetDate = (preset: string, updateUrl: boolean = true) => {
-    const today = getTodayInBusinessTimezone();
-    let start = today;
-    let end = today;
-
-    if (preset === 'today') {
-      start = today;
-      end = today;
-    } else if (preset === 'yesterday') {
-      start = shiftDateString(today, -1);
-      end = shiftDateString(today, -1);
-    } else if (preset === '7days') {
-      start = shiftDateString(today, -6);
-      end = today;
-    } else if (preset === '30days') {
-      start = shiftDateString(today, -29);
-      end = today;
-    } else if (preset === 'this_month') {
-      const parts = today.split('-');
-      start = `${parts[0]}-${parts[1]}-01`;
-      end = today;
-    } else if (preset === 'prev_month') {
-      const parts = today.split('-');
-      let year = parseInt(parts[0], 10);
-      let month = parseInt(parts[1], 10) - 1;
-      if (month === 0) {
-        month = 12;
-        year -= 1;
-      }
-      const mStr = String(month).padStart(2, '0');
-      const lastDay = new Date(year, month, 0).getDate();
-      start = `${year}-${mStr}-01`;
-      end = `${year}-${mStr}-${String(lastDay).padStart(2, '0')}`;
-    }
-
-    const nextFilterState = {
-      dateRangePreset: preset,
-      selectedDate: start,
-      startDate: start,
-      endDate: end
-    };
-
-    setDraftFilters(prev => ({ ...prev, ...nextFilterState }));
-    setAppliedFilters(prev => ({ ...prev, ...nextFilterState }));
-
-    if (updateUrl) {
-      if (preset === 'today') {
-        searchParams.delete('period');
-        searchParams.delete('from');
-        searchParams.delete('to');
-      } else {
-        searchParams.set('period', preset);
-        searchParams.delete('from');
-        searchParams.delete('to');
-      }
-      setSearchParams(searchParams, { replace: true });
-    }
-
-    setShowCustomRangePanel(false);
-    setShowCustomDateInput(false);
-    setIsDateDropdownOpen(false);
-  };
-
-  const handleSelectDatePresetOption = (presetId: string) => {
-    if (presetId === 'custom_date') {
-      setShowCustomDateInput(true);
-      setShowCustomRangePanel(false);
-      setIsDateDropdownOpen(false);
-    } else if (presetId === 'custom_range') {
-      setShowCustomRangePanel(true);
-      setShowCustomDateInput(false);
-      setIsDateDropdownOpen(false);
-    } else {
-      applyPresetDate(presetId);
-    }
-  };
-
-  const handleApplyCustomRange = () => {
-    if (customFromDate > customToDate) {
-      toast.error('From Date cannot be after To Date');
-      return;
-    }
-
-    const isSingle = customFromDate === customToDate;
-    const presetKey = isSingle ? 'custom_date' : 'custom_range';
-
-    const nextFilterState = {
-      dateRangePreset: presetKey,
-      selectedDate: customFromDate,
-      startDate: customFromDate,
-      endDate: customToDate
-    };
-
-    setDraftFilters(prev => ({ ...prev, ...nextFilterState }));
-    setAppliedFilters(prev => ({ ...prev, ...nextFilterState }));
-
-    searchParams.delete('period');
-    searchParams.set('from', customFromDate);
-    searchParams.set('to', customToDate);
-    setSearchParams(searchParams, { replace: true });
-
-    setShowCustomRangePanel(false);
-    setShowCustomDateInput(false);
-    toast.success('Custom date range applied!');
-  };
-
   const getResolvedDateLabel = () => {
-    const preset = appliedFilters.dateRangePreset;
-    const start = appliedFilters.startDate;
-    const end = appliedFilters.endDate;
-
-    if (preset === 'today') return 'Today';
-    if (preset === 'yesterday') return 'Yesterday';
-    if (preset === '7days') return 'Last 7 Days';
-    if (preset === '30days') return 'Last 30 Days';
-    if (preset === 'this_month') return 'This Month';
-    if (preset === 'prev_month') return 'Previous Month';
-    if (start === end) return formatSalesDateShort(start);
-    return `${formatSalesDateShort(start)} – ${formatSalesDateShort(end)}`;
+    const todayStr = getTodayInBusinessTimezone();
+    if (analyticsStartDate === todayStr && analyticsEndDate === todayStr) return 'Today';
+    if (analyticsStartDate === analyticsEndDate) return formatSalesDateShort(analyticsStartDate);
+    return `${formatSalesDateShort(analyticsStartDate)} – ${formatSalesDateShort(analyticsEndDate)}`;
   };
 
 
@@ -503,8 +363,8 @@ export const WebsiteAnalytics: React.FC = () => {
   const filteredOrders = useMemo(() => {
     return allOrders.filter(o => {
       const orderDateStr = o.order_date || getTodayInBusinessTimezone();
-      if (appliedFilters.startDate && appliedFilters.endDate) {
-        if (orderDateStr < appliedFilters.startDate || orderDateStr > appliedFilters.endDate) {
+      if (analyticsStartDate && analyticsEndDate) {
+        if (orderDateStr < analyticsStartDate || orderDateStr > analyticsEndDate) {
           return false;
         }
       }
@@ -545,7 +405,7 @@ export const WebsiteAnalytics: React.FC = () => {
 
       return true;
     });
-  }, [allOrders, appliedFilters, drillDownPaymentMode, drillDownState, drillDownCity]);
+  }, [allOrders, analyticsStartDate, analyticsEndDate, appliedFilters, drillDownPaymentMode, drillDownState, drillDownCity]);
 
   // SUMMARY METRICS COMPUTATION
   const totalOrdersCount = filteredOrders.length;
@@ -1168,45 +1028,23 @@ export const WebsiteAnalytics: React.FC = () => {
             )}
           </div>
 
-          {/* COMPACT DATE RANGE DROPDOWN */}
-          <div ref={dateDropdownRef} className="relative w-full sm:w-[170px]">
-            <button
-              type="button"
-              onClick={() => setIsDateDropdownOpen(!isDateDropdownOpen)}
-              aria-label="Select Analytics Date Range"
-              className={`w-full h-[40px] px-3.5 border rounded-xl flex items-center justify-between text-xs font-bold transition-all cursor-pointer shadow-sm focus:outline-none ${
-                appliedFilters.dateRangePreset !== 'today'
-                  ? 'bg-purple-950/40 border-purple-500/60 text-purple-200'
-                  : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-white'
-              }`}
-            >
-              <div className="flex items-center gap-2 truncate">
-                <Calendar size={15} className="text-purple-400 shrink-0" />
-                <span className="truncate">{getResolvedDateLabel()}</span>
-              </div>
-              <ChevronDown size={14} className={`text-slate-400 transition-transform ${isDateDropdownOpen ? 'rotate-180 text-purple-400' : ''}`} />
-            </button>
-
-            {/* DATE PRESET DROPDOWN POPUP MENU */}
-            {isDateDropdownOpen && (
-              <div className="absolute z-50 top-full right-0 w-[200px] mt-1.5 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden py-1 divide-y divide-slate-800/40 text-xs animate-in fade-in duration-150">
-                {DATE_PRESET_OPTIONS.map(opt => (
-                  <div
-                    key={opt.id}
-                    onClick={() => handleSelectDatePresetOption(opt.id)}
-                    className={`px-3.5 py-2.5 cursor-pointer transition-colors flex items-center justify-between ${
-                      appliedFilters.dateRangePreset === opt.id
-                        ? 'bg-purple-600/20 text-purple-300 font-bold'
-                        : 'text-slate-300 hover:bg-slate-800/70'
-                    }`}
-                  >
-                    <span>{opt.label}</span>
-                    {appliedFilters.dateRangePreset === opt.id && <Check size={13} className="text-purple-400" />}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* COMPACT DATE RANGE BUTTON */}
+          <button
+            type="button"
+            onClick={() => setIsDateModalOpen(true)}
+            aria-label="Select Analytics Date Range"
+            className={`h-[40px] px-3.5 border rounded-xl flex items-center justify-between gap-2 text-xs font-bold transition-all cursor-pointer shadow-sm focus:outline-none ${
+              analyticsStartDate !== getTodayInBusinessTimezone() || analyticsEndDate !== getTodayInBusinessTimezone()
+                ? 'bg-purple-950/40 border-purple-500/60 text-purple-200'
+                : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2 truncate">
+              <Calendar size={15} className="text-purple-400 shrink-0" />
+              <span className="truncate">{getResolvedDateLabel()}</span>
+            </div>
+            <ChevronDown size={14} className="text-slate-400 shrink-0" />
+          </button>
 
           {/* COMPACT ANALYTICS FILTER DRAWER TRIGGER BUTTON */}
           <button
@@ -1232,92 +1070,6 @@ export const WebsiteAnalytics: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* CUSTOM SINGLE DATE PICKER INPUT */}
-      {showCustomDateInput && (
-        <div className="p-4 bg-slate-900 border border-purple-500/40 rounded-2xl flex items-center justify-between gap-4 animate-in fade-in duration-200">
-          <div className="flex items-center gap-3">
-            <Calendar size={18} className="text-purple-400" />
-            <span className="text-xs font-bold text-slate-200">Select Custom Date:</span>
-            <input
-              type="date"
-              value={appliedFilters.selectedDate}
-              onChange={e => {
-                const val = e.target.value;
-                if (val) {
-                  const nextFilterState = {
-                    dateRangePreset: 'custom_date',
-                    selectedDate: val,
-                    startDate: val,
-                    endDate: val
-                  };
-                  setDraftFilters(prev => ({ ...prev, ...nextFilterState }));
-                  setAppliedFilters(prev => ({ ...prev, ...nextFilterState }));
-                  searchParams.delete('period');
-                  searchParams.set('from', val);
-                  searchParams.set('to', val);
-                  setSearchParams(searchParams, { replace: true });
-                }
-              }}
-              className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-purple-400 font-mono font-bold cursor-pointer"
-            />
-          </div>
-          <button
-            onClick={() => setShowCustomDateInput(false)}
-            className="text-xs text-slate-400 hover:text-white font-semibold cursor-pointer"
-          >
-            Close Picker
-          </button>
-        </div>
-      )}
-
-      {/* CUSTOM DATE RANGE PANEL (From & To Date Fields) */}
-      {showCustomRangePanel && (
-        <div className="p-5 bg-slate-900 border border-purple-500/40 rounded-2xl space-y-4 shadow-xl animate-in fade-in duration-200">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-purple-300 uppercase tracking-wider">
-              <CalendarRange size={16} /> Custom Date Range
-            </div>
-            <button onClick={() => setShowCustomRangePanel(false)} className="text-slate-400 hover:text-white cursor-pointer"><X size={16} /></button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-400 mb-1">From Date</label>
-              <input
-                type="date"
-                value={customFromDate}
-                onChange={e => setCustomFromDate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-purple-400 font-mono font-bold cursor-pointer"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-400 mb-1">To Date</label>
-              <input
-                type="date"
-                value={customToDate}
-                onChange={e => setCustomToDate(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-purple-400 font-mono font-bold cursor-pointer"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-            <button
-              onClick={() => setShowCustomRangePanel(false)}
-              className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleApplyCustomRange}
-              className="px-5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-md"
-            >
-              Apply Range
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* DRILL DOWN ACTIVE CHIPS BAR */}
       {(drillDownPaymentMode || drillDownState || drillDownCity) && (
@@ -1894,6 +1646,18 @@ export const WebsiteAnalytics: React.FC = () => {
         setDraftFilters={setDraftFilters}
         onApply={handleApplyFilters}
         onResetAll={handleResetFilters}
+      />
+
+      {/* DATE RANGE PICKER MODAL */}
+      <DateRangePickerModal
+        isOpen={isDateModalOpen}
+        onClose={() => setIsDateModalOpen(false)}
+        startDate={analyticsStartDate}
+        endDate={analyticsEndDate}
+        onApply={(start, end, preset) => {
+          setDateRange(start, end, preset);
+          setIsDateModalOpen(false);
+        }}
       />
 
       {/* ORDER DETAILS MODAL */}

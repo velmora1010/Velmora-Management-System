@@ -180,9 +180,16 @@ export const WebsiteUpload: React.FC = () => {
         order_date_range: dateRangeStr
       };
 
-      await websiteSalesService.processAndUploadFile(file!, 'Sales Manager', priceMode);
+      const result = await websiteSalesService.processAndUploadFile(file!, 'Sales Manager', priceMode);
       setProcessingProgress(100);
-      toast.success('Orders successfully uploaded & saved!');
+
+      toast.success(
+        `Orders successfully uploaded & saved!\n` +
+        `• ${result.metrics.sourceRowsProcessed} source rows processed\n` +
+        `• ${result.metrics.totalUniqueOrders} unique orders (${result.metrics.newOrdersCount} new, ${result.metrics.updatedOrdersCount} updated)\n` +
+        `• ${result.metrics.itemsCount} line items synchronized`,
+        { duration: 5000 }
+      );
 
       // Clear form & navigate to dashboard for the detected order date
       clearFile();
