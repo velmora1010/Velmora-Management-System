@@ -259,6 +259,23 @@ export class IciciBankStatementPdfParser implements DocumentParser {
     }
 
     // ── Stage 7: Convert to NormalizedTransaction ──
+    const normalizePdfSpacing = (text: string): string => {
+      if (!text) return text;
+      let s = text.trim();
+      // Fix 1 char separated from >= 4 chars
+      s = s.replace(/\b([a-zA-Z0-9])\s+([a-zA-Z0-9]{4,})\b/g, '$1$2');
+      s = s.replace(/\b([a-zA-Z0-9]{4,})\s+([a-zA-Z0-9])\b/g, '$1$2');
+      // Fix 2 chars separated from >= 5 chars
+      s = s.replace(/\b([a-zA-Z0-9]{2})\s+([a-zA-Z0-9]{5,})\b/g, '$1$2');
+      s = s.replace(/\b([a-zA-Z0-9]{5,})\s+([a-zA-Z0-9]{2})\b/g, '$1$2');
+      // Fix 3 chars separated from >= 10 chars
+      s = s.replace(/\b([a-zA-Z0-9]{3})\s+([a-zA-Z0-9]{10,})\b/g, '$1$2');
+      s = s.replace(/\b([a-zA-Z0-9]{10,})\s+([a-zA-Z0-9]{3})\b/g, '$1$2');
+      // Fix space between numbers
+      s = s.replace(/(\d)\s+(\d)/g, '$1$2');
+      return s;
+    };
+
     const extractDate = (str: string): string | null => {
       const match = str.match(DATE_PATTERN);
       return match ? match[1] : null;
@@ -289,7 +306,7 @@ export class IciciBankStatementPdfParser implements DocumentParser {
         postedDateTime: row.postedDate.trim(),
         date: extractDate(row.transactionDate) || row.transactionDate,
         amount: withdrawalAmt,
-        notes: row.remarks.trim() || '-'
+        notes: normalizePdfSpacing(row.remarks) || '-'
       });
     }
 

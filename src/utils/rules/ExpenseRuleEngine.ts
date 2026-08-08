@@ -26,7 +26,8 @@ export class ExpenseRuleEngine {
       .from('expense_rules')
       .select('*')
       .eq('is_active', true)
-      .order('priority', { ascending: true });
+      .order('priority', { ascending: true })
+      .order('created_at', { ascending: true }); // Stable tie-breaker
 
     if (error) {
       console.error('Error fetching expense rules:', error);
@@ -34,6 +35,24 @@ export class ExpenseRuleEngine {
     }
 
     return data as ExpenseRule[];
+  }
+
+  /**
+   * Safely matches a keyword as a distinct phrase or word boundary.
+   */
+  private static matchesKeyword(description: string, keyword: string | null | undefined): boolean {
+    if (!keyword || !description) return false;
+    const cleanKeyword = keyword.trim().toLowerCase();
+    if (!cleanKeyword) return false;
+
+    // Escape regex special characters
+    const escaped = cleanKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Ensure the keyword matches as a distinct boundary, not inside another word.
+    // Use (^|\W) and (?=\W|$) to support matching characters safely.
+    const regex = new RegExp(`(^|\\W)${escaped}((?=\\W)|$)`, 'i');
+    
+    return regex.test(description.toLowerCase());
   }
 
   /**
@@ -45,9 +64,9 @@ export class ExpenseRuleEngine {
     // Safety check - we search the transaction description (notes/reference/narration)
     const desc = (result.notes || '').toLowerCase();
 
-    // Find the first matching rule based on keyword (case-insensitive substring match)
+    // Find the first matching rule based on keyword
     // Rules are already sorted by priority ASC from the DB query
-    const matchedRule = rules.find(rule => desc.includes(rule.keyword.toLowerCase()));
+    const matchedRule = rules.find(rule => this.matchesKeyword(desc, rule.keyword));
 
     if (matchedRule) {
       // Only populate fields if they don't already exist on the normalized transaction
