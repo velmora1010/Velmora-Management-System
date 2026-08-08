@@ -20,6 +20,7 @@ export type DateRangePreset =
   | 'this_week'
   | '7days'
   | 'this_month'
+  | 'previous_month'
   | '30days'
   | 'this_year'
   | 'custom';
@@ -62,6 +63,24 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
 
   const [viewYear, setViewYear] = useState<number>(initialYearMonth.year);
   const [viewMonth, setViewMonth] = useState<number>(initialYearMonth.month);
+
+  // Compute exact previous calendar month bounds
+  const prevMonthBounds = useMemo(() => {
+    const parts = todayStr.split('-').map(Number);
+    const curYear = parts[0] || 2026;
+    const curMonth = parts[1] || 8;
+    let prevYear = curYear;
+    let prevMonth = curMonth - 1;
+    if (prevMonth === 0) {
+      prevMonth = 12;
+      prevYear = curYear - 1;
+    }
+    const daysInPrev = new Date(prevYear, prevMonth, 0).getDate();
+    return {
+      start: `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`,
+      end: `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(daysInPrev).padStart(2, '0')}`
+    };
+  }, [todayStr]);
 
   useEffect(() => {
     if (isOpen) {
@@ -115,6 +134,9 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
       const parts = todayStr.split('-').map(Number);
       start = `${parts[0]}-${String(parts[1]).padStart(2, '0')}-01`;
       end = todayStr;
+    } else if (preset === 'previous_month') {
+      start = prevMonthBounds.start;
+      end = prevMonthBounds.end;
     } else if (preset === '30days') {
       start = shiftDateString(todayStr, -29);
       end = todayStr;
@@ -293,9 +315,24 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
 
             <button
               onClick={() => applyPreset('this_month')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
+              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                draftStart === `${todayStr.split('-')[0]}-${todayStr.split('-')[1]}-01` && draftEnd === todayStr
+                  ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
+                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+              }`}
             >
               This Month
+            </button>
+
+            <button
+              onClick={() => applyPreset('previous_month')}
+              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                draftStart === prevMonthBounds.start && draftEnd === prevMonthBounds.end
+                  ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
+                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+              }`}
+            >
+              Previous Month
             </button>
 
             <button
