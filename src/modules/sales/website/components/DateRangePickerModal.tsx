@@ -17,11 +17,12 @@ import {
 export type DateRangePreset = 
   | 'today'
   | 'yesterday'
-  | 'this_week'
-  | '7days'
-  | 'this_month'
-  | '30days'
-  | 'this_year'
+  | 'thisWeek'
+  | 'last7Days'
+  | 'thisMonth'
+  | 'previousMonth'
+  | 'last30Days'
+  | 'thisYear'
   | 'custom';
 
 interface DateRangePickerModalProps {
@@ -38,6 +39,72 @@ const MONTH_NAMES = [
 ];
 
 const WEEKDAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+// Shared Single Quick Ranges Config
+export const QUICK_RANGES: { key: DateRangePreset; label: string }[] = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'thisWeek', label: 'This Week' },
+  { key: 'last7Days', label: 'Last 7 Days' },
+  { key: 'thisMonth', label: 'This Month' },
+  { key: 'previousMonth', label: 'Previous Month' },
+  { key: 'last30Days', label: 'Last 30 Days' },
+  { key: 'thisYear', label: 'This Year' }
+];
+
+export const getPresetRange = (preset: DateRangePreset, todayStr: string): { start: string; end: string } => {
+  let start = todayStr;
+  let end = todayStr;
+
+  if (preset === 'today') {
+    start = todayStr;
+    end = todayStr;
+  } else if (preset === 'yesterday') {
+    const yest = shiftDateString(todayStr, -1);
+    start = yest;
+    end = yest;
+  } else if (preset === 'thisWeek') {
+    const parts = todayStr.split('-').map(Number);
+    const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+    const day = dt.getDay(); // 0 is Sunday
+    const diffToMon = day === 0 ? -6 : 1 - day;
+    const monDt = new Date(dt);
+    monDt.setDate(dt.getDate() + diffToMon);
+    
+    const monStr = `${monDt.getFullYear()}-${String(monDt.getMonth() + 1).padStart(2, '0')}-${String(monDt.getDate()).padStart(2, '0')}`;
+    start = monStr;
+    end = todayStr;
+  } else if (preset === 'last7Days') {
+    start = shiftDateString(todayStr, -6);
+    end = todayStr;
+  } else if (preset === 'thisMonth') {
+    const parts = todayStr.split('-').map(Number);
+    start = `${parts[0]}-${String(parts[1]).padStart(2, '0')}-01`;
+    end = todayStr;
+  } else if (preset === 'previousMonth') {
+    const parts = todayStr.split('-').map(Number);
+    const year = parts[0];
+    const month = parts[1];
+    let prevYear = year;
+    let prevMonth = month - 1;
+    if (prevMonth === 0) {
+      prevMonth = 12;
+      prevYear = year - 1;
+    }
+    const daysInPrevMonth = new Date(prevYear, prevMonth, 0).getDate();
+    start = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`;
+    end = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(daysInPrevMonth).padStart(2, '0')}`;
+  } else if (preset === 'last30Days') {
+    start = shiftDateString(todayStr, -29);
+    end = todayStr;
+  } else if (preset === 'thisYear') {
+    const parts = todayStr.split('-').map(Number);
+    start = `${parts[0]}-01-01`;
+    end = todayStr;
+  }
+
+  return { start, end };
+};
 
 export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
   isOpen,
@@ -87,42 +154,7 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
 
   // Quick Preset Helper
   const applyPreset = (preset: DateRangePreset) => {
-    let start = todayStr;
-    let end = todayStr;
-
-    if (preset === 'today') {
-      start = todayStr;
-      end = todayStr;
-    } else if (preset === 'yesterday') {
-      const yest = shiftDateString(todayStr, -1);
-      start = yest;
-      end = yest;
-    } else if (preset === 'this_week') {
-      const parts = todayStr.split('-').map(Number);
-      const dt = new Date(parts[0], parts[1] - 1, parts[2]);
-      const day = dt.getDay(); // 0 is Sunday
-      const diffToMon = day === 0 ? -6 : 1 - day;
-      const monDt = new Date(dt);
-      monDt.setDate(dt.getDate() + diffToMon);
-      
-      const monStr = `${monDt.getFullYear()}-${String(monDt.getMonth() + 1).padStart(2, '0')}-${String(monDt.getDate()).padStart(2, '0')}`;
-      start = monStr;
-      end = todayStr;
-    } else if (preset === '7days') {
-      start = shiftDateString(todayStr, -6);
-      end = todayStr;
-    } else if (preset === 'this_month') {
-      const parts = todayStr.split('-').map(Number);
-      start = `${parts[0]}-${String(parts[1]).padStart(2, '0')}-01`;
-      end = todayStr;
-    } else if (preset === '30days') {
-      start = shiftDateString(todayStr, -29);
-      end = todayStr;
-    } else if (preset === 'this_year') {
-      const parts = todayStr.split('-').map(Number);
-      start = `${parts[0]}-01-01`;
-      end = todayStr;
-    }
+    const { start, end } = getPresetRange(preset, todayStr);
 
     setDraftStart(start);
     setDraftEnd(end);
@@ -258,59 +290,24 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block px-3 py-1 mb-1">
               Quick Ranges
             </span>
-            <button
-              onClick={() => applyPreset('today')}
-              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                draftStart === todayStr && draftEnd === todayStr
-                  ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-              }`}
-            >
-              <span>Today</span>
-              <Clock size={13} className="text-cyan-400" />
-            </button>
-
-            <button
-              onClick={() => applyPreset('yesterday')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Yesterday
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_week')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Week
-            </button>
-
-            <button
-              onClick={() => applyPreset('7days')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Last 7 Days
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_month')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Month
-            </button>
-
-            <button
-              onClick={() => applyPreset('30days')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Last 30 Days
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_year')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Year
-            </button>
+            {QUICK_RANGES.map((item) => {
+              const { start: pStart, end: pEnd } = getPresetRange(item.key, todayStr);
+              const isActive = draftStart === pStart && draftEnd === pEnd;
+              return (
+                <button
+                  key={item.key}
+                  onClick={() => applyPreset(item.key)}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                    isActive
+                      ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
+                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                  }`}
+                >
+                  <span>{item.label}</span>
+                  {item.key === 'today' && <Clock size={13} className="text-cyan-400" />}
+                </button>
+              );
+            })}
           </div>
 
           {/* DUAL CALENDAR MONTH VIEWS */}
