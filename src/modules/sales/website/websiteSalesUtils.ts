@@ -1242,3 +1242,17 @@ export function getUploadBatchesForAnalyticsPeriod(
 
   return periodOptions;
 }
+
+export function formatIndianCurrency(amount: number): string {
+  if (amount == null || isNaN(amount)) return '₹0';
+  const hasDecimals = amount % 1 !== 0;
+  return `₹${amount.toLocaleString('en-IN', { 
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2 
+  })}`;
+}
+
+export function formatIndianNumber(count: number): string {
+  if (count == null || isNaN(count)) return '0';
+  return count.toLocaleString('en-IN');
+}
