@@ -1242,3 +1242,50 @@ export function getUploadBatchesForAnalyticsPeriod(
 
   return periodOptions;
 }
+
+export interface WebsitePaymentSummary {
+  prepaidCount: number;
+  prepaidRevenue: number;
+  partialCodCount: number;
+  partialCodRevenue: number;
+  partialCodRemaining: number;
+  fullCodCount: number;
+  fullCodRevenue: number;
+  fullCodPending: number;
+  totalCodReceivable: number;
+  unknownPaymentCount: number;
+}
+
+export function calculateWebsitePaymentSummary(orders: WebsiteConsolidatedOrder[]): WebsitePaymentSummary {
+  const prepaidOrders = orders.filter(o => o.payment_mode === 'PREPAID');
+  const partialCodOrders = orders.filter(o => o.payment_mode === 'PARTIAL COD');
+  const fullCodOrders = orders.filter(o => o.payment_mode === 'COD');
+  const unknownPaymentOrders = orders.filter(o => o.payment_mode === 'UNKNOWN');
+
+  const prepaidCount = prepaidOrders.length;
+  const prepaidRevenue = prepaidOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+
+  const partialCodCount = partialCodOrders.length;
+  const partialCodRevenue = partialCodOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+  const partialCodRemaining = partialCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable) || 0), 0);
+
+  const fullCodCount = fullCodOrders.length;
+  const fullCodRevenue = fullCodOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+  const fullCodPending = fullCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable ?? o.price) || 0), 0);
+
+  const totalCodReceivable = partialCodRemaining + fullCodPending;
+  const unknownPaymentCount = unknownPaymentOrders.length;
+
+  return {
+    prepaidCount,
+    prepaidRevenue,
+    partialCodCount,
+    partialCodRevenue,
+    partialCodRemaining,
+    fullCodCount,
+    fullCodRevenue,
+    fullCodPending,
+    totalCodReceivable,
+    unknownPaymentCount
+  };
+}

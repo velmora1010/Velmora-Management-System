@@ -29,7 +29,8 @@ import {
   calculateDaysBetween,
   shiftDateRange,
   formatDateRangeDisplay,
-  formatSectionDateHeader
+  formatSectionDateHeader,
+  calculateWebsitePaymentSummary
 } from './websiteSalesUtils';
 import { DashboardFilterDrawer } from './components/DashboardFilterDrawer';
 import { ProductDispatchModal } from './components/ProductDispatchModal';
@@ -230,15 +231,18 @@ export const WebsiteDashboard: React.FC = () => {
   const avgOrderValue = totalOrdersCount > 0 ? Math.round(totalRevenue / totalOrdersCount) : 0;
 
   // Payment Breakdown for Selected Date Range & Applied Filters
-  const prepaidOrdersCount = orders.filter(o => o.payment_mode === 'PREPAID').length;
-  const partialCodOrders = orders.filter(o => o.payment_mode === 'PARTIAL COD');
-  const partialCodOrdersCount = partialCodOrders.length;
-  const fullCodOrders = orders.filter(o => o.payment_mode === 'COD');
-  const fullCodOrdersCount = fullCodOrders.length;
-
-  const partialCodRemaining = partialCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable) || 0), 0);
-  const fullCodReceivable = fullCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable ?? o.price) || 0), 0);
-  const totalCodReceivable = partialCodRemaining + fullCodReceivable;
+  const paymentSummary = useMemo(() => calculateWebsitePaymentSummary(orders), [orders]);
+  const {
+    prepaidCount,
+    prepaidRevenue,
+    partialCodCount,
+    partialCodRevenue,
+    partialCodRemaining,
+    fullCodCount,
+    fullCodRevenue,
+    fullCodPending,
+    totalCodReceivable
+  } = paymentSummary;
 
   // Product Dispatch Breakdown (Order items or product names)
   const dispatchedProductsList = useMemo(() => {
@@ -292,12 +296,12 @@ export const WebsiteDashboard: React.FC = () => {
   // 1. Dashboard Payment Mode Donut
   const dashboardPaymentDonutData = useMemo(() => {
     return [
-      { name: 'PREPAID', value: orders.filter(o => o.payment_mode === 'PREPAID').length, color: '#10b981' },
-      { name: 'PARTIAL COD', value: orders.filter(o => o.payment_mode === 'PARTIAL COD').length, color: '#a855f7' },
-      { name: 'COD', value: orders.filter(o => o.payment_mode === 'COD').length, color: '#f59e0b' },
+      { name: 'PREPAID', value: prepaidCount, color: '#10b981' },
+      { name: 'PARTIAL COD', value: partialCodCount, color: '#a855f7' },
+      { name: 'COD', value: fullCodCount, color: '#f59e0b' },
       { name: 'UNKNOWN', value: orders.filter(o => o.payment_mode === 'UNKNOWN').length, color: '#64748b' }
     ].filter(d => d.value > 0);
-  }, [orders]);
+  }, [prepaidCount, partialCodCount, fullCodCount, orders]);
 
   // 2. Dashboard Product Mix Donut
   const dashboardProductDonutData = useMemo(() => {
@@ -612,20 +616,26 @@ export const WebsiteDashboard: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
             <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Prepaid Orders</span>
-            <div className="text-2xl font-bold text-emerald-400">{prepaidOrdersCount}</div>
+            <div className="text-2xl font-bold text-emerald-400">{prepaidCount.toLocaleString()}</div>
+            <div className="text-sm font-bold text-white mt-1">₹{prepaidRevenue.toLocaleString()}</div>
+            <span className="text-[10px] text-slate-400 block font-medium">Prepaid Order Value</span>
             <span className="text-[11px] text-slate-500 mt-1 block">Full payment received</span>
           </div>
 
           <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
             <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Partial COD Orders</span>
-            <div className="text-2xl font-bold text-purple-400">{partialCodOrdersCount}</div>
+            <div className="text-2xl font-bold text-purple-400">{partialCodCount.toLocaleString()}</div>
+            <div className="text-sm font-bold text-white mt-1">₹{partialCodRevenue.toLocaleString()}</div>
+            <span className="text-[10px] text-slate-400 block font-medium">Partial COD Order Value</span>
             <span className="text-[11px] text-purple-400/90 mt-1 block font-medium">₹{partialCodRemaining.toLocaleString()} remaining COD</span>
           </div>
 
           <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
             <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Full COD Orders</span>
-            <div className="text-2xl font-bold text-amber-400">{fullCodOrdersCount}</div>
-            <span className="text-[11px] text-amber-400/90 mt-1 block font-medium">₹{fullCodReceivable.toLocaleString()} full COD</span>
+            <div className="text-2xl font-bold text-amber-400">{fullCodCount.toLocaleString()}</div>
+            <div className="text-sm font-bold text-white mt-1">₹{fullCodRevenue.toLocaleString()}</div>
+            <span className="text-[10px] text-slate-400 block font-medium">Full COD Order Value</span>
+            <span className="text-[11px] text-amber-400/90 mt-1 block font-medium">₹{fullCodPending.toLocaleString()} full COD pending</span>
           </div>
 
           <div className="p-5 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">

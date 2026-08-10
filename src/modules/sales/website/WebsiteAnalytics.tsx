@@ -45,7 +45,8 @@ import {
   formatSalesDateShort,
   shiftDateString,
   formatPhoneNumber,
-  getUploadBatchesForAnalyticsPeriod
+  getUploadBatchesForAnalyticsPeriod,
+  calculateWebsitePaymentSummary
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -416,18 +417,30 @@ export const WebsiteAnalytics: React.FC = () => {
   const totalUnits = useMemo(() => filteredOrders.reduce((sum, o) => sum + (Number(o.total_quantity) || 0), 0), [filteredOrders]);
   const avgOrderValue = totalOrdersCount > 0 ? Math.round(totalRevenue / totalOrdersCount) : 0;
 
+  // Payment Summary metrics using the unified calculation logic
+  const paymentSummary = useMemo(() => calculateWebsitePaymentSummary(filteredOrders), [filteredOrders]);
+  const {
+    prepaidCount,
+    prepaidRevenue,
+    partialCodCount,
+    partialCodRevenue,
+    partialCodRemaining,
+    fullCodCount,
+    fullCodRevenue,
+    fullCodPending,
+    totalCodReceivable,
+    unknownPaymentCount
+  } = paymentSummary;
+
+  // Legacy variables preserved to avoid breaking existing chart configs
   const prepaidOrders = useMemo(() => filteredOrders.filter(o => o.payment_mode === 'PREPAID'), [filteredOrders]);
   const partialCodOrders = useMemo(() => filteredOrders.filter(o => o.payment_mode === 'PARTIAL COD'), [filteredOrders]);
   const codOrders = useMemo(() => filteredOrders.filter(o => o.payment_mode === 'COD'), [filteredOrders]);
   const unknownPaymentOrders = useMemo(() => filteredOrders.filter(o => o.payment_mode === 'UNKNOWN'), [filteredOrders]);
 
-  const prepaidRevenue = useMemo(() => prepaidOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0), [prepaidOrders]);
-  const partialCodValue = useMemo(() => partialCodOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0), [partialCodOrders]);
+  const partialCodValue = partialCodRevenue;
   const partialCodAdvance = useMemo(() => partialCodOrders.reduce((sum, o) => sum + (Number(o.advance_paid) || 0), 0), [partialCodOrders]);
-  const partialCodRemaining = useMemo(() => partialCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable) || 0), 0), [partialCodOrders]);
-
-  const fullCodReceivable = useMemo(() => codOrders.reduce((sum, o) => sum + (Number(o.remaining_payable ?? o.price) || 0), 0), [codOrders]);
-  const totalCodReceivable = partialCodRemaining + fullCodReceivable;
+  const fullCodReceivable = fullCodPending;
 
   // SEARCH LOGIC FOR FILTERED ORDERS SECTION (Order ID & Customer Name only)
   const searchedOrders = useMemo(() => {
@@ -1198,22 +1211,29 @@ export const WebsiteAnalytics: React.FC = () => {
 
         <div className="p-5 border-t-4 border-t-emerald-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Prepaid Orders</span>
-          <div className="text-2xl font-bold text-emerald-400">{prepaidOrders.length}</div>
+          <div className="text-2xl font-bold text-emerald-400">{prepaidCount.toLocaleString()}</div>
+          <div className="text-sm font-bold text-white mt-1">₹{prepaidRevenue.toLocaleString()}</div>
+          <span className="text-[10px] text-slate-400 block font-medium">Prepaid Order Value</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-purple-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Partial COD Orders</span>
-          <div className="text-2xl font-bold text-purple-300">{partialCodOrders.length}</div>
+          <div className="text-2xl font-bold text-purple-300">{partialCodCount.toLocaleString()}</div>
+          <div className="text-sm font-bold text-white mt-1">₹{partialCodRevenue.toLocaleString()}</div>
+          <span className="text-[10px] text-slate-400 block font-medium">Partial COD Order Value</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Full COD Orders</span>
-          <div className="text-2xl font-bold text-amber-400">{codOrders.length}</div>
+          <div className="text-2xl font-bold text-amber-400">{fullCodCount.toLocaleString()}</div>
+          <div className="text-sm font-bold text-white mt-1">₹{fullCodRevenue.toLocaleString()}</div>
+          <span className="text-[10px] text-slate-400 block font-medium">Full COD Order Value</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total COD Receivable</span>
           <div className="text-2xl font-bold text-pink-300">₹{totalCodReceivable.toLocaleString()}</div>
+          <span className="text-[11px] text-slate-500 mt-1 block">Partial + Full COD pending</span>
         </div>
       </div>
 
