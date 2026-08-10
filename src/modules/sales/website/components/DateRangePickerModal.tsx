@@ -20,9 +20,27 @@ export type DateRangePreset =
   | 'this_week'
   | '7days'
   | 'this_month'
+  | 'previous_month'
+  | 'previousMonth'
   | '30days'
   | 'this_year'
   | 'custom';
+
+export interface QuickRangeConfig {
+  key: DateRangePreset;
+  label: string;
+}
+
+export const QUICK_RANGES: QuickRangeConfig[] = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'this_week', label: 'This Week' },
+  { key: '7days', label: 'Last 7 Days' },
+  { key: 'this_month', label: 'This Month' },
+  { key: 'previous_month', label: 'Previous Month' },
+  { key: '30days', label: 'Last 30 Days' },
+  { key: 'this_year', label: 'This Year' }
+];
 
 interface DateRangePickerModalProps {
   isOpen: boolean;
@@ -85,6 +103,46 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
+  // Determine active preset key for sidebar highlight
+  const activePresetKey = useMemo(() => {
+    if (!draftStart || !draftEnd) return 'custom';
+    if (draftStart === todayStr && draftEnd === todayStr) return 'today';
+
+    const yest = shiftDateString(todayStr, -1);
+    if (draftStart === yest && draftEnd === yest) return 'yesterday';
+
+    const parts = todayStr.split('-').map(Number);
+    const dt = new Date(parts[0], parts[1] - 1, parts[2]);
+    const day = dt.getDay();
+    const diffToMon = day === 0 ? -6 : 1 - day;
+    const monDt = new Date(dt);
+    monDt.setDate(dt.getDate() + diffToMon);
+    const monStr = `${monDt.getFullYear()}-${String(monDt.getMonth() + 1).padStart(2, '0')}-${String(monDt.getDate()).padStart(2, '0')}`;
+    if (draftStart === monStr && draftEnd === todayStr) return 'this_week';
+
+    if (draftStart === shiftDateString(todayStr, -6) && draftEnd === todayStr) return '7days';
+
+    const thisMonthStart = `${parts[0]}-${String(parts[1]).padStart(2, '0')}-01`;
+    if (draftStart === thisMonthStart && draftEnd === todayStr) return 'this_month';
+
+    // Previous Month Check
+    const currYear = parts[0];
+    const currMonth = parts[1];
+    const prevYear = currMonth === 1 ? currYear - 1 : currYear;
+    const prevMonth = currMonth === 1 ? 12 : currMonth - 1;
+    const lastDay = new Date(prevYear, prevMonth, 0).getDate();
+    const prevStart = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`;
+    const prevEnd = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    if (draftStart === prevStart && draftEnd === prevEnd) return 'previous_month';
+
+    if (draftStart === shiftDateString(todayStr, -29) && draftEnd === todayStr) return '30days';
+
+    const thisYearStart = `${parts[0]}-01-01`;
+    if (draftStart === thisYearStart && draftEnd === todayStr) return 'this_year';
+
+    return 'custom';
+  }, [draftStart, draftEnd, todayStr]);
+
   // Quick Preset Helper
   const applyPreset = (preset: DateRangePreset) => {
     let start = todayStr;
@@ -115,6 +173,17 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
       const parts = todayStr.split('-').map(Number);
       start = `${parts[0]}-${String(parts[1]).padStart(2, '0')}-01`;
       end = todayStr;
+    } else if (preset === 'previous_month' || preset === 'previousMonth') {
+      const parts = todayStr.split('-').map(Number);
+      const currYear = parts[0];
+      const currMonth = parts[1]; // 1 to 12
+
+      const prevYear = currMonth === 1 ? currYear - 1 : currYear;
+      const prevMonth = currMonth === 1 ? 12 : currMonth - 1;
+      const lastDay = new Date(prevYear, prevMonth, 0).getDate();
+
+      start = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`;
+      end = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
     } else if (preset === '30days') {
       start = shiftDateString(todayStr, -29);
       end = todayStr;
@@ -202,115 +271,69 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
       days.push({ dateStr, dayNum: d, isCurrentMonth: true });
     }
 
-    // Remaining trailing days to complete 35 or 42 grid cells
-    const remaining = (7 - (days.length % 7)) % 7;
-    for (let i = 1; i <= remaining; i++) {
+    // Days from next month to fill 42 cells (6 rows x 7 cols)
+    const remaining = 42 - days.length;
+    for (let d = 1; d <= remaining; d++) {
       const nm = month === 11 ? 0 : month + 1;
       const ny = month === 11 ? year + 1 : year;
-      const dateStr = `${ny}-${String(nm + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-      days.push({ dateStr, dayNum: i, isCurrentMonth: false });
+      const dateStr = `${ny}-${String(nm + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({ dateStr, dayNum: d, isCurrentMonth: false });
     }
 
     return days;
   };
 
-  const month1Days = useMemo(() => buildMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
-  
-  // Second month (viewMonth + 1)
-  const nextMonthYear = viewMonth === 11 ? viewYear + 1 : viewYear;
+  // Next month parameters for dual month display
   const nextMonthNum = viewMonth === 11 ? 0 : viewMonth + 1;
+  const nextMonthYear = viewMonth === 11 ? viewYear + 1 : viewYear;
+
+  const month1Days = useMemo(() => buildMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
   const month2Days = useMemo(() => buildMonthDays(nextMonthYear, nextMonthNum), [nextMonthYear, nextMonthNum]);
 
   if (!isOpen) return null;
 
-  const currentMin = draftStart < draftEnd ? draftStart : draftEnd;
-  const currentMax = draftStart < draftEnd ? draftEnd : draftStart;
-
   return (
-    <div 
-      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Select Sales Date Range"
-    >
-      <div className="absolute inset-0" onClick={onClose} />
-
-      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in font-sans">
+      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* HEADER */}
-        <div className="p-5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 text-cyan-400">
-            <CalendarIcon size={20} />
-            <h2 className="text-lg font-extrabold text-white tracking-tight">Select Date Range</h2>
+        <div className="px-6 py-4 border-b border-slate-800/80 flex items-center justify-between bg-slate-950/60">
+          <div className="flex items-center gap-2 text-cyan-400">
+            <CalendarIcon size={18} />
+            <h3 className="text-sm font-extrabold text-white tracking-tight">Select Date Range</h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-            aria-label="Close Date Range Selector"
+            className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* BODY (QUICK PRESETS + DUAL CALENDARS) */}
-        <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-800/80">
+        <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-800/80 overflow-y-auto">
           {/* QUICK RANGE PRESETS SIDEBAR */}
-          <div className="p-4 lg:w-48 bg-slate-950/40 shrink-0 space-y-1">
+          <div className="p-4 lg:w-48 bg-slate-950/40 shrink-0 space-y-1 max-h-[420px] overflow-y-auto">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block px-3 py-1 mb-1">
               Quick Ranges
             </span>
-            <button
-              onClick={() => applyPreset('today')}
-              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                draftStart === todayStr && draftEnd === todayStr
-                  ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
-                  : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-              }`}
-            >
-              <span>Today</span>
-              <Clock size={13} className="text-cyan-400" />
-            </button>
-
-            <button
-              onClick={() => applyPreset('yesterday')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Yesterday
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_week')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Week
-            </button>
-
-            <button
-              onClick={() => applyPreset('7days')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Last 7 Days
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_month')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Month
-            </button>
-
-            <button
-              onClick={() => applyPreset('30days')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              Last 30 Days
-            </button>
-
-            <button
-              onClick={() => applyPreset('this_year')}
-              className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            >
-              This Year
-            </button>
+            {QUICK_RANGES.map(item => {
+              const isSelected = activePresetKey === item.key;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => applyPreset(item.key)}
+                  className={`w-full text-left px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
+                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                  }`}
+                >
+                  <span>{item.label}</span>
+                  {isSelected && <Clock size={13} className="text-cyan-400 shrink-0" />}
+                </button>
+              );
+            })}
           </div>
 
           {/* DUAL CALENDAR MONTH VIEWS */}
@@ -362,38 +385,41 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
               </button>
             </div>
 
-            {/* CALENDARS GRID (MONTH 1 & MONTH 2) */}
+            {/* DUAL CALENDAR GRIDS */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* MONTH 1 */}
               <div className="space-y-2">
-                <div className="text-xs font-bold text-cyan-400 text-center uppercase tracking-wider">
+                <div className="text-center text-xs font-bold text-cyan-300 uppercase tracking-wider">
                   {MONTH_NAMES[viewMonth]} {viewYear}
                 </div>
-                <div className="grid grid-cols-7 gap-1 text-center">
+                <div className="grid grid-cols-7 text-center text-[10px] font-bold text-slate-400 py-1">
                   {WEEKDAY_NAMES.map(w => (
-                    <span key={w} className="text-[10px] font-bold text-slate-400 py-1">{w}</span>
+                    <div key={`m1-w-${w}`}>{w}</div>
                   ))}
-                  {month1Days.map((d, i) => {
-                    const isStart = d.dateStr === currentMin;
-                    const isEnd = d.dateStr === currentMax;
-                    const inRange = d.dateStr >= currentMin && d.dateStr <= currentMax;
+                </div>
+                <div className="grid grid-cols-7 gap-1 text-xs font-mono">
+                  {month1Days.map((cell, idx) => {
+                    const isSelectedStart = cell.dateStr === draftStart;
+                    const isSelectedEnd = cell.dateStr === draftEnd;
+                    const isInRange = cell.dateStr >= draftStart && cell.dateStr <= draftEnd;
+
+                    let bgClass = 'hover:bg-slate-800 text-slate-300';
+                    if (!cell.isCurrentMonth) bgClass = 'text-slate-600 hover:bg-slate-800/40';
+
+                    if (isSelectedStart || isSelectedEnd) {
+                      bgClass = 'bg-cyan-500 text-white font-bold rounded-lg shadow-md';
+                    } else if (isInRange) {
+                      bgClass = 'bg-cyan-500/20 text-cyan-200 font-semibold';
+                    }
 
                     return (
                       <button
-                        key={i}
+                        key={`m1-d-${cell.dateStr}-${idx}`}
                         type="button"
-                        onClick={() => handleDayClick(d.dateStr)}
-                        className={`h-8 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center ${
-                          !d.isCurrentMonth ? 'text-slate-600 opacity-40' : 'text-slate-200'
-                        } ${
-                          isStart || isEnd
-                            ? 'bg-cyan-500 text-slate-950 font-extrabold shadow-md shadow-cyan-500/20'
-                            : inRange
-                            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                            : 'hover:bg-slate-800'
-                        }`}
+                        onClick={() => handleDayClick(cell.dateStr)}
+                        className={`h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${bgClass}`}
                       >
-                        {d.dayNum}
+                        {cell.dayNum}
                       </button>
                     );
                   })}
@@ -402,34 +428,37 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
 
               {/* MONTH 2 */}
               <div className="space-y-2">
-                <div className="text-xs font-bold text-cyan-400 text-center uppercase tracking-wider">
+                <div className="text-center text-xs font-bold text-cyan-300 uppercase tracking-wider">
                   {MONTH_NAMES[nextMonthNum]} {nextMonthYear}
                 </div>
-                <div className="grid grid-cols-7 gap-1 text-center">
+                <div className="grid grid-cols-7 text-center text-[10px] font-bold text-slate-400 py-1">
                   {WEEKDAY_NAMES.map(w => (
-                    <span key={w} className="text-[10px] font-bold text-slate-400 py-1">{w}</span>
+                    <div key={`m2-w-${w}`}>{w}</div>
                   ))}
-                  {month2Days.map((d, i) => {
-                    const isStart = d.dateStr === currentMin;
-                    const isEnd = d.dateStr === currentMax;
-                    const inRange = d.dateStr >= currentMin && d.dateStr <= currentMax;
+                </div>
+                <div className="grid grid-cols-7 gap-1 text-xs font-mono">
+                  {month2Days.map((cell, idx) => {
+                    const isSelectedStart = cell.dateStr === draftStart;
+                    const isSelectedEnd = cell.dateStr === draftEnd;
+                    const isInRange = cell.dateStr >= draftStart && cell.dateStr <= draftEnd;
+
+                    let bgClass = 'hover:bg-slate-800 text-slate-300';
+                    if (!cell.isCurrentMonth) bgClass = 'text-slate-600 hover:bg-slate-800/40';
+
+                    if (isSelectedStart || isSelectedEnd) {
+                      bgClass = 'bg-cyan-500 text-white font-bold rounded-lg shadow-md';
+                    } else if (isInRange) {
+                      bgClass = 'bg-cyan-500/20 text-cyan-200 font-semibold';
+                    }
 
                     return (
                       <button
-                        key={i}
+                        key={`m2-d-${cell.dateStr}-${idx}`}
                         type="button"
-                        onClick={() => handleDayClick(d.dateStr)}
-                        className={`h-8 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center ${
-                          !d.isCurrentMonth ? 'text-slate-600 opacity-40' : 'text-slate-200'
-                        } ${
-                          isStart || isEnd
-                            ? 'bg-cyan-500 text-slate-950 font-extrabold shadow-md shadow-cyan-500/20'
-                            : inRange
-                            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                            : 'hover:bg-slate-800'
-                        }`}
+                        onClick={() => handleDayClick(cell.dateStr)}
+                        className={`h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer ${bgClass}`}
                       >
-                        {d.dayNum}
+                        {cell.dayNum}
                       </button>
                     );
                   })}
@@ -440,25 +469,24 @@ export const DateRangePickerModal: React.FC<DateRangePickerModalProps> = ({
         </div>
 
         {/* FOOTER */}
-        <div className="p-4 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-3">
-          <div className="text-xs text-slate-400 font-mono">
-            Selected: <span className="text-cyan-300 font-bold">{formatSalesDateShort(currentMin)}</span> — <span className="text-cyan-300 font-bold">{formatSalesDateShort(currentMax)}</span>
+        <div className="px-6 py-3.5 border-t border-slate-800/80 bg-slate-950 flex items-center justify-between text-xs">
+          <div className="text-slate-400 font-mono">
+            Selected: <span className="text-cyan-300 font-bold">{formatSalesDateShort(draftStart)} — {formatSalesDateShort(draftEnd)}</span>
           </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleApplyCustom}
-              className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-extrabold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-md shadow-cyan-600/20"
+              className="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-lg shadow-cyan-500/20"
             >
-              <Check size={14} /> Apply Range
+              <Check size={15} /> Apply Range
             </button>
           </div>
         </div>
