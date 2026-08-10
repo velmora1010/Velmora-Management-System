@@ -601,14 +601,30 @@ export class WebsiteSalesService {
         if (q && !orderPhone.includes(q)) return false;
       }
 
-      if (filters.state && o.state !== filters.state) return false;
-      if (filters.city && o.city !== filters.city) return false;
+      if (filters.state) {
+        const fs = filters.state.toLowerCase().trim();
+        const os = (o.state || '').toLowerCase().trim();
+        if (os !== fs) return false;
+      }
+      if (filters.city) {
+        const fc = filters.city.toLowerCase().trim();
+        const oc = (o.city || '').toLowerCase().trim();
+        if (oc !== fc) return false;
+      }
       if (filters.paymentMode && o.payment_mode !== filters.paymentMode) return false;
       if (filters.offer && o.offer !== filters.offer) return false;
 
       if (filters.batchIds && filters.batchIds.length > 0 && !filters.batchIds.includes(o.upload_batch_id)) return false;
-      if (filters.states && filters.states.length > 0 && !filters.states.includes(o.state)) return false;
-      if (filters.cities && filters.cities.length > 0 && !filters.cities.includes(o.city)) return false;
+      if (filters.states && filters.states.length > 0) {
+        const normalizedStates = filters.states.map(s => s.toLowerCase().trim());
+        const os = (o.state || '').toLowerCase().trim();
+        if (!normalizedStates.includes(os)) return false;
+      }
+      if (filters.cities && filters.cities.length > 0) {
+        const normalizedCities = filters.cities.map(c => c.toLowerCase().trim());
+        const oc = (o.city || '').toLowerCase().trim();
+        if (!normalizedCities.includes(oc)) return false;
+      }
       if (filters.pincodes && filters.pincodes.length > 0 && !filters.pincodes.includes(o.pincode)) return false;
       if (filters.paymentModes && filters.paymentModes.length > 0 && !filters.paymentModes.includes(o.payment_mode)) return false;
       if (filters.offers && filters.offers.length > 0 && !filters.offers.includes(o.offer || 'No Offer')) return false;

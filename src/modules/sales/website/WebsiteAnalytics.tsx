@@ -228,18 +228,26 @@ export const WebsiteAnalytics: React.FC = () => {
   // Collapsible Secondary Tables
   const [showStateTable, setShowStateTable] = useState<boolean>(false);
 
+  // ─── EFFECT 1: Sync URL params to shared date context (mount only) ─────────
   useEffect(() => {
-    loadData();
     const from = searchParams.get('from');
-    const to = searchParams.get('to');
-
+    const to   = searchParams.get('to');
     if (from && to && from.match(/^\d{4}-\d{2}-\d{2}$/) && to.match(/^\d{4}-\d{2}-\d{2}$/)) {
       if (from !== analyticsStartDate || to !== analyticsEndDate) {
         setDateRange(from, to, 'custom');
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ─── EFFECT 2: Reload data whenever shared date range changes ─────────────
+  // FIX: was `[]` — only fired on mount, so July selection showed 0 orders.
+  // Now fires on every analyticsStartDate / analyticsEndDate change.
+  useEffect(() => {
+    loadData(analyticsStartDate, analyticsEndDate);
+  }, [analyticsStartDate, analyticsEndDate]);
+
+  // ─── EFFECT 3: Close view dropdown on outside click ───────────────────────
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (viewDropdownRef.current && !viewDropdownRef.current.contains(event.target as Node)) {
@@ -250,14 +258,17 @@ export const WebsiteAnalytics: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const loadData = async () => {
+  // loadData accepts explicit date params to avoid stale-closure bugs.
+  // The component re-renders after setDateRange, then the effect above
+  // calls loadData with the current values — no closure capture issue.
+  const loadData = async (startDate: string, endDate: string) => {
     setLoading(true);
     const bList = await websiteSalesService.getUploadBatches();
     setBatches(bList);
 
     const orders = await websiteSalesService.getConsolidatedOrders({
-      startDate: analyticsStartDate,
-      endDate: analyticsEndDate
+      startDate,
+      endDate
     });
     setAllOrders(orders);
     setLoading(false);
@@ -377,8 +388,16 @@ export const WebsiteAnalytics: React.FC = () => {
       if (drillDownCity && o.city !== drillDownCity) return false;
 
       if (appliedFilters.batchIds.length > 0 && !appliedFilters.batchIds.includes(o.upload_batch_id)) return false;
-      if (appliedFilters.states.length > 0 && !appliedFilters.states.includes(o.state)) return false;
-      if (appliedFilters.cities.length > 0 && !appliedFilters.cities.includes(o.city)) return false;
+      if (appliedFilters.states.length > 0) {
+        const normalizedStates = appliedFilters.states.map(s => s.toLowerCase().trim());
+        const os = (o.state || '').toLowerCase().trim();
+        if (!normalizedStates.includes(os)) return false;
+      }
+      if (appliedFilters.cities.length > 0) {
+        const normalizedCities = appliedFilters.cities.map(c => c.toLowerCase().trim());
+        const oc = (o.city || '').toLowerCase().trim();
+        if (!normalizedCities.includes(oc)) return false;
+      }
       if (appliedFilters.pincodes.length > 0 && !appliedFilters.pincodes.includes(o.pincode)) return false;
       if (appliedFilters.paymentModes.length > 0 && !appliedFilters.paymentModes.includes(o.payment_mode)) return false;
       if (appliedFilters.offers.length > 0 && !appliedFilters.offers.includes(o.offer)) return false;

@@ -122,31 +122,36 @@ export const WebsiteDashboard: React.FC = () => {
   }, [searchParams]);
 
   // Load dataset on date range change or applied filter change
+  // FIX: pass params explicitly so there is no stale-closure capture
   useEffect(() => {
     setDashboardPaymentCardSlice(null);
     setDashboardProductCardSlice(null);
     setDashboardOfferCardSlice(null);
     setDashboardStateCardSlice(null);
-    loadData();
+    loadData(salesStartDate, salesEndDate, appliedFilters);
   }, [salesStartDate, salesEndDate, appliedFilters]);
 
-  const loadData = async () => {
+  const loadData = async (
+    startDate: string,
+    endDate: string,
+    filters: typeof appliedFilters
+  ) => {
     setLoading(true);
     const bList = await websiteSalesService.getUploadBatches();
     setBatches(bList);
 
-    // Fetch full period dataset for dropdown options
+    // Fetch full period dataset for filter dropdown options
     const periodDataset = await websiteSalesService.getConsolidatedOrders({
-      startDate: salesStartDate,
-      endDate: salesEndDate
+      startDate,
+      endDate
     });
     setAllOrders(periodDataset);
 
-    // Filter using selected date range + applied dashboard filters
+    // Fetch filtered dataset using date range + all applied filters
     const ordList = await websiteSalesService.getConsolidatedOrders({
-      ...appliedFilters,
-      startDate: salesStartDate,
-      endDate: salesEndDate
+      ...filters,
+      startDate,
+      endDate
     });
 
     setOrders(ordList);
@@ -156,7 +161,7 @@ export const WebsiteDashboard: React.FC = () => {
   const handleDeleteBatch = async (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to delete batch "${name}" and all its raw & consolidated data?`)) {
       await websiteSalesService.deleteUploadBatch(id);
-      loadData();
+      loadData(salesStartDate, salesEndDate, appliedFilters);
     }
   };
 
