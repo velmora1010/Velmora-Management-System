@@ -12,7 +12,8 @@ import {
   detectColumnMapping, 
   consolidateRawRows,
   getTodayInBusinessTimezone,
-  formatSalesDateShort
+  formatSalesDateShort,
+  normalizeLocationKey
 } from './websiteSalesUtils';
 
 const UPLOADS_KEY = 'website_sales_upload_batches';
@@ -601,14 +602,20 @@ export class WebsiteSalesService {
         if (q && !orderPhone.includes(q)) return false;
       }
 
-      if (filters.state && o.state !== filters.state) return false;
-      if (filters.city && o.city !== filters.city) return false;
+      if (filters.state && normalizeLocationKey(o.state) !== normalizeLocationKey(filters.state)) return false;
+      if (filters.city && normalizeLocationKey(o.city) !== normalizeLocationKey(filters.city)) return false;
       if (filters.paymentMode && o.payment_mode !== filters.paymentMode) return false;
       if (filters.offer && o.offer !== filters.offer) return false;
 
       if (filters.batchIds && filters.batchIds.length > 0 && !filters.batchIds.includes(o.upload_batch_id)) return false;
-      if (filters.states && filters.states.length > 0 && !filters.states.includes(o.state)) return false;
-      if (filters.cities && filters.cities.length > 0 && !filters.cities.includes(o.city)) return false;
+      if (filters.states && filters.states.length > 0) {
+        const normStates = filters.states.map(s => normalizeLocationKey(s));
+        if (!normStates.includes(normalizeLocationKey(o.state))) return false;
+      }
+      if (filters.cities && filters.cities.length > 0) {
+        const normCities = filters.cities.map(c => normalizeLocationKey(c));
+        if (!normCities.includes(normalizeLocationKey(o.city))) return false;
+      }
       if (filters.pincodes && filters.pincodes.length > 0 && !filters.pincodes.includes(o.pincode)) return false;
       if (filters.paymentModes && filters.paymentModes.length > 0 && !filters.paymentModes.includes(o.payment_mode)) return false;
       if (filters.offers && filters.offers.length > 0 && !filters.offers.includes(o.offer || 'No Offer')) return false;

@@ -1289,3 +1289,45 @@ export function calculateWebsitePaymentSummary(orders: WebsiteConsolidatedOrder[
     unknownPaymentCount
   };
 }
+
+export function normalizeLocationKey(value: any): string {
+  if (value === null || value === undefined) return '';
+  const str = String(value).trim().toLowerCase();
+  
+  // Collapse multiple spaces to none to handle "Tamil Nadu" vs "TamilNadu" or "New Delhi" vs "NewDelhi"
+  return str.replace(/\s+/g, '');
+}
+
+export function toCanonicalLocation(value: any): string {
+  const rawStr = String(value || '').trim();
+  const lower = rawStr.toLowerCase();
+  if (lower === 'unspecified' || lower === 'na' || lower === 'n/a' || lower === 'null' || lower === 'undefined' || !rawStr) {
+    return 'Unspecified';
+  }
+
+  // Canonical manual overrides for multi-word location keys
+  const canonicalMap: { [key: string]: string } = {
+    'tamilnadu': 'Tamil Nadu',
+    'andhrapradesh': 'Andhra Pradesh',
+    'uttarpradesh': 'Uttar Pradesh',
+    'madhyapradesh': 'Madhya Pradesh',
+    'himachalpradesh': 'Himachal Pradesh',
+    'newdelhi': 'New Delhi',
+    'westbengal': 'West Bengal',
+    'jammukashmir': 'Jammu & Kashmir',
+    'dadranagarhaveli': 'Dadra & Nagar Haveli',
+    'damandiu': 'Daman & Diu',
+    'arunachalpradesh': 'Arunachal Pradesh',
+  };
+
+  const normalized = lower.replace(/\s+/g, '');
+  if (canonicalMap[normalized]) {
+    return canonicalMap[normalized];
+  }
+
+  // Default fallback: Title Case
+  const words = rawStr.replace(/\s+/g, ' ').split(' ');
+  return words
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}

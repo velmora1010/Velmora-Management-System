@@ -46,7 +46,9 @@ import {
   shiftDateString,
   formatPhoneNumber,
   getUploadBatchesForAnalyticsPeriod,
-  calculateWebsitePaymentSummary
+  calculateWebsitePaymentSummary,
+  normalizeLocationKey,
+  toCanonicalLocation
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -374,12 +376,18 @@ export const WebsiteAnalytics: React.FC = () => {
       }
 
       if (drillDownPaymentMode && o.payment_mode !== drillDownPaymentMode) return false;
-      if (drillDownState && o.state !== drillDownState) return false;
-      if (drillDownCity && o.city !== drillDownCity) return false;
+      if (drillDownState && normalizeLocationKey(o.state) !== normalizeLocationKey(drillDownState)) return false;
+      if (drillDownCity && normalizeLocationKey(o.city) !== normalizeLocationKey(drillDownCity)) return false;
 
       if (appliedFilters.batchIds.length > 0 && !appliedFilters.batchIds.includes(o.upload_batch_id)) return false;
-      if (appliedFilters.states.length > 0 && !appliedFilters.states.includes(o.state)) return false;
-      if (appliedFilters.cities.length > 0 && !appliedFilters.cities.includes(o.city)) return false;
+      if (appliedFilters.states.length > 0) {
+        const normStates = appliedFilters.states.map(s => normalizeLocationKey(s));
+        if (!normStates.includes(normalizeLocationKey(o.state))) return false;
+      }
+      if (appliedFilters.cities.length > 0) {
+        const normCities = appliedFilters.cities.map(c => normalizeLocationKey(c));
+        if (!normCities.includes(normalizeLocationKey(o.city))) return false;
+      }
       if (appliedFilters.pincodes.length > 0 && !appliedFilters.pincodes.includes(o.pincode)) return false;
       if (appliedFilters.paymentModes.length > 0 && !appliedFilters.paymentModes.includes(o.payment_mode)) return false;
       if (appliedFilters.offers.length > 0 && !appliedFilters.offers.includes(o.offer)) return false;
@@ -660,9 +668,13 @@ export const WebsiteAnalytics: React.FC = () => {
   const statePieData = useMemo(() => {
     const map = new Map<string, { state: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
-      const st = o.state || 'Unspecified';
-      if (!map.has(st)) map.set(st, { state: st, orders: 0, revenue: 0, units: 0 });
-      const item = map.get(st)!;
+      const canonicalState = toCanonicalLocation(o.state);
+      if (canonicalState === 'Unspecified') return;
+      const norm = normalizeLocationKey(canonicalState);
+      if (!map.has(norm)) {
+        map.set(norm, { state: canonicalState, orders: 0, revenue: 0, units: 0 });
+      }
+      const item = map.get(norm)!;
       item.orders += 1;
       item.revenue += Number(o.price) || 0;
       item.units += Number(o.total_quantity) || 0;
@@ -707,9 +719,16 @@ export const WebsiteAnalytics: React.FC = () => {
   const cityDonutData = useMemo(() => {
     const map = new Map<string, { cityState: string; city: string; state: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
-      const key = `${o.city || 'Unspecified'}, ${o.state || 'Unspecified'}`;
-      if (!map.has(key)) map.set(key, { cityState: key, city: o.city || 'Unspecified', state: o.state || 'Unspecified', orders: 0, revenue: 0, units: 0 });
-      const item = map.get(key)!;
+      const canonicalCity = toCanonicalLocation(o.city);
+      const canonicalState = toCanonicalLocation(o.state);
+      if (canonicalCity === 'Unspecified' || canonicalState === 'Unspecified') return;
+      const normKey = `${normalizeLocationKey(canonicalCity)},${normalizeLocationKey(canonicalState)}`;
+      const cityState = `${canonicalCity}, ${canonicalState}`;
+      
+      if (!map.has(normKey)) {
+        map.set(normKey, { cityState, city: canonicalCity, state: canonicalState, orders: 0, revenue: 0, units: 0 });
+      }
+      const item = map.get(normKey)!;
       item.orders += 1;
       item.revenue += Number(o.price) || 0;
       item.units += Number(o.total_quantity) || 0;
@@ -755,9 +774,10 @@ export const WebsiteAnalytics: React.FC = () => {
     if (!drillDownState) return filteredOrders;
     if (drillDownState === 'Others') {
       const topStates = statePieData.filter(d => d.state !== 'Others').map(d => d.state);
-      return filteredOrders.filter(o => !topStates.includes(o.state));
+      const normTopStates = topStates.map(s => normalizeLocationKey(s));
+      return filteredOrders.filter(o => !normTopStates.includes(normalizeLocationKey(o.state)));
     }
-    return filteredOrders.filter(o => o.state === drillDownState);
+    return filteredOrders.filter(o => normalizeLocationKey(o.state) === normalizeLocationKey(drillDownState));
   }, [filteredOrders, drillDownState, statePieData]);
 
   // 4. City-wise Sales matching orders
@@ -765,9 +785,16 @@ export const WebsiteAnalytics: React.FC = () => {
     if (!drillDownCity) return filteredOrders;
     if (drillDownCity === 'Others') {
       const topCityStates = cityDonutData.filter(d => d.cityState !== 'Others').map(d => d.cityState);
-      return filteredOrders.filter(o => !topCityStates.includes(`${o.city || 'Unspecified'}, ${o.state || 'Unspecified'}`));
+      const normTopCityStates = topCityStates.map(cs => cs.toLowerCase().replace(/\s+/g, ''));
+      return filteredOrders.filter(o => {
+        const currentCs = `${o.city || 'Unspecified'},${o.state || 'Unspecified'}`.toLowerCase().replace(/\s+/g, '');
+        return !normTopCityStates.includes(currentCs);
+      });
     }
-    return filteredOrders.filter(o => `${o.city || 'Unspecified'}, ${o.state || 'Unspecified'}` === drillDownCity);
+    return filteredOrders.filter(o => {
+      const currentCs = `${o.city || 'Unspecified'},${o.state || 'Unspecified'}`.toLowerCase().replace(/\s+/g, '');
+      return currentCs === drillDownCity.toLowerCase().replace(/\s+/g, '');
+    });
   }, [filteredOrders, drillDownCity, cityDonutData]);
 
   // 5. PINCODE PERFORMANCE PIE DATA (Top 6 + Others)
@@ -1319,6 +1346,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={paymentDonutData}
                 centerValue={totalOrdersCount}
                 centerLabel="TOTAL ORDERS"
+                valueFormatter={(val) => val.toLocaleString()}
                 selectedSliceName={drillDownPaymentMode}
                 onSliceClick={entry => setDrillDownPaymentMode(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No payment data available for the selected filters"
@@ -1353,6 +1381,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={revenueMixData}
                 centerValue={`₹${totalRevenue.toLocaleString()}`}
                 centerLabel="TOTAL REVENUE"
+                valueFormatter={(val) => `₹${val.toLocaleString()}`}
                 selectedSliceName={revenueMixCardSlice}
                 onSliceClick={entry => setRevenueMixCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No revenue data available for the selected filters"
@@ -1390,6 +1419,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={statePieData}
                 centerValue={stateMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : stateMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={stateMetric === 'revenue' ? "TOTAL REVENUE" : stateMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                valueFormatter={(val) => stateMetric === 'revenue' ? `₹${val.toLocaleString()}` : val.toLocaleString()}
                 selectedSliceName={drillDownState}
                 onSliceClick={entry => {
                   if (entry.state && entry.state !== 'Others') {
@@ -1464,6 +1494,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={cityDonutData}
                 centerValue={cityMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : cityMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={cityMetric === 'revenue' ? "TOTAL REVENUE" : cityMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                valueFormatter={(val) => cityMetric === 'revenue' ? `₹${val.toLocaleString()}` : val.toLocaleString()}
                 selectedSliceName={drillDownCity}
                 onSliceClick={entry => {
                   if (entry.cityState && entry.cityState !== 'Others') {
@@ -1506,6 +1537,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={pincodePieData}
                 centerValue={pincodeMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : pincodeMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={pincodeMetric === 'revenue' ? "TOTAL REVENUE" : pincodeMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                valueFormatter={(val) => pincodeMetric === 'revenue' ? `₹${val.toLocaleString()}` : val.toLocaleString()}
                 selectedSliceName={pincodeCardSlice}
                 onSliceClick={entry => setPincodeCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No pincode data available for the selected filters"
@@ -1540,6 +1572,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={productDonutData}
                 centerValue={productMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : productMetric === 'orders' ? totalOrdersCount : totalUnits}
                 centerLabel={productMetric === 'revenue' ? "TOTAL REVENUE" : productMetric === 'orders' ? "TOTAL ORDERS" : "TOTAL UNITS"}
+                valueFormatter={(val) => productMetric === 'revenue' ? `₹${val.toLocaleString()}` : val.toLocaleString()}
                 selectedSliceName={productCardSlice}
                 onSliceClick={entry => setProductCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No product data available for the selected filters"
@@ -1577,6 +1610,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={offerPieData}
                 centerValue={offerMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : offerMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={offerMetric === 'revenue' ? "TOTAL REVENUE" : offerMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                valueFormatter={(val) => offerMetric === 'revenue' ? `₹${val.toLocaleString()}` : val.toLocaleString()}
                 selectedSliceName={offerCardSlice}
                 onSliceClick={entry => setOfferCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No offer data available for the selected filters"
@@ -1611,6 +1645,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={orderValueDonutData}
                 centerValue={orderValueMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : totalOrdersCount}
                 centerLabel={orderValueMetric === 'revenue' ? "TOTAL REVENUE" : "TOTAL ORDERS"}
+                valueFormatter={(val) => orderValueMetric === 'revenue' ? `₹${val.toLocaleString()}` : val.toLocaleString()}
                 selectedSliceName={orderValueCardSlice}
                 onSliceClick={entry => setOrderValueCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No order value data available for the selected filters"
@@ -1643,6 +1678,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   data={orderCompositionDonuts.productDonut}
                   centerValue={totalOrdersCount}
                   centerLabel="TOTAL ORDERS"
+                  valueFormatter={(val) => val.toLocaleString()}
                   height={220}
                   innerRadius={45}
                   outerRadius={75}
@@ -1661,6 +1697,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   data={orderCompositionDonuts.quantityDonut}
                   centerValue={totalOrdersCount}
                   centerLabel="TOTAL ORDERS"
+                  valueFormatter={(val) => val.toLocaleString()}
                   height={220}
                   innerRadius={45}
                   outerRadius={75}
@@ -1693,6 +1730,7 @@ export const WebsiteAnalytics: React.FC = () => {
               data={codReceivableDonutData}
               centerValue={`₹${(partialCodAdvance + totalCodReceivable).toLocaleString()}`}
               centerLabel="TOTAL COD VALUE"
+              valueFormatter={(val) => `₹${val.toLocaleString()}`}
               selectedSliceName={codCardSlice}
               onSliceClick={entry => setCodCardSlice(prev => prev === entry.name ? null : entry.name)}
               emptyMessage="No COD data available for the selected filters"

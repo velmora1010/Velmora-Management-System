@@ -30,7 +30,9 @@ import {
   shiftDateRange,
   formatDateRangeDisplay,
   formatSectionDateHeader,
-  calculateWebsitePaymentSummary
+  calculateWebsitePaymentSummary,
+  normalizeLocationKey,
+  toCanonicalLocation
 } from './websiteSalesUtils';
 import { DashboardFilterDrawer } from './components/DashboardFilterDrawer';
 import { ProductDispatchModal } from './components/ProductDispatchModal';
@@ -328,7 +330,8 @@ export const WebsiteDashboard: React.FC = () => {
   const dashboardStateDonutData = useMemo(() => {
     const map = new Map<string, number>();
     orders.forEach(o => {
-      const st = o.state || 'Unspecified';
+      const st = toCanonicalLocation(o.state);
+      if (st === 'Unspecified') return; // Skip bad state label
       map.set(st, (map.get(st) || 0) + 1);
     });
     const list = Array.from(map.entries()).map(([name, count]) => ({ name, value: count }));
@@ -362,7 +365,7 @@ export const WebsiteDashboard: React.FC = () => {
 
   const dashboardStateMatchingOrders = useMemo(() => {
     if (!dashboardStateCardSlice) return orders;
-    return orders.filter(o => (o.state || 'Unspecified') === dashboardStateCardSlice);
+    return orders.filter(o => toCanonicalLocation(o.state) === dashboardStateCardSlice);
   }, [orders, dashboardStateCardSlice]);
 
   // Batches for Selected Date Range & Applied Filters

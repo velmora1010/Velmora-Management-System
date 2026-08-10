@@ -11,7 +11,12 @@ import {
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch } from '../types';
 import type { MultiSelectFilterState } from '../WebsiteAnalytics';
 import { MultiSelectDropdown, OptionItem } from './MultiSelectDropdown';
-import { getUploadBatchesForAnalyticsPeriod, getTodayInBusinessTimezone } from '../websiteSalesUtils';
+import { 
+  getUploadBatchesForAnalyticsPeriod, 
+  getTodayInBusinessTimezone,
+  normalizeLocationKey,
+  toCanonicalLocation
+} from '../websiteSalesUtils';
 import { useWebsiteSalesDateRange } from '../context/WebsiteSalesDateRangeContext';
 
 interface AnalyticsFilterDrawerProps {
@@ -86,35 +91,64 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
 
   // Dynamic filter options derived strictly from active period orders
   const stateOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<string, string>();
     periodOrders.forEach(o => {
-      const st = (o.state || 'Unspecified').trim();
-      set.add(st);
+      const raw = o.state;
+      const normalized = normalizeLocationKey(raw);
+      if (!normalized) return;
+      if (normalized === 'na' || normalized === 'n/a' || normalized === 'null' || normalized === 'undefined' || normalized === '-') return;
+      
+      const canonical = toCanonicalLocation(raw);
+      if (canonical === 'Unspecified') return;
+      
+      if (!map.has(normalized)) {
+        map.set(normalized, canonical);
+      }
     });
-    return Array.from(set).sort().map(s => ({ label: s, value: s }));
+    return Array.from(map.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([key, label]) => ({ label, value: label }));
   }, [periodOrders]);
 
   const cityOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
+    const map = new Map<string, string>();
     const selectedStates = draftFilters.states || [];
+    const normalizedSelectedStates = selectedStates.map(s => normalizeLocationKey(s));
+    
     periodOrders.forEach(o => {
-      if (selectedStates.length === 0 || selectedStates.includes(o.state)) {
-        const ct = (o.city || 'Unspecified').trim();
-        set.add(ct);
+      if (normalizedSelectedStates.length === 0 || normalizedSelectedStates.includes(normalizeLocationKey(o.state))) {
+        const raw = o.city;
+        const normalized = normalizeLocationKey(raw);
+        if (!normalized) return;
+        if (normalized === 'na' || normalized === 'n/a' || normalized === 'null' || normalized === 'undefined' || normalized === '-') return;
+        
+        const canonical = toCanonicalLocation(raw);
+        if (canonical === 'Unspecified') return;
+        
+        if (!map.has(normalized)) {
+          map.set(normalized, canonical);
+        }
       }
     });
-    return Array.from(set).sort().map(c => ({ label: c, value: c }));
+    return Array.from(map.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([key, label]) => ({ label, value: label }));
   }, [periodOrders, draftFilters.states]);
 
   const pincodeOptions: OptionItem[] = useMemo(() => {
     const set = new Set<string>();
     const selectedStates = draftFilters.states || [];
     const selectedCities = draftFilters.cities || [];
+    const normalizedSelectedStates = selectedStates.map(s => normalizeLocationKey(s));
+    const normalizedSelectedCities = selectedCities.map(c => normalizeLocationKey(c));
+    
     periodOrders.forEach(o => {
-      if ((selectedStates.length === 0 || selectedStates.includes(o.state)) &&
-          (selectedCities.length === 0 || selectedCities.includes(o.city))) {
+      if (
+        (normalizedSelectedStates.length === 0 || normalizedSelectedStates.includes(normalizeLocationKey(o.state))) &&
+        (normalizedSelectedCities.length === 0 || normalizedSelectedCities.includes(normalizeLocationKey(o.city)))
+      ) {
         const pin = String(o.pincode || '').trim();
-        if (pin && pin !== '-') set.add(pin);
+        if (pin && pin !== '-' && pin !== 'null' && pin !== 'undefined') set.add(pin);
       }
     });
     return Array.from(set).sort().map(p => ({ label: p, value: p }));

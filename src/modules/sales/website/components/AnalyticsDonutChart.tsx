@@ -140,16 +140,26 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
         </ResponsiveContainer>
 
         {/* CENTER OVERLAY (TOTAL VALUE & LABEL) */}
-        {centerValue !== undefined && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-2">
-            <span className="text-xl sm:text-2xl font-extrabold text-white tracking-tight drop-shadow-md">
-              {typeof centerValue === 'number' ? centerValue.toLocaleString() : centerValue}
-            </span>
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mt-0.5">
-              {centerLabel}
-            </span>
-          </div>
-        )}
+        {centerValue !== undefined && (() => {
+          const valStr = typeof centerValue === 'number' ? centerValue.toLocaleString() : String(centerValue);
+          const len = valStr.length;
+          let fontClass = 'text-xl sm:text-2xl font-extrabold';
+          if (len > 14) fontClass = 'text-[11px] sm:text-xs font-black';
+          else if (len > 11) fontClass = 'text-xs sm:text-sm font-extrabold';
+          else if (len > 8) fontClass = 'text-sm sm:text-base font-extrabold';
+          else if (len > 5) fontClass = 'text-base sm:text-lg font-extrabold';
+
+          return (
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-3">
+              <span className={`${fontClass} text-white tracking-tight drop-shadow-md`}>
+                {valStr}
+              </span>
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mt-0.5">
+                {centerLabel}
+              </span>
+            </div>
+          );
+        })()}
       </div>
 
       {/* LEGEND LIST */}
@@ -175,12 +185,12 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
                 isSelected ? 'border-purple-500 bg-purple-950/20' : 'border-slate-800'
               }`}
             >
-              <div className="flex items-center gap-2 truncate pr-2">
+              <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sliceColor }} />
                 <span className="font-sans font-bold text-slate-200 truncate">{item.name}</span>
               </div>
-              <div className="text-right shrink-0">
-                <span className="font-bold text-white">{formattedVal}</span>
+              <div className="text-right shrink-0 ml-auto pl-1">
+                <span className="font-bold text-white block truncate max-w-[120px]">{formattedVal}</span>
                 <span className="text-[10px] text-slate-400 block">{pct}%</span>
               </div>
             </div>
