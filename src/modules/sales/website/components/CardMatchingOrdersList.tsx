@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ShoppingBag, ChevronDown, ChevronUp } from 'lucide-react';
 import type { WebsiteConsolidatedOrder } from '../types';
+import { formatIndianNumber } from '../websiteSalesUtils';
 
 interface CardMatchingOrdersListProps {
   orders: WebsiteConsolidatedOrder[];
@@ -34,7 +35,7 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
           <ShoppingBag size={14} className="text-indigo-400" />
           <span className="text-xs font-extrabold text-white tracking-tight">{title}</span>
           <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-            {uniqueOrders.length} {uniqueOrders.length === 1 ? 'Order' : 'Orders'}
+            {formatIndianNumber(uniqueOrders.length)} {uniqueOrders.length === 1 ? 'Order' : 'Orders'}
           </span>
         </div>
       </div>
@@ -75,7 +76,7 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
                 {showAll ? (
                   <>Show Less <ChevronUp size={13} /></>
                 ) : (
-                  <>View All Orders ({uniqueOrders.length}) <ChevronDown size={13} /></>
+                  <>View All Orders ({formatIndianNumber(uniqueOrders.length)}) <ChevronDown size={13} /></>
                 )}
               </button>
             </div>

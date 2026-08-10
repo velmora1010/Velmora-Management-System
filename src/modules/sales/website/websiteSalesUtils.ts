@@ -1256,3 +1256,15 @@ export function formatIndianNumber(count: number): string {
   if (count == null || isNaN(count)) return '0';
   return count.toLocaleString('en-IN');
 }
+
+export function formatCount(count: number): string {
+  return formatIndianNumber(count);
+}
+
+export function formatUnits(units: number): string {
+  return formatIndianNumber(units);
+}
+
+export function formatCurrency(amount: number): string {
+  return formatIndianCurrency(amount);
+}

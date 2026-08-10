@@ -1,6 +1,7 @@
 import React from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { PieChart as PieIcon, AlertCircle } from 'lucide-react';
+import { formatIndianCurrency, formatIndianNumber } from '../websiteSalesUtils';
 
 export interface DonutSliceData {
   name: string;
@@ -34,6 +35,7 @@ export interface AnalyticsDonutChartProps {
   centerValue?: string | number;
   centerLabel?: string;
   valueFormatter?: (value: number, item: DonutSliceData) => string;
+  isCurrency?: boolean;
   onSliceClick?: (item: DonutSliceData) => void;
   selectedSliceName?: string | null;
   emptyMessage?: string;
@@ -47,6 +49,7 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
   centerValue,
   centerLabel = 'TOTAL',
   valueFormatter,
+  isCurrency = false,
   onSliceClick,
   selectedSliceName,
   emptyMessage = 'No data available',
@@ -54,10 +57,31 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
   innerRadius = 60,
   outerRadius = 90
 }) => {
+  // HOOK 1: Chart Total calculation (MUST BE AT TOP LEVEL)
   const chartTotal = React.useMemo(() => {
+    if (!data) return 0;
     return data.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
   }, [data]);
 
+  // HOOK 2: Format Center Value (MUST BE AT TOP LEVEL BEFORE ANY EARLY RETURN)
+  const formattedCenterValue = React.useMemo(() => {
+    if (centerValue === undefined || centerValue === null) return '';
+    if (typeof centerValue === 'number') {
+      return isCurrency ? formatIndianCurrency(centerValue) : formatIndianNumber(centerValue);
+    }
+    return String(centerValue);
+  }, [centerValue, isCurrency]);
+
+  // HOOK 3: Center Font Size Class (MUST BE AT TOP LEVEL BEFORE ANY EARLY RETURN)
+  const centerFontSizeClass = React.useMemo(() => {
+    const len = formattedCenterValue.length;
+    if (len > 15) return 'text-xs font-extrabold';
+    if (len > 12) return 'text-sm font-extrabold';
+    if (len > 9) return 'text-base font-extrabold';
+    return 'text-xl sm:text-2xl font-extrabold';
+  }, [formattedCenterValue]);
+
+  // EARLY RETURN IF DATA IS EMPTY (Hooks count is strictly invariant on every render!)
   if (!data || data.length === 0 || chartTotal === 0) {
     return (
       <div 
@@ -70,19 +94,21 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
     );
   }
 
+  const formatSliceValue = (val: number, item: DonutSliceData): string => {
+    if (valueFormatter) return valueFormatter(val, item);
+    if (isCurrency) return formatIndianCurrency(val);
+    return formatIndianNumber(val);
+  };
+
   const CustomPieTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const d = payload[0].payload as DonutSliceData;
       const pct = chartTotal > 0 ? ((d.value / chartTotal) * 100).toFixed(1) : '0';
 
-      const mainValFormatted = valueFormatter 
-        ? valueFormatter(d.value, d)
-        : typeof d.value === 'number' && (d.revenue !== undefined || d.name?.toLowerCase().includes('revenue') || d.name?.toLowerCase().includes('receivable') || d.name?.toLowerCase().includes('advance'))
-          ? `₹${d.value.toLocaleString()}`
-          : d.value.toLocaleString();
+      const mainValFormatted = formatSliceValue(d.value, d);
 
       return (
-        <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl text-xs space-y-1 font-mono z-50 min-w-[150px]">
+        <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl shadow-2xl text-xs space-y-1 font-mono z-50 min-w-[160px]">
           <p className="font-bold text-white font-sans border-b border-slate-800 pb-1">
             {d.name || d.product || d.offer || d.state || d.cityState || d.pincode}
           </p>
@@ -90,10 +116,10 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
             <p className="text-cyan-300">
               Value: <strong>{mainValFormatted}</strong> ({pct}%)
             </p>
-            {d.orders !== undefined && <p className="text-slate-300">Orders: <strong>{d.orders}</strong></p>}
-            {d.revenue !== undefined && <p className="text-emerald-400">Revenue: <strong>₹{d.revenue.toLocaleString()}</strong></p>}
-            {d.units !== undefined && <p className="text-purple-300">Units: <strong>{d.units}</strong></p>}
-            {d.aov !== undefined && <p className="text-pink-300">AOV: <strong>₹{d.aov.toLocaleString()}</strong></p>}
+            {d.orders !== undefined && <p className="text-slate-300">Orders: <strong>{formatIndianNumber(d.orders)}</strong></p>}
+            {d.revenue !== undefined && <p className="text-emerald-400">Revenue: <strong>{formatIndianCurrency(d.revenue)}</strong></p>}
+            {d.units !== undefined && <p className="text-purple-300">Units: <strong>{formatIndianNumber(d.units)}</strong></p>}
+            {d.aov !== undefined && <p className="text-pink-300">AOV: <strong>{formatIndianCurrency(d.aov)}</strong></p>}
             {d.city !== undefined && d.city !== d.name && <p className="text-slate-400">City: <strong>{d.city}</strong></p>}
             {d.state !== undefined && d.state !== d.name && <p className="text-slate-400">State: <strong>{d.state}</strong></p>}
           </div>
@@ -140,10 +166,10 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
         </ResponsiveContainer>
 
         {/* CENTER OVERLAY (TOTAL VALUE & LABEL) */}
-        {centerValue !== undefined && (
+        {formattedCenterValue && (
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-2">
-            <span className="text-xl sm:text-2xl font-extrabold text-white tracking-tight drop-shadow-md">
-              {typeof centerValue === 'number' ? centerValue.toLocaleString() : centerValue}
+            <span className={`${centerFontSizeClass} text-white tracking-tight drop-shadow-md`}>
+              {formattedCenterValue}
             </span>
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mt-0.5">
               {centerLabel}
@@ -158,30 +184,31 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
           const pct = chartTotal > 0 ? ((item.value / chartTotal) * 100).toFixed(1) : '0';
           const sliceColor = item.color || DEFAULT_DISTINCT_COLORS[index % DEFAULT_DISTINCT_COLORS.length];
           const isSelected = selectedSliceName === item.name || selectedSliceName === item.state || selectedSliceName === item.city;
-
-          const formattedVal = valueFormatter 
-            ? valueFormatter(item.value, item)
-            : typeof item.value === 'number' && (item.revenue !== undefined || item.name?.toLowerCase().includes('revenue') || item.name?.toLowerCase().includes('receivable') || item.name?.toLowerCase().includes('advance'))
-              ? `₹${item.value.toLocaleString()}`
-              : item.value.toLocaleString();
+          const formattedVal = formatSliceValue(item.value, item);
 
           return (
             <div
               key={`${item.name}-${index}`}
               onClick={() => onSliceClick && onSliceClick(item)}
-              className={`p-2 rounded-xl border bg-slate-950 flex items-center justify-between transition-colors ${
+              className={`p-2.5 rounded-xl border bg-slate-950 flex items-center justify-between gap-2 min-w-0 transition-colors ${
                 onSliceClick ? 'cursor-pointer hover:border-slate-700' : ''
               } ${
-                isSelected ? 'border-purple-500 bg-purple-950/20' : 'border-slate-800'
+                isSelected ? 'border-purple-500 bg-purple-950/30 ring-1 ring-purple-500/50' : 'border-slate-800'
               }`}
             >
-              <div className="flex items-center gap-2 truncate pr-2">
+              <div className="flex items-center gap-2 min-w-0 shrink flex-1 pr-2">
                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sliceColor }} />
-                <span className="font-sans font-bold text-slate-200 truncate">{item.name}</span>
+                <span className="font-sans font-bold text-slate-200 text-xs truncate" title={item.name}>
+                  {item.name}
+                </span>
               </div>
-              <div className="text-right shrink-0">
-                <span className="font-bold text-white">{formattedVal}</span>
-                <span className="text-[10px] text-slate-400 block">{pct}%</span>
+              <div className="text-right shrink-0 ml-2">
+                <div className="font-bold text-white text-xs tracking-tight whitespace-nowrap">
+                  {formattedVal}
+                </div>
+                <div className="text-[10px] text-slate-400 font-medium text-right">
+                  {pct}%
+                </div>
               </div>
             </div>
           );

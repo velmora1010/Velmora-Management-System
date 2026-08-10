@@ -47,7 +47,10 @@ import {
   formatPhoneNumber,
   getUploadBatchesForAnalyticsPeriod,
   formatIndianCurrency,
-  formatIndianNumber
+  formatIndianNumber,
+  formatCount,
+  formatUnits,
+  formatCurrency
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -1333,6 +1336,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 data={paymentDonutData}
                 centerValue={totalOrdersCount}
                 centerLabel="TOTAL ORDERS"
+                isCurrency={false}
                 selectedSliceName={drillDownPaymentMode}
                 onSliceClick={entry => setDrillDownPaymentMode(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No payment data available for the selected filters"
@@ -1365,8 +1369,9 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={revenueMixData}
-                centerValue={`₹${totalRevenue.toLocaleString()}`}
+                centerValue={totalRevenue}
                 centerLabel="TOTAL REVENUE"
+                isCurrency={true}
                 selectedSliceName={revenueMixCardSlice}
                 onSliceClick={entry => setRevenueMixCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No revenue data available for the selected filters"
@@ -1402,8 +1407,9 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={statePieData}
-                centerValue={stateMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : stateMetric === 'units' ? totalUnits : totalOrdersCount}
+                centerValue={stateMetric === 'revenue' ? totalRevenue : stateMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={stateMetric === 'revenue' ? "TOTAL REVENUE" : stateMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                isCurrency={stateMetric === 'revenue'}
                 selectedSliceName={drillDownState}
                 onSliceClick={entry => {
                   if (entry.state && entry.state !== 'Others') {
@@ -1440,9 +1446,9 @@ export const WebsiteAnalytics: React.FC = () => {
                         {statePieData.map(s => (
                           <tr key={s.name} className="hover:bg-slate-800/40 transition-colors">
                             <td className="py-2 px-3 font-bold text-white font-sans">{s.name}</td>
-                            <td className="py-2 px-3 text-cyan-300">{s.orders}</td>
-                            <td className="py-2 px-3 text-emerald-400">₹{s.revenue.toLocaleString()}</td>
-                            <td className="py-2 px-3 text-slate-300">{s.units}</td>
+                            <td className="py-2 px-3 text-cyan-300">{formatCount(s.orders)}</td>
+                            <td className="py-2 px-3 text-emerald-400">{formatCurrency(s.revenue)}</td>
+                            <td className="py-2 px-3 text-slate-300">{formatUnits(s.units)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1476,8 +1482,9 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={cityDonutData}
-                centerValue={cityMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : cityMetric === 'units' ? totalUnits : totalOrdersCount}
+                centerValue={cityMetric === 'revenue' ? totalRevenue : cityMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={cityMetric === 'revenue' ? "TOTAL REVENUE" : cityMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                isCurrency={cityMetric === 'revenue'}
                 selectedSliceName={drillDownCity}
                 onSliceClick={entry => {
                   if (entry.cityState && entry.cityState !== 'Others') {
@@ -1518,8 +1525,9 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={pincodePieData}
-                centerValue={pincodeMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : pincodeMetric === 'units' ? totalUnits : totalOrdersCount}
+                centerValue={pincodeMetric === 'revenue' ? totalRevenue : pincodeMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={pincodeMetric === 'revenue' ? "TOTAL REVENUE" : pincodeMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                isCurrency={pincodeMetric === 'revenue'}
                 selectedSliceName={pincodeCardSlice}
                 onSliceClick={entry => setPincodeCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No pincode data available for the selected filters"
@@ -1552,8 +1560,9 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={productDonutData}
-                centerValue={productMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : productMetric === 'orders' ? totalOrdersCount : totalUnits}
+                centerValue={productMetric === 'revenue' ? totalRevenue : productMetric === 'orders' ? totalOrdersCount : totalUnits}
                 centerLabel={productMetric === 'revenue' ? "TOTAL REVENUE" : productMetric === 'orders' ? "TOTAL ORDERS" : "TOTAL UNITS"}
+                isCurrency={productMetric === 'revenue'}
                 selectedSliceName={productCardSlice}
                 onSliceClick={entry => setProductCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No product data available for the selected filters"
@@ -1589,8 +1598,9 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={offerPieData}
-                centerValue={offerMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : offerMetric === 'units' ? totalUnits : totalOrdersCount}
+                centerValue={offerMetric === 'revenue' ? totalRevenue : offerMetric === 'units' ? totalUnits : totalOrdersCount}
                 centerLabel={offerMetric === 'revenue' ? "TOTAL REVENUE" : offerMetric === 'units' ? "TOTAL UNITS" : "TOTAL ORDERS"}
+                isCurrency={offerMetric === 'revenue'}
                 selectedSliceName={offerCardSlice}
                 onSliceClick={entry => setOfferCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No offer data available for the selected filters"
@@ -1623,8 +1633,9 @@ export const WebsiteAnalytics: React.FC = () => {
 
               <AnalyticsDonutChart
                 data={orderValueDonutData}
-                centerValue={orderValueMetric === 'revenue' ? `₹${totalRevenue.toLocaleString()}` : totalOrdersCount}
+                centerValue={orderValueMetric === 'revenue' ? totalRevenue : totalOrdersCount}
                 centerLabel={orderValueMetric === 'revenue' ? "TOTAL REVENUE" : "TOTAL ORDERS"}
+                isCurrency={orderValueMetric === 'revenue'}
                 selectedSliceName={orderValueCardSlice}
                 onSliceClick={entry => setOrderValueCardSlice(prev => prev === entry.name ? null : entry.name)}
                 emptyMessage="No order value data available for the selected filters"
@@ -1657,6 +1668,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   data={orderCompositionDonuts.productDonut}
                   centerValue={totalOrdersCount}
                   centerLabel="TOTAL ORDERS"
+                  isCurrency={false}
                   height={220}
                   innerRadius={45}
                   outerRadius={75}
@@ -1675,6 +1687,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   data={orderCompositionDonuts.quantityDonut}
                   centerValue={totalOrdersCount}
                   centerLabel="TOTAL ORDERS"
+                  isCurrency={false}
                   height={220}
                   innerRadius={45}
                   outerRadius={75}
@@ -1705,8 +1718,9 @@ export const WebsiteAnalytics: React.FC = () => {
 
             <AnalyticsDonutChart
               data={codReceivableDonutData}
-              centerValue={`₹${(partialCodAdvance + totalCodReceivable).toLocaleString()}`}
+              centerValue={partialCodAdvance + totalCodReceivable}
               centerLabel="TOTAL COD VALUE"
+              isCurrency={true}
               selectedSliceName={codCardSlice}
               onSliceClick={entry => setCodCardSlice(prev => prev === entry.name ? null : entry.name)}
               emptyMessage="No COD data available for the selected filters"
