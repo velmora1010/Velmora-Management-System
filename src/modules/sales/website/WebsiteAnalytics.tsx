@@ -45,7 +45,9 @@ import {
   formatSalesDateShort,
   shiftDateString,
   formatPhoneNumber,
-  getUploadBatchesForAnalyticsPeriod
+  getUploadBatchesForAnalyticsPeriod,
+  formatIndianCurrency,
+  formatIndianNumber
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -426,6 +428,7 @@ export const WebsiteAnalytics: React.FC = () => {
   const partialCodAdvance = useMemo(() => partialCodOrders.reduce((sum, o) => sum + (Number(o.advance_paid) || 0), 0), [partialCodOrders]);
   const partialCodRemaining = useMemo(() => partialCodOrders.reduce((sum, o) => sum + (Number(o.remaining_payable) || 0), 0), [partialCodOrders]);
 
+  const fullCodValue = useMemo(() => codOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0), [codOrders]);
   const fullCodReceivable = useMemo(() => codOrders.reduce((sum, o) => sum + (Number(o.remaining_payable ?? o.price) || 0), 0), [codOrders]);
   const totalCodReceivable = partialCodRemaining + fullCodReceivable;
 
@@ -1178,42 +1181,49 @@ export const WebsiteAnalytics: React.FC = () => {
       >
         <div className="p-5 border-t-4 border-t-blue-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Orders</span>
-          <div className="text-2xl font-bold text-white">{totalOrdersCount}</div>
+          <div className="text-2xl font-bold text-white">{formatIndianNumber(totalOrdersCount)}</div>
         </div>
         
         <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Revenue</span>
-          <div className="text-2xl font-bold text-emerald-400">₹{totalRevenue.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-emerald-400">{formatIndianCurrency(totalRevenue)}</div>
         </div>
 
         <div className="p-5 border-t-4 border-t-cyan-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total Units</span>
-          <div className="text-2xl font-bold text-cyan-300">{totalUnits}</div>
+          <div className="text-2xl font-bold text-cyan-300">{formatIndianNumber(totalUnits)}</div>
         </div>
 
         <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Avg Order Value</span>
-          <div className="text-2xl font-bold text-purple-300">₹{avgOrderValue.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-purple-300">{formatIndianCurrency(avgOrderValue)}</div>
         </div>
 
         <div className="p-5 border-t-4 border-t-emerald-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Prepaid Orders</span>
-          <div className="text-2xl font-bold text-emerald-400">{prepaidOrders.length}</div>
+          <div className="text-2xl font-bold text-emerald-400">{formatIndianNumber(prepaidOrders.length)}</div>
+          <div className="text-sm font-bold text-emerald-300 mt-1">{formatIndianCurrency(prepaidRevenue)}</div>
+          <span className="text-[11px] text-slate-500 mt-0.5 block">Full payment received</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-purple-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Partial COD Orders</span>
-          <div className="text-2xl font-bold text-purple-300">{partialCodOrders.length}</div>
+          <div className="text-2xl font-bold text-purple-300">{formatIndianNumber(partialCodOrders.length)}</div>
+          <div className="text-sm font-bold text-purple-300 mt-1">{formatIndianCurrency(partialCodValue)}</div>
+          <span className="text-[11px] text-purple-400/90 mt-0.5 block font-medium">{formatIndianCurrency(partialCodRemaining)} remaining COD</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Full COD Orders</span>
-          <div className="text-2xl font-bold text-amber-400">{codOrders.length}</div>
+          <div className="text-2xl font-bold text-amber-400">{formatIndianNumber(codOrders.length)}</div>
+          <div className="text-sm font-bold text-amber-300 mt-1">{formatIndianCurrency(fullCodValue)}</div>
+          <span className="text-[11px] text-amber-400/90 mt-0.5 block font-medium">{formatIndianCurrency(fullCodReceivable)} full COD</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total COD Receivable</span>
-          <div className="text-2xl font-bold text-pink-300">₹{totalCodReceivable.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-pink-300">{formatIndianCurrency(totalCodReceivable)}</div>
+          <span className="text-[11px] text-slate-500 mt-1 block">Partial + Full COD pending</span>
         </div>
       </div>
 
