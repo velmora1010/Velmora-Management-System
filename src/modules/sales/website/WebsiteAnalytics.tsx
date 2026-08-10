@@ -1209,31 +1209,76 @@ export const WebsiteAnalytics: React.FC = () => {
           <div className="text-2xl font-bold text-purple-300">₹{avgOrderValue.toLocaleString()}</div>
         </div>
 
-        <div className="p-5 border-t-4 border-t-emerald-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-          <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Prepaid Orders</span>
-          <div className="text-2xl font-bold text-emerald-400">{prepaidCount.toLocaleString()}</div>
-          <div className="text-base font-bold text-white mt-1">₹{prepaidRevenue.toLocaleString()}</div>
-          <span className="text-[10px] text-slate-400 block font-medium">Prepaid Order Value</span>
+        <div className="p-5 border-t-4 border-t-emerald-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between">
+          <div>
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Prepaid Orders</span>
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
+              <div className="flex flex-col justify-center">
+                <div className="text-2xl font-bold text-emerald-400 leading-none">{prepaidCount.toLocaleString()}</div>
+                <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+              </div>
+              <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
+              <div className="flex flex-col justify-center sm:pl-1">
+                <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{prepaidRevenue.toLocaleString()}</div>
+                <span className="text-[11px] text-slate-400 block font-medium">Prepaid Order Value</span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 pt-1">
+            <span className="text-[11px] text-slate-500 block leading-tight">Full payment received</span>
+          </div>
         </div>
 
-        <div className="p-5 border-t-4 border-t-purple-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-          <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Partial COD Orders</span>
-          <div className="text-2xl font-bold text-purple-300">{partialCodCount.toLocaleString()}</div>
-          <div className="text-base font-bold text-white mt-1">₹{partialCodRevenue.toLocaleString()}</div>
-          <span className="text-[10px] text-slate-400 block font-medium">Partial COD Order Value</span>
+        <div className="p-5 border-t-4 border-t-purple-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between">
+          <div>
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Partial COD Orders</span>
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
+              <div className="flex flex-col justify-center">
+                <div className="text-2xl font-bold text-purple-300">{partialCodCount.toLocaleString()}</div>
+                <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+              </div>
+              <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
+              <div className="flex flex-col justify-center sm:pl-1">
+                <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{partialCodRevenue.toLocaleString()}</div>
+                <span className="text-[11px] text-slate-400 block font-medium">Partial COD Order Value</span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 pt-1">
+            <div className="text-[14px] sm:text-[15px] font-bold text-purple-400/90 leading-tight">₹{partialCodRemaining.toLocaleString()}</div>
+            <span className="text-[10px] text-slate-500 block font-medium uppercase tracking-wider mt-0.5">remaining COD</span>
+          </div>
         </div>
 
-        <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-          <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Full COD Orders</span>
-          <div className="text-2xl font-bold text-amber-400">{fullCodCount.toLocaleString()}</div>
-          <div className="text-base font-bold text-white mt-1">₹{fullCodRevenue.toLocaleString()}</div>
-          <span className="text-[10px] text-slate-400 block font-medium">Full COD Order Value</span>
+        <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between">
+          <div>
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Full COD Orders</span>
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
+              <div className="flex flex-col justify-center">
+                <div className="text-2xl font-bold text-amber-400">{fullCodCount.toLocaleString()}</div>
+                <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+              </div>
+              <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
+              <div className="flex flex-col justify-center sm:pl-1">
+                <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{fullCodRevenue.toLocaleString()}</div>
+                <span className="text-[11px] text-slate-400 block font-medium">Full COD Order Value</span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 pt-1">
+            <div className="text-[14px] sm:text-[15px] font-bold text-amber-400/90 leading-tight">₹{fullCodPending.toLocaleString()}</div>
+            <span className="text-[10px] text-slate-500 block font-medium uppercase tracking-wider mt-0.5">COD Pending</span>
+          </div>
         </div>
 
-        <div className="p-5 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
-          <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Total COD Receivable</span>
-          <div className="text-2xl font-bold text-pink-300">₹{totalCodReceivable.toLocaleString()}</div>
-          <span className="text-[11px] text-slate-500 mt-1 block">Partial + Full COD pending</span>
+        <div className="p-5 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between">
+          <div>
+            <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total COD Receivable</span>
+            <div className="text-2xl font-bold text-pink-300 mt-3">₹{totalCodReceivable.toLocaleString()}</div>
+          </div>
+          <div className="mt-4 pt-1">
+            <span className="text-[11px] text-slate-500 block leading-tight">Partial + Full COD pending</span>
+          </div>
         </div>
       </div>
 
