@@ -1212,21 +1212,21 @@ export const WebsiteAnalytics: React.FC = () => {
         <div className="p-5 border-t-4 border-t-emerald-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Prepaid Orders</span>
           <div className="text-2xl font-bold text-emerald-400">{prepaidCount.toLocaleString()}</div>
-          <div className="text-sm font-bold text-white mt-1">₹{prepaidRevenue.toLocaleString()}</div>
+          <div className="text-base font-bold text-white mt-1">₹{prepaidRevenue.toLocaleString()}</div>
           <span className="text-[10px] text-slate-400 block font-medium">Prepaid Order Value</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-purple-400 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Partial COD Orders</span>
           <div className="text-2xl font-bold text-purple-300">{partialCodCount.toLocaleString()}</div>
-          <div className="text-sm font-bold text-white mt-1">₹{partialCodRevenue.toLocaleString()}</div>
+          <div className="text-base font-bold text-white mt-1">₹{partialCodRevenue.toLocaleString()}</div>
           <span className="text-[10px] text-slate-400 block font-medium">Partial COD Order Value</span>
         </div>
 
         <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
           <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Full COD Orders</span>
           <div className="text-2xl font-bold text-amber-400">{fullCodCount.toLocaleString()}</div>
-          <div className="text-sm font-bold text-white mt-1">₹{fullCodRevenue.toLocaleString()}</div>
+          <div className="text-base font-bold text-white mt-1">₹{fullCodRevenue.toLocaleString()}</div>
           <span className="text-[10px] text-slate-400 block font-medium">Full COD Order Value</span>
         </div>
 
