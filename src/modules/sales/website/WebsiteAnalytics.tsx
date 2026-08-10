@@ -37,6 +37,7 @@ import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
+import { DateRangePickerModal } from './components/DateRangePickerModal';
 import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
 import { useWebsiteSalesData } from './context/WebsiteSalesDataContext';
 import { 
