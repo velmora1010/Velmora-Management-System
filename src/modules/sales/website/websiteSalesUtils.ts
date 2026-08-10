@@ -1242,3 +1242,234 @@ export function getUploadBatchesForAnalyticsPeriod(
 
   return periodOptions;
 }
+
+// ============================================================================
+// LOCATION NORMALIZATION & CANONICAL DISPLAY SYSTEM
+// ============================================================================
+
+const KNOWN_STATE_ALIASES: Record<string, string> = {
+  'tamilnadu': 'tamil nadu',
+  'tamil nadu': 'tamil nadu',
+  'andhrapradesh': 'andhra pradesh',
+  'andhra pradesh': 'andhra pradesh',
+  'uttarpradesh': 'uttar pradesh',
+  'uttar pradesh': 'uttar pradesh',
+  'madhyapradesh': 'madhya pradesh',
+  'madhya pradesh': 'madhya pradesh',
+  'westbengal': 'west bengal',
+  'west bengal': 'west bengal',
+  'himachalpradesh': 'himachal pradesh',
+  'himachal pradesh': 'himachal pradesh',
+  'jammuandkashmir': 'jammu & kashmir',
+  'jammu and kashmir': 'jammu & kashmir',
+  'jammu & kashmir': 'jammu & kashmir',
+  'dadraandnagarhaveli': 'dadra & nagar haveli',
+  'dadra & nagar haveli': 'dadra & nagar haveli',
+  'andamanandnicobar': 'andaman & nicobar',
+  'andaman and nicobar': 'andaman & nicobar',
+  'andaman & nicobar': 'andaman & nicobar',
+  'andaman and nicobar islands': 'andaman & nicobar',
+  'damananddiu': 'daman & diu',
+  'daman & diu': 'daman & diu'
+};
+
+const PLACEHOLDER_VALUES = new Set([
+  '', ' ', 'null', 'undefined', 'n/a', 'na', '-', '--', 'unspecified', 'unknown'
+]);
+
+/**
+ * Normalizes any location string (State / City) to a stable, canonical comparison key.
+ * Trims whitespace, collapses internal multi-spaces, lowercases, and maps common state aliases.
+ */
+export function normalizeLocationKey(value: string | null | undefined): string {
+  if (!value) return '';
+  let str = String(value).trim();
+  if (!str) return '';
+  
+  // Collapse multiple consecutive spaces to a single space
+  str = str.replace(/\s+/g, ' ');
+  const lower = str.toLowerCase();
+
+  if (PLACEHOLDER_VALUES.has(lower)) return '';
+
+  // Check alias map
+  const compactLower = lower.replace(/\s+/g, '');
+  if (KNOWN_STATE_ALIASES[lower]) {
+    return KNOWN_STATE_ALIASES[lower];
+  }
+  if (KNOWN_STATE_ALIASES[compactLower]) {
+    return KNOWN_STATE_ALIASES[compactLower];
+  }
+
+  return lower;
+}
+
+/**
+ * Returns a clean, title-cased canonical display label for a location (State or City).
+ * Example: "tamil nadu" -> "Tamil Nadu", "CHENNAI" -> "Chennai", "new delhi" -> "New Delhi"
+ */
+export function formatCanonicalLocationLabel(value: string | null | undefined): string {
+  const normKey = normalizeLocationKey(value);
+  if (!normKey) return 'Unspecified';
+
+  // Specific canonical state labels
+  const CANONICAL_STATE_NAMES: Record<string, string> = {
+    'tamil nadu': 'Tamil Nadu',
+    'andhra pradesh': 'Andhra Pradesh',
+    'uttar pradesh': 'Uttar Pradesh',
+    'madhya pradesh': 'Madhya Pradesh',
+    'west bengal': 'West Bengal',
+    'himachal pradesh': 'Himachal Pradesh',
+    'jammu & kashmir': 'Jammu & Kashmir',
+    'dadra & nagar haveli': 'Dadra & Nagar Haveli',
+    'andaman & nicobar': 'Andaman & Nicobar',
+    'daman & diu': 'Daman & Diu',
+    'telangana': 'Telangana',
+    'karnataka': 'Karnataka',
+    'kerala': 'Kerala',
+    'maharashtra': 'Maharashtra',
+    'gujarat': 'Gujarat',
+    'rajasthan': 'Rajasthan',
+    'punjab': 'Punjab',
+    'haryana': 'Haryana',
+    'bihar': 'Bihar',
+    'odisha': 'Odisha',
+    'jharkhand': 'Jharkhand',
+    'chhattisgarh': 'Chhattisgarh',
+    'uttarakhand': 'Uttarakhand',
+    'goa': 'Goa',
+    'assam': 'Assam',
+    'sikkim': 'Sikkim',
+    'nagaland': 'Nagaland',
+    'manipur': 'Manipur',
+    'mizoram': 'Mizoram',
+    'tripura': 'Tripura',
+    'meghalaya': 'Meghalaya',
+    'arunachal pradesh': 'Arunachal Pradesh',
+    'delhi': 'Delhi',
+    'new delhi': 'New Delhi',
+    'puducherry': 'Puducherry',
+    'chandigarh': 'Chandigarh'
+  };
+
+  if (CANONICAL_STATE_NAMES[normKey]) {
+    return CANONICAL_STATE_NAMES[normKey];
+  }
+
+  // Generic Title Casing for cities and other locations
+  return normKey
+    .split(' ')
+    .map(word => {
+      if (word.length === 0) return '';
+      if (word === '&' || word === 'and' || word === 'of') return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+}
+
+/**
+ * Builds deduplicated State options using normalized comparison keys.
+ */
+export function getNormalizedStateOptions(orders: WebsiteConsolidatedOrder[]): OptionItem[] {
+  const map = new Map<string, { label: string; rawCount: number }>();
+
+  orders.forEach(o => {
+    const key = normalizeLocationKey(o.state);
+    if (!key) return;
+
+    if (!map.has(key)) {
+      const canonical = formatCanonicalLocationLabel(o.state);
+      map.set(key, { label: canonical, rawCount: 1 });
+    } else {
+      map.get(key)!.rawCount++;
+    }
+  });
+
+  return Array.from(map.entries())
+    .map(([key, info]) => ({ label: info.label, value: key }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Builds deduplicated City options filtered by selected state keys (if any).
+ */
+export function getNormalizedCityOptions(
+  orders: WebsiteConsolidatedOrder[], 
+  selectedStateKeys: string[] = []
+): OptionItem[] {
+  const map = new Map<string, { label: string; rawCount: number }>();
+  const activeStateKeys = new Set(selectedStateKeys.filter(Boolean));
+
+  orders.forEach(o => {
+    const stateKey = normalizeLocationKey(o.state);
+    if (activeStateKeys.size > 0 && (!stateKey || !activeStateKeys.has(stateKey))) {
+      return;
+    }
+
+    const cityKey = normalizeLocationKey(o.city);
+    if (!cityKey) return;
+
+    if (!map.has(cityKey)) {
+      const canonical = formatCanonicalLocationLabel(o.city);
+      map.set(cityKey, { label: canonical, rawCount: 1 });
+    } else {
+      map.get(cityKey)!.rawCount++;
+    }
+  });
+
+  return Array.from(map.entries())
+    .map(([key, info]) => ({ label: info.label, value: key }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Builds deduplicated Pincode options filtered by selected state and city keys.
+ */
+export function getNormalizedPincodeOptions(
+  orders: WebsiteConsolidatedOrder[],
+  selectedStateKeys: string[] = [],
+  selectedCityKeys: string[] = []
+): OptionItem[] {
+  const set = new Set<string>();
+  const activeStateKeys = new Set(selectedStateKeys.filter(Boolean));
+  const activeCityKeys = new Set(selectedCityKeys.filter(Boolean));
+
+  orders.forEach(o => {
+    const stateKey = normalizeLocationKey(o.state);
+    if (activeStateKeys.size > 0 && (!stateKey || !activeStateKeys.has(stateKey))) {
+      return;
+    }
+
+    const cityKey = normalizeLocationKey(o.city);
+    if (activeCityKeys.size > 0 && (!cityKey || !activeCityKeys.has(cityKey))) {
+      return;
+    }
+
+    const pin = String(o.pincode || '').trim();
+    if (pin && pin !== '-' && pin !== '0' && pin.toLowerCase() !== 'n/a') {
+      set.add(pin);
+    }
+  });
+
+  return Array.from(set)
+    .sort()
+    .map(pin => ({ label: pin, value: pin }));
+}
+
+/**
+ * Checks if an order's state matches selected state keys (using normalized keys).
+ */
+export function orderMatchesState(o: WebsiteConsolidatedOrder, selectedStateKeys: string[]): boolean {
+  if (!selectedStateKeys || selectedStateKeys.length === 0) return true;
+  const key = normalizeLocationKey(o.state);
+  return key !== '' && selectedStateKeys.includes(key);
+}
+
+/**
+ * Checks if an order's city matches selected city keys (using normalized keys).
+ */
+export function orderMatchesCity(o: WebsiteConsolidatedOrder, selectedCityKeys: string[]): boolean {
+  if (!selectedCityKeys || selectedCityKeys.length === 0) return true;
+  const key = normalizeLocationKey(o.city);
+  return key !== '' && selectedCityKeys.includes(key);
+}

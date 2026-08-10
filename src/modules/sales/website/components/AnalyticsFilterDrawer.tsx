@@ -11,7 +11,13 @@ import {
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch } from '../types';
 import type { MultiSelectFilterState } from '../WebsiteAnalytics';
 import { MultiSelectDropdown, OptionItem } from './MultiSelectDropdown';
-import { getUploadBatchesForAnalyticsPeriod, getTodayInBusinessTimezone } from '../websiteSalesUtils';
+import { 
+  getUploadBatchesForAnalyticsPeriod, 
+  getTodayInBusinessTimezone,
+  getNormalizedStateOptions,
+  getNormalizedCityOptions,
+  getNormalizedPincodeOptions
+} from '../websiteSalesUtils';
 import { useWebsiteSalesDateRange } from '../context/WebsiteSalesDateRangeContext';
 
 interface AnalyticsFilterDrawerProps {
@@ -84,40 +90,17 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
     return getUploadBatchesForAnalyticsPeriod(batches, allOrders, start, end).length;
   }, [batches, allOrders, startDate, endDate]);
 
-  // Dynamic filter options derived strictly from active period orders
+  // Dynamic filter options derived strictly from active period orders with normalized location deduplication
   const stateOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
-    periodOrders.forEach(o => {
-      const st = (o.state || 'Unspecified').trim();
-      set.add(st);
-    });
-    return Array.from(set).sort().map(s => ({ label: s, value: s }));
+    return getNormalizedStateOptions(periodOrders);
   }, [periodOrders]);
 
   const cityOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
-    const selectedStates = draftFilters.states || [];
-    periodOrders.forEach(o => {
-      if (selectedStates.length === 0 || selectedStates.includes(o.state)) {
-        const ct = (o.city || 'Unspecified').trim();
-        set.add(ct);
-      }
-    });
-    return Array.from(set).sort().map(c => ({ label: c, value: c }));
+    return getNormalizedCityOptions(periodOrders, draftFilters.states);
   }, [periodOrders, draftFilters.states]);
 
   const pincodeOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
-    const selectedStates = draftFilters.states || [];
-    const selectedCities = draftFilters.cities || [];
-    periodOrders.forEach(o => {
-      if ((selectedStates.length === 0 || selectedStates.includes(o.state)) &&
-          (selectedCities.length === 0 || selectedCities.includes(o.city))) {
-        const pin = String(o.pincode || '').trim();
-        if (pin && pin !== '-') set.add(pin);
-      }
-    });
-    return Array.from(set).sort().map(p => ({ label: p, value: p }));
+    return getNormalizedPincodeOptions(periodOrders, draftFilters.states, draftFilters.cities);
   }, [periodOrders, draftFilters.states, draftFilters.cities]);
 
   const offerOptions: OptionItem[] = useMemo(() => {

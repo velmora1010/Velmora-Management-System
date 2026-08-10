@@ -15,7 +15,13 @@ import {
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch, WebsiteSalesFilterState } from '../types';
 import { MultiSelectDropdown, OptionItem } from './MultiSelectDropdown';
-import { formatSalesDateDisplay, formatSalesDateShort } from '../websiteSalesUtils';
+import { 
+  formatSalesDateDisplay, 
+  formatSalesDateShort,
+  getNormalizedStateOptions,
+  getNormalizedCityOptions,
+  getNormalizedPincodeOptions
+} from '../websiteSalesUtils';
 
 interface DashboardFilterDrawerProps {
   isOpen: boolean;
@@ -90,36 +96,15 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
   }, [batches]);
 
   const stateOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
-    allOrders.forEach(o => set.add((o.state || 'Unspecified').trim()));
-    return Array.from(set).sort().map(s => ({ label: s, value: s }));
+    return getNormalizedStateOptions(allOrders);
   }, [allOrders]);
 
   const cityOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
-    const selectedStates = draftFilters.states || [];
-    allOrders.forEach(o => {
-      if (selectedStates.length === 0 || selectedStates.includes(o.state)) {
-        set.add((o.city || 'Unspecified').trim());
-      }
-    });
-    return Array.from(set).sort().map(c => ({ label: c, value: c }));
+    return getNormalizedCityOptions(allOrders, draftFilters.states);
   }, [allOrders, draftFilters.states]);
 
   const pincodeOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
-    const selectedStates = draftFilters.states || [];
-    const selectedCities = draftFilters.cities || [];
-    allOrders.forEach(o => {
-      if (
-        (selectedStates.length === 0 || selectedStates.includes(o.state)) &&
-        (selectedCities.length === 0 || selectedCities.includes(o.city))
-      ) {
-        const pin = String(o.pincode || '').trim();
-        if (pin && pin !== '-') set.add(pin);
-      }
-    });
-    return Array.from(set).sort().map(p => ({ label: p, value: p }));
+    return getNormalizedPincodeOptions(allOrders, draftFilters.states, draftFilters.cities);
   }, [allOrders, draftFilters.states, draftFilters.cities]);
 
   const offerOptions: OptionItem[] = useMemo(() => {

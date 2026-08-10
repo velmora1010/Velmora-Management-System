@@ -45,7 +45,11 @@ import {
   formatSalesDateShort,
   shiftDateString,
   formatPhoneNumber,
-  getUploadBatchesForAnalyticsPeriod
+  getUploadBatchesForAnalyticsPeriod,
+  normalizeLocationKey,
+  formatCanonicalLocationLabel,
+  orderMatchesState,
+  orderMatchesCity
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -373,12 +377,12 @@ export const WebsiteAnalytics: React.FC = () => {
       }
 
       if (drillDownPaymentMode && o.payment_mode !== drillDownPaymentMode) return false;
-      if (drillDownState && o.state !== drillDownState) return false;
-      if (drillDownCity && o.city !== drillDownCity) return false;
+      if (drillDownState && normalizeLocationKey(o.state) !== normalizeLocationKey(drillDownState)) return false;
+      if (drillDownCity && normalizeLocationKey(o.city) !== normalizeLocationKey(drillDownCity)) return false;
 
       if (appliedFilters.batchIds.length > 0 && !appliedFilters.batchIds.includes(o.upload_batch_id)) return false;
-      if (appliedFilters.states.length > 0 && !appliedFilters.states.includes(o.state)) return false;
-      if (appliedFilters.cities.length > 0 && !appliedFilters.cities.includes(o.city)) return false;
+      if (appliedFilters.states.length > 0 && !orderMatchesState(o, appliedFilters.states)) return false;
+      if (appliedFilters.cities.length > 0 && !orderMatchesCity(o, appliedFilters.cities)) return false;
       if (appliedFilters.pincodes.length > 0 && !appliedFilters.pincodes.includes(o.pincode)) return false;
       if (appliedFilters.paymentModes.length > 0 && !appliedFilters.paymentModes.includes(o.payment_mode)) return false;
       if (appliedFilters.offers.length > 0 && !appliedFilters.offers.includes(o.offer)) return false;
@@ -611,7 +615,7 @@ export const WebsiteAnalytics: React.FC = () => {
     filteredOrders.forEach(o => {
       let key = 'Other';
       if (revenueMixGroup === 'Payment Mode') key = o.payment_mode;
-      else if (revenueMixGroup === 'State') key = o.state || 'Unspecified';
+      else if (revenueMixGroup === 'State') key = formatCanonicalLocationLabel(o.state);
       else if (revenueMixGroup === 'Product') key = o.product_name || 'Unspecified';
       else if (revenueMixGroup === 'Offer') key = (o.offer && o.offer !== '-') ? o.offer : 'No Offer';
       else if (revenueMixGroup === 'Order Value Range') {
@@ -643,20 +647,33 @@ export const WebsiteAnalytics: React.FC = () => {
     ];
   }, [filteredOrders, revenueMixGroup]);
 
-  // 3. STATE-WISE SALES PIE DATA (Top 5 + Others)
+  // 3. STATE-WISE SALES PIE DATA (Top 5 + Others with normalized location key grouping)
   const statePieData = useMemo(() => {
-    const map = new Map<string, { state: string; orders: number; revenue: number; units: number }>();
+    const map = new Map<string, { stateKey: string; stateLabel: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
-      const st = o.state || 'Unspecified';
-      if (!map.has(st)) map.set(st, { state: st, orders: 0, revenue: 0, units: 0 });
-      const item = map.get(st)!;
+      const stKey = normalizeLocationKey(o.state);
+      if (!stKey) return;
+      if (!map.has(stKey)) {
+        map.set(stKey, { 
+          stateKey: stKey, 
+          stateLabel: formatCanonicalLocationLabel(o.state), 
+          orders: 0, 
+          revenue: 0, 
+          units: 0 
+        });
+      }
+      const item = map.get(stKey)!;
       item.orders += 1;
       item.revenue += Number(o.price) || 0;
       item.units += Number(o.total_quantity) || 0;
     });
 
     const list = Array.from(map.values()).map(d => ({
-      ...d,
+      state: d.stateLabel,
+      stateKey: d.stateKey,
+      orders: d.orders,
+      revenue: d.revenue,
+      units: d.units,
       aov: d.orders > 0 ? Math.round(d.revenue / d.orders) : 0,
       val: stateMetric === 'revenue' ? d.revenue : stateMetric === 'units' ? d.units : d.orders
     }));
@@ -678,6 +695,7 @@ export const WebsiteAnalytics: React.FC = () => {
       ...top5.map((d, i) => ({ ...d, name: d.state, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
       {
         state: 'Others',
+        stateKey: 'others',
         name: 'Others',
         orders: othersOrders,
         revenue: othersRev,
@@ -690,13 +708,29 @@ export const WebsiteAnalytics: React.FC = () => {
     ];
   }, [filteredOrders, stateMetric]);
 
-  // 4. CITY-WISE SALES DONUT DATA (Top 6 + Others)
+  // 4. CITY-WISE SALES DONUT DATA (Top 6 + Others with normalized location key grouping)
   const cityDonutData = useMemo(() => {
-    const map = new Map<string, { cityState: string; city: string; state: string; orders: number; revenue: number; units: number }>();
+    const map = new Map<string, { cityKey: string; cityStateLabel: string; city: string; state: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
-      const key = `${o.city || 'Unspecified'}, ${o.state || 'Unspecified'}`;
-      if (!map.has(key)) map.set(key, { cityState: key, city: o.city || 'Unspecified', state: o.state || 'Unspecified', orders: 0, revenue: 0, units: 0 });
-      const item = map.get(key)!;
+      const cKey = normalizeLocationKey(o.city);
+      const sKey = normalizeLocationKey(o.state);
+      if (!cKey) return;
+      const compositeKey = `${cKey}|${sKey}`;
+
+      if (!map.has(compositeKey)) {
+        const cLabel = formatCanonicalLocationLabel(o.city);
+        const sLabel = formatCanonicalLocationLabel(o.state);
+        map.set(compositeKey, { 
+          cityKey: compositeKey, 
+          cityStateLabel: `${cLabel}, ${sLabel}`, 
+          city: cLabel, 
+          state: sLabel, 
+          orders: 0, 
+          revenue: 0, 
+          units: 0 
+        });
+      }
+      const item = map.get(compositeKey)!;
       item.orders += 1;
       item.revenue += Number(o.price) || 0;
       item.units += Number(o.total_quantity) || 0;
@@ -710,7 +744,7 @@ export const WebsiteAnalytics: React.FC = () => {
     list.sort((a, b) => b.val - a.val);
 
     if (list.length <= 6) {
-      return list.map((d, i) => ({ ...d, name: d.cityState, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
+      return list.map((d, i) => ({ ...d, name: d.cityStateLabel, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
     }
 
     const top6 = list.slice(0, 6);
@@ -721,9 +755,10 @@ export const WebsiteAnalytics: React.FC = () => {
     const othersVal = remaining.reduce((s, x) => s + x.val, 0);
 
     return [
-      ...top6.map((d, i) => ({ ...d, name: d.cityState, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
+      ...top6.map((d, i) => ({ ...d, name: d.cityStateLabel, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
       {
-        cityState: 'Others',
+        cityKey: 'others',
+        cityStateLabel: 'Others',
         city: 'Others',
         state: 'Others',
         name: 'Others',
@@ -741,20 +776,25 @@ export const WebsiteAnalytics: React.FC = () => {
   const stateMatchingOrders = useMemo(() => {
     if (!drillDownState) return filteredOrders;
     if (drillDownState === 'Others') {
-      const topStates = statePieData.filter(d => d.state !== 'Others').map(d => d.state);
-      return filteredOrders.filter(o => !topStates.includes(o.state));
+      const topStateKeys = statePieData.filter(d => d.state !== 'Others').map(d => d.stateKey);
+      return filteredOrders.filter(o => !topStateKeys.includes(normalizeLocationKey(o.state)));
     }
-    return filteredOrders.filter(o => o.state === drillDownState);
+    const normDrill = normalizeLocationKey(drillDownState);
+    return filteredOrders.filter(o => normalizeLocationKey(o.state) === normDrill);
   }, [filteredOrders, drillDownState, statePieData]);
 
   // 4. City-wise Sales matching orders
   const cityMatchingOrders = useMemo(() => {
     if (!drillDownCity) return filteredOrders;
     if (drillDownCity === 'Others') {
-      const topCityStates = cityDonutData.filter(d => d.cityState !== 'Others').map(d => d.cityState);
-      return filteredOrders.filter(o => !topCityStates.includes(`${o.city || 'Unspecified'}, ${o.state || 'Unspecified'}`));
+      const topCityKeys = cityDonutData.filter(d => d.cityStateLabel !== 'Others').map(d => d.cityKey);
+      return filteredOrders.filter(o => !topCityKeys.includes(`${normalizeLocationKey(o.city)}|${normalizeLocationKey(o.state)}`));
     }
-    return filteredOrders.filter(o => `${o.city || 'Unspecified'}, ${o.state || 'Unspecified'}` === drillDownCity);
+    return filteredOrders.filter(o => {
+      const composite = `${normalizeLocationKey(o.city)}|${normalizeLocationKey(o.state)}`;
+      const normDrill = normalizeLocationKey(drillDownCity);
+      return composite === drillDownCity || normalizeLocationKey(o.city) === normDrill || o.city === drillDownCity;
+    });
   }, [filteredOrders, drillDownCity, cityDonutData]);
 
   // 5. PINCODE PERFORMANCE PIE DATA (Top 6 + Others)
@@ -1081,8 +1121,8 @@ export const WebsiteAnalytics: React.FC = () => {
             <Filter size={15} />
             <span>Active Chart Drill-down Filter:</span>
             {drillDownPaymentMode && <span className="font-bold bg-purple-500/20 text-purple-300 px-2.5 py-0.5 rounded-md border border-purple-500/40">Payment: {drillDownPaymentMode}</span>}
-            {drillDownState && <span className="font-bold bg-cyan-500/20 text-cyan-300 px-2.5 py-0.5 rounded-md border border-cyan-500/40">State: {drillDownState}</span>}
-            {drillDownCity && <span className="font-bold bg-blue-500/20 text-blue-300 px-2.5 py-0.5 rounded-md border border-blue-500/40">City: {drillDownCity}</span>}
+            {drillDownState && <span className="font-bold bg-cyan-500/20 text-cyan-300 px-2.5 py-0.5 rounded-md border border-cyan-500/40">State: {formatCanonicalLocationLabel(drillDownState)}</span>}
+            {drillDownCity && <span className="font-bold bg-blue-500/20 text-blue-300 px-2.5 py-0.5 rounded-md border border-blue-500/40">City: {formatCanonicalLocationLabel(drillDownCity)}</span>}
           </div>
           <button
             onClick={() => {
@@ -1111,14 +1151,14 @@ export const WebsiteAnalytics: React.FC = () => {
 
             {appliedFilters.states?.map(st => (
               <span key={st} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px]">
-                State: {st}
+                State: {formatCanonicalLocationLabel(st)}
                 <button onClick={() => handleRemoveChip('states', st)} className="hover:text-white cursor-pointer"><X size={12} /></button>
               </span>
             ))}
 
             {appliedFilters.cities?.map(ct => (
               <span key={ct} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px]">
-                City: {ct}
+                City: {formatCanonicalLocationLabel(ct)}
                 <button onClick={() => handleRemoveChip('cities', ct)} className="hover:text-white cursor-pointer"><X size={12} /></button>
               </span>
             ))}
