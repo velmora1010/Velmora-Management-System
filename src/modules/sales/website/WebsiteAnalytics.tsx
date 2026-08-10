@@ -37,8 +37,8 @@ import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
-import { DateRangePickerModal } from './components/DateRangePickerModal';
 import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
+import { useWebsiteSalesData } from './context/WebsiteSalesDataContext';
 import { 
   getTodayInBusinessTimezone, 
   formatSalesDateDisplay, 
@@ -148,9 +148,6 @@ const ORDERS_REV_SEGMENTS: SegmentOption<'orders' | 'revenue'>[] = [
 
 export const WebsiteAnalytics: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [allOrders, setAllOrders] = useState<WebsiteConsolidatedOrder[]>([]);
-  const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
 
   // Shared Website Sales Date Range State
   const { 
@@ -158,6 +155,17 @@ export const WebsiteAnalytics: React.FC = () => {
     endDate: analyticsEndDate, 
     setDateRange 
   } = useWebsiteSalesDateRange();
+
+  // Shared Website Sales Data Provider
+  const { 
+    orders: sharedOrders, 
+    batches: sharedBatches, 
+    loading: sharedLoading 
+  } = useWebsiteSalesData();
+
+  const batches = sharedBatches;
+  const allOrders = sharedOrders;
+  const loading = sharedLoading;
 
   const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
 
@@ -229,7 +237,6 @@ export const WebsiteAnalytics: React.FC = () => {
   const [showStateTable, setShowStateTable] = useState<boolean>(false);
 
   useEffect(() => {
-    loadData();
     const from = searchParams.get('from');
     const to = searchParams.get('to');
 
@@ -238,7 +245,14 @@ export const WebsiteAnalytics: React.FC = () => {
         setDateRange(from, to, 'custom');
       }
     }
-  }, []);
+  }, [searchParams]);
+
+  // Reset drill-downs on date range change
+  useEffect(() => {
+    setDrillDownPaymentMode(null);
+    setDrillDownState(null);
+    setDrillDownCity(null);
+  }, [analyticsStartDate, analyticsEndDate]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -249,19 +263,6 @@ export const WebsiteAnalytics: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const loadData = async () => {
-    setLoading(true);
-    const bList = await websiteSalesService.getUploadBatches();
-    setBatches(bList);
-
-    const orders = await websiteSalesService.getConsolidatedOrders({
-      startDate: analyticsStartDate,
-      endDate: analyticsEndDate
-    });
-    setAllOrders(orders);
-    setLoading(false);
-  };
 
   const handleSelectAnalyticsView = (sectionId: string) => {
     setSelectedViewId(sectionId);

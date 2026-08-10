@@ -1242,3 +1242,79 @@ export function getUploadBatchesForAnalyticsPeriod(
 
   return periodOptions;
 }
+
+// ============================================================================
+// LOCATION NORMALIZATION UTILITIES
+// ============================================================================
+
+/**
+ * Normalizes a location string (city or state) to a stable lowercase key for
+ * grouping and comparison. Returns empty string for null/undefined/placeholder values.
+ */
+export function normalizeLocationKey(raw: string | undefined | null): string {
+  if (!raw) return '';
+  const trimmed = raw.trim().replace(/\s+/g, ' ').toLowerCase();
+  if (!trimmed || trimmed === '-' || trimmed === 'n/a' || trimmed === 'na' || trimmed === 'unspecified') return '';
+
+  // Known state alias normalization
+  const aliases: Record<string, string> = {
+    'tamilnadu': 'tamil nadu',
+    'andhrapradesh': 'andhra pradesh',
+    'andhra pradesh': 'andhra pradesh',
+    'jammuandkashmir': 'jammu & kashmir',
+    'jammu and kashmir': 'jammu & kashmir',
+    'jammukashmir': 'jammu & kashmir',
+    'uttarpradesh': 'uttar pradesh',
+    'himachalpradesh': 'himachal pradesh',
+    'madhyapradesh': 'madhya pradesh',
+    'westbengal': 'west bengal',
+    'arunachalpradesh': 'arunachal pradesh'
+  };
+
+  const noSpaces = trimmed.replace(/\s+/g, '');
+  return aliases[noSpaces] || aliases[trimmed] || trimmed;
+}
+
+/**
+ * Returns a canonical title-cased display label for a location string.
+ * Groups all casing/spacing variants into one clean label.
+ */
+export function formatCanonicalLocationLabel(raw: string | undefined | null): string {
+  const key = normalizeLocationKey(raw);
+  if (!key) return raw?.trim() || 'Unspecified';
+
+  // Known canonical labels
+  const canonicalLabels: Record<string, string> = {
+    'tamil nadu': 'Tamil Nadu',
+    'andhra pradesh': 'Andhra Pradesh',
+    'jammu & kashmir': 'Jammu & Kashmir',
+    'uttar pradesh': 'Uttar Pradesh',
+    'himachal pradesh': 'Himachal Pradesh',
+    'madhya pradesh': 'Madhya Pradesh',
+    'west bengal': 'West Bengal',
+    'arunachal pradesh': 'Arunachal Pradesh'
+  };
+
+  if (canonicalLabels[key]) return canonicalLabels[key];
+
+  // Title-case fallback
+  return key.replace(/(^\w|\s\w|&\s\w)/g, match => match.toUpperCase());
+}
+
+/**
+ * Returns true if the order's state matches ANY of the given normalized state filter values.
+ */
+export function orderMatchesState(order: { state?: string }, filterStates: string[]): boolean {
+  if (!filterStates || filterStates.length === 0) return true;
+  const orderKey = normalizeLocationKey(order.state);
+  return filterStates.some(fs => normalizeLocationKey(fs) === orderKey);
+}
+
+/**
+ * Returns true if the order's city matches ANY of the given normalized city filter values.
+ */
+export function orderMatchesCity(order: { city?: string }, filterCities: string[]): boolean {
+  if (!filterCities || filterCities.length === 0) return true;
+  const orderKey = normalizeLocationKey(order.city);
+  return filterCities.some(fc => normalizeLocationKey(fc) === orderKey);
+}
