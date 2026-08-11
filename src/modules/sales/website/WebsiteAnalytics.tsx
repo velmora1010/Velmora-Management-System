@@ -48,7 +48,8 @@ import {
   getUploadBatchesForAnalyticsPeriod,
   calculateWebsitePaymentSummary,
   normalizeLocationKey,
-  toCanonicalLocation
+  toCanonicalLocation,
+  resolveCanonicalLocation
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -668,8 +669,9 @@ export const WebsiteAnalytics: React.FC = () => {
   const statePieData = useMemo(() => {
     const map = new Map<string, { state: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
-      const canonicalState = toCanonicalLocation(o.state);
-      if (canonicalState === 'Unspecified') return;
+      const resolved = resolveCanonicalLocation(o.state, o.city, o.pincode);
+      const canonicalState = resolved.stateName || toCanonicalLocation(o.state);
+      if (!canonicalState || canonicalState === 'Unspecified') return;
       const norm = normalizeLocationKey(canonicalState);
       if (!map.has(norm)) {
         map.set(norm, { state: canonicalState, orders: 0, revenue: 0, units: 0 });
@@ -719,9 +721,10 @@ export const WebsiteAnalytics: React.FC = () => {
   const cityDonutData = useMemo(() => {
     const map = new Map<string, { cityState: string; city: string; state: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
-      const canonicalCity = toCanonicalLocation(o.city);
-      const canonicalState = toCanonicalLocation(o.state);
-      if (canonicalCity === 'Unspecified' || canonicalState === 'Unspecified') return;
+      const resolved = resolveCanonicalLocation(o.state, o.city, o.pincode);
+      const canonicalCity = resolved.cityName || toCanonicalLocation(o.city);
+      const canonicalState = resolved.stateName || toCanonicalLocation(o.state);
+      if (!canonicalCity || canonicalCity === 'Unspecified' || !canonicalState || canonicalState === 'Unspecified') return;
       const normKey = `${normalizeLocationKey(canonicalCity)},${normalizeLocationKey(canonicalState)}`;
       const cityState = `${canonicalCity}, ${canonicalState}`;
       

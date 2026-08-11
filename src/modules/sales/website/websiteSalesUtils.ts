@@ -9,6 +9,12 @@ import type {
   WebsiteUploadBatch 
 } from './types';
 import type { OptionItem } from './components/MultiSelectDropdown';
+import {
+  MASTER_LOCATIONS,
+  PINCODE_TO_LOCATION,
+  CITY_ALIASES,
+  STATE_ALIASES,
+} from '../../../data/indiaLocations';
 
 // ============================================================================
 // 1. COLUMN MATCHING UTILITIES WITH PRECISE HEADER DETECTION
@@ -1290,44 +1296,243 @@ export function calculateWebsitePaymentSummary(orders: WebsiteConsolidatedOrder[
   };
 }
 
-export function normalizeLocationKey(value: any): string {
+// ============================================================================
+// CANONICAL INDIA MASTER LOCATION SYSTEM
+// ============================================================================
+
+/**
+ * Normalize a raw location text for key-comparison purposes.
+ * - trim
+ * - lowercase
+ * - collapse whitespace
+ * - strip harmless punctuation
+ */
+export function normalizeLocationText(value: any): string {
   if (value === null || value === undefined) return '';
   const str = String(value).trim().toLowerCase();
-  
-  // Collapse multiple spaces to none to handle "Tamil Nadu" vs "TamilNadu" or "New Delhi" vs "NewDelhi"
-  return str.replace(/\s+/g, '');
+  return str.replace(/\s+/g, ' ').replace(/[^\w\s]/g, '').replace(/\s+/g, '');
 }
 
+/**
+ * Legacy alias – keep for backward compatibility with existing callers.
+ * Delegates to normalizeLocationText.
+ */
+export function normalizeLocationKey(value: any): string {
+  return normalizeLocationText(value);
+}
+
+/**
+ * Resolve a raw state string to its canonical master stateKey.
+ * Returns empty string if unresolvable.
+ */
+export function resolveStateKey(rawState: any): string {
+  const norm = normalizeLocationText(rawState);
+  if (!norm || norm === 'na' || norm === 'null' || norm === 'undefined' || norm === '-') return '';
+  // Check exact key match
+  if (MASTER_LOCATIONS[norm]) return norm;
+  // Check state alias
+  if (STATE_ALIASES[norm]) {
+    const aliased = STATE_ALIASES[norm];
+    if (MASTER_LOCATIONS[aliased]) return aliased;
+  }
+  // Try partial key scan for close match (e.g. "tamilnadu" already covered above)
+  return '';
+}
+
+/**
+ * Resolve a raw city string to its canonical master cityKey, optionally
+ * constrained to a known stateKey.
+ * Returns empty string if unresolvable.
+ */
+export function resolveCityKey(rawCity: any, stateKey?: string): string {
+  const norm = normalizeLocationText(rawCity);
+  if (!norm || norm === 'na' || norm === 'null' || norm === 'undefined' || norm === '-') return '';
+
+  // Apply city alias first
+  const aliasedCityKey = CITY_ALIASES[norm] ?? norm;
+
+  if (stateKey && MASTER_LOCATIONS[stateKey]) {
+    // Constrained search within state
+    if (MASTER_LOCATIONS[stateKey].cities[aliasedCityKey]) return aliasedCityKey;
+    if (MASTER_LOCATIONS[stateKey].cities[norm]) return norm;
+  } else {
+    // Global search: return first matching city key across all states
+    for (const sk in MASTER_LOCATIONS) {
+      if (MASTER_LOCATIONS[sk].cities[aliasedCityKey]) return aliasedCityKey;
+      if (MASTER_LOCATIONS[sk].cities[norm]) return norm;
+    }
+  }
+  return '';
+}
+
+export interface CanonicalLocation {
+  stateKey: string;
+  stateName: string;
+  cityKey: string;
+  cityName: string;
+  pincode: string;
+  matchMethod: 'pincode' | 'state+city' | 'alias' | 'unmatched';
+}
+
+/**
+ * Resolve a raw sales order's state/city/pincode to canonical master values.
+ *
+ * Priority:
+ *   1. Valid 6-digit pincode match in master data
+ *   2. Exact normalized state + city match
+ *   3. Alias match
+ *   4. Unmatched (totals still preserved)
+ */
+export function resolveCanonicalLocation(
+  rawState: any,
+  rawCity: any,
+  rawPincode: any
+): CanonicalLocation {
+  const pinStr = String(rawPincode || '').replace(/\D/g, '').trim();
+
+  // 1. Pincode strongest signal
+  if (pinStr.length === 6 && PINCODE_TO_LOCATION[pinStr]) {
+    const { stateKey, cityKey } = PINCODE_TO_LOCATION[pinStr];
+    const stateData = MASTER_LOCATIONS[stateKey];
+    const cityData = stateData?.cities[cityKey];
+    return {
+      stateKey,
+      stateName: stateData?.name ?? stateKey,
+      cityKey,
+      cityName: cityData?.name ?? cityKey,
+      pincode: pinStr,
+      matchMethod: 'pincode',
+    };
+  }
+
+  // 2. State + City normalized match
+  const resolvedStateKey = resolveStateKey(rawState);
+  const resolvedCityKey = resolveCityKey(rawCity, resolvedStateKey || undefined);
+
+  if (resolvedStateKey && resolvedCityKey) {
+    const stateData = MASTER_LOCATIONS[resolvedStateKey];
+    const cityData = stateData?.cities[resolvedCityKey];
+    return {
+      stateKey: resolvedStateKey,
+      stateName: stateData?.name ?? resolvedStateKey,
+      cityKey: resolvedCityKey,
+      cityName: cityData?.name ?? resolvedCityKey,
+      pincode: pinStr,
+      matchMethod: CITY_ALIASES[normalizeLocationText(rawCity)] ? 'alias' : 'state+city',
+    };
+  }
+
+  // 3. Partial: only state resolved
+  if (resolvedStateKey) {
+    const stateData = MASTER_LOCATIONS[resolvedStateKey];
+    return {
+      stateKey: resolvedStateKey,
+      stateName: stateData?.name ?? resolvedStateKey,
+      cityKey: '',
+      cityName: '',
+      pincode: pinStr,
+      matchMethod: 'state+city',
+    };
+  }
+
+  // 4. Unmatched
+  return {
+    stateKey: '',
+    stateName: '',
+    cityKey: '',
+    cityName: '',
+    pincode: pinStr,
+    matchMethod: 'unmatched',
+  };
+}
+
+/**
+ * Get canonical state display name from MASTER_LOCATIONS.
+ * Falls back to title-casing the raw value if not found.
+ */
 export function toCanonicalLocation(value: any): string {
   const rawStr = String(value || '').trim();
   const lower = rawStr.toLowerCase();
-  if (lower === 'unspecified' || lower === 'na' || lower === 'n/a' || lower === 'null' || lower === 'undefined' || !rawStr) {
+  if (!rawStr || lower === 'unspecified' || lower === 'na' || lower === 'n/a' || lower === 'null' || lower === 'undefined') {
     return 'Unspecified';
   }
-
-  // Canonical manual overrides for multi-word location keys
-  const canonicalMap: { [key: string]: string } = {
-    'tamilnadu': 'Tamil Nadu',
-    'andhrapradesh': 'Andhra Pradesh',
-    'uttarpradesh': 'Uttar Pradesh',
-    'madhyapradesh': 'Madhya Pradesh',
-    'himachalpradesh': 'Himachal Pradesh',
-    'newdelhi': 'New Delhi',
-    'westbengal': 'West Bengal',
-    'jammukashmir': 'Jammu & Kashmir',
-    'dadranagarhaveli': 'Dadra & Nagar Haveli',
-    'damandiu': 'Daman & Diu',
-    'arunachalpradesh': 'Arunachal Pradesh',
-  };
-
-  const normalized = lower.replace(/\s+/g, '');
-  if (canonicalMap[normalized]) {
-    return canonicalMap[normalized];
+  const stateKey = resolveStateKey(rawStr);
+  if (stateKey && MASTER_LOCATIONS[stateKey]) {
+    return MASTER_LOCATIONS[stateKey].name;
   }
-
   // Default fallback: Title Case
   const words = rawStr.replace(/\s+/g, ' ').split(' ');
-  return words
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
+  return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 }
+
+/**
+ * Get all canonical state options from master data for use in filter dropdowns.
+ * Returns sorted list of { label, value } pairs.
+ */
+export function getMasterStateOptions(): Array<{ label: string; value: string }> {
+  return Object.keys(MASTER_LOCATIONS)
+    .map(key => ({ label: MASTER_LOCATIONS[key].name, value: MASTER_LOCATIONS[key].name }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Get canonical city options for a given state name.
+ * If no state is selected, returns an empty array (force state selection first).
+ */
+export function getMasterCityOptions(stateName: string): Array<{ label: string; value: string }> {
+  if (!stateName) return [];
+  const stateKey = resolveStateKey(stateName);
+  if (!stateKey || !MASTER_LOCATIONS[stateKey]) return [];
+  return Object.keys(MASTER_LOCATIONS[stateKey].cities)
+    .map(cityKey => ({ label: MASTER_LOCATIONS[stateKey].cities[cityKey].name, value: MASTER_LOCATIONS[stateKey].cities[cityKey].name }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Get canonical pincode options for a given state name and city name.
+ */
+export function getMasterPincodeOptions(stateName: string, cityName: string): Array<{ label: string; value: string }> {
+  if (!stateName || !cityName) return [];
+  const stateKey = resolveStateKey(stateName);
+  if (!stateKey || !MASTER_LOCATIONS[stateKey]) return [];
+  const cityKey = resolveCityKey(cityName, stateKey);
+  if (!cityKey || !MASTER_LOCATIONS[stateKey].cities[cityKey]) return [];
+  return (MASTER_LOCATIONS[stateKey].cities[cityKey].pincodes || [])
+    .sort()
+    .map(p => ({ label: p, value: p }));
+}
+
+/**
+ * Check if a sales order matches a set of canonical filter selections.
+ * Uses resolveCanonicalLocation so raw spelling variants are all caught.
+ */
+export function orderMatchesLocationFilter(
+  order: { state?: string | null; city?: string | null; pincode?: string | null },
+  selectedStates: string[],
+  selectedCities: string[],
+  selectedPincodes: string[]
+): boolean {
+  if (selectedStates.length === 0 && selectedCities.length === 0 && selectedPincodes.length === 0) {
+    return true;
+  }
+  const resolved = resolveCanonicalLocation(order.state, order.city, order.pincode);
+
+  if (selectedPincodes.length > 0 && resolved.pincode && selectedPincodes.includes(resolved.pincode)) {
+    return true;
+  }
+
+  if (selectedStates.length > 0 || selectedCities.length > 0) {
+    const stateMatch = selectedStates.length === 0 || selectedStates.includes(resolved.stateName);
+    const cityMatch = selectedCities.length === 0 || selectedCities.includes(resolved.cityName);
+    if (stateMatch && cityMatch && (selectedPincodes.length === 0 || (resolved.pincode && selectedPincodes.includes(resolved.pincode)))) {
+      return true;
+    }
+  }
+
+  if (selectedPincodes.length === 0 && selectedStates.length === 0 && selectedCities.length > 0) {
+    return selectedCities.includes(resolved.cityName);
+  }
+
+  return false;
+}
+

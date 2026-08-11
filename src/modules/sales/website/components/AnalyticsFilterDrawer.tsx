@@ -15,7 +15,9 @@ import {
   getUploadBatchesForAnalyticsPeriod, 
   getTodayInBusinessTimezone,
   normalizeLocationKey,
-  toCanonicalLocation
+  getMasterStateOptions,
+  getMasterCityOptions,
+  getMasterPincodeOptions
 } from '../websiteSalesUtils';
 import { useWebsiteSalesDateRange } from '../context/WebsiteSalesDateRangeContext';
 
@@ -89,70 +91,39 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
     return getUploadBatchesForAnalyticsPeriod(batches, allOrders, start, end).length;
   }, [batches, allOrders, startDate, endDate]);
 
-  // Dynamic filter options derived strictly from active period orders
-  const stateOptions: OptionItem[] = useMemo(() => {
-    const map = new Map<string, string>();
-    periodOrders.forEach(o => {
-      const raw = o.state;
-      const normalized = normalizeLocationKey(raw);
-      if (!normalized) return;
-      if (normalized === 'na' || normalized === 'n/a' || normalized === 'null' || normalized === 'undefined' || normalized === '-') return;
-      
-      const canonical = toCanonicalLocation(raw);
-      if (canonical === 'Unspecified') return;
-      
-      if (!map.has(normalized)) {
-        map.set(normalized, canonical);
-      }
-    });
-    return Array.from(map.entries())
-      .sort((a, b) => a[1].localeCompare(b[1]))
-      .map(([key, label]) => ({ label, value: label }));
-  }, [periodOrders]);
+  // Dynamic filter options — derived from MASTER LOCATION DATA, NOT raw order data
+  // State list: always shows all canonical India states
+  const stateOptions: OptionItem[] = useMemo(() => getMasterStateOptions(), []);
 
+  // City list: shows canonical cities for selected state(s), or all cities if no state selected
   const cityOptions: OptionItem[] = useMemo(() => {
-    const map = new Map<string, string>();
     const selectedStates = draftFilters.states || [];
-    const normalizedSelectedStates = selectedStates.map(s => normalizeLocationKey(s));
-    
-    periodOrders.forEach(o => {
-      if (normalizedSelectedStates.length === 0 || normalizedSelectedStates.includes(normalizeLocationKey(o.state))) {
-        const raw = o.city;
-        const normalized = normalizeLocationKey(raw);
-        if (!normalized) return;
-        if (normalized === 'na' || normalized === 'n/a' || normalized === 'null' || normalized === 'undefined' || normalized === '-') return;
-        
-        const canonical = toCanonicalLocation(raw);
-        if (canonical === 'Unspecified') return;
-        
-        if (!map.has(normalized)) {
-          map.set(normalized, canonical);
-        }
-      }
+    if (selectedStates.length === 0) return [];
+    // Merge cities from all selected states
+    const citySet = new Map<string, string>();
+    selectedStates.forEach(stateName => {
+      getMasterCityOptions(stateName).forEach(opt => {
+        if (!citySet.has(opt.value)) citySet.set(opt.value, opt.label);
+      });
     });
-    return Array.from(map.entries())
-      .sort((a, b) => a[1].localeCompare(b[1]))
-      .map(([key, label]) => ({ label, value: label }));
-  }, [periodOrders, draftFilters.states]);
+    return Array.from(citySet.entries())
+      .map(([value, label]) => ({ label, value }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [draftFilters.states]);
 
+  // Pincode list: shows canonical pincodes for selected state+city combination(s)
   const pincodeOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
     const selectedStates = draftFilters.states || [];
     const selectedCities = draftFilters.cities || [];
-    const normalizedSelectedStates = selectedStates.map(s => normalizeLocationKey(s));
-    const normalizedSelectedCities = selectedCities.map(c => normalizeLocationKey(c));
-    
-    periodOrders.forEach(o => {
-      if (
-        (normalizedSelectedStates.length === 0 || normalizedSelectedStates.includes(normalizeLocationKey(o.state))) &&
-        (normalizedSelectedCities.length === 0 || normalizedSelectedCities.includes(normalizeLocationKey(o.city)))
-      ) {
-        const pin = String(o.pincode || '').trim();
-        if (pin && pin !== '-' && pin !== 'null' && pin !== 'undefined') set.add(pin);
-      }
+    if (selectedStates.length === 0 || selectedCities.length === 0) return [];
+    const pinSet = new Set<string>();
+    selectedStates.forEach(stateName => {
+      selectedCities.forEach(cityName => {
+        getMasterPincodeOptions(stateName, cityName).forEach(opt => pinSet.add(opt.value));
+      });
     });
-    return Array.from(set).sort().map(p => ({ label: p, value: p }));
-  }, [periodOrders, draftFilters.states, draftFilters.cities]);
+    return Array.from(pinSet).sort().map(p => ({ label: p, value: p }));
+  }, [draftFilters.states, draftFilters.cities]);
 
   const offerOptions: OptionItem[] = useMemo(() => {
     const set = new Set<string>();
@@ -247,24 +218,24 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
                   options={stateOptions}
                   selectedValues={draftFilters.states}
                   onChange={vals => setDraftFilters(prev => ({ ...prev, states: vals, cities: [], pincodes: [] }))}
-                  placeholder={stateOptions.length > 0 ? "All States" : "No states for selected period"}
-                  disabled={stateOptions.length === 0}
+                  placeholder="All States"
+                  disabled={false}
                 />
                 <MultiSelectDropdown
                   label="City"
                   options={cityOptions}
                   selectedValues={draftFilters.cities}
                   onChange={vals => setDraftFilters(prev => ({ ...prev, cities: vals, pincodes: [] }))}
-                  placeholder={cityOptions.length > 0 ? "All Cities" : "No cities for selected period"}
-                  disabled={cityOptions.length === 0}
+                  placeholder={draftFilters.states && draftFilters.states.length > 0 ? "All Cities" : "Select a state first"}
+                  disabled={!draftFilters.states || draftFilters.states.length === 0}
                 />
                 <MultiSelectDropdown
                   label="Pincode"
                   options={pincodeOptions}
                   selectedValues={draftFilters.pincodes}
                   onChange={vals => setDraftFilters(prev => ({ ...prev, pincodes: vals }))}
-                  placeholder={pincodeOptions.length > 0 ? "All Pincodes" : "No pincodes for selected period"}
-                  disabled={pincodeOptions.length === 0}
+                  placeholder={draftFilters.cities && draftFilters.cities.length > 0 ? "All Pincodes" : "Select a city first"}
+                  disabled={!draftFilters.cities || draftFilters.cities.length === 0}
                 />
               </div>
             </div>

@@ -19,7 +19,9 @@ import {
   formatSalesDateDisplay, 
   formatSalesDateShort,
   normalizeLocationKey,
-  toCanonicalLocation
+  getMasterStateOptions,
+  getMasterCityOptions,
+  getMasterPincodeOptions
 } from '../websiteSalesUtils';
 
 interface DashboardFilterDrawerProps {
@@ -94,69 +96,35 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
     }));
   }, [batches]);
 
-  const stateOptions: OptionItem[] = useMemo(() => {
-    const map = new Map<string, string>();
-    allOrders.forEach(o => {
-      const raw = o.state;
-      const normalized = normalizeLocationKey(raw);
-      if (!normalized) return;
-      if (normalized === 'na' || normalized === 'n/a' || normalized === 'null' || normalized === 'undefined' || normalized === '-') return;
-      
-      const canonical = toCanonicalLocation(raw);
-      if (canonical === 'Unspecified') return;
-      
-      if (!map.has(normalized)) {
-        map.set(normalized, canonical);
-      }
-    });
-    return Array.from(map.entries())
-      .sort((a, b) => a[1].localeCompare(b[1]))
-      .map(([key, label]) => ({ label, value: label }));
-  }, [allOrders]);
+  // State/City/Pincode options driven by MASTER LOCATION DATA (not sales history)
+  const stateOptions: OptionItem[] = useMemo(() => getMasterStateOptions(), []);
 
   const cityOptions: OptionItem[] = useMemo(() => {
-    const map = new Map<string, string>();
     const selectedStates = draftFilters.states || [];
-    const normalizedSelectedStates = selectedStates.map(s => normalizeLocationKey(s));
-    
-    allOrders.forEach(o => {
-      if (normalizedSelectedStates.length === 0 || normalizedSelectedStates.includes(normalizeLocationKey(o.state))) {
-        const raw = o.city;
-        const normalized = normalizeLocationKey(raw);
-        if (!normalized) return;
-        if (normalized === 'na' || normalized === 'n/a' || normalized === 'null' || normalized === 'undefined' || normalized === '-') return;
-        
-        const canonical = toCanonicalLocation(raw);
-        if (canonical === 'Unspecified') return;
-        
-        if (!map.has(normalized)) {
-          map.set(normalized, canonical);
-        }
-      }
+    if (selectedStates.length === 0) return [];
+    const citySet = new Map<string, string>();
+    selectedStates.forEach(stateName => {
+      getMasterCityOptions(stateName).forEach(opt => {
+        if (!citySet.has(opt.value)) citySet.set(opt.value, opt.label);
+      });
     });
-    return Array.from(map.entries())
-      .sort((a, b) => a[1].localeCompare(b[1]))
-      .map(([key, label]) => ({ label, value: label }));
-  }, [allOrders, draftFilters.states]);
+    return Array.from(citySet.entries())
+      .map(([value, label]) => ({ label, value }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [draftFilters.states]);
 
   const pincodeOptions: OptionItem[] = useMemo(() => {
-    const set = new Set<string>();
     const selectedStates = draftFilters.states || [];
     const selectedCities = draftFilters.cities || [];
-    const normalizedSelectedStates = selectedStates.map(s => normalizeLocationKey(s));
-    const normalizedSelectedCities = selectedCities.map(c => normalizeLocationKey(c));
-    
-    allOrders.forEach(o => {
-      if (
-        (normalizedSelectedStates.length === 0 || normalizedSelectedStates.includes(normalizeLocationKey(o.state))) &&
-        (normalizedSelectedCities.length === 0 || normalizedSelectedCities.includes(normalizeLocationKey(o.city)))
-      ) {
-        const pin = String(o.pincode || '').trim();
-        if (pin && pin !== '-' && pin !== 'null' && pin !== 'undefined') set.add(pin);
-      }
+    if (selectedStates.length === 0 || selectedCities.length === 0) return [];
+    const pinSet = new Set<string>();
+    selectedStates.forEach(stateName => {
+      selectedCities.forEach(cityName => {
+        getMasterPincodeOptions(stateName, cityName).forEach(opt => pinSet.add(opt.value));
+      });
     });
-    return Array.from(set).sort().map(p => ({ label: p, value: p }));
-  }, [allOrders, draftFilters.states, draftFilters.cities]);
+    return Array.from(pinSet).sort().map(p => ({ label: p, value: p }));
+  }, [draftFilters.states, draftFilters.cities]);
 
   const offerOptions: OptionItem[] = useMemo(() => {
     const set = new Set<string>();
@@ -297,6 +265,7 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
                 selectedValues={draftFilters.states || []}
                 onChange={vals => setDraftFilters({ ...draftFilters, states: vals, cities: [], pincodes: [] })}
                 placeholder="All States"
+                disabled={false}
               />
 
               <MultiSelectDropdown
@@ -304,7 +273,8 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
                 options={cityOptions}
                 selectedValues={draftFilters.cities || []}
                 onChange={vals => setDraftFilters({ ...draftFilters, cities: vals, pincodes: [] })}
-                placeholder="All Cities"
+                placeholder={(draftFilters.states || []).length > 0 ? "All Cities" : "Select a state first"}
+                disabled={(draftFilters.states || []).length === 0}
               />
 
               <MultiSelectDropdown
@@ -312,7 +282,8 @@ export const DashboardFilterDrawer: React.FC<DashboardFilterDrawerProps> = ({
                 options={pincodeOptions}
                 selectedValues={draftFilters.pincodes || []}
                 onChange={vals => setDraftFilters({ ...draftFilters, pincodes: vals })}
-                placeholder="All Pincodes"
+                placeholder={(draftFilters.cities || []).length > 0 ? "All Pincodes" : "Select a city first"}
+                disabled={(draftFilters.cities || []).length === 0}
               />
             </div>
           </div>
