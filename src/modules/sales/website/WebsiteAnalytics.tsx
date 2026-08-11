@@ -653,19 +653,10 @@ export const WebsiteAnalytics: React.FC = () => {
       .map(([name, rev]) => ({ name, value: rev }))
       .sort((a, b) => b.value - a.value);
 
-    if (sorted.length <= 5) {
-      return sorted.map((d, i) => ({ ...d, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
-    }
-
-    const top5 = sorted.slice(0, 5);
-    const othersRev = sorted.slice(5).reduce((sum, item) => sum + item.value, 0);
-    return [
-      ...top5.map((d, i) => ({ ...d, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
-      { name: 'Others', value: othersRev, color: '#64748b' }
-    ];
+    return sorted.map((d, i) => ({ ...d, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
   }, [filteredOrders, revenueMixGroup]);
 
-  // 3. STATE-WISE SALES PIE DATA (Top 5 + Others)
+  // 3. STATE-WISE SALES PIE DATA (Show ALL canonical states)
   const statePieData = useMemo(() => {
     const map = new Map<string, { state: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
@@ -690,34 +681,15 @@ export const WebsiteAnalytics: React.FC = () => {
 
     list.sort((a, b) => b.val - a.val);
 
-    if (list.length <= 5) {
-      return list.map((d, i) => ({ ...d, name: d.state, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
-    }
-
-    const top5 = list.slice(0, 5);
-    const remaining = list.slice(5);
-    const othersOrders = remaining.reduce((s, x) => s + x.orders, 0);
-    const othersRev = remaining.reduce((s, x) => s + x.revenue, 0);
-    const othersUnits = remaining.reduce((s, x) => s + x.units, 0);
-    const othersVal = remaining.reduce((s, x) => s + x.val, 0);
-
-    return [
-      ...top5.map((d, i) => ({ ...d, name: d.state, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
-      {
-        state: 'Others',
-        name: 'Others',
-        orders: othersOrders,
-        revenue: othersRev,
-        units: othersUnits,
-        aov: othersOrders > 0 ? Math.round(othersRev / othersOrders) : 0,
-        val: othersVal,
-        value: othersVal,
-        color: '#64748b'
-      }
-    ];
+    return list.map((d, i) => ({
+      ...d,
+      name: d.state,
+      value: d.val,
+      color: DISTINCT_COLORS[i % DISTINCT_COLORS.length]
+    }));
   }, [filteredOrders, stateMetric]);
 
-  // 4. CITY-WISE SALES DONUT DATA (Top 6 + Others)
+  // 4. CITY-WISE SALES DONUT DATA (Show ALL canonical cities)
   const cityDonutData = useMemo(() => {
     const map = new Map<string, { cityState: string; city: string; state: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
@@ -744,68 +716,42 @@ export const WebsiteAnalytics: React.FC = () => {
 
     list.sort((a, b) => b.val - a.val);
 
-    if (list.length <= 6) {
-      return list.map((d, i) => ({ ...d, name: d.cityState, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
-    }
-
-    const top6 = list.slice(0, 6);
-    const remaining = list.slice(6);
-    const othersOrders = remaining.reduce((s, x) => s + x.orders, 0);
-    const othersRev = remaining.reduce((s, x) => s + x.revenue, 0);
-    const othersUnits = remaining.reduce((s, x) => s + x.units, 0);
-    const othersVal = remaining.reduce((s, x) => s + x.val, 0);
-
-    return [
-      ...top6.map((d, i) => ({ ...d, name: d.cityState, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
-      {
-        cityState: 'Others',
-        city: 'Others',
-        state: 'Others',
-        name: 'Others',
-        orders: othersOrders,
-        revenue: othersRev,
-        units: othersUnits,
-        val: othersVal,
-        value: othersVal,
-        color: '#64748b'
-      }
-    ];
+    return list.map((d, i) => ({
+      ...d,
+      name: d.cityState,
+      value: d.val,
+      color: DISTINCT_COLORS[i % DISTINCT_COLORS.length]
+    }));
   }, [filteredOrders, cityMetric]);
 
   // 3. State-wise Sales matching orders
   const stateMatchingOrders = useMemo(() => {
     if (!drillDownState) return filteredOrders;
-    if (drillDownState === 'Others') {
-      const topStates = statePieData.filter(d => d.state !== 'Others').map(d => d.state);
-      const normTopStates = topStates.map(s => normalizeLocationKey(s));
-      return filteredOrders.filter(o => !normTopStates.includes(normalizeLocationKey(o.state)));
-    }
-    return filteredOrders.filter(o => normalizeLocationKey(o.state) === normalizeLocationKey(drillDownState));
-  }, [filteredOrders, drillDownState, statePieData]);
+    return filteredOrders.filter(o => {
+      const resolved = resolveCanonicalLocation(o.state, o.city, o.pincode);
+      const canonicalState = resolved.stateName || toCanonicalLocation(o.state);
+      return normalizeLocationKey(canonicalState) === normalizeLocationKey(drillDownState);
+    });
+  }, [filteredOrders, drillDownState]);
 
   // 4. City-wise Sales matching orders
   const cityMatchingOrders = useMemo(() => {
     if (!drillDownCity) return filteredOrders;
-    if (drillDownCity === 'Others') {
-      const topCityStates = cityDonutData.filter(d => d.cityState !== 'Others').map(d => d.cityState);
-      const normTopCityStates = topCityStates.map(cs => cs.toLowerCase().replace(/\s+/g, ''));
-      return filteredOrders.filter(o => {
-        const currentCs = `${o.city || 'Unspecified'},${o.state || 'Unspecified'}`.toLowerCase().replace(/\s+/g, '');
-        return !normTopCityStates.includes(currentCs);
-      });
-    }
     return filteredOrders.filter(o => {
-      const currentCs = `${o.city || 'Unspecified'},${o.state || 'Unspecified'}`.toLowerCase().replace(/\s+/g, '');
-      return currentCs === drillDownCity.toLowerCase().replace(/\s+/g, '');
+      const resolved = resolveCanonicalLocation(o.state, o.city, o.pincode);
+      const canonicalCity = resolved.cityName || toCanonicalLocation(o.city);
+      const canonicalState = resolved.stateName || toCanonicalLocation(o.state);
+      const currentCs = `${canonicalCity}, ${canonicalState}`;
+      return currentCs.toLowerCase().replace(/\s+/g, '') === drillDownCity.toLowerCase().replace(/\s+/g, '');
     });
-  }, [filteredOrders, drillDownCity, cityDonutData]);
+  }, [filteredOrders, drillDownCity]);
 
-  // 5. PINCODE PERFORMANCE PIE DATA (Top 6 + Others)
+  // 5. PINCODE PERFORMANCE PIE DATA (Show ALL pincodes)
   const pincodePieData = useMemo(() => {
     const map = new Map<string, { pincode: string; city: string; state: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
       const pin = String(o.pincode || '-').trim();
-      if (pin === '-') return;
+      if (pin === '-' || pin === 'Unspecified') return;
       if (!map.has(pin)) map.set(pin, { pincode: pin, city: o.city || '-', state: o.state || '-', orders: 0, revenue: 0, units: 0 });
       const item = map.get(pin)!;
       item.orders += 1;
@@ -821,36 +767,15 @@ export const WebsiteAnalytics: React.FC = () => {
 
     list.sort((a, b) => b.val - a.val);
 
-    if (list.length <= 6) {
-      return list.map((d, i) => ({ ...d, name: d.pincode, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
-    }
-
-    const top6 = list.slice(0, 6);
-    const remaining = list.slice(6);
-    const othersOrders = remaining.reduce((s, x) => s + x.orders, 0);
-    const othersRev = remaining.reduce((s, x) => s + x.revenue, 0);
-    const othersUnits = remaining.reduce((s, x) => s + x.units, 0);
-    const othersVal = remaining.reduce((s, x) => s + x.val, 0);
-
-    return [
-      ...top6.map((d, i) => ({ ...d, name: d.pincode, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
-      {
-        pincode: 'Others',
-        city: 'Others',
-        state: 'Others',
-        name: 'Others',
-        orders: othersOrders,
-        revenue: othersRev,
-        units: othersUnits,
-        aov: othersOrders > 0 ? Math.round(othersRev / othersOrders) : 0,
-        val: othersVal,
-        value: othersVal,
-        color: '#64748b'
-      }
-    ];
+    return list.map((d, i) => ({
+      ...d,
+      name: d.pincode,
+      value: d.val,
+      color: DISTINCT_COLORS[i % DISTINCT_COLORS.length]
+    }));
   }, [filteredOrders, pincodeMetric]);
 
-  // 6. PRODUCT PERFORMANCE DONUT DATA (Top 5 + Others)
+  // 6. PRODUCT PERFORMANCE DONUT DATA (Show ALL products)
   const productDonutData = useMemo(() => {
     const map = new Map<string, { product: string; units: number; orders: number; revenue: number }>();
     filteredOrders.forEach(o => {
@@ -879,33 +804,15 @@ export const WebsiteAnalytics: React.FC = () => {
 
     list.sort((a, b) => b.val - a.val);
 
-    if (list.length <= 5) {
-      return list.map((d, i) => ({ ...d, name: d.product, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
-    }
-
-    const top5 = list.slice(0, 5);
-    const remaining = list.slice(5);
-    const othersUnits = remaining.reduce((s, x) => s + x.units, 0);
-    const othersOrders = remaining.reduce((s, x) => s + x.orders, 0);
-    const othersRev = remaining.reduce((s, x) => s + x.revenue, 0);
-    const othersVal = remaining.reduce((s, x) => s + x.val, 0);
-
-    return [
-      ...top5.map((d, i) => ({ ...d, name: d.product, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
-      {
-        product: 'Others',
-        name: 'Others',
-        units: othersUnits,
-        orders: othersOrders,
-        revenue: othersRev,
-        val: othersVal,
-        value: othersVal,
-        color: '#64748b'
-      }
-    ];
+    return list.map((d, i) => ({
+      ...d,
+      name: d.product,
+      value: d.val,
+      color: DISTINCT_COLORS[i % DISTINCT_COLORS.length]
+    }));
   }, [filteredOrders, productMetric]);
 
-  // 7. OFFER PERFORMANCE PIE DATA (Top 5 + Others)
+  // 7. OFFER PERFORMANCE PIE DATA (Show ALL offers)
   const offerPieData = useMemo(() => {
     const map = new Map<string, { offer: string; orders: number; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
@@ -924,30 +831,12 @@ export const WebsiteAnalytics: React.FC = () => {
 
     list.sort((a, b) => b.val - a.val);
 
-    if (list.length <= 5) {
-      return list.map((d, i) => ({ ...d, name: d.offer, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] }));
-    }
-
-    const top5 = list.slice(0, 5);
-    const remaining = list.slice(5);
-    const othersOrders = remaining.reduce((s, x) => s + x.orders, 0);
-    const othersRev = remaining.reduce((s, x) => s + x.revenue, 0);
-    const othersUnits = remaining.reduce((s, x) => s + x.units, 0);
-    const othersVal = remaining.reduce((s, x) => s + x.val, 0);
-
-    return [
-      ...top5.map((d, i) => ({ ...d, name: d.offer, value: d.val, color: DISTINCT_COLORS[i % DISTINCT_COLORS.length] })),
-      {
-        offer: 'Others',
-        name: 'Others',
-        orders: othersOrders,
-        revenue: othersRev,
-        units: othersUnits,
-        val: othersVal,
-        value: othersVal,
-        color: '#64748b'
-      }
-    ];
+    return list.map((d, i) => ({
+      ...d,
+      name: d.offer,
+      value: d.val,
+      color: DISTINCT_COLORS[i % DISTINCT_COLORS.length]
+    }));
   }, [filteredOrders, offerMetric]);
 
   // 8. ORDER VALUE DISTRIBUTION DONUT DATA
