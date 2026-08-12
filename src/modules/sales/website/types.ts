@@ -95,6 +95,11 @@ export interface WebsiteConsolidatedOrder {
   conflict_details?: string;
   created_at: string;
   items?: WebsiteOrderItem[];
+  canonicalState?: string;
+  canonicalStateKey?: string;
+  canonicalCity?: string;
+  canonicalCityKey?: string;
+  canonicalPincode?: string;
 }
 
 export interface WebsiteSalesFilterState {

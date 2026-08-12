@@ -427,9 +427,8 @@ export function formatSectionDateHeader(title: string, startDate: string, endDat
 
 export function normalizeOrderId(val: any): string {
   if (val === null || val === undefined) return '';
-  let str = String(val).trim();
-  str = str.replace(/[\r\n\t]/g, '').trim();
-  return str;
+  let str = String(val).trim().replace(/[\r\n\t]/g, '');
+  return str.replace(/^#+/, '').toLowerCase();
 }
 
 export function normalizeIndianPhoneNumber(val: any): string {
@@ -1654,8 +1653,12 @@ export function resolveCanonicalLocation(
  * Get canonical state display name from MASTER_LOCATIONS.
  * Falls back to title-casing the raw value if not found.
  */
-export function toCanonicalLocation(value: any): string {
-  const rawStr = String(value || '').trim();
+export function toCanonicalLocation(rawState: any, rawCity?: any, rawPincode?: any): any {
+  if (rawCity !== undefined || rawPincode !== undefined) {
+    const res = resolveCanonicalLocation(rawState, rawCity, rawPincode);
+    return { state: res.canonicalState, city: res.canonicalCity };
+  }
+  const rawStr = String(rawState || '').trim();
   const lower = rawStr.toLowerCase();
   if (!rawStr || lower === 'unspecified' || lower === 'na' || lower === 'n/a' || lower === 'null' || lower === 'undefined') {
     return 'Unspecified';
@@ -1707,36 +1710,193 @@ export function getMasterPincodeOptions(stateName: string, cityName: string): Ar
 }
 
 /**
+ * Attach canonical location properties to an order object using hybrid resolution.
+ */
+export function attachCanonicalLocation<T extends { state?: string | null; city?: string | null; pincode?: string | null }>(
+  order: T
+): T & { canonicalState: string; canonicalStateKey: string; canonicalCity: string; canonicalCityKey: string; canonicalPincode: string } {
+  const resolved = resolveCanonicalLocation(order.state, order.city, order.pincode);
+  return {
+    ...order,
+    canonicalState: resolved.stateName,
+    canonicalStateKey: resolved.stateKey || normalizeLocationKey(resolved.stateName),
+    canonicalCity: resolved.cityName,
+    canonicalCityKey: resolved.cityKey || normalizeLocationKey(resolved.cityName),
+    canonicalPincode: resolved.pincode || String(order.pincode || '').trim()
+  };
+}
+
+/**
  * Check if a sales order matches a set of canonical filter selections.
- * Uses resolveCanonicalLocation so raw spelling variants are all caught.
+ * Uses resolved canonical location values (state, city, pincode) and stable keys.
  */
 export function orderMatchesLocationFilter(
-  order: { state?: string | null; city?: string | null; pincode?: string | null },
-  selectedStates: string[],
-  selectedCities: string[],
-  selectedPincodes: string[]
+  order: { 
+    state?: string | null; 
+    city?: string | null; 
+    pincode?: string | null;
+    canonicalState?: string;
+    canonicalStateKey?: string;
+    canonicalCity?: string;
+    canonicalCityKey?: string;
+    canonicalPincode?: string;
+  },
+  selectedStates: string[] = [],
+  selectedCities: string[] = [],
+  selectedPincodes: string[] = []
 ): boolean {
-  if (selectedStates.length === 0 && selectedCities.length === 0 && selectedPincodes.length === 0) {
+  const hasStates = Array.isArray(selectedStates) && selectedStates.length > 0;
+  const hasCities = Array.isArray(selectedCities) && selectedCities.length > 0;
+  const hasPincodes = Array.isArray(selectedPincodes) && selectedPincodes.length > 0;
+
+  if (!hasStates && !hasCities && !hasPincodes) {
     return true;
   }
-  const resolved = resolveCanonicalLocation(order.state, order.city, order.pincode);
 
-  if (selectedPincodes.length > 0 && resolved.pincode && selectedPincodes.includes(resolved.pincode)) {
-    return true;
+  const cState = order.canonicalState ?? resolveCanonicalLocation(order.state, order.city, order.pincode).stateName;
+  const cStateKey = order.canonicalStateKey ?? normalizeLocationKey(cState);
+  
+  const cCity = order.canonicalCity ?? resolveCanonicalLocation(order.state, order.city, order.pincode).cityName;
+  const cCityKey = order.canonicalCityKey ?? normalizeLocationKey(cCity);
+
+  const cPincode = order.canonicalPincode ?? resolveCanonicalLocation(order.state, order.city, order.pincode).pincode;
+
+  // 1. State Filter Check
+  if (hasStates) {
+    const selectedStateKeys = selectedStates.map(s => normalizeLocationKey(s));
+    const stateMatch = selectedStates.includes(cState) || selectedStateKeys.includes(cStateKey);
+    if (!stateMatch) return false;
   }
 
-  if (selectedStates.length > 0 || selectedCities.length > 0) {
-    const stateMatch = selectedStates.length === 0 || selectedStates.includes(resolved.stateName);
-    const cityMatch = selectedCities.length === 0 || selectedCities.includes(resolved.cityName);
-    if (stateMatch && cityMatch && (selectedPincodes.length === 0 || (resolved.pincode && selectedPincodes.includes(resolved.pincode)))) {
+  // 2. City Filter Check
+  if (hasCities) {
+    const selectedCityKeys = selectedCities.map(c => normalizeLocationKey(c));
+    const cityMatch = selectedCities.includes(cCity) || selectedCityKeys.includes(cCityKey);
+    if (!cityMatch) return false;
+  }
+
+  // 3. Pincode Filter Check
+  if (hasPincodes) {
+    const rawPin = String(order.pincode || '').trim();
+    const pincodeMatch = selectedPincodes.includes(cPincode) || (rawPin !== '' && selectedPincodes.includes(rawPin));
+    if (!pincodeMatch) return false;
+  }
+
+  return true;
+}
+
+// ============================================================================
+// SHARED WEBSITE SALES ORDER SEARCH UTILITIES
+// ============================================================================
+
+/**
+ * Normalize a customer name for searching:
+ * - Trim, lowercase, collapse consecutive spaces
+ */
+export function normalizeCustomerName(val: any): string {
+  if (val === null || val === undefined) return '';
+  return String(val).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Normalize a phone number for searching:
+ * - Remove all non-digit characters
+ * - Strip leading Indian country codes (e.g. 91 prefix if 12 digits, 0 prefix if 11 digits)
+ */
+export function normalizePhoneDigits(val: any): string {
+  if (val === null || val === undefined) return '';
+  let digits = String(val).replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+  return digits;
+}
+
+/**
+ * Check if a single order matches a multi-field search query (Order ID, Customer Name, or Phone).
+ * Supports search queries with or without '#', partial name match, and normalized phone match.
+ */
+export function matchesOrderSearch(order: any, query: string): boolean {
+  if (!query || !query.trim()) return true;
+  const qRaw = query.trim();
+  const qNorm = qRaw.toLowerCase();
+  const qId = normalizeOrderId(qRaw);
+  const qPhone = normalizePhoneDigits(qRaw);
+
+  // 1. Order ID match
+  if (order.order_id) {
+    const oIdNorm = normalizeOrderId(order.order_id);
+    if (oIdNorm.includes(qId) || order.order_id.toLowerCase().includes(qNorm)) {
       return true;
     }
   }
 
-  if (selectedPincodes.length === 0 && selectedStates.length === 0 && selectedCities.length > 0) {
-    return selectedCities.includes(resolved.cityName);
+  // 2. Customer Name match
+  if (order.customer_name) {
+    const oNameNorm = normalizeCustomerName(order.customer_name);
+    const qNameNorm = normalizeCustomerName(qRaw);
+    if (oNameNorm.includes(qNameNorm)) {
+      return true;
+    }
+  }
+
+  // 3. Phone Number match
+  if (order.phone && qPhone) {
+    const oPhone = normalizePhoneDigits(order.phone);
+    const rawPhoneDigits = String(order.phone).replace(/\D/g, '');
+    if (oPhone.includes(qPhone) || rawPhoneDigits.includes(qPhone)) {
+      return true;
+    }
   }
 
   return false;
 }
+
+/**
+ * Filter an array of orders using matchesOrderSearch.
+ */
+export function filterOrdersBySearch<T extends any>(orders: T[], query: string): T[] {
+  if (!query || !query.trim()) return orders;
+  return orders.filter(o => matchesOrderSearch(o, query));
+}
+
+/**
+ * Check if an order matches a dedicated Order ID filter (EXACT normalized match).
+ */
+export function matchesOrderIdExact(order: any, query: string): boolean {
+  if (!query || !query.trim()) return true;
+  const targetId = normalizeOrderId(query);
+  if (!targetId) return true;
+  const rawId = order?.order_id ?? order?.orderId ?? '';
+  const itemOrderId = normalizeOrderId(rawId);
+  return itemOrderId === targetId;
+}
+
+/**
+ * Check if an order matches a dedicated Customer Name filter (case-insensitive partial match).
+ */
+export function matchesCustomerNamePartial(order: any, query: string): boolean {
+  if (!query || !query.trim()) return true;
+  const qName = normalizeCustomerName(query);
+  if (!qName) return true;
+  const rawName = order?.customer_name ?? order?.customerName ?? '';
+  const oName = normalizeCustomerName(rawName);
+  return oName.includes(qName);
+}
+
+/**
+ * Check if an order matches a dedicated Phone filter (normalized digits match).
+ */
+export function matchesPhoneDigitsPartial(order: any, query: string): boolean {
+  if (!query || !query.trim()) return true;
+  const qPhone = normalizePhoneDigits(query);
+  if (!qPhone) return true;
+  const rawPhone = order?.phone ?? order?.phoneNumber ?? '';
+  const oPhone = normalizePhoneDigits(rawPhone);
+  const rawPhoneDigits = String(rawPhone).replace(/\D/g, '');
+  return oPhone.includes(qPhone) || rawPhoneDigits.includes(qPhone);
+}
+
 

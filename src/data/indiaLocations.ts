@@ -4021,7 +4021,6 @@ export const MASTER_LOCATIONS: { [stateKey: string]: MasterStateData } = {
           "632007",
           "632009",
           "632014",
-          "632602",
           "635854"
         ]
       },

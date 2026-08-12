@@ -6,7 +6,8 @@ import {
   CreditCard, 
   Tag, 
   SlidersHorizontal,
-  Check
+  Check,
+  Search
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch } from '../types';
 import type { MultiSelectFilterState } from '../WebsiteAnalytics';
@@ -206,6 +207,48 @@ export const AnalyticsFilterDrawer: React.FC<AnalyticsFilterDrawerProps> = ({
 
           {/* SCROLLABLE BODY */}
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* 0. ORDER SEARCH */}
+            <div className="space-y-3 pb-2 border-b border-slate-800/60">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
+                <Search size={14} className="text-indigo-400" />
+                <span>Order Search</span>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Order ID</label>
+                  <input
+                    type="text"
+                    value={draftFilters.orderIdSearch || ''}
+                    onChange={e => setDraftFilters(prev => ({ ...prev, orderIdSearch: e.target.value }))}
+                    placeholder="Search by Order ID"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-400 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Customer Name</label>
+                  <input
+                    type="text"
+                    value={draftFilters.customerNameSearch || ''}
+                    onChange={e => setDraftFilters(prev => ({ ...prev, customerNameSearch: e.target.value }))}
+                    placeholder="Search by customer name"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Phone Number</label>
+                  <input
+                    type="text"
+                    value={draftFilters.phoneSearch || ''}
+                    onChange={e => setDraftFilters(prev => ({ ...prev, phoneSearch: e.target.value }))}
+                    placeholder="Search 10-digit phone number"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-400 font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* 1. LOCATION */}
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
