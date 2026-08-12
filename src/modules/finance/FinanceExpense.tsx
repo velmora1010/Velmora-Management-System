@@ -13,6 +13,7 @@ import { UploadExpense } from './UploadExpense';
 export const FinanceExpense = () => {
   const { expenses, isLoading, archiveExpense, refreshExpenses } = useExpenses();
   const [searchQuery, setSearchQuery] = useState('');
+  const [showUncategorizedOnly, setShowUncategorizedOnly] = useState(false);
   
   // Tab and Form state
   const [activeTab, setActiveTab] = useState<'view' | 'add' | 'analytics' | 'upload'>('view');
@@ -75,6 +76,11 @@ export const FinanceExpense = () => {
       }
       // Section filter
       if (selectedSectionFilter !== 'all' && String(expense.sub_category1) !== selectedSectionFilter) {
+        return false;
+      }
+      
+      // Uncategorized filter
+      if (showUncategorizedOnly && expense.main_category !== 'Uncategorized') {
         return false;
       }
 
@@ -203,6 +209,18 @@ export const FinanceExpense = () => {
               <option key={s.id} value={s.id}>{s.section_name}</option>
             ))}
           </select>
+
+          {/* Requires Review Filter */}
+          <button
+            onClick={() => setShowUncategorizedOnly(!showUncategorizedOnly)}
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap border ${
+              showUncategorizedOnly
+                ? 'bg-amber-500/10 text-amber-500 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.1)]'
+                : 'bg-card border-border/50 text-muted hover:text-main hover:bg-black/5 dark:hover:bg-white/5'
+            }`}
+          >
+            Requires Review
+          </button>
         </div>
       )}
 

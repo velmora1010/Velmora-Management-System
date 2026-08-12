@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useExpenses, type FinanceExpense } from '../../hooks/finance/useExpenses';
 import { supabase } from '../../lib/supabase';
 import { MultiSelect } from '../../components/ui/MultiSelect';
+import toast from 'react-hot-toast';
 
 interface ExpenseCardEditorProps {
   expense: FinanceExpense;
@@ -10,10 +11,32 @@ interface ExpenseCardEditorProps {
   onSuccess: () => void;
 }
 
+const suggestKeyword = (notes: string | null | undefined): string => {
+  if (!notes) return '';
+  const parts = notes.toLowerCase().split(/[\/\-\s]+/);
+  const ignored = new Set([
+    'mmt', 'imps', 'neft', 'rtgs', 'upi', 'rev', 'pos', 'inf', 'vin', 'bil', 
+    'trf', 'min', 'cr', 'dr', 'to', 'from', 'by', 'transfer', 'payment', 'bank', 'net'
+  ]);
+
+  for (const part of parts) {
+    const cleaned = part.replace(/[^a-z0-9]/g, '');
+    if (!cleaned) continue;
+    if (/^\d+$/.test(cleaned)) continue;
+    if (ignored.has(cleaned)) continue;
+    if (/\d/.test(cleaned) && cleaned.length > 8) continue;
+    return cleaned;
+  }
+  return '';
+};
+
 export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: ExpenseCardEditorProps) => {
   const { updateExpense } = useExpenses();
   const [error, setError] = useState<string | null>(null);
   const [vendors, setVendors] = useState<string[]>([]);
+  const [saveAsRule, setSaveAsRule] = useState(false);
+  const [ruleKeyword, setRuleKeyword] = useState(() => suggestKeyword(expense.notes));
+
 
   // Form State
   const [formData, setFormData] = useState<Partial<FinanceExpense>>({
@@ -161,6 +184,11 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
       return;
     }
 
+    if (saveAsRule && !ruleKeyword.trim()) {
+      setError('Please specify a keyword for the automation rule.');
+      return;
+    }
+
     setError(null);
 
     const payload = {
@@ -177,6 +205,58 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
         const res = await updateExpense(expense.id, payload);
         if (!res.success) throw new Error(res.error);
       }
+
+      if (saveAsRule) {
+        const kw = ruleKeyword.trim();
+        const { data: existingRules, error: fetchErr } = await supabase
+          .from('expense_rules')
+          .select('*')
+          .eq('keyword', kw);
+
+        if (fetchErr) {
+          toast.error('Expense updated, but rule creation failed (Database Error).');
+        } else if (existingRules && existingRules.length > 0) {
+          const existing = existingRules[0];
+          const isSameMapping = 
+            existing.department === selectedMain &&
+            existing.category === selectedSub1 &&
+            (existing.sub_category1 || '') === (selectedSub2 || '') &&
+            (existing.vendor || '') === (formData.vendor || '');
+
+          if (isSameMapping) {
+            toast.success('Expense updated. (Automation rule already exists)');
+          } else {
+            toast.error('Expense updated, but automation rule was NOT created because this keyword already has a different mapping.');
+          }
+        } else {
+          const { error: insertErr } = await supabase
+            .from('expense_rules')
+            .insert([{
+              keyword: kw,
+              department: selectedMain,
+              category: selectedSub1,
+              sub_category1: selectedSub2,
+              sub_category2: selectedSub3,
+              vendor: formData.vendor || null,
+              payment_mode: formData.payment_mode || null,
+              gst_status: formData.gst_status || null,
+              purchased_by: formData.purchased_by || null,
+              approved_by: formData.approved_by || null,
+              notes: formData.notes || null,
+              priority: 50,
+              is_active: true
+            }]);
+            
+          if (insertErr) {
+            toast.error(`Expense updated, but rule creation failed: ${insertErr.message}`);
+          } else {
+            toast.success('Expense updated and automation rule created successfully!');
+          }
+        }
+      } else {
+        toast.success('Expense updated successfully.');
+      }
+      
       onSuccess();
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -186,6 +266,7 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
       }
     }
   };
+
 
   return (
     <>
@@ -404,6 +485,39 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
               className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary resize-none"
             />
           </div>
+        </div>
+
+        {/* Section 6: Automation */}
+        <div className="space-y-4 pt-4 border-t border-border/50">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id={`saveAsRule-${expense.id}`}
+              checked={saveAsRule}
+              onChange={(e) => setSaveAsRule(e.target.checked)}
+              className="w-4 h-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-background bg-background cursor-pointer"
+            />
+            <label htmlFor={`saveAsRule-${expense.id}`} className="text-sm font-medium text-main cursor-pointer select-none">
+              Save this correction as an automation rule for future transactions
+            </label>
+          </div>
+          
+          {saveAsRule && (
+            <div className="space-y-2 pl-6 fade-in">
+              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Keyword Confirmation</label>
+              <input
+                type="text"
+                required
+                value={ruleKeyword}
+                onChange={(e) => setRuleKeyword(e.target.value)}
+                placeholder="Enter automation keyword (e.g., swiggy)"
+                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-primary font-mono"
+              />
+              <p className="text-[11px] text-muted leading-tight">
+                This exact keyword will be matched against future transactions to automatically categorize them. Ensure it is unique enough to avoid false positives.
+              </p>
+            </div>
+          )}
         </div>
       </form>
     </>
