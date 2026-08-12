@@ -32,7 +32,9 @@ import {
   formatSectionDateHeader,
   calculateWebsitePaymentSummary,
   normalizeLocationKey,
-  toCanonicalLocation
+  toCanonicalLocation,
+  resolveCanonicalLocation,
+  normalizeOrderId
 } from './websiteSalesUtils';
 import { DashboardFilterDrawer } from './components/DashboardFilterDrawer';
 import { ProductDispatchModal } from './components/ProductDispatchModal';
@@ -330,8 +332,8 @@ export const WebsiteDashboard: React.FC = () => {
   const dashboardStateDonutData = useMemo(() => {
     const map = new Map<string, number>();
     orders.forEach(o => {
-      const st = toCanonicalLocation(o.state);
-      if (st === 'Unspecified') return; // Skip bad state label
+      const st = o.canonicalState || resolveCanonicalLocation(o.state, o.city, o.pincode).stateName;
+      if (!st || st === 'Unspecified') return; // Skip bad state label
       map.set(st, (map.get(st) || 0) + 1);
     });
     const list = Array.from(map.entries()).map(([name, count]) => ({ name, value: count }));
@@ -365,7 +367,10 @@ export const WebsiteDashboard: React.FC = () => {
 
   const dashboardStateMatchingOrders = useMemo(() => {
     if (!dashboardStateCardSlice) return orders;
-    return orders.filter(o => toCanonicalLocation(o.state) === dashboardStateCardSlice);
+    return orders.filter(o => {
+      const st = o.canonicalState || resolveCanonicalLocation(o.state, o.city, o.pincode).stateName;
+      return st === dashboardStateCardSlice;
+    });
   }, [orders, dashboardStateCardSlice]);
 
   // Batches for Selected Date Range & Applied Filters
@@ -482,7 +487,7 @@ export const WebsiteDashboard: React.FC = () => {
 
             {appliedFilters.orderIdSearch && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[11px]">
-                Order ID: {appliedFilters.orderIdSearch}
+                Order ID: #{normalizeOrderId(appliedFilters.orderIdSearch)}
                 <button onClick={() => handleRemoveChip('orderIdSearch')} className="hover:text-white cursor-pointer"><X size={12} /></button>
               </span>
             )}

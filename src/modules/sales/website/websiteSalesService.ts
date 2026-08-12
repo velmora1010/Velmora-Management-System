@@ -14,7 +14,11 @@ import {
   getTodayInBusinessTimezone,
   formatSalesDateShort,
   normalizeLocationKey,
-  orderMatchesLocationFilter
+  orderMatchesLocationFilter,
+  resolveCanonicalLocation,
+  normalizeOrderId,
+  normalizeCustomerName,
+  normalizePhoneDigits
 } from './websiteSalesUtils';
 
 const UPLOADS_KEY = 'website_sales_upload_batches';
@@ -547,14 +551,24 @@ export class WebsiteSalesService {
         ? items.map(it => `${it.product_name} × ${it.quantity}`).join(' | ')
         : extra.order_formatted || `${productNames} × ${o.total_quantity || 1}`;
 
+      const rawState = o.state || 'Unspecified';
+      const rawCity = o.city || 'Unspecified';
+      const rawPincode = o.pincode || '';
+      const canonicalLoc = resolveCanonicalLocation(rawState, rawCity, rawPincode);
+
       return {
         id: o.id,
         order_id: o.order_id,
         customer_name: o.customer_name || 'N/A',
         address: extra.address || '',
-        state: o.state || 'Unspecified',
-        city: o.city || 'Unspecified',
-        pincode: o.pincode || '',
+        state: rawState,
+        city: rawCity,
+        pincode: rawPincode,
+        canonicalState: canonicalLoc.stateName,
+        canonicalStateKey: canonicalLoc.stateKey || normalizeLocationKey(canonicalLoc.stateName),
+        canonicalCity: canonicalLoc.cityName,
+        canonicalCityKey: canonicalLoc.cityKey || normalizeLocationKey(canonicalLoc.cityName),
+        canonicalPincode: canonicalLoc.pincode || rawPincode,
         order_formatted: orderFormatted,
         product_name: productNames,
         total_quantity: Number(o.total_quantity) || 1,
@@ -587,20 +601,23 @@ export class WebsiteSalesService {
         return false;
       }
 
-      if (filters.orderIdSearch) {
-        const q = filters.orderIdSearch.toLowerCase().trim();
-        if (!o.order_id.toLowerCase().includes(q)) return false;
+      if (filters.orderIdSearch && filters.orderIdSearch.trim()) {
+        const targetId = normalizeOrderId(filters.orderIdSearch);
+        const itemOrderId = normalizeOrderId(o.order_id);
+        if (itemOrderId !== targetId) return false;
       }
 
-      if (filters.customerNameSearch) {
-        const q = filters.customerNameSearch.toLowerCase().trim();
-        if (!o.customer_name.toLowerCase().includes(q)) return false;
+      if (filters.customerNameSearch && filters.customerNameSearch.trim()) {
+        const q = normalizeCustomerName(filters.customerNameSearch);
+        const oName = normalizeCustomerName(o.customer_name);
+        if (!oName.includes(q)) return false;
       }
 
-      if (filters.phoneSearch) {
-        const q = filters.phoneSearch.replace(/\D/g, '');
-        const orderPhone = (o.phone || '').replace(/\D/g, '');
-        if (q && !orderPhone.includes(q)) return false;
+      if (filters.phoneSearch && filters.phoneSearch.trim()) {
+        const q = normalizePhoneDigits(filters.phoneSearch);
+        const orderPhone = normalizePhoneDigits(o.phone);
+        const rawPhoneDigits = String(o.phone || '').replace(/\D/g, '');
+        if (q && !orderPhone.includes(q) && !rawPhoneDigits.includes(q)) return false;
       }
 
       if (filters.state || filters.city || (filters.states && filters.states.length > 0) || (filters.cities && filters.cities.length > 0) || (filters.pincodes && filters.pincodes.length > 0)) {

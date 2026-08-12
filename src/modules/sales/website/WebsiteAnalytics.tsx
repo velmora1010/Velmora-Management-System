@@ -49,7 +49,14 @@ import {
   calculateWebsitePaymentSummary,
   normalizeLocationKey,
   toCanonicalLocation,
-  resolveCanonicalLocation
+  resolveCanonicalLocation,
+  orderMatchesLocationFilter,
+  matchesOrderSearch,
+  filterOrdersBySearch,
+  normalizeOrderId,
+  matchesOrderIdExact,
+  matchesCustomerNamePartial,
+  matchesPhoneDigitsPartial
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -66,6 +73,10 @@ export interface MultiSelectFilterState {
   selectedDate: string;
   startDate: string;
   endDate: string;
+  orderIdSearch?: string;
+  customerNameSearch?: string;
+  phoneSearch?: string;
+  globalSearch?: string;
 }
 
 const DEFAULT_FILTERS: MultiSelectFilterState = {
@@ -80,7 +91,11 @@ const DEFAULT_FILTERS: MultiSelectFilterState = {
   dateRangePreset: 'today',
   selectedDate: getTodayInBusinessTimezone(),
   startDate: getTodayInBusinessTimezone(),
-  endDate: getTodayInBusinessTimezone()
+  endDate: getTodayInBusinessTimezone(),
+  orderIdSearch: '',
+  customerNameSearch: '',
+  phoneSearch: '',
+  globalSearch: ''
 };
 
 const ORDER_TYPE_OPTIONS = [
@@ -177,6 +192,7 @@ export const WebsiteAnalytics: React.FC = () => {
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState<boolean>(false);
 
   // Active filter count computation
+  // Active filter count computation
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (appliedFilters.batchIds && appliedFilters.batchIds.length > 0) count += appliedFilters.batchIds.length;
@@ -187,6 +203,10 @@ export const WebsiteAnalytics: React.FC = () => {
     if (appliedFilters.offers && appliedFilters.offers.length > 0) count += appliedFilters.offers.length;
     if (appliedFilters.products && appliedFilters.products.length > 0) count += appliedFilters.products.length;
     if (appliedFilters.orderTypes && appliedFilters.orderTypes.length > 0) count += appliedFilters.orderTypes.length;
+    if (appliedFilters.orderIdSearch && appliedFilters.orderIdSearch.trim()) count += 1;
+    if (appliedFilters.customerNameSearch && appliedFilters.customerNameSearch.trim()) count += 1;
+    if (appliedFilters.phoneSearch && appliedFilters.phoneSearch.trim()) count += 1;
+    if (appliedFilters.globalSearch && appliedFilters.globalSearch.trim()) count += 1;
     return count;
   }, [appliedFilters]);
 
@@ -195,6 +215,8 @@ export const WebsiteAnalytics: React.FC = () => {
     const nextFilters = { ...appliedFilters };
     if (val && Array.isArray(nextFilters[key])) {
       (nextFilters[key] as string[]) = ((nextFilters[key] as string[]) || []).filter(v => v !== val);
+    } else if (typeof nextFilters[key] === 'string') {
+      (nextFilters[key] as string) = '';
     }
     setDraftFilters(nextFilters);
     setAppliedFilters(nextFilters);
@@ -355,7 +377,11 @@ export const WebsiteAnalytics: React.FC = () => {
       paymentModes: [],
       offers: [],
       products: [],
-      orderTypes: []
+      orderTypes: [],
+      orderIdSearch: '',
+      customerNameSearch: '',
+      phoneSearch: '',
+      globalSearch: ''
     };
     setDraftFilters(resetBusinessFilters);
     setAppliedFilters(resetBusinessFilters);
@@ -377,19 +403,21 @@ export const WebsiteAnalytics: React.FC = () => {
       }
 
       if (drillDownPaymentMode && o.payment_mode !== drillDownPaymentMode) return false;
-      if (drillDownState && normalizeLocationKey(o.state) !== normalizeLocationKey(drillDownState)) return false;
-      if (drillDownCity && normalizeLocationKey(o.city) !== normalizeLocationKey(drillDownCity)) return false;
+      if (drillDownState) {
+        const cState = o.canonicalState || resolveCanonicalLocation(o.state, o.city, o.pincode).stateName;
+        if (normalizeLocationKey(cState) !== normalizeLocationKey(drillDownState)) return false;
+      }
+      if (drillDownCity) {
+        const cCity = o.canonicalCity || resolveCanonicalLocation(o.state, o.city, o.pincode).cityName;
+        if (normalizeLocationKey(cCity) !== normalizeLocationKey(drillDownCity)) return false;
+      }
 
       if (appliedFilters.batchIds.length > 0 && !appliedFilters.batchIds.includes(o.upload_batch_id)) return false;
-      if (appliedFilters.states.length > 0) {
-        const normStates = appliedFilters.states.map(s => normalizeLocationKey(s));
-        if (!normStates.includes(normalizeLocationKey(o.state))) return false;
+      
+      // Unified Canonical Location Matching (State, City, Pincode)
+      if (!orderMatchesLocationFilter(o, appliedFilters.states, appliedFilters.cities, appliedFilters.pincodes)) {
+        return false;
       }
-      if (appliedFilters.cities.length > 0) {
-        const normCities = appliedFilters.cities.map(c => normalizeLocationKey(c));
-        if (!normCities.includes(normalizeLocationKey(o.city))) return false;
-      }
-      if (appliedFilters.pincodes.length > 0 && !appliedFilters.pincodes.includes(o.pincode)) return false;
       if (appliedFilters.paymentModes.length > 0 && !appliedFilters.paymentModes.includes(o.payment_mode)) return false;
       if (appliedFilters.offers.length > 0 && !appliedFilters.offers.includes(o.offer)) return false;
 
@@ -414,6 +442,22 @@ export const WebsiteAnalytics: React.FC = () => {
           if (ot === 'Multiple Products, Multiple Quantity' && itemCount > 1 && totalQty > 1) matched = true;
         }
         if (!matched) return false;
+      }
+
+      // Order Search (Filter Drawer fields — dedicated exact/partial matchers)
+      if (appliedFilters.orderIdSearch && appliedFilters.orderIdSearch.trim()) {
+        if (!matchesOrderIdExact(o, appliedFilters.orderIdSearch.trim())) return false;
+      }
+      if (appliedFilters.customerNameSearch && appliedFilters.customerNameSearch.trim()) {
+        if (!matchesCustomerNamePartial(o, appliedFilters.customerNameSearch.trim())) return false;
+      }
+      if (appliedFilters.phoneSearch && appliedFilters.phoneSearch.trim()) {
+        if (!matchesPhoneDigitsPartial(o, appliedFilters.phoneSearch.trim())) return false;
+      }
+
+      // Global Header Search
+      if (appliedFilters.globalSearch && appliedFilters.globalSearch.trim()) {
+        if (!matchesOrderSearch(o, appliedFilters.globalSearch.trim())) return false;
       }
 
       return true;
@@ -981,6 +1025,34 @@ export const WebsiteAnalytics: React.FC = () => {
             <ChevronDown size={14} className="text-slate-400 shrink-0" />
           </button>
 
+          {/* GLOBAL ANALYTICS ORDER SEARCH INPUT */}
+          <div className="relative w-full sm:w-[220px]">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={appliedFilters.globalSearch || ''}
+              onChange={e => {
+                const val = e.target.value;
+                setDraftFilters(prev => ({ ...prev, globalSearch: val }));
+                setAppliedFilters(prev => ({ ...prev, globalSearch: val }));
+              }}
+              placeholder="Search Order ID, Name or Phone..."
+              className="w-full h-[40px] pl-9 pr-8 bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-indigo-400 rounded-xl text-xs text-white placeholder-slate-500 outline-none transition-colors shadow-sm font-mono"
+            />
+            {appliedFilters.globalSearch && (
+              <button
+                onClick={() => {
+                  setDraftFilters(prev => ({ ...prev, globalSearch: '' }));
+                  setAppliedFilters(prev => ({ ...prev, globalSearch: '' }));
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 cursor-pointer"
+                title="Clear global search"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
           {/* COMPACT ANALYTICS FILTER DRAWER TRIGGER BUTTON */}
           <button
             type="button"
@@ -1089,6 +1161,34 @@ export const WebsiteAnalytics: React.FC = () => {
                 <button onClick={() => handleRemoveChip('orderTypes', ot)} className="hover:text-white cursor-pointer"><X size={12} /></button>
               </span>
             ))}
+
+            {appliedFilters.orderIdSearch && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[11px] font-mono font-bold">
+                Order ID: #{normalizeOrderId(appliedFilters.orderIdSearch)}
+                <button onClick={() => handleRemoveChip('orderIdSearch')} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            )}
+
+            {appliedFilters.customerNameSearch && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[11px] font-bold">
+                Name: {appliedFilters.customerNameSearch}
+                <button onClick={() => handleRemoveChip('customerNameSearch')} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            )}
+
+            {appliedFilters.phoneSearch && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[11px] font-mono font-bold">
+                Phone: {appliedFilters.phoneSearch}
+                <button onClick={() => handleRemoveChip('phoneSearch')} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            )}
+
+            {appliedFilters.globalSearch && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 text-[11px] font-mono font-bold">
+                Search: {appliedFilters.globalSearch}
+                <button onClick={() => handleRemoveChip('globalSearch')} className="hover:text-white cursor-pointer"><X size={12} /></button>
+              </span>
+            )}
           </div>
 
           <button
