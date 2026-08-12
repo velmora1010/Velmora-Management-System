@@ -1365,84 +1365,288 @@ export function resolveCityKey(rawCity: any, stateKey?: string): string {
   return '';
 }
 
-export interface CanonicalLocation {
+export interface CanonicalLocationResult {
+  rawState: string;
+  rawCity: string;
+  rawPincode: string;
+
+  canonicalState: string;
+  canonicalCity: string;
+  canonicalPincode: string;
+
+  resolutionMethod: 'pincode' | 'alias' | 'exact' | 'fuzzy' | 'unmapped';
+  confidence: number;
+
   stateKey: string;
-  stateName: string;
   cityKey: string;
+  stateName: string;
   cityName: string;
   pincode: string;
-  matchMethod: 'pincode' | 'state+city' | 'alias' | 'unmatched';
+  matchMethod: 'pincode' | 'state+city' | 'alias' | 'fuzzy' | 'unmatched';
+}
+
+/** Legacy type alias for backward compatibility */
+export type CanonicalLocation = CanonicalLocationResult;
+
+/**
+ * Jaro-Winkler string similarity (0.0 to 1.0) for safe state-scoped fuzzy matching.
+ */
+export function jaroWinklerSimilarity(s1: string, s2: string): number {
+  if (!s1 || !s2) return 0;
+  if (s1 === s2) return 1.0;
+
+  const len1 = s1.length;
+  const len2 = s2.length;
+  const matchWindow = Math.max(0, Math.floor(Math.max(len1, len2) / 2) - 1);
+
+  const matches1 = new Array(len1).fill(false);
+  const matches2 = new Array(len2).fill(false);
+
+  let matches = 0;
+  let transpositions = 0;
+
+  for (let i = 0; i < len1; i++) {
+    const start = Math.max(0, i - matchWindow);
+    const end = Math.min(i + matchWindow + 1, len2);
+
+    for (let j = start; j < end; j++) {
+      if (matches2[j]) continue;
+      if (s1[i] !== s2[j]) continue;
+      matches1[i] = true;
+      matches2[j] = true;
+      matches++;
+      break;
+    }
+  }
+
+  if (matches === 0) return 0;
+
+  let k = 0;
+  for (let i = 0; i < len1; i++) {
+    if (!matches1[i]) continue;
+    while (!matches2[k]) k++;
+    if (s1[i] !== s2[k]) transpositions++;
+    k++;
+  }
+
+  const jaro = (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3;
+
+  // Winkler prefix scale (up to 4 chars)
+  let prefix = 0;
+  for (let i = 0; i < Math.min(len1, len2, 4); i++) {
+    if (s1[i] === s2[i]) prefix++;
+    else break;
+  }
+
+  return jaro + prefix * 0.1 * (1 - jaro);
+}
+
+/**
+ * Perform safe, state-scoped fuzzy matching against canonical cities within stateKey.
+ * Returns { cityKey, confidence } if a candidate meets similarity >= 0.85 with clear margin.
+ */
+export function resolveFuzzyCityKey(rawCity: any, stateKey: string): { cityKey: string; confidence: number } | null {
+  const norm = normalizeLocationText(rawCity);
+  if (!norm || norm.length < 3 || !stateKey || !MASTER_LOCATIONS[stateKey]) return null;
+
+  const cities = MASTER_LOCATIONS[stateKey].cities;
+  let bestKey = '';
+  let maxScore = 0;
+  let secondMaxScore = 0;
+
+  for (const cKey in cities) {
+    const score = jaroWinklerSimilarity(norm, cKey);
+    if (score > maxScore) {
+      secondMaxScore = maxScore;
+      maxScore = score;
+      bestKey = cKey;
+    } else if (score > secondMaxScore) {
+      secondMaxScore = score;
+    }
+  }
+
+  // Safe conservative thresholds:
+  // 1. High similarity threshold >= 0.85
+  // 2. Minimum margin of 0.04 over second best candidate to avoid ambiguous ties
+  if (maxScore >= 0.85 && (maxScore - secondMaxScore >= 0.04 || maxScore >= 0.95)) {
+    return { cityKey: bestKey, confidence: Math.round(maxScore * 100) / 100 };
+  }
+
+  return null;
 }
 
 /**
  * Resolve a raw sales order's state/city/pincode to canonical master values.
  *
- * Priority:
- *   1. Valid 6-digit pincode match in master data
- *   2. Exact normalized state + city match
- *   3. Alias match
- *   4. Unmatched (totals still preserved)
+ * Strict Hybrid Priority:
+ *   1. Pincode Match (Priority 1, Confidence 1.0)
+ *   2. Alias Match (Priority 2, Confidence 0.95)
+ *   3. Exact Normalized Match (Priority 3, Confidence 1.0)
+ *   4. Safe State-Scoped Fuzzy Match (Priority 4, Confidence 0.85 - 0.90)
+ *   5. Unmapped Fallback (Priority 5, Confidence 0.0)
  */
 export function resolveCanonicalLocation(
   rawState: any,
   rawCity: any,
   rawPincode: any
-): CanonicalLocation {
-  const pinStr = String(rawPincode || '').replace(/\D/g, '').trim();
+): CanonicalLocationResult {
+  const rState = String(rawState || '').trim();
+  const rCity = String(rawCity || '').trim();
+  const rPincode = String(rawPincode || '').trim();
+  const pinStr = rPincode.replace(/\D/g, '').trim();
 
-  // 1. Pincode strongest signal
+  // Priority 1: Valid 6-digit Pincode match in master data
   if (pinStr.length === 6 && PINCODE_TO_LOCATION[pinStr]) {
     const { stateKey, cityKey } = PINCODE_TO_LOCATION[pinStr];
     const stateData = MASTER_LOCATIONS[stateKey];
     const cityData = stateData?.cities[cityKey];
+    const cState = stateData?.name ?? stateKey;
+    const cCity = cityData?.name ?? cityKey;
+
     return {
+      rawState: rState,
+      rawCity: rCity,
+      rawPincode: rPincode,
+      canonicalState: cState,
+      canonicalCity: cCity,
+      canonicalPincode: pinStr,
+      resolutionMethod: 'pincode',
+      confidence: 1.0,
       stateKey,
-      stateName: stateData?.name ?? stateKey,
       cityKey,
-      cityName: cityData?.name ?? cityKey,
+      stateName: cState,
+      cityName: cCity,
       pincode: pinStr,
-      matchMethod: 'pincode',
+      matchMethod: 'pincode'
     };
   }
 
-  // 2. State + City normalized match
-  const resolvedStateKey = resolveStateKey(rawState);
-  const resolvedCityKey = resolveCityKey(rawCity, resolvedStateKey || undefined);
+  const resolvedStateKey = resolveStateKey(rState);
 
-  if (resolvedStateKey && resolvedCityKey) {
+  // Priority 2: Alias Match
+  const normCity = normalizeLocationText(rCity);
+  const aliasedCityKey = CITY_ALIASES[normCity];
+  if (aliasedCityKey) {
+    let stateKey = resolvedStateKey;
+    let cityKey = aliasedCityKey;
+
+    if (stateKey && MASTER_LOCATIONS[stateKey]?.cities[cityKey]) {
+      const stateData = MASTER_LOCATIONS[stateKey];
+      const cityData = stateData.cities[cityKey];
+      return {
+        rawState: rState,
+        rawCity: rCity,
+        rawPincode: rPincode,
+        canonicalState: stateData.name,
+        canonicalCity: cityData.name,
+        canonicalPincode: pinStr,
+        resolutionMethod: 'alias',
+        confidence: 0.95,
+        stateKey,
+        cityKey,
+        stateName: stateData.name,
+        cityName: cityData.name,
+        pincode: pinStr,
+        matchMethod: 'alias'
+      };
+    } else {
+      for (const sk in MASTER_LOCATIONS) {
+        if (MASTER_LOCATIONS[sk].cities[cityKey]) {
+          const stateData = MASTER_LOCATIONS[sk];
+          const cityData = stateData.cities[cityKey];
+          return {
+            rawState: rState,
+            rawCity: rCity,
+            rawPincode: rPincode,
+            canonicalState: stateData.name,
+            canonicalCity: cityData.name,
+            canonicalPincode: pinStr,
+            resolutionMethod: 'alias',
+            confidence: 0.95,
+            stateKey: sk,
+            cityKey,
+            stateName: stateData.name,
+            cityName: cityData.name,
+            pincode: pinStr,
+            matchMethod: 'alias'
+          };
+        }
+      }
+    }
+  }
+
+  // Priority 3: Exact Normalized Match
+  const exactCityKey = resolveCityKey(rCity, resolvedStateKey || undefined);
+  if (resolvedStateKey && exactCityKey) {
     const stateData = MASTER_LOCATIONS[resolvedStateKey];
-    const cityData = stateData?.cities[resolvedCityKey];
+    const cityData = stateData?.cities[exactCityKey];
+    const cState = stateData?.name ?? resolvedStateKey;
+    const cCity = cityData?.name ?? exactCityKey;
     return {
+      rawState: rState,
+      rawCity: rCity,
+      rawPincode: rPincode,
+      canonicalState: cState,
+      canonicalCity: cCity,
+      canonicalPincode: pinStr,
+      resolutionMethod: 'exact',
+      confidence: 1.0,
       stateKey: resolvedStateKey,
-      stateName: stateData?.name ?? resolvedStateKey,
-      cityKey: resolvedCityKey,
-      cityName: cityData?.name ?? resolvedCityKey,
+      cityKey: exactCityKey,
+      stateName: cState,
+      cityName: cCity,
       pincode: pinStr,
-      matchMethod: CITY_ALIASES[normalizeLocationText(rawCity)] ? 'alias' : 'state+city',
+      matchMethod: 'state+city'
     };
   }
 
-  // 3. Partial: only state resolved
+  // Priority 4: Safe State-Scoped Fuzzy Match
   if (resolvedStateKey) {
-    const stateData = MASTER_LOCATIONS[resolvedStateKey];
-    return {
-      stateKey: resolvedStateKey,
-      stateName: stateData?.name ?? resolvedStateKey,
-      cityKey: '',
-      cityName: '',
-      pincode: pinStr,
-      matchMethod: 'state+city',
-    };
+    const fuzzyRes = resolveFuzzyCityKey(rCity, resolvedStateKey);
+    if (fuzzyRes) {
+      const stateData = MASTER_LOCATIONS[resolvedStateKey];
+      const cityData = stateData?.cities[fuzzyRes.cityKey];
+      const cState = stateData?.name ?? resolvedStateKey;
+      const cCity = cityData?.name ?? fuzzyRes.cityKey;
+      return {
+        rawState: rState,
+        rawCity: rCity,
+        rawPincode: rPincode,
+        canonicalState: cState,
+        canonicalCity: cCity,
+        canonicalPincode: pinStr,
+        resolutionMethod: 'fuzzy',
+        confidence: fuzzyRes.confidence,
+        stateKey: resolvedStateKey,
+        cityKey: fuzzyRes.cityKey,
+        stateName: cState,
+        cityName: cCity,
+        pincode: pinStr,
+        matchMethod: 'fuzzy'
+      };
+    }
   }
 
-  // 4. Unmatched
+  // Priority 5: Unmapped Fallback
+  const stateData = resolvedStateKey ? MASTER_LOCATIONS[resolvedStateKey] : null;
+  const cState = stateData?.name || (rState ? toCanonicalLocation(rState) : 'Unspecified');
+  const cCity = rCity ? toCanonicalLocation(rCity) : 'Unspecified';
+
   return {
-    stateKey: '',
-    stateName: '',
+    rawState: rState,
+    rawCity: rCity,
+    rawPincode: rPincode,
+    canonicalState: cState,
+    canonicalCity: cCity,
+    canonicalPincode: pinStr,
+    resolutionMethod: 'unmapped',
+    confidence: 0.0,
+    stateKey: resolvedStateKey || '',
     cityKey: '',
-    cityName: '',
+    stateName: cState,
+    cityName: cCity,
     pincode: pinStr,
-    matchMethod: 'unmatched',
+    matchMethod: 'unmatched'
   };
 }
 

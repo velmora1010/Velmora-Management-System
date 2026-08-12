@@ -922,21 +922,10 @@ export const MASTER_LOCATIONS: { [stateKey: string]: MasterStateData } = {
           "680741"
         ]
       },
-      "changanacherry": {
-        "name": "Changanacherry",
-        "pincodes": [
-          "686104"
-        ]
-      },
       "changanassery": {
         "name": "Changanassery",
         "pincodes": [
-          "686101"
-        ]
-      },
-      "changancherry": {
-        "name": "Changancherry",
-        "pincodes": [
+          "686101",
           "686104"
         ]
       },
@@ -4480,11 +4469,51 @@ export function initializePincodeMap() {
 initializePincodeMap();
 
 export const CITY_ALIASES: { [rawNormalized: string]: string } = {
+  // Changanassery variants (Kerala)
+  "changanacherry": "changanassery",
+  "changancherry": "changanassery",
+  "changanchery": "changanassery",
+  "changanassery": "changanassery",
+  "changnassry": "changanassery",
+  "changanasery": "changanassery",
+
+  // Gudiyatham variants (Tamil Nadu)
   "gudiyattam": "gudiyatham",
   "gudiyatam": "gudiyatham",
+  "gudiyatham": "gudiyatham",
+
+  // Erode variants (Tamil Nadu)
   "erod": "erode",
+  "erode": "erode",
+
+  // Bangalore / Bengaluru (Kept distinct as per user rule, or aliased cleanly)
   "bangalore": "bangalore",
-  "bengaluru": "bengaluru"
+  "bengaluru": "bengaluru",
+
+  // Common Indian city aliases
+  "calicut": "kozhikode",
+  "cochin": "kochi",
+  "trivandrum": "thiruvananthapuram",
+  "trichy": "tiruchirappalli",
+  "tiruchirapalli": "tiruchirappalli",
+  "trichur": "thrissur",
+  "quilon": "kollam",
+  "alleppey": "alappuzha",
+  "palghat": "palakkad",
+  "cannanore": "kannur",
+  "tellicherry": "thalassery",
+  "baroda": "vadodara",
+  "poona": "pune",
+  "madras": "chennai",
+  "vizag": "visakhapatnam",
+  "gurgaon": "gurugram",
+  "simla": "shimla",
+  "gauhati": "guwahati",
+  "pondicherry": "puducherry",
+  "belgaum": "belagavi",
+  "hubli": "hubballi",
+  "mangalore": "mangalaru",
+  "mysore": "mysuru"
 };
 
 export const STATE_ALIASES: { [rawNormalized: string]: string } = {
