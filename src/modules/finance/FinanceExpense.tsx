@@ -5,15 +5,14 @@ import { ExpenseForm } from './ExpenseForm';
 import { ExpenseCardEditor } from './ExpenseCardEditor';
 import { FinanceInfoCard } from '../../components/ui/FinanceInfoCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
-import { departmentService } from '../../services/departmentService';
 import { supabase } from '../../lib/supabase';
-import type { Department, DepartmentSection } from '../../types';
 import { UploadExpense } from './UploadExpense';
 
 export const FinanceExpense = () => {
   const { expenses, isLoading, archiveExpense, refreshExpenses } = useExpenses();
   const [searchQuery, setSearchQuery] = useState('');
-  const [showUncategorizedOnly, setShowUncategorizedOnly] = useState(false);
+  const [categorizationFilter, setCategorizationFilter] = useState<'all' | 'categorized' | 'uncategorized'>('all');
+
   
   // Tab and Form state
   const [activeTab, setActiveTab] = useState<'view' | 'add' | 'analytics' | 'upload'>('view');
@@ -23,81 +22,108 @@ export const FinanceExpense = () => {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null);
-
-  // Mappings
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [sections, setSections] = useState<DepartmentSection[]>([]);
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
   const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
+  const [selectedSub2Filter, setSelectedSub2Filter] = useState<string>('all');
+  const [selectedSub3Filter, setSelectedSub3Filter] = useState<string>('all');
 
-  useEffect(() => {
-    const loadMappings = async () => {
-      try {
-        const { data: depts } = await departmentService.getAllDepartments();
-        if (depts) setDepartments(depts);
-        
-        const { data: secs } = await departmentService.getAllSections();
-        if (secs) setSections(secs);
-      } catch (err) {
-        console.error('Failed to load mappings in FinanceExpense:', err);
-      }
-    };
-    loadMappings();
-  }, []);
+  // Dynamic Filter Options
+  const dynamicDepartments = useMemo(() => {
+    const depts = new Set(expenses.map(e => e.main_category).filter(Boolean));
+    return Array.from(depts).sort() as string[];
+  }, [expenses]);
 
-  const getDeptName = (id: string | null) => {
-    if (!id) return '-';
-    const match = departments.find(d => String(d.id) === String(id));
-    return match ? match.department_name : String(id);
-  };
-
-  const getSectionName = (id: string | null) => {
-    if (!id) return '-';
-    const match = sections.find(s => String(s.id) === String(id));
-    return match ? match.section_name : String(id);
-  };
-
-  // Sections filtered by selected department filter
-  const filteredSectionsForFilterDropdown = useMemo(() => {
+  const dynamicSections = useMemo(() => {
     if (selectedDeptFilter === 'all') return [];
-    return sections.filter(s => String(s.department_id) === selectedDeptFilter);
-  }, [sections, selectedDeptFilter]);
+    const secs = new Set(
+      expenses
+        .filter(e => e.main_category === selectedDeptFilter)
+        .map(e => e.sub_category1)
+        .filter(Boolean)
+    );
+    return Array.from(secs).sort() as string[];
+  }, [expenses, selectedDeptFilter]);
 
-  // Reset section filter if department filter changes
+  const dynamicSub2 = useMemo(() => {
+    if (selectedDeptFilter === 'all' || selectedSectionFilter === 'all') return [];
+    const sub2s = new Set(
+      expenses
+        .filter(e => e.main_category === selectedDeptFilter && e.sub_category1 === selectedSectionFilter)
+        .map(e => e.sub_category2)
+        .filter(Boolean)
+    );
+    return Array.from(sub2s).sort() as string[];
+  }, [expenses, selectedDeptFilter, selectedSectionFilter]);
+
+  const dynamicSub3 = useMemo(() => {
+    if (selectedDeptFilter === 'all' || selectedSectionFilter === 'all' || selectedSub2Filter === 'all') return [];
+    const sub3s = new Set(
+      expenses
+        .filter(e => e.main_category === selectedDeptFilter && e.sub_category1 === selectedSectionFilter && e.sub_category2 === selectedSub2Filter)
+        .map(e => e.sub_category3)
+        .filter(Boolean)
+    );
+    return Array.from(sub3s).sort() as string[];
+  }, [expenses, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter]);
+
+  // Reset child filters if parent filter changes
   useEffect(() => {
     setSelectedSectionFilter('all');
+    setSelectedSub2Filter('all');
+    setSelectedSub3Filter('all');
   }, [selectedDeptFilter]);
+
+  useEffect(() => {
+    setSelectedSub2Filter('all');
+    setSelectedSub3Filter('all');
+  }, [selectedSectionFilter]);
+
+  useEffect(() => {
+    setSelectedSub3Filter('all');
+  }, [selectedSub2Filter]);
 
   const filteredExpenses = useMemo(() => {
     return expenses.filter(expense => {
       // Dept filter
-      if (selectedDeptFilter !== 'all' && String(expense.main_category) !== selectedDeptFilter) {
+      if (selectedDeptFilter !== 'all' && expense.main_category !== selectedDeptFilter) {
         return false;
       }
       // Section filter
-      if (selectedSectionFilter !== 'all' && String(expense.sub_category1) !== selectedSectionFilter) {
+      if (selectedSectionFilter !== 'all' && expense.sub_category1 !== selectedSectionFilter) {
+        return false;
+      }
+      // Sub 2 filter
+      if (selectedSub2Filter !== 'all' && expense.sub_category2 !== selectedSub2Filter) {
+        return false;
+      }
+      // Sub 3 filter
+      if (selectedSub3Filter !== 'all' && expense.sub_category3 !== selectedSub3Filter) {
         return false;
       }
       
-      // Uncategorized filter
-      if (showUncategorizedOnly && expense.main_category !== 'Uncategorized') {
+      // Categorization filter
+      if (categorizationFilter === 'categorized' && expense.main_category === 'Uncategorized') {
+        return false;
+      }
+      if (categorizationFilter === 'uncategorized' && expense.main_category !== 'Uncategorized') {
         return false;
       }
 
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
-      const resolvedDept = getDeptName(expense.main_category).toLowerCase();
-      const resolvedSection = getSectionName(expense.sub_category1).toLowerCase();
+      const resolvedDept = (expense.main_category || '-').toLowerCase();
+      const resolvedSection = (expense.sub_category1 || '-').toLowerCase();
       
       return (
         resolvedDept.includes(q) ||
         resolvedSection.includes(q) ||
         (expense.sub_category2 || '').toLowerCase().includes(q) ||
+        (expense.sub_category3 || '').toLowerCase().includes(q) ||
         (expense.vendor || '').toLowerCase().includes(q) ||
         (expense.purchased_by || '').toLowerCase().includes(q)
       );
     });
-  }, [expenses, selectedDeptFilter, selectedSectionFilter, searchQuery, departments, sections]);
+  }, [expenses, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter, selectedSub3Filter, categorizationFilter, searchQuery]);
 
   const handleEdit = (expense: FinanceExpenseType) => {
     setEditingId(expense.id || null);
@@ -173,7 +199,7 @@ export const FinanceExpense = () => {
       </div>
 
       {activeTab === 'view' && (
-        <div className="flex flex-col sm:flex-row gap-3 mb-6 items-center">
+        <div className="flex flex-col sm:flex-row gap-3 mb-6 items-center flex-wrap">
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
             <input
@@ -189,11 +215,11 @@ export const FinanceExpense = () => {
           <select
             value={selectedDeptFilter}
             onChange={(e) => setSelectedDeptFilter(e.target.value)}
-            className="w-full sm:w-48 bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
           >
             <option value="all">All Departments</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>{d.department_name}</option>
+            {dynamicDepartments.map((dept) => (
+              <option key={dept} value={dept}>{dept}</option>
             ))}
           </select>
 
@@ -202,25 +228,51 @@ export const FinanceExpense = () => {
             value={selectedSectionFilter}
             onChange={(e) => setSelectedSectionFilter(e.target.value)}
             disabled={selectedDeptFilter === 'all'}
-            className="w-full sm:w-48 bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
           >
             <option value="all">All Sections</option>
-            {filteredSectionsForFilterDropdown.map((s) => (
-              <option key={s.id} value={s.id}>{s.section_name}</option>
+            {dynamicSections.map((sec) => (
+              <option key={sec} value={sec}>{sec}</option>
             ))}
           </select>
 
-          {/* Requires Review Filter */}
-          <button
-            onClick={() => setShowUncategorizedOnly(!showUncategorizedOnly)}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap border ${
-              showUncategorizedOnly
-                ? 'bg-amber-500/10 text-amber-500 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.1)]'
-                : 'bg-card border-border/50 text-muted hover:text-main hover:bg-black/5 dark:hover:bg-white/5'
-            }`}
+          {/* Sub Category 2 Filter */}
+          <select
+            value={selectedSub2Filter}
+            onChange={(e) => setSelectedSub2Filter(e.target.value)}
+            disabled={selectedSectionFilter === 'all'}
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
           >
-            Requires Review
-          </button>
+            <option value="all">All Sub Categories 2</option>
+            {dynamicSub2.map((sec) => (
+              <option key={sec} value={sec}>{sec}</option>
+            ))}
+          </select>
+
+          {/* Sub Category 3 Filter */}
+          <select
+            value={selectedSub3Filter}
+            onChange={(e) => setSelectedSub3Filter(e.target.value)}
+            disabled={selectedSub2Filter === 'all'}
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+          >
+            <option value="all">All Sub Categories 3</option>
+            {dynamicSub3.map((sec) => (
+              <option key={sec} value={sec}>{sec}</option>
+            ))}
+          </select>
+
+          {/* Categorization Filter */}
+          <select
+            value={categorizationFilter}
+            onChange={(e) => setCategorizationFilter(e.target.value as any)}
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
+          >
+
+            <option value="all">All</option>
+            <option value="categorized">Categorized</option>
+            <option value="uncategorized">Uncategorized</option>
+          </select>
         </div>
       )}
 
@@ -276,8 +328,8 @@ export const FinanceExpense = () => {
                 {filteredExpenses.map(expense => (
                   <FinanceInfoCard
                     key={expense.id}
-                    title={getDeptName(expense.main_category)}
-                    subtitle={`${getSectionName(expense.sub_category1)}${expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}`}
+                    title={expense.main_category || '-'}
+                    subtitle={`${expense.sub_category1 || '-'}${expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}`}
                     badges={[expense.vendor || 'No Vendor']}
                     onEdit={() => handleEdit(expense)}
                     onDelete={() => expense.id && handleDelete(expense.id)}
