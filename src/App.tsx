@@ -119,7 +119,6 @@ function App() {
                       
                       <Route path="po-history" element={<POHistoryPage />} />
                       
-                      <Route path="bank-account" element={<PlaceholderPage title="Bank Account" />} />
                       <Route path="analytics" element={<AnalyticsPage />} />
                     </Route>
 

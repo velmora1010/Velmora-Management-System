@@ -8,9 +8,11 @@ interface BillFormProps {
   bill: FinanceBill | null;
   onClose: () => void;
   onSuccess: () => void;
+  isInline?: boolean;
+  formId?: string;
 }
 
-export const BillForm = ({ bill, onClose, onSuccess }: BillFormProps) => {
+export const BillForm = ({ bill, onClose, onSuccess, isInline, formId = "billForm" }: BillFormProps) => {
   const { addBill, updateBill } = useBills();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,34 +173,15 @@ export const BillForm = ({ bill, onClose, onSuccess }: BillFormProps) => {
     }
   };
 
-  return (
-    <div className="bg-card w-full rounded-2xl shadow-sm border border-border flex flex-col fade-in">
-      
-      {/* Header */}
-      <div className="flex items-center justify-between p-6 border-b border-border shrink-0">
-        <div>
-          <h2 className="text-xl font-bold text-main">
-            {bill ? 'Edit Bill' : 'Add New Bill'}
-          </h2>
-          <p className="text-sm text-muted mt-1">Enter finance bill details and categorization.</p>
+  const formContent = (
+    <>
+      {error && (
+        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-500 rounded-xl text-sm font-medium">
+          {error}
         </div>
-        <button 
-          onClick={onClose}
-          className="p-2 text-muted hover:text-main bg-background rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-        >
-          <X size={20} />
-        </button>
-      </div>
+      )}
 
-      {/* Form Body */}
-      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-        {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-500 rounded-xl text-sm font-medium">
-            {error}
-          </div>
-        )}
-
-        <form id="billForm" onSubmit={handleSubmit} className="space-y-8">
+      <form id={formId} onSubmit={handleSubmit} className="space-y-8">
           
           {/* Section: Categorization */}
           <div>
@@ -398,36 +381,59 @@ export const BillForm = ({ bill, onClose, onSuccess }: BillFormProps) => {
               </div>
             </div>
           </div>
+      </form>
+    </>
+  );
 
-        </form>
+  if (isInline) {
+    return formContent;
+  }
+
+  return (
+    <div className="bg-card w-full rounded-2xl shadow-sm border border-border flex flex-col fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between p-6 border-b border-border shrink-0">
+        <div>
+          <h2 className="text-xl font-bold text-main">
+            {bill ? 'Edit Bill' : 'Add New Bill'}
+          </h2>
+          <p className="text-sm text-muted mt-1">Enter bill details and categorization.</p>
+        </div>
+        <button 
+          onClick={onClose}
+          className="p-2 text-muted hover:text-main bg-background rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+        >
+          <X size={20} />
+        </button>
+      </div>
+
+      {/* Form Body */}
+      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+        {formContent}
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-end gap-3 p-6 border-t border-border shrink-0 bg-black/5 dark:bg-white/5 rounded-b-2xl">
+      <div className="p-6 border-t border-border bg-card shrink-0 flex items-center justify-end gap-3">
         <button
           type="button"
           onClick={onClose}
-          className="px-5 py-2.5 text-sm font-medium text-main bg-background border border-border rounded-xl hover:brightness-95 dark:hover:brightness-110 transition-colors"
+          className="px-6 py-2.5 rounded-xl text-sm font-medium bg-background border border-border text-main hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
         >
           Cancel
         </button>
         <button
-          form="billForm"
           type="submit"
+          form={formId}
           disabled={isSubmitting}
-          className="px-5 py-2.5 text-sm font-medium text-white bg-primary rounded-xl hover:brightness-110 transition-colors disabled:opacity-70 flex items-center gap-2 shadow-lg shadow-primary/20"
+          className="px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110 transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2"
         >
           {isSubmitting ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Saving...
-            </>
+            <><div className="animate-spin rounded-full h-4 w-4 border-2 border-white/20 border-t-white"></div> Saving...</>
           ) : (
             'Save Bill'
           )}
         </button>
       </div>
-
     </div>
   );
 };

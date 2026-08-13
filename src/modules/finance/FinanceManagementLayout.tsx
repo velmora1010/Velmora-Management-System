@@ -9,7 +9,6 @@ export const FinanceManagementLayout = () => {
     { name: 'Expense', path: '/finance/management/expense' },
     { name: 'Purchase Order', path: '/finance/management/purchase-order' },
     { name: 'PO History', path: '/finance/management/po-history' },
-    { name: 'Bank Account', path: '/finance/management/bank-account' },
     { name: 'Analytics', path: '/finance/management/analytics' },
   ];
 

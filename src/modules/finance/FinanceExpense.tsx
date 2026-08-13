@@ -2,100 +2,180 @@ import { useState, useEffect, useMemo } from 'react';
 import { Search, Edit2, Trash2 } from 'lucide-react';
 import { useExpenses, type FinanceExpense as FinanceExpenseType } from '../../hooks/finance/useExpenses';
 import { ExpenseForm } from './ExpenseForm';
+import { ExpenseCardEditor } from './ExpenseCardEditor';
+import { FinanceInfoCard } from '../../components/ui/FinanceInfoCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
-import { departmentService } from '../../services/departmentService';
 import { supabase } from '../../lib/supabase';
-import type { Department, DepartmentSection } from '../../types';
+import { UploadExpense } from './UploadExpense';
+import { ExpenseAnalytics } from './ExpenseAnalytics';
 
 export const FinanceExpense = () => {
   const { expenses, isLoading, archiveExpense, refreshExpenses } = useExpenses();
   const [searchQuery, setSearchQuery] = useState('');
+  const [categorizationFilter, setCategorizationFilter] = useState<'all' | 'categorized' | 'uncategorized'>('all');
+
   
   // Tab and Form state
-  const [activeTab, setActiveTab] = useState<'view' | 'add' | 'analytics'>('view');
+  const [activeTab, setActiveTab] = useState<'view' | 'add' | 'analytics' | 'upload'>('view');
   const [editingExpense, setEditingExpense] = useState<FinanceExpenseType | null>(null);
 
   // Modal state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null);
-
-  // Mappings
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [sections, setSections] = useState<DepartmentSection[]>([]);
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
   const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
+  const [selectedSub2Filter, setSelectedSub2Filter] = useState<string>('all');
+  const [selectedSub3Filter, setSelectedSub3Filter] = useState<string>('all');
 
-  useEffect(() => {
-    const loadMappings = async () => {
-      try {
-        const { data: depts } = await departmentService.getAllDepartments();
-        if (depts) setDepartments(depts);
-        
-        const { data: secs } = await departmentService.getAllSections();
-        if (secs) setSections(secs);
-      } catch (err) {
-        console.error('Failed to load mappings in FinanceExpense:', err);
-      }
-    };
-    loadMappings();
-  }, []);
+  // Dynamic Filter Options
+  const dynamicDepartments = useMemo(() => {
+    const depts = new Set(expenses.map(e => e.main_category).filter(Boolean));
+    return Array.from(depts).sort() as string[];
+  }, [expenses]);
 
-  const getDeptName = (id: string | null) => {
-    if (!id) return '-';
-    const match = departments.find(d => String(d.id) === String(id));
-    return match ? match.department_name : String(id);
-  };
-
-  const getSectionName = (id: string | null) => {
-    if (!id) return '-';
-    const match = sections.find(s => String(s.id) === String(id));
-    return match ? match.section_name : String(id);
-  };
-
-  // Sections filtered by selected department filter
-  const filteredSectionsForFilterDropdown = useMemo(() => {
+  const dynamicSections = useMemo(() => {
     if (selectedDeptFilter === 'all') return [];
-    return sections.filter(s => String(s.department_id) === selectedDeptFilter);
-  }, [sections, selectedDeptFilter]);
+    const secs = new Set(
+      expenses
+        .filter(e => e.main_category === selectedDeptFilter)
+        .map(e => e.sub_category1)
+        .filter(Boolean)
+    );
+    return Array.from(secs).sort() as string[];
+  }, [expenses, selectedDeptFilter]);
 
-  // Reset section filter if department filter changes
+  const dynamicSub2 = useMemo(() => {
+    if (selectedDeptFilter === 'all' || selectedSectionFilter === 'all') return [];
+    const sub2s = new Set(
+      expenses
+        .filter(e => e.main_category === selectedDeptFilter && e.sub_category1 === selectedSectionFilter)
+        .map(e => e.sub_category2)
+        .filter(Boolean)
+    );
+    return Array.from(sub2s).sort() as string[];
+  }, [expenses, selectedDeptFilter, selectedSectionFilter]);
+
+  const dynamicSub3 = useMemo(() => {
+    if (selectedDeptFilter === 'all' || selectedSectionFilter === 'all' || selectedSub2Filter === 'all') return [];
+    const sub3s = new Set(
+      expenses
+        .filter(e => e.main_category === selectedDeptFilter && e.sub_category1 === selectedSectionFilter && e.sub_category2 === selectedSub2Filter)
+        .map(e => e.sub_category3)
+        .filter(Boolean)
+    );
+    return Array.from(sub3s).sort() as string[];
+  }, [expenses, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter]);
+
+  // Reset child filters if parent filter changes
   useEffect(() => {
     setSelectedSectionFilter('all');
+    setSelectedSub2Filter('all');
+    setSelectedSub3Filter('all');
   }, [selectedDeptFilter]);
 
+  useEffect(() => {
+    setSelectedSub2Filter('all');
+    setSelectedSub3Filter('all');
+  }, [selectedSectionFilter]);
+
+  useEffect(() => {
+    setSelectedSub3Filter('all');
+  }, [selectedSub2Filter]);
+
   const filteredExpenses = useMemo(() => {
-    return expenses.filter(expense => {
+    const filtered = expenses.filter(expense => {
       // Dept filter
-      if (selectedDeptFilter !== 'all' && String(expense.main_category) !== selectedDeptFilter) {
+      if (selectedDeptFilter !== 'all' && expense.main_category !== selectedDeptFilter) {
         return false;
       }
       // Section filter
-      if (selectedSectionFilter !== 'all' && String(expense.sub_category1) !== selectedSectionFilter) {
+      if (selectedSectionFilter !== 'all' && expense.sub_category1 !== selectedSectionFilter) {
+        return false;
+      }
+      // Sub 2 filter
+      if (selectedSub2Filter !== 'all' && expense.sub_category2 !== selectedSub2Filter) {
+        return false;
+      }
+      // Sub 3 filter
+      if (selectedSub3Filter !== 'all' && expense.sub_category3 !== selectedSub3Filter) {
+        return false;
+      }
+      
+      // Categorization filter
+      if (categorizationFilter === 'categorized' && expense.main_category === 'Uncategorized') {
+        return false;
+      }
+      if (categorizationFilter === 'uncategorized' && expense.main_category !== 'Uncategorized') {
         return false;
       }
 
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
-      const resolvedDept = getDeptName(expense.main_category).toLowerCase();
-      const resolvedSection = getSectionName(expense.sub_category1).toLowerCase();
+      const resolvedDept = (expense.main_category || '-').toLowerCase();
+      const resolvedSection = (expense.sub_category1 || '-').toLowerCase();
       
       return (
         resolvedDept.includes(q) ||
         resolvedSection.includes(q) ||
         (expense.sub_category2 || '').toLowerCase().includes(q) ||
+        (expense.sub_category3 || '').toLowerCase().includes(q) ||
         (expense.vendor || '').toLowerCase().includes(q) ||
         (expense.purchased_by || '').toLowerCase().includes(q)
       );
     });
-  }, [expenses, selectedDeptFilter, selectedSectionFilter, searchQuery, departments, sections]);
+
+    // Sort by date descending (newest first)
+    return filtered.sort((a, b) => {
+      // The cards currently display expense.created_at
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      
+      const isValidA = !isNaN(dateA) && dateA > 0;
+      const isValidB = !isNaN(dateB) && dateB > 0;
+      
+      if (isValidA && isValidB) return dateB - dateA;
+      if (isValidA && !isValidB) return -1;
+      if (!isValidA && isValidB) return 1;
+      return 0;
+    });
+  }, [expenses, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter, selectedSub3Filter, categorizationFilter, searchQuery]);
+
+  const formatDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const groupedExpenses = useMemo(() => {
+    const groups: Record<string, FinanceExpenseType[]> = {};
+    filteredExpenses.forEach(expense => {
+      const dateKey = formatDate(expense.created_at);
+      const validKey = dateKey === '-' || dateKey === 'Invalid Date' ? 'Date Not Available' : dateKey;
+      if (!groups[validKey]) {
+        groups[validKey] = [];
+      }
+      groups[validKey].push(expense);
+    });
+    
+    // Maintain the sorted order of keys from filteredExpenses
+    const orderedKeys = Array.from(new Set(filteredExpenses.map(expense => {
+       const dateKey = formatDate(expense.created_at);
+       return dateKey === '-' || dateKey === 'Invalid Date' ? 'Date Not Available' : dateKey;
+    })));
+    
+    return orderedKeys.map(key => ({
+      date: key,
+      items: groups[key]
+    }));
+  }, [filteredExpenses]);
 
   const handleEdit = (expense: FinanceExpenseType) => {
-    setEditingExpense(expense);
-    setActiveTab('add');
+    setEditingId(expense.id || null);
   };
 
   const handleAddNew = () => {
-    setEditingExpense(null);
+    setEditingId(null);
     setActiveTab('add');
   };
 
@@ -111,12 +191,6 @@ export const FinanceExpense = () => {
     }
   };
 
-  const formatDate = (dateStr: string | null | undefined) => {
-    if (!dateStr) return '-';
-    const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
-
   return (
     <div className="flex flex-col h-full fade-in text-slate-200">
       {/* Finance Sub Navigation */}
@@ -130,6 +204,16 @@ export const FinanceExpense = () => {
           }`}
         >
           Add Expense
+        </button>
+        <button
+          onClick={() => setActiveTab('upload')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            activeTab === 'upload'
+              ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110'
+              : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+          }`}
+        >
+          Upload Expense
         </button>
         <button
           onClick={() => setActiveTab('view')}
@@ -154,7 +238,7 @@ export const FinanceExpense = () => {
       </div>
 
       {activeTab === 'view' && (
-        <div className="flex flex-col sm:flex-row gap-3 mb-6 items-center">
+        <div className="flex flex-col sm:flex-row gap-3 mb-6 items-center flex-wrap">
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
             <input
@@ -170,11 +254,11 @@ export const FinanceExpense = () => {
           <select
             value={selectedDeptFilter}
             onChange={(e) => setSelectedDeptFilter(e.target.value)}
-            className="w-full sm:w-48 bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
           >
             <option value="all">All Departments</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>{d.department_name}</option>
+            {dynamicDepartments.map((dept) => (
+              <option key={dept} value={dept}>{dept}</option>
             ))}
           </select>
 
@@ -183,12 +267,50 @@ export const FinanceExpense = () => {
             value={selectedSectionFilter}
             onChange={(e) => setSelectedSectionFilter(e.target.value)}
             disabled={selectedDeptFilter === 'all'}
-            className="w-full sm:w-48 bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
           >
             <option value="all">All Sections</option>
-            {filteredSectionsForFilterDropdown.map((s) => (
-              <option key={s.id} value={s.id}>{s.section_name}</option>
+            {dynamicSections.map((sec) => (
+              <option key={sec} value={sec}>{sec}</option>
             ))}
+          </select>
+
+          {/* Sub Category 2 Filter */}
+          <select
+            value={selectedSub2Filter}
+            onChange={(e) => setSelectedSub2Filter(e.target.value)}
+            disabled={selectedSectionFilter === 'all'}
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+          >
+            <option value="all">All Sub Categories 2</option>
+            {dynamicSub2.map((sec) => (
+              <option key={sec} value={sec}>{sec}</option>
+            ))}
+          </select>
+
+          {/* Sub Category 3 Filter */}
+          <select
+            value={selectedSub3Filter}
+            onChange={(e) => setSelectedSub3Filter(e.target.value)}
+            disabled={selectedSub2Filter === 'all'}
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+          >
+            <option value="all">All Sub Categories 3</option>
+            {dynamicSub3.map((sec) => (
+              <option key={sec} value={sec}>{sec}</option>
+            ))}
+          </select>
+
+          {/* Categorization Filter */}
+          <select
+            value={categorizationFilter}
+            onChange={(e) => setCategorizationFilter(e.target.value as any)}
+            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
+          >
+
+            <option value="all">All</option>
+            <option value="categorized">Categorized</option>
+            <option value="uncategorized">Uncategorized</option>
           </select>
         </div>
       )}
@@ -206,16 +328,12 @@ export const FinanceExpense = () => {
           />
         )}
 
+        {activeTab === 'upload' && (
+          <UploadExpense onClose={() => setActiveTab('view')} />
+        )}
+
         {activeTab === 'analytics' && (
-          <div className="flex flex-col items-center justify-center p-12 text-center bg-card rounded-2xl border border-border/50 shadow-sm mt-4 fade-in">
-            <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center text-3xl mb-4">
-              📊
-            </div>
-            <h3 className="text-xl font-semibold text-main mb-2">Analytics Dashboard</h3>
-            <p className="text-muted max-w-md">
-              Expense analytics and reporting features will be available here.
-            </p>
-          </div>
+          <ExpenseAnalytics expenses={expenses} />
         )}
 
         {activeTab === 'view' && (
@@ -237,71 +355,51 @@ export const FinanceExpense = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4">
-                {filteredExpenses.map(expense => (
-                  <div key={expense.id} className="bg-card border border-border/50 rounded-2xl p-5 shadow-sm hover:border-border transition-colors group">
-                    <div className="flex flex-col md:flex-row justify-between gap-4">
-                      
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h3 className="text-lg font-semibold text-main">
-                            {getDeptName(expense.main_category)}
-                          </h3>
-                          <span className={`px-2.5 py-1 text-xs font-medium rounded-md bg-primary/10 text-primary`}>
-                            {expense.vendor || 'No Vendor'}
-                          </span>
-                        </div>
-                        <div className="text-sm text-muted mb-4">
-                          {getSectionName(expense.sub_category1)} 
-                          {expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-y-4 gap-x-6">
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Amount</div>
-                            <div className="text-sm font-semibold text-main">₹{expense.amount ?? '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Date</div>
-                            <div className="text-sm text-main">{formatDate(expense.created_at)}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Payment Mode</div>
-                            <div className="text-sm text-main">{expense.payment_mode || '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">Purchased By</div>
-                            <div className="text-sm text-main">{expense.purchased_by || '-'}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted mb-1 uppercase tracking-wider">GST Status</div>
-                            <div className="text-sm text-main">{expense.gst_status || '-'}</div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-row md:flex-col items-end gap-2 shrink-0">
-                        <button 
-                          onClick={() => handleEdit(expense)}
-                          className="p-2 text-muted hover:text-primary bg-background rounded-lg hover:bg-primary/10 transition-colors"
-                          title="Edit Expense"
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                        <button 
-                          onClick={() => expense.id && handleDelete(expense.id)}
-                          className="p-2 text-muted hover:text-red-500 bg-background rounded-lg hover:bg-red-500/10 transition-colors"
-                          title="Archive Expense"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-
+              <div className="flex flex-col gap-8 pb-8">
+                {groupedExpenses.map(group => (
+                  <div key={group.date} className="flex flex-col gap-5">
+                    <div className="flex items-center gap-4">
+                      <div className="h-px bg-border/50 flex-1"></div>
+                      <h4 className="text-sm font-medium text-muted uppercase tracking-wider">{group.date}</h4>
+                      <div className="h-px bg-border/50 flex-1"></div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6 items-start">
+                      {group.items.map(expense => (
+                        <FinanceInfoCard
+                          key={expense.id}
+                          title={expense.main_category || '-'}
+                          subtitle={`${expense.sub_category1 || '-'}${expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}`}
+                          badges={[expense.vendor || 'No Vendor']}
+                          onEdit={() => handleEdit(expense)}
+                          onDelete={() => expense.id && handleDelete(expense.id)}
+                          editTooltip="Edit Expense"
+                          deleteTooltip="Archive Expense"
+                          isEditing={editingId === expense.id}
+                          formId={`edit-expense-${expense.id}`}
+                          onCancelEdit={() => setEditingId(null)}
+                          renderEditForm={() => (
+                            <ExpenseCardEditor
+                              expense={expense}
+                              formId={`edit-expense-${expense.id}`}
+                              onClose={() => setEditingId(null)}
+                              onSuccess={() => setEditingId(null)}
+                            />
+                          )}
+                          fields={[
+                            { label: "Amount", value: `₹${expense.amount ?? '-'}` },
+                            { label: "Payment Mode", value: expense.payment_mode || '-' },
+                            { label: "Purchased By", value: expense.purchased_by || '-' },
+                            { label: "GST Status", value: expense.gst_status || '-' },
+                          ]}
+                        />
+                      ))}
                     </div>
                   </div>
                 ))}
               </div>
             )}
+
           </>
         )}
       </div>
