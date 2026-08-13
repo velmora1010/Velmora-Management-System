@@ -140,6 +140,35 @@ export const FinanceExpense = () => {
     });
   }, [expenses, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter, selectedSub3Filter, categorizationFilter, searchQuery]);
 
+  const formatDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const groupedExpenses = useMemo(() => {
+    const groups: Record<string, FinanceExpenseType[]> = {};
+    filteredExpenses.forEach(expense => {
+      const dateKey = formatDate(expense.created_at);
+      const validKey = dateKey === '-' || dateKey === 'Invalid Date' ? 'Date Not Available' : dateKey;
+      if (!groups[validKey]) {
+        groups[validKey] = [];
+      }
+      groups[validKey].push(expense);
+    });
+    
+    // Maintain the sorted order of keys from filteredExpenses
+    const orderedKeys = Array.from(new Set(filteredExpenses.map(expense => {
+       const dateKey = formatDate(expense.created_at);
+       return dateKey === '-' || dateKey === 'Invalid Date' ? 'Date Not Available' : dateKey;
+    })));
+    
+    return orderedKeys.map(key => ({
+      date: key,
+      items: groups[key]
+    }));
+  }, [filteredExpenses]);
+
   const handleEdit = (expense: FinanceExpenseType) => {
     setEditingId(expense.id || null);
   };
@@ -159,12 +188,6 @@ export const FinanceExpense = () => {
       await archiveExpense(expenseToDelete);
       setExpenseToDelete(null);
     }
-  };
-
-  const formatDate = (dateStr: string | null | undefined) => {
-    if (!dateStr) return '-';
-    const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
   return (
@@ -339,39 +362,51 @@ export const FinanceExpense = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6 items-start">
-                {filteredExpenses.map(expense => (
-                  <FinanceInfoCard
-                    key={expense.id}
-                    title={expense.main_category || '-'}
-                    subtitle={`${expense.sub_category1 || '-'}${expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}`}
-                    badges={[expense.vendor || 'No Vendor']}
-                    onEdit={() => handleEdit(expense)}
-                    onDelete={() => expense.id && handleDelete(expense.id)}
-                    editTooltip="Edit Expense"
-                    deleteTooltip="Archive Expense"
-                    isEditing={editingId === expense.id}
-                    formId={`edit-expense-${expense.id}`}
-                    onCancelEdit={() => setEditingId(null)}
-                    renderEditForm={() => (
-                      <ExpenseCardEditor
-                        expense={expense}
-                        formId={`edit-expense-${expense.id}`}
-                        onClose={() => setEditingId(null)}
-                        onSuccess={() => setEditingId(null)}
-                      />
-                    )}
-                    fields={[
-                      { label: "Amount", value: `₹${expense.amount ?? '-'}` },
-                      { label: "Date", value: formatDate(expense.created_at) },
-                      { label: "Payment Mode", value: expense.payment_mode || '-' },
-                      { label: "Purchased By", value: expense.purchased_by || '-' },
-                      { label: "GST Status", value: expense.gst_status || '-' },
-                    ]}
-                  />
+              <div className="flex flex-col gap-8 pb-8">
+                {groupedExpenses.map(group => (
+                  <div key={group.date} className="flex flex-col gap-5">
+                    <div className="flex items-center gap-4">
+                      <div className="h-px bg-border/50 flex-1"></div>
+                      <h4 className="text-sm font-medium text-muted uppercase tracking-wider">{group.date}</h4>
+                      <div className="h-px bg-border/50 flex-1"></div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6 items-start">
+                      {group.items.map(expense => (
+                        <FinanceInfoCard
+                          key={expense.id}
+                          title={expense.main_category || '-'}
+                          subtitle={`${expense.sub_category1 || '-'}${expense.sub_category2 ? ` › ${expense.sub_category2}` : ''}`}
+                          badges={[expense.vendor || 'No Vendor']}
+                          onEdit={() => handleEdit(expense)}
+                          onDelete={() => expense.id && handleDelete(expense.id)}
+                          editTooltip="Edit Expense"
+                          deleteTooltip="Archive Expense"
+                          isEditing={editingId === expense.id}
+                          formId={`edit-expense-${expense.id}`}
+                          onCancelEdit={() => setEditingId(null)}
+                          renderEditForm={() => (
+                            <ExpenseCardEditor
+                              expense={expense}
+                              formId={`edit-expense-${expense.id}`}
+                              onClose={() => setEditingId(null)}
+                              onSuccess={() => setEditingId(null)}
+                            />
+                          )}
+                          fields={[
+                            { label: "Amount", value: `₹${expense.amount ?? '-'}` },
+                            { label: "Payment Mode", value: expense.payment_mode || '-' },
+                            { label: "Purchased By", value: expense.purchased_by || '-' },
+                            { label: "GST Status", value: expense.gst_status || '-' },
+                          ]}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
+
           </>
         )}
       </div>
