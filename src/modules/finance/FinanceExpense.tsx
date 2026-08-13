@@ -83,7 +83,7 @@ export const FinanceExpense = () => {
   }, [selectedSub2Filter]);
 
   const filteredExpenses = useMemo(() => {
-    return expenses.filter(expense => {
+    const filtered = expenses.filter(expense => {
       // Dept filter
       if (selectedDeptFilter !== 'all' && expense.main_category !== selectedDeptFilter) {
         return false;
@@ -122,6 +122,21 @@ export const FinanceExpense = () => {
         (expense.vendor || '').toLowerCase().includes(q) ||
         (expense.purchased_by || '').toLowerCase().includes(q)
       );
+    });
+
+    // Sort by date descending (newest first)
+    return filtered.sort((a, b) => {
+      // The cards currently display expense.created_at
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      
+      const isValidA = !isNaN(dateA) && dateA > 0;
+      const isValidB = !isNaN(dateB) && dateB > 0;
+      
+      if (isValidA && isValidB) return dateB - dateA;
+      if (isValidA && !isValidB) return -1;
+      if (!isValidA && isValidB) return 1;
+      return 0;
     });
   }, [expenses, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter, selectedSub3Filter, categorizationFilter, searchQuery]);
 
