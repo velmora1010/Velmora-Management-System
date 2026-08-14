@@ -224,8 +224,26 @@ export const OrderData: React.FC = () => {
       return;
     }
 
-    const loadToast = toast.loading(`Importing shipments from ${file.name}...`);
+    const loadToast = toast.loading(`Parsing ${file.name}...`);
     try {
+      try {
+        await db.open();
+        
+        // Diagnostic logs
+        console.log("DB NAME", db.name);
+        console.log("DB VERSION", db.verno);
+        console.log("AVAILABLE STORES", db.tables.map(t => t.name));
+        
+        // Safe check to verify required store exists after opening db
+        const logisticsStore = db.tables.find(t => t.name === 'logistics_orders');
+        if (!logisticsStore) {
+          throw new Error("Logistics database upgrade failed: logistics_orders store is unavailable.");
+        }
+      } catch (openErr: any) {
+        console.error('Dexie database open/upgrade failed:', openErr);
+        throw new Error(`Database initialization/migration failed: ${openErr.message || String(openErr)}`);
+      }
+
       const parsedData = await new Promise<any[]>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -234,8 +252,8 @@ export const OrderData: React.FC = () => {
             const workbook = XLSX.read(data, { type: 'binary' });
             const sheetName = workbook.SheetNames[0];
             const sheet = workbook.Sheets[sheetName];
-            const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
-            resolve(rawRows);
+            const parsed = XLSX.utils.sheet_to_json(sheet) as any[];
+            resolve(parsed);
           } catch (err) {
             reject(err);
           }
@@ -247,6 +265,8 @@ export const OrderData: React.FC = () => {
       if (parsedData.length === 0) {
         throw new Error('The uploaded file is empty.');
       }
+
+      console.log("IMPORT ROW COUNT", parsedData.length);
 
       const headers = Object.keys(parsedData[0]);
       if (!headers.includes('Order') || !headers.includes('Tracking number')) {
@@ -266,6 +286,8 @@ export const OrderData: React.FC = () => {
           dbOrderMapByOrderId.set(normalizeOrderId(o.orderId), o);
         }
       });
+
+      console.log("REQUESTED TRANSACTION STORES", ["logistics_orders"]);
 
       await db.transaction('rw', db.logistics_orders, async () => {
         for (const row of parsedData) {
@@ -301,11 +323,10 @@ export const OrderData: React.FC = () => {
 
           const existingOrder = dbOrderMapByOrderId.get(orderId);
 
-          // Resolve state priority:
+          // Resolve state priority (isolated from delivery_history inside this transaction scope):
           // 1. Existing Order Data state already saved for same normalized Order ID
-          // 2. Existing historical/order record state if available in delivery_history
-          // 3. Imported shipment record state if present
-          // 4. Otherwise mark internally as Unknown
+          // 2. Imported shipment record state if present
+          // 3. Otherwise mark internally as Unknown
           let resolvedState = 'Unknown';
           let pincode = '';
           
@@ -313,14 +334,8 @@ export const OrderData: React.FC = () => {
             resolvedState = normalizeState(existingOrder.state, rawLastEvent);
             pincode = existingOrder.pincode || '';
           } else {
-            const hist = await db.delivery_history.where('orderNo').equals(orderId).first();
-            if (hist && hist.state) {
-              resolvedState = normalizeState(hist.state, rawLastEvent);
-              pincode = hist.pincode || '';
-            } else {
-              const rowState = row['State'] || row['state'] || row['Customer State'] || row['customer state'];
-              resolvedState = normalizeState(rowState || '', rawLastEvent);
-            }
+            const rowState = row['State'] || row['state'] || row['Customer State'] || row['customer state'];
+            resolvedState = normalizeState(rowState || '', rawLastEvent);
           }
 
           if (existingOrder) {
