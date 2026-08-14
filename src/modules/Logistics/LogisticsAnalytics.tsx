@@ -6,8 +6,19 @@ import { type StateMetrics } from '../../utils/analyticsCalculations';
 import { Search, RefreshCw, Download, FileBarChart, Clock, Truck, BarChart3 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import toast from 'react-hot-toast';
+import { isCourierActive } from '../../config/courierConfig';
 
 const PALETTE = ['#6366f1', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#a855f7'];
+
+const STATUS_COLORS: Record<string, string> = {
+  'In Transit': '#3b82f6',      // Blue
+  'Delivered': '#10b981',       // Emerald/Green
+  'Pending/Error': '#a855f7',   // Purple
+  'RTO': '#ef4444',             // Red
+  'Out for Delivery': '#f97316',// Orange
+  'Info Received': '#06b6d4',   // Cyan
+  'Exception/Sync Failed': '#ec4899' // Pink/Magenta
+};
 
 const SectionHeader: React.FC<{ icon: React.ReactNode; title: string; subtitle: string }> = ({ icon, title, subtitle }) => {
   return (
@@ -28,7 +39,6 @@ const SectionHeader: React.FC<{ icon: React.ReactNode; title: string; subtitle: 
 
 export const LogisticsAnalytics: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [metrics, setMetrics] = useState<Record<string, StateMetrics>>({});
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState('');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -37,8 +47,6 @@ export const LogisticsAnalytics: React.FC = () => {
     setLoading(true);
     try {
       setRefreshTrigger(prev => prev + 1);
-      const summary = await analyticsService.getLogisticsStateSummary();
-      setMetrics(summary);
       setLastUpdated(new Date().toLocaleTimeString());
       toast.success('Logistics analytics refreshed.');
     } catch (err: any) {
@@ -55,7 +63,8 @@ export const LogisticsAnalytics: React.FC = () => {
   // Query visual dashboard/analytics statistics dynamically in a reactive live query
   const stats = useLiveQuery(async () => {
     // 1. Read only logistics_orders where stage = "tracking"
-    const allOrders = await db.logistics_orders.where('stage').equals('tracking').toArray();
+    const allOrdersRaw = await db.logistics_orders.where('stage').equals('tracking').toArray();
+    const allOrders = allOrdersRaw.filter(o => isCourierActive(o.courier));
 
     // 2. Group by unique Order ID before counting (no double counting)
     const uniqueOrdersMap = new Map<string, any>();
@@ -91,6 +100,7 @@ export const LogisticsAnalytics: React.FC = () => {
         statusLower.includes('exception') || 
         statusLower.includes('error') || 
         statusLower.includes('unable to fetch') || 
+        statusLower.includes('sync failed') || 
         statusLower.includes('sync not available') || 
         statusLower.includes('unknown') || 
         (o.trackingError && o.trackingError.trim() !== '');
@@ -124,6 +134,8 @@ export const LogisticsAnalytics: React.FC = () => {
       }
     }
 
+    const stateSummary = await analyticsService.getLogisticsStateSummary();
+
     return {
       inTransit,
       trackingDelivered,
@@ -133,11 +145,14 @@ export const LogisticsAnalytics: React.FC = () => {
       courierAmazon: courierSnapshotMap['Amazon'],
       courierDelhivery: courierSnapshotMap['Delhivery'],
       courierEkart: courierSnapshotMap['Ekart'],
-      courierUnknown: courierSnapshotMap['Other']
+      courierUnknown: courierSnapshotMap['Other'],
+      stateSummary
     };
   }, [refreshTrigger]);
 
-  const statesOrder = ['Tamil Nadu', 'Kerala', 'Karnataka', 'Andhra Pradesh', 'Telangana', 'Others'];
+  const metrics = stats?.stateSummary || {};
+
+  const statesOrder = ['Tamil Nadu', 'Kerala', 'Karnataka', 'Andhra Pradesh', 'Telangana', 'Unknown', 'Others'];
 
   const totals = {
     prepaidTotal: 0,
@@ -272,7 +287,7 @@ export const LogisticsAnalytics: React.FC = () => {
     { name: 'Delhivery', value: stats?.courierDelhivery || 0 },
     { name: 'Ekart', value: stats?.courierEkart || 0 },
     { name: 'Other', value: stats?.courierUnknown || 0 }
-  ].filter(c => c.value > 0);
+  ].filter(c => isCourierActive(c.name) && c.value > 0);
 
   const fixedCouriersList = [
     { name: 'ST Courier', value: stats?.courierSt || 0 },
@@ -280,7 +295,7 @@ export const LogisticsAnalytics: React.FC = () => {
     { name: 'Delhivery', value: stats?.courierDelhivery || 0 },
     { name: 'Ekart', value: stats?.courierEkart || 0 },
     { name: 'Other', value: stats?.courierUnknown || 0 }
-  ];
+  ].filter(c => isCourierActive(c.name));
 
   return (
     <div className="flex flex-col h-full overflow-y-auto max-h-full pr-1 custom-scrollbar pb-6 space-y-5 animate-in fade-in duration-300">
@@ -347,8 +362,8 @@ export const LogisticsAnalytics: React.FC = () => {
                     dataKey="value"
                     stroke="none"
                   >
-                    {trackingSummaryData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={PALETTE[(index + 2) % PALETTE.length]} />
+                    {trackingSummaryData.map((entry) => (
+                      <Cell key={`cell-${entry.name}`} fill={STATUS_COLORS[entry.name] || '#64748b'} />
                     ))}
                   </Pie>
                   <Tooltip contentStyle={{ background: '#0f172a', borderColor: '#334155', borderRadius: '8px', color: '#fff' }} />
@@ -358,25 +373,25 @@ export const LogisticsAnalytics: React.FC = () => {
             <div className="w-1/2 flex flex-col gap-2 justify-center text-xs">
               <div className="bg-slate-950/40 border border-slate-800/80 p-1.5 rounded-xl flex justify-between items-center shadow-inner">
                 <span className="text-slate-400 font-semibold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-500"></span> In Transit
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS['In Transit'] }}></span> In Transit
                 </span>
                 <span className="text-white font-mono font-bold">{stats?.inTransit || 0}</span>
               </div>
               <div className="bg-slate-950/40 border border-slate-800/80 p-1.5 rounded-xl flex justify-between items-center shadow-inner">
                 <span className="text-slate-400 font-semibold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Delivered
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS['Delivered'] }}></span> Delivered
                 </span>
                 <span className="text-white font-mono font-bold">{stats?.trackingDelivered || 0}</span>
               </div>
               <div className="bg-slate-950/40 border border-slate-800/80 p-1.5 rounded-xl flex justify-between items-center shadow-inner">
                 <span className="text-slate-400 font-semibold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-purple-500"></span> Pending/Err
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS['Pending/Error'] }}></span> Pending/Err
                 </span>
                 <span className="text-white font-mono font-bold">{stats?.trackingYet || 0}</span>
               </div>
               <div className="bg-slate-950/40 border border-slate-800/80 p-1.5 rounded-xl flex justify-between items-center shadow-inner">
                 <span className="text-slate-400 font-semibold flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-red-500"></span> RTO
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLORS['RTO'] }}></span> RTO
                 </span>
                 <span className="text-white font-mono font-bold">{stats?.trackingRTO || 0}</span>
               </div>
@@ -492,6 +507,8 @@ export const LogisticsAnalytics: React.FC = () => {
                           ? 'bg-rose-950/10 text-rose-200 border-rose-950/20'
                           : st === 'Telangana'
                           ? 'bg-fuchsia-950/10 text-fuchsia-200 border-fuchsia-950/20'
+                          : st === 'Unknown'
+                          ? 'bg-slate-950/10 text-slate-450 border-slate-950/20'
                           : 'bg-slate-950/5 text-slate-400 border-slate-900/5'
                       }`}
                     >

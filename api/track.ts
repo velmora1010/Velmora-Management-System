@@ -2,11 +2,14 @@ import type { IncomingMessage, ServerResponse } from 'http';
 
 const normalizeStatus = (rawStatus: string): string => {
   const s = rawStatus.toLowerCase().trim();
-  if (!s) return 'In Transit';
+  if (!s) return 'Pending';
 
-  // 1. RTO/Returned
+  // 1. RTO / Returned / Return to Origin / RTO Delivered / Return
   if (
     s.includes('rto') ||
+    s.includes('returned') ||
+    s.includes('return to origin') ||
+    s.includes('rto delivered') ||
     s.includes('return') ||
     s.includes('refused') ||
     s.includes('undelivered') ||
@@ -25,10 +28,9 @@ const normalizeStatus = (rawStatus: string): string => {
     return 'Out for Delivery';
   }
 
-  // 4. In Transit
+  // 4. Processed / Forwarded / In Transit
   if (
     s.includes('transit') ||
-    s.includes('booked') ||
     s.includes('processed') ||
     s.includes('forwarded') ||
     s.includes('shipped') ||
@@ -40,16 +42,16 @@ const normalizeStatus = (rawStatus: string): string => {
     return 'In Transit';
   }
 
-  // 5. Info Received / Pending
+  // 5. Booked / Consignment Booked
   if (
+    s.includes('booked') ||
     s.includes('info received') ||
-    s.includes('manifest') ||
-    s.includes('not found')
+    s.includes('manifest')
   ) {
     return 'Info Received';
   }
 
-  return 'In Transit';
+  return 'Pending';
 };
 
 function parseTimelineDate(dateStr: string): Date | null {

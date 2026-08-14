@@ -5,6 +5,7 @@ import { trackingEngine } from '../../services/tracking/trackingEngine';
 import { Search, RefreshCw, AlertCircle, Clock, Truck, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { LogisticsOrder } from '../../types/logistics';
+import { isCourierActive } from '../../config/courierConfig';
 
 const TABS = [
   'All',
@@ -25,30 +26,54 @@ export const TrackingStatus: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('All');
   const [syncingIds, setSyncingIds] = useState<number[]>([]);
   const [isBulkSyncing, setIsBulkSyncing] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{
+    completed: number;
+    total: number;
+    checking: number;
+    queued: number;
+    success: number;
+    failed: number;
+    phase: 'first-pass' | 'retrying' | 'complete';
+    retryCount?: number;
+  } | null>(null);
   
   // State for showing the detailed sync error log modal
   const [errorOrder, setErrorOrder] = useState<LogisticsOrder | null>(null);
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
 
   // Load orders in tracking stage
-  const trackingOrders = useLiveQuery(
+  const trackingOrdersRaw = useLiveQuery(
     () => db.logistics_orders.where('stage').equals('tracking').reverse().toArray(),
     []
   ) ?? [];
 
+  const trackingOrders = React.useMemo(() => {
+    return trackingOrdersRaw.filter(o => isCourierActive(o.courier));
+  }, [trackingOrdersRaw]);
+
   // Status mapping helper
   const getOrderTabStatus = (ord: LogisticsOrder): string => {
     let statusText = (ord.status || '').trim();
-    if (ord.courier === 'Delhivery' || ord.courier === 'Ekart' || ord.trackingError === 'Sync not available for this courier') {
+    if (ord.trackingError === 'Sync not available for this courier') {
       statusText = 'Sync not available';
     }
-    if (statusText === '') {
-      statusText = 'Pending';
+
+    // Check syncState first
+    if (ord.syncState === 'queued' || ord.syncState === 'checking' || ord.syncState === 'retrying') {
+      if (statusText && statusText !== 'Waiting...' && statusText !== 'Checking...' && statusText !== 'Queued') {
+        // fallthrough to evaluate the actual status text
+      } else {
+        return 'Pending';
+      }
+    }
+
+    if (statusText === '' || statusText === 'Not Tracked') {
+      return 'Pending';
     }
 
     const s = statusText.toLowerCase();
     
-    if (s.includes('out for delivery')) {
+    if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
       return 'Out for Delivery';
     }
     if (s.includes('in transit')) {
@@ -64,6 +89,9 @@ export const TrackingStatus: React.FC = () => {
       s.includes('exception') || 
       s.includes('error') || 
       s.includes('unable to fetch') || 
+      s.includes('sync failed') || 
+      s.includes('rto') ||
+      s.includes('returned') ||
       s.includes('sync not available') || 
       s.includes('unknown')
     ) {
@@ -72,7 +100,7 @@ export const TrackingStatus: React.FC = () => {
     if (s.includes('failed')) {
       return 'Failed Attempt';
     }
-    if (s.includes('info received') || s.includes('shipment created')) {
+    if (s.includes('info received') || s.includes('shipment created') || s.includes('booked')) {
       return 'Info Received';
     }
     if (s.includes('expired')) {
@@ -121,13 +149,16 @@ export const TrackingStatus: React.FC = () => {
   });
 
   const getButtonState = (ord: LogisticsOrder) => {
-    if (syncingIds.includes(ord.id!)) {
+    if (syncingIds.includes(ord.id!) || ord.syncState === 'checking' || ord.syncState === 'retrying') {
       return 'Checking...';
+    }
+    if (ord.syncState === 'queued') {
+      return 'Queued';
     }
     if (ord.courier === 'Delhivery' || ord.courier === 'Ekart' || ord.trackingError === 'Sync not available for this courier') {
       return 'Not Available';
     }
-    if (ord.status === 'Unable to fetch') {
+    if (ord.status === 'Sync Failed') {
       return 'Retry';
     }
     if (ord.syncedAt || ord.lastFailedAt) {
@@ -148,8 +179,11 @@ export const TrackingStatus: React.FC = () => {
 
     try {
       const originalStatus = order.status;
+      const isNew = !originalStatus || originalStatus === 'Not Tracked' || originalStatus === 'Pending';
+      
       await db.logistics_orders.update(order.id, {
-        status: 'Checking...',
+        status: isNew ? 'Checking...' : originalStatus,
+        syncState: 'checking',
         trackingError: undefined
       });
 
@@ -173,7 +207,7 @@ export const TrackingStatus: React.FC = () => {
       if (!isBulk) {
         toast.error('Sync Failed', { id: toastId });
       }
-      return { success: false, status: 'Unable to fetch', error: err.message || String(err) };
+      return { success: false, status: 'Sync Failed', error: err.message || String(err) };
     } finally {
       setSyncingIds(prev => prev.filter(id => id !== order.id));
     }
@@ -181,63 +215,53 @@ export const TrackingStatus: React.FC = () => {
 
   const handleBulkSync = async () => {
     const syncableOrders = filteredOrders.filter(o => o.awbNumber);
-    if (syncableOrders.length === 0) {
-      toast.error('No orders with AWB numbers found in current list.', { id: 'bulk-sync-toast' });
+    
+    // Filter out already Delivered and RTO terminal states
+    const eligibleOrders = syncableOrders.filter(o => {
+      const statusLower = (o.status || '').toLowerCase().trim();
+      const isDelivered = statusLower.includes('delivered');
+      const isRto = statusLower.includes('rto') || statusLower.includes('returned') || statusLower.includes('return to origin');
+      return !isDelivered && !isRto;
+    });
+
+    if (eligibleOrders.length === 0) {
+      toast.error('No eligible active shipments (non-Delivered/non-RTO ST Courier shipments) found to sync.', { id: 'bulk-sync-toast' });
       return;
     }
 
     setIsBulkSyncing(true);
-    toast.loading('Tracking sync started… please wait', { id: 'bulk-sync-toast' });
-    
-    const summary = {
-      Amazon: { success: 0, unsupported: 0 },
-      'ST Courier': { success: 0, unsupported: 0 },
-      Delhivery: { success: 0, unsupported: 0 },
-      Ekart: { success: 0, unsupported: 0 },
-      Failed: 0
-    };
+    const total = eligibleOrders.length;
+    const progressToastId = 'bulk-sync-toast';
+    toast.loading(
+      `ST Courier Bulk Sync\n\nCompleted: 0 / ${total}\nChecking: 0\nQueued: ${total}\nSuccessful: 0\nFailed: 0`,
+      { id: progressToastId }
+    );
 
-    const processItem = async (order: LogisticsOrder) => {
-      const res = await syncRow(order, true);
-      const courierKey = order.courier as 'Amazon' | 'ST Courier' | 'Delhivery' | 'Ekart';
-      const isKnownCourier = ['Amazon', 'ST Courier', 'Delhivery', 'Ekart'].includes(order.courier || '');
-      
-      if (res.notAvailable) {
-        if (isKnownCourier) summary[courierKey].unsupported++;
-      } else if (res.success) {
-        if (isKnownCourier) summary[courierKey].success++;
-      } else {
-        summary.Failed++;
-      }
-    };
+    try {
+      const res = await trackingEngine.syncBulkOptimized(eligibleOrders, (stats) => {
+        setBulkProgress(stats);
 
-    const concurrencyLimit = 2;
-    const executing: Promise<any>[] = [];
-    
-    for (const order of syncableOrders) {
-      const p = Promise.resolve().then(() => processItem(order));
-      executing.push(p);
-      
-      if (concurrencyLimit <= syncableOrders.length) {
-        const e: any = p.then(() => executing.splice(executing.indexOf(e), 1));
-        if (executing.length >= concurrencyLimit) {
-          await Promise.race(executing);
+        if (stats.phase === 'first-pass') {
+          toast.loading(
+            `ST Courier Bulk Sync\n\nCompleted: ${stats.completed} / ${stats.total}\nChecking: ${stats.checking}\nQueued: ${stats.queued}\nSuccessful: ${stats.success}\nFailed: ${stats.failed}`,
+            { id: progressToastId }
+          );
+        } else if (stats.phase === 'retrying') {
+          toast.loading(
+            `ST Courier Bulk Sync (Retrying Failed Shipments...)\n\nCompleted: ${stats.completed} / ${stats.total}\nChecking: ${stats.checking}\nQueued: ${stats.queued}\nSuccessful: ${stats.success}\nFailed: ${stats.failed}`,
+            { id: progressToastId }
+          );
         }
-      }
+      });
+
+      toast.dismiss(progressToastId);
+      toast.success(`Bulk sync complete. Successful: ${res.success}, Failed: ${res.failed}`);
+    } catch (err) {
+      toast.error('Bulk sync failed.', { id: progressToastId });
+    } finally {
+      setIsBulkSyncing(false);
+      setBulkProgress(null);
     }
-    
-    await Promise.all(executing);
-    setIsBulkSyncing(false);
-
-    const summaryMsg = [
-      `Amazon\n${summary.Amazon.success} success`,
-      `ST Courier\n${summary['ST Courier'].success} success`,
-      `Delhivery\n${summary.Delhivery.unsupported} unsupported`,
-      `Ekart\n${summary.Ekart.unsupported} unsupported`,
-      `Failed\n${summary.Failed}`
-    ].join('\n\n');
-
-    toast.success(summaryMsg, { id: 'bulk-sync-toast', duration: 7000 });
   };
 
   const confirmClearAll = async () => {
@@ -267,35 +291,66 @@ export const TrackingStatus: React.FC = () => {
   };
 
   const getStatusDisplay = (ord: LogisticsOrder) => {
-    const isSyncing = syncingIds.includes(ord.id!);
-    if (isSyncing) {
-      const s = ord.status || '';
-      if (s.startsWith('Checking') || s === 'Fetching courier...' || s === 'Parsing status...' || s.startsWith('Retry')) {
-        return s;
-      }
-      return 'Checking...';
-    }
     if (ord.courier === 'Delhivery' || ord.courier === 'Ekart' || ord.trackingError === 'Sync not available for this courier') {
       return 'Sync not available';
     }
-    if (ord.status === 'Unable to fetch') {
-      return 'Unable to fetch';
+    
+    let statusText = (ord.status || '').trim();
+    if (statusText === '' || statusText === 'Not Tracked') {
+      return 'Pending';
     }
-    return ord.status || 'Not Tracked';
+
+    const s = statusText.toLowerCase();
+    
+    if (s.includes('rto') || s.includes('returned') || s === 'rto') {
+      return 'RTO';
+    }
+    if (s.includes('delivered')) {
+      return 'Delivered';
+    }
+    if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
+      return 'Out for Delivery';
+    }
+    if (
+      s.includes('transit') ||
+      s.includes('processed') ||
+      s.includes('forwarded')
+    ) {
+      return 'In Transit';
+    }
+    if (
+      s.includes('booked') ||
+      s.includes('info received') ||
+      s.includes('manifest')
+    ) {
+      return 'Info Received';
+    }
+    if (s.includes('pending')) {
+      return 'Pending';
+    }
+    if (
+      s.includes('exception') || 
+      s.includes('error') || 
+      s.includes('unable to fetch') || 
+      s.includes('unknown')
+    ) {
+      return 'Exception';
+    }
+    if (s.includes('failed') || ord.trackingError) {
+      return 'Sync Failed';
+    }
+    return statusText;
   };
 
   const getStatusBadgeClass = (statusText: string) => {
-    if (statusText === 'Checking...' || statusText.startsWith('Checking') || statusText === 'Fetching courier...' || statusText === 'Parsing status...' || statusText.startsWith('Retry')) {
-      return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
-    }
     if (statusText === 'Sync not available') return 'bg-slate-800 text-slate-500 border-slate-700/50';
-    if (statusText === 'Unable to fetch' || statusText === 'Not Tracked') return 'bg-red-500/10 text-red-400 border-red-500/20';
+    if (statusText === 'Pending') return 'bg-purple-500/10 text-purple-400 border-purple-500/20';
     
     const s = statusText.toLowerCase();
     if (s.includes('delivered')) return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
     if (s.includes('transit') || s.includes('out')) return 'bg-sky-500/10 text-sky-400 border-sky-500/20';
-    if (s.includes('rto') || s.includes('fail') || s.includes('not found')) return 'bg-red-500/10 text-red-400 border-red-500/20';
-    return 'bg-slate-800 text-slate-400 border-slate-700/50';
+    if (s.includes('rto') || s.includes('fail') || s.includes('exception')) return 'bg-red-500/10 text-red-400 border-red-500/20';
+    return 'bg-slate-850 text-slate-400 border-slate-750/80';
   };
 
   return (
@@ -402,11 +457,16 @@ export const TrackingStatus: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-2 text-center">
-                        <div className="flex flex-col items-center gap-1">
+                        <div className="flex flex-col items-center justify-center gap-1">
                           <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${getStatusBadgeClass(getStatusDisplay(ord))}`}>
-                            {isSyncing && <RefreshCw size={10} className="animate-spin" />}
+                            {(isSyncing || ord.syncState === 'checking' || ord.syncState === 'retrying') && <RefreshCw size={10} className="animate-spin" />}
                             {getStatusDisplay(ord)}
                           </span>
+                          {ord.syncState && ord.syncState !== 'idle' && (
+                            <span className="text-[9px] text-slate-500 font-semibold animate-pulse">
+                              {ord.syncState === 'queued' ? 'queued' : ord.syncState === 'checking' ? 'checking...' : 'retrying...'}
+                            </span>
+                          )}
                           
                           {/* Sync Error View Error Trigger */}
                           {ord.trackingError && ord.trackingError !== 'Sync not available for this courier' && (
@@ -560,6 +620,50 @@ export const TrackingStatus: React.FC = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {isBulkSyncing && bulkProgress && (
+        <div className="fixed bottom-6 right-6 bg-slate-900/95 border border-slate-700/80 rounded-2xl shadow-2xl p-5 w-80 text-xs text-slate-300 font-semibold z-50 animate-in slide-in-from-bottom duration-300">
+          <div className="text-white font-bold text-sm border-b border-slate-800/80 pb-2 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <RefreshCw className="text-primary animate-spin" size={14} />
+              {bulkProgress.phase === 'first-pass' ? 'ST Courier Bulk Sync' : 'Retrying Failed Shipments'}
+            </span>
+            <span className="text-[10px] text-primary bg-primary/10 px-2 py-0.5 rounded-full border border-primary/20">
+              {Math.round((bulkProgress.completed / bulkProgress.total) * 100) || 0}%
+            </span>
+          </div>
+          
+          <div className="space-y-2 mt-3.5">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Completed:</span>
+              <span className="text-white font-mono font-bold">{bulkProgress.completed} / {bulkProgress.total}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Checking (Active):</span>
+              <span className="text-blue-400 font-mono font-bold">{bulkProgress.checking}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Queued:</span>
+              <span className="text-slate-500 font-mono font-bold">{bulkProgress.queued}</span>
+            </div>
+            <div className="flex justify-between border-t border-slate-800/60 pt-2">
+              <span className="text-emerald-400">Successful:</span>
+              <span className="text-emerald-400 font-mono font-bold">{bulkProgress.success}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-red-400">Failed:</span>
+              <span className="text-red-400 font-mono font-bold">{bulkProgress.failed}</span>
+            </div>
+          </div>
+          
+          {bulkProgress.phase === 'retrying' && (
+            <div className="mt-3.5 pt-2.5 border-t border-slate-850 text-[10px] text-yellow-400/90 flex items-center gap-1.5">
+              <AlertCircle size={12} />
+              <span>Retrying failed shipments (Attempt {bulkProgress.retryCount || 2})</span>
+            </div>
+          )}
         </div>
       )}
     </div>

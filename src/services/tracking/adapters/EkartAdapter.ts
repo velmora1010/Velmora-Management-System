@@ -1,7 +1,7 @@
 import type { CourierAdapter, TrackingResult } from './CourierAdapter';
 
 export class EkartAdapter implements CourierAdapter {
-  async track(_awb: string): Promise<TrackingResult> {
+  async track(_awb: string, _timeoutMs?: number): Promise<TrackingResult> {
     return {
       status: '',
       success: false,

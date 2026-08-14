@@ -1,7 +1,7 @@
 import type { CourierAdapter, TrackingResult } from './CourierAdapter';
 
 export class AmazonAdapter implements CourierAdapter {
-  async track(awb: string): Promise<TrackingResult> {
+  async track(awb: string, timeoutMs?: number): Promise<TrackingResult> {
     try {
       const response = await fetch('/api/track', {
         method: 'POST',
@@ -11,7 +11,8 @@ export class AmazonAdapter implements CourierAdapter {
         body: JSON.stringify({
           courier: 'Amazon',
           awbNumber: awb
-        })
+        }),
+        signal: AbortSignal.timeout(timeoutMs || 25000)
       });
 
       if (!response.ok) {

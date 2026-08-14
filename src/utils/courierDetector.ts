@@ -1,14 +1,20 @@
+import { isCourierActive } from '../config/courierConfig';
+
 export const detectCourier = (awb: string): string => {
   if (!awb) return 'Unknown';
   const cleanAwb = awb.trim();
+  let detected = 'Unknown';
   if (cleanAwb.startsWith('5')) {
-    return 'ST Courier';
+    detected = 'ST Courier';
   } else if (cleanAwb.startsWith('1')) {
-    return 'Delhivery';
+    detected = 'Delhivery';
   } else if (cleanAwb.startsWith('3')) {
-    return 'Amazon';
+    detected = 'Amazon';
   } else if (cleanAwb.startsWith('IL') || cleanAwb.startsWith('il')) {
-    return 'Ekart';
+    detected = 'Ekart';
   }
-  return 'Unknown';
+
+  if (detected === 'Unknown') return 'Unknown';
+  return isCourierActive(detected) ? detected : 'Unsupported Courier';
 };
+

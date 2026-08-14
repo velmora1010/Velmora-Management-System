@@ -205,8 +205,10 @@ export const analyticsService = {
 
   async getLogisticsStateSummary(): Promise<Record<string, any>> {
     try {
+      const { isCourierActive } = await import('../config/courierConfig');
       const orders = await db.logistics_orders.toArray();
-      return calculateStateSummary(orders);
+      const filtered = orders.filter(o => o.stage !== 'tracking' || isCourierActive(o.courier));
+      return calculateStateSummary(filtered);
     } catch (e) {
       return {};
     }
