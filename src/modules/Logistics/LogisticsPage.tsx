@@ -38,6 +38,37 @@ export const LogisticsPage: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
+  // Run startup migration to clean bad temporary status strings stored in database from old runs
+  useEffect(() => {
+    const migrateTemporaryStatuses = async () => {
+      try {
+        const { db } = await import('../../lib/db');
+        const orders = await db.logistics_orders.toArray();
+        const progressWords = ['checking', 'waiting', 'fetching', 'queued', 'retry', 'parsing'];
+        
+        await db.transaction('rw', db.logistics_orders, async () => {
+          for (const order of orders) {
+            const status = (order.status || '').trim();
+            const statusLower = status.toLowerCase();
+            
+            const isProgressWord = progressWords.some(word => statusLower.includes(word));
+            
+            if (isProgressWord) {
+              await db.logistics_orders.update(order.id!, {
+                status: 'Pending',
+                syncState: 'idle'
+              });
+            }
+          }
+        });
+        console.log('[LOGISTICS MIGRATION] Cleaned up temporary progress status strings.');
+      } catch (err) {
+        console.error('[LOGISTICS MIGRATION] Failed to clean temporary status strings:', err);
+      }
+    };
+    migrateTemporaryStatuses();
+  }, []);
+
   const handleNavigateTab = (tabId: 'import' | 'data' | 'tracking' | 'trash', fileId?: number | null) => {
     if (fileId !== undefined) {
       setSelectedFileId(fileId);

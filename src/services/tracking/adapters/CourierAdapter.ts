@@ -10,5 +10,5 @@ export interface TrackingResult {
 }
 
 export interface CourierAdapter {
-  track(awb: string): Promise<TrackingResult>;
+  track(awb: string, timeoutMs?: number): Promise<TrackingResult>;
 }

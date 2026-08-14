@@ -40,6 +40,12 @@ export interface LogisticsOrder {
   syncedAt?: string;
   trackingError?: string;
   lastFailedAt?: string;
+  // Source tracking file fields
+  sourceStatus?: string;
+  sourceSubStatus?: string;
+  lastEvent?: string;
+  lastMileCourier?: string;
+  syncState?: 'queued' | 'checking' | 'retrying' | 'idle';
 }
 
 export interface TrackingLog {
