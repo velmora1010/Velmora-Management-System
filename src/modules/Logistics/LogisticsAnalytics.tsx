@@ -86,25 +86,27 @@ export const LogisticsAnalytics: React.FC = () => {
       const status = String(o.status || '').trim();
       const statusLower = status.toLowerCase();
 
-      // Category Splitting
-      if (statusLower.includes('in transit')) {
+      // Category Splitting based on actual tracking/status/error state
+      const isException = 
+        statusLower.includes('exception') || 
+        statusLower.includes('error') || 
+        statusLower.includes('unable to fetch') || 
+        statusLower.includes('sync not available') || 
+        statusLower.includes('unknown') || 
+        (o.trackingError && o.trackingError.trim() !== '');
+
+      if (isException) {
+        trackingYet++; // Exception
+      } else if (statusLower.includes('out for delivery')) {
+        inTransit++; // Out for Delivery is counted as In Transit
+      } else if (statusLower.includes('in transit')) {
         inTransit++;
       } else if (statusLower.includes('delivered')) {
         trackingDelivered++;
       } else if (statusLower.includes('rto') || statusLower.includes('returned') || statusLower.includes('return to origin')) {
         trackingRTO++;
-      } else if (
-        status === '' || 
-        statusLower.includes('unable to fetch') || 
-        statusLower.includes('sync not available') || 
-        statusLower.includes('failed') || 
-        statusLower.includes('pending') || 
-        statusLower.includes('error') || 
-        statusLower.includes('unknown')
-      ) {
-        trackingYet++;
       } else {
-        trackingYet++;
+        trackingYet++; // Pending / blank
       }
 
       // Courier Splits

@@ -70,6 +70,33 @@ export function formatDate(date: Date): string {
 export function extractDateOnly(value: any): string {
   if (value === undefined || value === null || value === '') return "-";
   
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return "-";
+    return formatDate(value);
+  }
+
+  // Handle number or numeric string representing Excel serial date
+  let numVal = NaN;
+  if (typeof value === 'number') {
+    numVal = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      numVal = Number(trimmed);
+    }
+  }
+
+  if (!isNaN(numVal) && numVal >= 35000 && numVal <= 60000) {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const jsDate = new Date(excelEpoch.getTime() + numVal * 24 * 60 * 60 * 1000);
+    const localDate = new Date(
+      jsDate.getUTCFullYear(),
+      jsDate.getUTCMonth(),
+      jsDate.getUTCDate()
+    );
+    return formatDate(localDate);
+  }
+
   const text = String(value).trim();
   if (!text || text === '-' || text === 'None') return "-";
 
@@ -469,33 +496,6 @@ export function mapAllRows(headers: string[], rows: any[][]): { cols: ColumnMapp
       mergedRow.push(getFirstNonEmptyVal(groupRowsOnly, i));
     }
 
-    // Step 4: Validate #2701
-    if (orderKey === '2701') {
-      let hasTargetRawDate = false;
-      for (const item of groupItems) {
-        const rawDeliv = cols.deliveredDateIdx !== -1 ? item.row[cols.deliveredDateIdx] : undefined;
-        const cleanRaw = rawDeliv ? String(rawDeliv).trim() : '';
-        if (cleanRaw === "02-06-2026 22:16:31" || cleanRaw === "2-6-26 22:16:31" || cleanRaw === "2-6-26") {
-          hasTargetRawDate = true;
-        }
-      }
-      if (hasTargetRawDate && finalDeliveryDate !== "02-06-2026") {
-        console.error("2701 delivery date mapping failed");
-      }
-    }
-
-    // Debug logging for Order ID 2701
-    if (orderKey === '2701') {
-      console.log("=== DEBUG LOG FOR ORDER ID 2701 (mapAllRows) ===");
-      console.table(groupItems.map(item => ({
-        "Order Number": item.orderId,
-        "Order Date": item.row[cols.orderDateIdx],
-        "Order Delivered Date": item.row[cols.deliveredDateIdx],
-        "mapped deliveryDateDisplay": item.deliveryDateDisplay
-      })));
-      console.log("final merged row for 2701:", mergedRow);
-      console.log("==================================================");
-    }
 
     const mr = mapRow(mergedRow, cols);
     if (mr) {
@@ -610,33 +610,6 @@ export async function importHistoricalData(
       mergedRow.push(getFirstNonEmptyVal(groupRowsOnly, i));
     }
 
-    // Step 4: Validate #2701
-    if (orderKey === '2701') {
-      let hasTargetRawDate = false;
-      for (const item of groupItems) {
-        const rawDeliv = cols.deliveredDateIdx !== -1 ? item.row[cols.deliveredDateIdx] : undefined;
-        const cleanRaw = rawDeliv ? String(rawDeliv).trim() : '';
-        if (cleanRaw === "02-06-2026 22:16:31" || cleanRaw === "2-6-26 22:16:31" || cleanRaw === "2-6-26") {
-          hasTargetRawDate = true;
-        }
-      }
-      if (hasTargetRawDate && finalDeliveryDate !== "02-06-2026") {
-        console.error("2701 delivery date mapping failed");
-      }
-    }
-
-    // Debug logging for Order ID 2701
-    if (orderKey === '2701') {
-      console.log("=== DEBUG LOG FOR ORDER ID 2701 (importHistoricalData) ===");
-      console.table(groupItems.map(item => ({
-        "Order Number": item.orderId,
-        "Order Date": item.row[cols.orderDateIdx],
-        "Order Delivered Date": item.row[cols.deliveredDateIdx],
-        "mapped deliveryDateDisplay": item.deliveryDateDisplay
-      })));
-      console.log("final merged row for 2701:", mergedRow);
-      console.log("========================================================");
-    }
 
     selectedRows.push(mergedRow);
     groupFinalDates.push({

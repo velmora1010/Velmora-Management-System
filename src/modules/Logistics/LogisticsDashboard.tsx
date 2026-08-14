@@ -32,8 +32,9 @@ export const LogisticsDashboard: React.FC<LogisticsDashboardProps> = ({ onNaviga
   const handleDeleteImport = async (id: number, fileName: string) => {
     if (confirm(`Are you sure you want to permanently delete import "${fileName}"?`)) {
       try {
+        await db.delivery_history.where('sourceFileName').equals(fileName).delete();
         await db.logistics_imports.delete(id);
-        toast.success('Spreadsheet import deleted.');
+        toast.success('Spreadsheet import and history deleted.');
       } catch (err: any) {
         toast.error(`Delete failed: ${err.message}`);
       }

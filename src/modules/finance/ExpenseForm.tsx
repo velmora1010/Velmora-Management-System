@@ -62,8 +62,8 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
       for (const [key, val] of Object.entries(filters)) {
         if (val) query = query.eq(key, val);
       }
-      const { data, err } = await query;
-      if (err) throw err;
+      const { data, error } = await query;
+      if (error) throw error;
       if (!data) return [];
       
       const values = data.map((row: any) => row[targetCol]).filter(Boolean);

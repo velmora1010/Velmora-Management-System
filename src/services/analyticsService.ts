@@ -1,5 +1,7 @@
 import { supabase } from '../lib/supabase';
 import type { GlobalAnalyticsFilters, KpiMetrics, TrendDataPoint, CategoryBreakdown } from '../types/analytics';
+import { db } from '../lib/db';
+import { calculateStateSummary } from '../utils/analyticsCalculations';
 
 let cachedKpis: KpiMetrics | null = null;
 let lastCacheKey = '';
@@ -203,20 +205,8 @@ export const analyticsService = {
 
   async getLogisticsStateSummary(): Promise<Record<string, any>> {
     try {
-      const { data } = await supabase.from('delivery_history').select('*');
-      const stateMap: Record<string, any> = {};
-
-      (data || []).forEach(row => {
-        const st = row.state || 'Unknown';
-        if (!stateMap[st]) {
-          stateMap[st] = { state: st, totalOrders: 0, delivered: 0, pending: 0, avgDeliveryDays: 0 };
-        }
-        stateMap[st].totalOrders += 1;
-        if (row.deliveredDate) stateMap[st].delivered += 1;
-        else stateMap[st].pending += 1;
-      });
-
-      return stateMap;
+      const orders = await db.logistics_orders.toArray();
+      return calculateStateSummary(orders);
     } catch (e) {
       return {};
     }

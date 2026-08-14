@@ -60,7 +60,7 @@ export const useFinanceCategories = () => {
 
   // ID-based cascade updates
   const cascadeUpdates = async (oldRow: FinanceCategoryRow, newCat: Partial<FinanceCategoryRow>) => {
-    const promises: Promise<any>[] = [];
+    const promises: any[] = [];
 
     categories.forEach(row => {
       let needsUpdate = false;

@@ -6,32 +6,24 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: 'mock-api',
+      name: 'forward-api',
       configureServer(server) {
-        server.middlewares.use((req, res, next) => {
-          if (req.url === '/api/track' && req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => {
-              body += chunk;
-            });
-            req.on('end', () => {
-              try {
-                JSON.parse(body);
-                // Return a mock successful tracking status for local testing
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({
-                  success: true,
-                  status: 'In Transit',
-                  location: 'Bengaluru Hub',
-                  lastUpdated: new Date().toLocaleString(),
-                  deliveredDate: '',
-                  rawResponse: 'Mock response from local Vite dev server'
-                }));
-              } catch (e) {
-                res.writeHead(400);
-                res.end('Bad Request');
-              }
-            });
+        server.middlewares.use(async (req, res, next) => {
+          if (req.url && req.url.startsWith('/api/track')) {
+            try {
+              const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+              const query: Record<string, string> = {};
+              urlObj.searchParams.forEach((val, key) => {
+                query[key] = val;
+              });
+
+              const { default: handler } = await import('./api/track');
+              const extendedReq = Object.assign(req, { query });
+              await handler(extendedReq, res);
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: false, error: err.message }));
+            }
           } else {
             next();
           }

@@ -1,14 +1,116 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 
 const normalizeStatus = (rawStatus: string): string => {
-  const s = rawStatus.toLowerCase();
-  if (s.includes('delivered')) return 'Delivered';
-  if (s.includes('out for delivery')) return 'Out for Delivery';
-  if (s.includes('rto') || s.includes('return') || s.includes('refused') || s.includes('undelivered') || s.includes('door locked')) return 'RTO';
-  if (s.includes('transit') || s.includes('booked') || s.includes('processed') || s.includes('forwarded') || s.includes('shipped')) return 'In Transit';
-  if (s.includes('not found')) return 'Tracking Not Found';
+  const s = rawStatus.toLowerCase().trim();
+  if (!s) return 'In Transit';
+
+  // 1. RTO/Returned
+  if (
+    s.includes('rto') ||
+    s.includes('return') ||
+    s.includes('refused') ||
+    s.includes('undelivered') ||
+    s.includes('door locked')
+  ) {
+    return 'RTO';
+  }
+
+  // 2. Delivered
+  if (s.includes('delivered')) {
+    return 'Delivered';
+  }
+
+  // 3. Out for Delivery
+  if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
+    return 'Out for Delivery';
+  }
+
+  // 4. In Transit
+  if (
+    s.includes('transit') ||
+    s.includes('booked') ||
+    s.includes('processed') ||
+    s.includes('forwarded') ||
+    s.includes('shipped') ||
+    s.includes('dispatched') ||
+    s.includes('hub') ||
+    s.includes('service center') ||
+    s.includes('received')
+  ) {
+    return 'In Transit';
+  }
+
+  // 5. Info Received / Pending
+  if (
+    s.includes('info received') ||
+    s.includes('manifest') ||
+    s.includes('not found')
+  ) {
+    return 'Info Received';
+  }
+
   return 'In Transit';
 };
+
+function parseTimelineDate(dateStr: string): Date | null {
+  try {
+    const clean = dateStr.trim();
+    if (clean.includes('-') || clean.includes('/')) {
+      const parts = clean.split(/\s+/);
+      const datePart = parts[0].replace(/\//g, '-');
+      const timePart = parts[1] || '';
+      const ampmPart = parts[2] || '';
+      
+      const dateSplit = datePart.split('-');
+      if (dateSplit.length === 3) {
+        const day = parseInt(dateSplit[0], 10);
+        const month = parseInt(dateSplit[1], 10);
+        const year = parseInt(dateSplit[2], 10);
+        
+        let hours = 0;
+        let minutes = 0;
+        if (timePart) {
+          const timeSplit = timePart.split(':');
+          hours = parseInt(timeSplit[0], 10);
+          minutes = parseInt(timeSplit[1], 10);
+          if (ampmPart.toUpperCase() === 'PM' && hours < 12) hours += 12;
+          if (ampmPart.toUpperCase() === 'AM' && hours === 12) hours = 0;
+        }
+        return new Date(year, month - 1, day, hours, minutes);
+      }
+    } else {
+      const parsed = Date.parse(clean);
+      if (!isNaN(parsed)) return new Date(parsed);
+      
+      const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+      const parts = clean.split(/\s+/);
+      if (parts.length >= 3) {
+        const monthName = parts[0].toLowerCase().substring(0, 3);
+        const monthIdx = months.indexOf(monthName);
+        const day = parseInt(parts[1].replace(/,/g, ''), 10);
+        const year = parseInt(parts[2], 10);
+        
+        const timePart = parts[3] || '';
+        const ampmPart = parts[4] || '';
+        
+        let hours = 0;
+        let minutes = 0;
+        if (timePart) {
+          const timeSplit = timePart.split(':');
+          hours = parseInt(timeSplit[0], 10);
+          minutes = parseInt(timeSplit[1], 10);
+          if (ampmPart.toUpperCase() === 'PM' && hours < 12) hours += 12;
+          if (ampmPart.toUpperCase() === 'AM' && hours === 12) hours = 0;
+        }
+        
+        if (monthIdx !== -1 && !isNaN(day) && !isNaN(year)) {
+          return new Date(year, monthIdx, day, hours, minutes);
+        }
+      }
+    }
+  } catch (e) {}
+  return null;
+}
 
 const getBody = (req: IncomingMessage): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -77,51 +179,121 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
 
   try {
     if (courier === 'ST Courier') {
-      const fetchRes = await fetch(`https://stcourier.com/track/shipment?awb=${encodeURIComponent(awbNumber)}`, {
+      // Step 1: POST to doCheck to initiate tracking state and session
+      const postRes = await fetch('https://stcourier.com/track/doCheck', {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `awb_no=${encodeURIComponent(awbNumber)}`,
+        signal: AbortSignal.timeout(20000)
+      });
+
+      if (!postRes.ok) {
+        throw new Error(`ST Courier doCheck responded with status: ${postRes.status}`);
+      }
+
+      // Collect the Set-Cookie headers
+      let cookieHeader = '';
+      if (typeof postRes.headers.getSetCookie === 'function') {
+        const setCookies = postRes.headers.getSetCookie();
+        if (setCookies && setCookies.length > 0) {
+          cookieHeader = setCookies.join('; ');
+        }
+      }
+      if (!cookieHeader) {
+        cookieHeader = postRes.headers.get('set-cookie') || '';
+      }
+
+      // Step 2: GET to shipment using the cookie
+      const fetchRes = await fetch(`https://stcourier.com/track/shipment`, {
+        method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Cookie': cookieHeader
         },
-        signal: AbortSignal.timeout(45000)
+        signal: AbortSignal.timeout(20000)
       });
 
       if (!fetchRes.ok) {
-        throw new Error(`ST Courier tracking site responded with status: ${fetchRes.status}`);
+        throw new Error(`ST Courier shipment page responded with status: ${fetchRes.status}`);
       }
 
       const htmlContent = await fetchRes.text();
       
       let parsedStatus = '';
-      const htmlUpper = htmlContent.toUpperCase();
-      
-      if (htmlUpper.includes('DELIVERED')) {
-        parsedStatus = 'Delivered';
-      } else if (htmlUpper.includes('OUT FOR DELIVERY') || htmlUpper.includes('OUT_FOR_DELIVERY')) {
-        parsedStatus = 'Out for Delivery';
-      } else if (htmlUpper.includes('RTO') || htmlUpper.includes('RETURN TO ORIGIN') || htmlUpper.includes('RETURNED')) {
-        parsedStatus = 'RTO';
-      } else if (htmlUpper.includes('IN TRANSIT') || htmlUpper.includes('TRANSIT') || htmlUpper.includes('SHIPPED') || htmlUpper.includes('FORWARDED') || htmlUpper.includes('BOOKED')) {
-        parsedStatus = 'In Transit';
-      } else {
-        const rxList = [
-          /(?:Current Status|Delivery Status|Status)[^>]*>([^<]+)/i,
-          /status[^>]*>([^<]+)/i,
-          /<td>([^<]*(?:delivered|transit|shipped|booked|returned|delivery|rto)[^<]*)<\/td>/i
-        ];
-        for (const rx of rxList) {
-          const match = htmlContent.match(rx);
-          if (match && match[1]) {
-            parsedStatus = match[1].trim();
-            break;
-          }
-        }
+      const currentStatusMatch = htmlContent.match(/Current\s+Status[^>]*>\s*(?:<[^>]*>\s*)*([^<]+)/i);
+      if (currentStatusMatch && currentStatusMatch[1]) {
+        parsedStatus = currentStatusMatch[1].trim();
       }
 
-      if (parsedStatus) {
+      let deliveryDate = '';
+      const deliveryDateMatch = htmlContent.match(/Delivery\s+Date\/Time[^>]*>\s*(?:<[^>]*>\s*)*([^<]+)/i);
+      if (deliveryDateMatch && deliveryDateMatch[1]) {
+        deliveryDate = deliveryDateMatch[1].trim();
+      }
+
+      // Timeline latest event check as verification/fallback
+      let latestTimelineStatus = '';
+      try {
+        const eventRegex = /((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s*<br\s*\/?>\s*\d{1,2}:\d{2}\s+(?:AM|PM))/gi;
+        const eventMatches = [];
+        let match;
+        while ((match = eventRegex.exec(htmlContent)) !== null) {
+          eventMatches.push({
+            index: match.index,
+            length: match[1].length,
+            dateStr: match[1].replace(/<br\s*\/?>/i, ' ').replace(/\s+/g, ' ').trim()
+          });
+        }
+
+        const timelineEvents: { date: Date; status: string }[] = [];
+        for (let i = 0; i < eventMatches.length; i++) {
+          const curr = eventMatches[i];
+          const nextIndex = i + 1 < eventMatches.length ? eventMatches[i + 1].index : htmlContent.length;
+          const textSegment = htmlContent.substring(curr.index + curr.length, Math.min(curr.index + 1500, nextIndex));
+          
+          // Clean up the HTML from the segment to extract the event description
+          const cleanText = textSegment.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+          
+          const eventDate = parseTimelineDate(curr.dateStr);
+          if (eventDate) {
+            timelineEvents.push({
+              date: eventDate,
+              status: cleanText
+            });
+          }
+        }
+
+        if (timelineEvents.length > 0) {
+          // Sort descending chronologically
+          timelineEvents.sort((a, b) => b.date.getTime() - a.date.getTime());
+          latestTimelineStatus = timelineEvents[0].status;
+        }
+      } catch (e) {
+        console.error('[ST TRACKING] Timeline parsing error:', e);
+      }
+
+      // Determine the final status to use, preferring parsedStatus then falling back to latestTimelineStatus
+      const finalRawStatus = parsedStatus || latestTimelineStatus || '';
+      const normalized = normalizeStatus(finalRawStatus);
+
+      // Development diagnostics
+      console.log(`[ST TRACKING] AWB: ${awbNumber}`);
+      console.log(`[ST TRACKING] Raw Current Status: ${parsedStatus || 'N/A'}`);
+      console.log(`[ST TRACKING] Latest Event: ${latestTimelineStatus || 'N/A'}`);
+      console.log(`[ST TRACKING] Normalized Status: ${normalized}`);
+      console.log(`[ST TRACKING] Delivery Date: ${deliveryDate || 'N/A'}`);
+      console.log(`[ST TRACKING] API Success: true`);
+
+      if (normalized) {
         res.statusCode = 200;
         res.end(JSON.stringify({
           success: true,
-          status: normalizeStatus(parsedStatus),
+          status: normalized,
+          deliveryDate: deliveryDate || undefined,
           lastSyncedAt: nowStr
         }));
       } else {

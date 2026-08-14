@@ -20,8 +20,17 @@ export const trackingEngine = {
       return { success: false, status: 'Unable to fetch' };
     }
 
+    const prevStatusLog = order.status || 'N/A';
     const prevStatus = originalStatus || order.status || '';
-    const isProgress = (s: string) => s.startsWith('Checking') || s === 'Fetching courier...' || s === 'Parsing status...' || s.startsWith('Retry') || s === 'Unable to fetch';
+    const isProgress = (s: string) => 
+      s.startsWith('Checking') || 
+      s === 'Fetching courier...' || 
+      s === 'Parsing status...' || 
+      s.startsWith('Retry') || 
+      s === 'Unable to fetch' || 
+      s === 'Tracking API not connected' ||
+      s === 'Sync not available' ||
+      s === '';
     const originalRealStatus = prevStatus && !isProgress(prevStatus) ? prevStatus : '';
 
     let attempt = 0;
@@ -108,6 +117,10 @@ export const trackingEngine = {
         trackingError: undefined,
         lastFailedAt: undefined
       });
+      if (order.courier === 'ST Courier') {
+        console.log(`[ST TRACKING] Previous DB Status: ${prevStatusLog}`);
+        console.log(`[ST TRACKING] New DB Status: ${finalStatus}`);
+      }
       return { success: true, status: finalStatus };
     } else {
       const finalError = (result && result.error) || 'Failed to fetch status from tracking API';
@@ -118,6 +131,10 @@ export const trackingEngine = {
         trackingError: finalError,
         lastFailedAt: new Date().toLocaleString()
       });
+      if (order.courier === 'ST Courier') {
+        console.log(`[ST TRACKING] Previous DB Status: ${prevStatusLog}`);
+        console.log(`[ST TRACKING] New DB Status: ${finalStatus}`);
+      }
       return { success: false, status: finalStatus };
     }
   },
