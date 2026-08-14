@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { UploadCredit } from './UploadCredit';
 
 export const FinanceCredit = () => {
   // Tab state
@@ -43,15 +44,7 @@ export const FinanceCredit = () => {
       {/* Main Content Area Placeholder */}
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
         {activeTab === 'upload' && (
-          <div className="flex flex-col items-center justify-center p-12 text-center bg-card rounded-2xl border border-border/50 shadow-sm mt-4 fade-in">
-            <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center text-3xl mb-4">
-              📤
-            </div>
-            <h3 className="text-xl font-semibold text-main mb-2">Upload Credit</h3>
-            <p className="text-muted max-w-md">
-              Credit PDF parsing and statement extraction features will be available here.
-            </p>
-          </div>
+          <UploadCredit onClose={() => setActiveTab('view')} />
         )}
 
         {activeTab === 'view' && (
