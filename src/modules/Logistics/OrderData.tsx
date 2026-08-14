@@ -224,8 +224,15 @@ export const OrderData: React.FC = () => {
       return;
     }
 
-    const loadToast = toast.loading(`Importing shipments from ${file.name}...`);
+    const loadToast = toast.loading(`Parsing ${file.name}...`);
     try {
+      try {
+        await db.open();
+      } catch (openErr: any) {
+        console.error('Dexie database open/upgrade failed:', openErr);
+        throw new Error(`Database initialization/migration failed: ${openErr.message || String(openErr)}`);
+      }
+
       const parsedData = await new Promise<any[]>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -234,8 +241,8 @@ export const OrderData: React.FC = () => {
             const workbook = XLSX.read(data, { type: 'binary' });
             const sheetName = workbook.SheetNames[0];
             const sheet = workbook.Sheets[sheetName];
-            const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
-            resolve(rawRows);
+            const parsed = XLSX.utils.sheet_to_json(sheet) as any[];
+            resolve(parsed);
           } catch (err) {
             reject(err);
           }
@@ -267,7 +274,7 @@ export const OrderData: React.FC = () => {
         }
       });
 
-      await db.transaction('rw', db.logistics_orders, async () => {
+      await db.transaction('rw', [db.logistics_orders, db.delivery_history], async () => {
         for (const row of parsedData) {
           const rawId = row['Order'];
           const rawAwb = row['Tracking number'];

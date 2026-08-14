@@ -102,6 +102,25 @@ export class AppDB extends Dexie {
     this.version(13).stores({
       delivery_history: '++id, orderNo, pincode, state, courier, orderDate, deliveredDate, deliveryDays, sourceFileName, importedAt'
     });
+    this.version(14).stores({
+      shipments: 'awb, orderId, status, state, department, lastSyncedAt',
+      extractions: 'id, imageName, awb, status, uploadedAt',
+      raw_materials: '++id, name, category, created_at',
+      inventory_in: '++id, material_id, material_name, vendor_name, date_received, created_at',
+      batches: '++id, batch_id, serial_number, inventory_in_id, material_id, status, created_at',
+      inventory_out: '++id, batch_id, product_id, date, created_at',
+      production_batches: '++id, production_batch_id, product_name, status, created_at',
+      production_micro_batches: '++id, production_batch_id, status',
+      production_ingredients: '++id, production_batch_id, material_name, status',
+      raw_material_issues: '++id, production_batch_id, raw_material_batch_id',
+      finished_goods_inventory: '++id, production_batch_id, micro_batch_id, product_name, status',
+      customer_tickets: '++id, ticketId, orderId, awbNumber, status, priority, issueType, createdAt',
+      logistics_imports: '++id, fileName, uploadedAt',
+      logistics_orders: '++id, orderId, awbNumber, stage, orderType, phoneNumber',
+      tracking_logs: '++id, awb, courier, startedAt, success',
+      historical_delivery_data: '++id, pincode, state, courier, orderDate, deliveredDate, deliveryDays',
+      delivery_history: '++id, orderNo, pincode, state, courier, orderDate, deliveredDate, deliveryDays, sourceFileName, importedAt'
+    });
   }
 }
 
