@@ -7,6 +7,7 @@ export const FinanceManagementLayout = () => {
   const primaryNav = [
     { name: 'Bills', path: '/finance/management/bills' },
     { name: 'Expense', path: '/finance/management/expense' },
+    { name: 'Credit', path: '/finance/management/credit' },
     { name: 'Purchase Order', path: '/finance/management/purchase-order' },
     { name: 'PO History', path: '/finance/management/po-history' },
     { name: 'Analytics', path: '/finance/management/analytics' },
