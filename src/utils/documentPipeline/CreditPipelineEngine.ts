@@ -1,6 +1,7 @@
 import { DocumentSource, DocumentType, FileType, NormalizedTransaction, PdfTextItem } from './types';
 import { DocumentClassifier } from './DocumentClassifier';
 import { IciciCreditPdfParser } from './parsers/IciciCreditPdfParser';
+import { CreditRuleEngine } from '../rules/CreditRuleEngine';
 import * as xlsx from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -36,8 +37,13 @@ export class CreditPipelineEngine {
       }
 
       console.log(`[CreditPipelineEngine] Executing parser...`);
-      const transactions = await parser.parse(source.rawContent, file);
+      let transactions = await parser.parse(source.rawContent, file);
       console.log(`[CreditPipelineEngine] Parser completed. Returned ${transactions.length} normalized transactions.`);
+
+      console.log(`[CreditPipelineEngine] Executing Credit Rules...`);
+      const activeRules = await CreditRuleEngine.fetchActiveRules();
+      transactions = transactions.map((t: NormalizedTransaction) => CreditRuleEngine.applyCreditRules(t, activeRules));
+      console.log(`[CreditPipelineEngine] Rules applied.`);
 
       return { transactions, documentType };
     } catch (error: any) {

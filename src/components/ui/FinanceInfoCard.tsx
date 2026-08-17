@@ -60,6 +60,7 @@ export const FinanceInfoCard = ({
             <>
               {onEdit && (
                 <button
+                  type="button"
                   onClick={onEdit}
                   className="p-2 text-muted hover:text-primary bg-background border border-transparent hover:border-primary/20 rounded-lg hover:bg-primary/10 transition-colors"
                   title={editTooltip}
@@ -69,6 +70,7 @@ export const FinanceInfoCard = ({
               )}
               {onDelete && (
                 <button
+                  type="button"
                   onClick={onDelete}
                   className="p-2 text-muted hover:text-red-500 bg-background border border-transparent hover:border-red-500/20 rounded-lg hover:bg-red-500/10 transition-colors"
                   title={deleteTooltip}
@@ -80,8 +82,14 @@ export const FinanceInfoCard = ({
           ) : (
             <>
               <button
-                type="submit"
-                form={formId}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (formId) {
+                    const form = document.getElementById(formId) as HTMLFormElement | null;
+                    if (form) form.requestSubmit();
+                  }
+                }}
                 className="px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110 transition-colors"
               >
                 Save

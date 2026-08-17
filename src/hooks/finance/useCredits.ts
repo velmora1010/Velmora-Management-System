@@ -197,6 +197,65 @@ export const useCredits = () => {
     return updateCredit(id, { status: 'archived' });
   };
 
+  const reprocessRules = async () => {
+    try {
+      const { CreditRuleEngine } = await import('../../utils/rules/CreditRuleEngine');
+      const rules = await CreditRuleEngine.fetchActiveRules();
+      
+      const uncategorized = credits.filter(c => !c.main_category || c.main_category === 'Uncategorized');
+      if (uncategorized.length === 0) return { success: true, processed: 0, matched: 0, remaining: 0 };
+
+      let matchedCount = 0;
+      const promises: Promise<any>[] = [];
+
+      for (const credit of uncategorized) {
+        // Convert to expected shape for engine
+        const tempTx: any = {
+          notes: credit.notes,
+          main_category: credit.main_category,
+          sub_category1: credit.sub_category1,
+          sub_category2: credit.sub_category2,
+          source: credit.source,
+          payment_mode: credit.payment_mode
+        };
+        
+        const applied = CreditRuleEngine.applyCreditRules(tempTx, rules);
+        
+        // If it got categorized
+        if (applied.main_category && applied.main_category !== 'Uncategorized') {
+          matchedCount++;
+          // Wait for all to finish parallelly below
+          promises.push(supabase
+            .from(SUPABASE_TABLES.creditsRow)
+            .update({
+              main_category: applied.main_category,
+              sub_category1: applied.sub_category1,
+              sub_category2: applied.sub_category2,
+              source: applied.source,
+              payment_mode: applied.payment_mode
+            })
+            .eq('id', credit.id) as any
+          );
+        }
+      }
+
+      if (promises.length > 0) {
+        await Promise.all(promises);
+        await fetchCredits();
+      }
+      
+      return { 
+        success: true, 
+        processed: uncategorized.length, 
+        matched: matchedCount,
+        remaining: uncategorized.length - matchedCount
+      };
+    } catch (e: unknown) {
+      console.error('Failed to reprocess rules:', e);
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+    }
+  };
+
   return {
     credits,
     imports,
@@ -208,6 +267,7 @@ export const useCredits = () => {
     uploadBatch,
     deleteBatch,
     updateCredit,
-    archiveCredit
+    archiveCredit,
+    reprocessRules
   };
 };

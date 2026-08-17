@@ -1,16 +1,18 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Search } from 'lucide-react';
+import { Search, RefreshCw } from 'lucide-react';
 import { UploadCredit } from './UploadCredit';
 import { useCredits, type FinanceCredit as FinanceCreditType } from '../../hooks/finance/useCredits';
 import { FinanceInfoCard } from '../../components/ui/FinanceInfoCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { CreditCardEditor } from './CreditCardEditor';
+import toast from 'react-hot-toast';
 
 export const FinanceCredit = () => {
-  const { credits, isLoading, archiveCredit } = useCredits();
+  const { credits, isLoading, archiveCredit, refreshCredits } = useCredits();
   
   // Tab state
-  const [activeTab, setActiveTab] = useState<'view' | 'upload' | 'analytics'>('view');
+  const [activeTab, setActiveTab] = useState<'view' | 'upload' | 'rules' | 'analytics'>('view');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -159,6 +161,7 @@ export const FinanceCredit = () => {
       {/* Finance Sub Navigation */}
       <div className="flex flex-wrap gap-2.5 mb-6">
         <button
+          type="button"
           onClick={() => setActiveTab('upload')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             activeTab === 'upload'
@@ -169,6 +172,7 @@ export const FinanceCredit = () => {
           Upload Credit
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('view')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             activeTab === 'view'
@@ -179,6 +183,7 @@ export const FinanceCredit = () => {
           View Credit
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('analytics')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             activeTab === 'analytics'
@@ -251,11 +256,31 @@ export const FinanceCredit = () => {
             <option value="categorized">Categorized</option>
             <option value="uncategorized">Uncategorized</option>
           </select>
+
+          <button
+            type="button"
+            onClick={async () => {
+              setIsRefreshing(true);
+              try {
+                await refreshCredits();
+                toast.success('Credits refreshed successfully.');
+              } catch (err) {
+                toast.error('Failed to refresh credits.');
+              }
+              setIsRefreshing(false);
+            }}
+            disabled={isRefreshing}
+            className="ml-auto w-full sm:w-auto flex items-center justify-center gap-2 bg-primary/10 text-primary border border-primary/20 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm hover:bg-primary/20 transition-all disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
         </div>
       )}
 
       {/* Main Content Area Placeholder */}
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+        
         {activeTab === 'upload' && (
           <UploadCredit onClose={() => setActiveTab('view')} />
         )}
