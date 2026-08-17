@@ -171,6 +171,32 @@ export const useCredits = () => {
     }
   };
 
+  const updateCredit = async (id: string, updates: Partial<FinanceCredit>) => {
+    try {
+      console.log('Credit Update Payload', updates);
+      const { data, error } = await supabase
+        .from(SUPABASE_TABLES.creditsRow)
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(`${error.message} - ${error.details}`);
+      }
+
+      setCredits(prev => prev.map(c => c.id === id ? data : c));
+      return { success: true, data };
+    } catch (e: unknown) {
+      console.error('Failed to update credit:', e);
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+    }
+  };
+
+  const archiveCredit = async (id: string) => {
+    return updateCredit(id, { status: 'archived' });
+  };
+
   return {
     credits,
     imports,
@@ -180,6 +206,8 @@ export const useCredits = () => {
     refreshCredits,
     fetchImports,
     uploadBatch,
-    deleteBatch
+    deleteBatch,
+    updateCredit,
+    archiveCredit
   };
 };
