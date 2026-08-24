@@ -5,6 +5,7 @@ import { useCredits, type FinanceCredit as FinanceCreditType } from '../../hooks
 import { FinanceInfoCard } from '../../components/ui/FinanceInfoCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { CreditCardEditor } from './CreditCardEditor';
+import { CreditAnalytics } from './CreditAnalytics';
 import toast from 'react-hot-toast';
 
 export const FinanceCredit = () => {
@@ -359,15 +360,20 @@ export const FinanceCredit = () => {
         )}
 
         {activeTab === 'analytics' && (
-          <div className="flex flex-col items-center justify-center p-12 text-center bg-card rounded-2xl border border-border/50 shadow-sm mt-4 fade-in">
-            <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center text-3xl mb-4">
-              📊
-            </div>
-            <h3 className="text-xl font-semibold text-main mb-2">Credit Analytics</h3>
-            <p className="text-muted max-w-md">
-              Credit analytics and reporting features will be available here.
-            </p>
-          </div>
+          <CreditAnalytics 
+            credits={credits} 
+            onRefresh={async () => {
+              setIsRefreshing(true);
+              try {
+                await refreshCredits();
+                toast.success('Credits refreshed successfully.');
+              } catch (err) {
+                toast.error('Failed to refresh credits.');
+              }
+              setIsRefreshing(false);
+            }}
+            isRefreshing={isRefreshing}
+          />
         )}
       </div>
 
