@@ -158,7 +158,7 @@ export const FinanceCredit = () => {
   };
 
   return (
-    <div className="flex flex-col h-full fade-in text-slate-200">
+    <div className="flex flex-col lg:h-full fade-in text-slate-200">
       {/* Finance Sub Navigation */}
       <div className="flex flex-wrap gap-2.5 mb-6">
         <button
@@ -280,7 +280,7 @@ export const FinanceCredit = () => {
       )}
 
       {/* Main Content Area Placeholder */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
+      <div className="flex-1 lg:overflow-y-auto custom-scrollbar pr-2">
         
         {activeTab === 'upload' && (
           <UploadCredit onClose={() => setActiveTab('view')} />

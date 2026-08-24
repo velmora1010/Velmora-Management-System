@@ -242,7 +242,7 @@ export const UploadCredit = ({ onClose }: UploadCreditProps) => {
   const previewHeaders = ['Date', 'Amount', 'Description', 'Source', 'Main Category', 'Sub Category 1', 'Sub Category 2'];
 
   return (
-    <div className="bg-card w-full rounded-2xl shadow-sm border border-border flex flex-col fade-in text-slate-200 h-full">
+    <div className="bg-card w-full rounded-2xl shadow-sm border border-border flex flex-col fade-in text-slate-200 lg:h-full min-h-[500px]">
       {/* Hidden File Inputs */}
       <input
         type="file"
@@ -261,17 +261,19 @@ export const UploadCredit = ({ onClose }: UploadCreditProps) => {
       />
 
       {/* Header */}
-      <div className="flex items-center justify-between p-6 border-b border-border shrink-0">
+      <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-5 p-6 border-b border-border shrink-0">
         <div>
-          <h2 className="text-xl font-bold text-main">Upload Credit Statements</h2>
-          <p className="text-sm text-muted mt-1">Bulk import credit transactions using Bank Statement PDFs.</p>
+          <h2 className="text-xl font-bold text-main leading-tight">
+            Upload<br className="sm:hidden" /> Credit Statements
+          </h2>
+          <p className="text-sm text-muted mt-2">Bulk import credit transactions using Bank Statement PDFs.</p>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 self-end sm:self-auto">
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110 flex items-center gap-2"
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110 flex items-center gap-2"
           >
             <Upload size={16} />
             Upload Files
@@ -280,7 +282,7 @@ export const UploadCredit = ({ onClose }: UploadCreditProps) => {
           {onClose && (
             <button 
               onClick={onClose}
-              className="p-2 text-muted hover:text-main bg-background rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors border border-transparent hover:border-border"
+              className="w-10 h-10 flex items-center justify-center text-muted hover:text-main bg-background/50 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors border border-transparent hover:border-border"
             >
               <X size={20} />
             </button>
@@ -289,7 +291,7 @@ export const UploadCredit = ({ onClose }: UploadCreditProps) => {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
+      <div className="flex-1 lg:overflow-hidden flex flex-col lg:flex-row">
         
         {/* Left Section: Files List */}
         <div className="w-full lg:w-96 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-border flex flex-col bg-background/30">
