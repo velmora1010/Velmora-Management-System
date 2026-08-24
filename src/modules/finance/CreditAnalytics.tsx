@@ -266,22 +266,22 @@ export const CreditAnalytics = ({ credits, onRefresh, isRefreshing }: CreditAnal
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-        <div className="bg-[#1e2536] p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Total Credits</span>
-          <span className="text-2xl font-bold text-white">{formatINR(data.totalAmount)}</span>
+        <div className="bg-[#1e2536] p-4 sm:p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col justify-center min-h-[100px]">
+          <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2 line-clamp-1">Total Credits</span>
+          <span className="text-lg sm:text-2xl font-bold text-white break-words">{formatINR(data.totalAmount)}</span>
         </div>
-        <div className="bg-[#1e2536] p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Transactions</span>
-          <span className="text-2xl font-bold text-white">{data.totalTransactions}</span>
+        <div className="bg-[#1e2536] p-4 sm:p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col justify-center min-h-[100px]">
+          <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2 line-clamp-1">Transactions</span>
+          <span className="text-lg sm:text-2xl font-bold text-white break-words">{data.totalTransactions}</span>
         </div>
-        <div className="bg-[#1e2536] p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Categorized</span>
-          <span className="text-2xl font-bold text-emerald-400">{formatINR(data.categorizedAmount)}</span>
+        <div className="bg-[#1e2536] p-4 sm:p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col justify-center min-h-[100px]">
+          <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2 line-clamp-1">Categorized</span>
+          <span className="text-lg sm:text-2xl font-bold text-emerald-400 break-words">{formatINR(data.categorizedAmount)}</span>
         </div>
-        <div className="bg-[#1e2536] p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Uncategorized</span>
-          <div className="flex items-center gap-2">
-            <span className="text-2xl font-bold text-amber-400">{formatINR(data.uncategorizedAmount)}</span>
+        <div className="bg-[#1e2536] p-4 sm:p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col justify-center min-h-[100px]">
+          <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2 line-clamp-1">Uncategorized</span>
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <span className="text-lg sm:text-2xl font-bold text-amber-400 break-words">{formatINR(data.uncategorizedAmount)}</span>
             {data.uncategorizedPercentage > 0 && (
               <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-bold">
                 {data.uncategorizedPercentage.toFixed(1)}%
@@ -289,9 +289,9 @@ export const CreditAnalytics = ({ credits, onRefresh, isRefreshing }: CreditAnal
             )}
           </div>
         </div>
-        <div className="bg-[#1e2536] p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Average Credit</span>
-          <span className="text-2xl font-bold text-white">{formatINR(data.averageCredit)}</span>
+        <div className="bg-[#1e2536] p-4 sm:p-5 rounded-xl border border-slate-700 shadow-sm flex flex-col justify-center min-h-[100px] col-span-2 md:col-span-1">
+          <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 sm:mb-2 line-clamp-1">Average Credit</span>
+          <span className="text-lg sm:text-2xl font-bold text-white break-words">{formatINR(data.averageCredit)}</span>
         </div>
       </div>
 
@@ -305,21 +305,40 @@ export const CreditAnalytics = ({ credits, onRefresh, isRefreshing }: CreditAnal
           {/* Trend Chart */}
           <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700 shadow-sm w-full">
             <h3 className="text-sm font-semibold text-slate-100 mb-6">Credit Inflow Trend</h3>
-            <div className="w-full h-64">
+            <div className="w-full h-64 sm:h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={data.trendData}>
+                <LineChart data={data.trendData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#94a3b8" 
+                    fontSize={11} 
+                    tickLine={false} 
+                    axisLine={false} 
+                    dy={10}
+                    minTickGap={30}
+                  />
                   <YAxis 
                     stroke="#94a3b8" 
-                    fontSize={12} 
+                    fontSize={11} 
                     tickLine={false} 
                     axisLine={false} 
                     tickFormatter={(val) => `₹${(val / 1000).toFixed(0)}k`}
-                    dx={-10}
+                    width={45}
+                    dx={-5}
                   />
-                  <Tooltip content={<CustomLineTooltip />} />
-                  <Line type="monotone" dataKey="amount" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, fill: '#1e2536', stroke: '#6366f1', strokeWidth: 2 }} activeDot={{ r: 6, fill: '#6366f1' }} />
+                  <Tooltip 
+                    content={<CustomLineTooltip />} 
+                    cursor={{ stroke: '#475569', strokeWidth: 1, strokeDasharray: '3 3' }} 
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="amount" 
+                    stroke="#6366f1" 
+                    strokeWidth={2} 
+                    dot={false}
+                    activeDot={{ r: 5, fill: '#6366f1', stroke: '#1e2536', strokeWidth: 2 }} 
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
