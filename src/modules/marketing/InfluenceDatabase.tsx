@@ -20,7 +20,15 @@ const JUSTMIXX_PRODUCTS = [
   "Magic Sponge",
   "DIY Detergent Liquid",
   "DIY Dishwash Liquid",
-  "DIY Fabric Conditioner"
+  "DIY Fabric Conditioner",
+  "Kitchen Cleaner",
+  "Car Wash",
+  "Bike Wash",
+  "BBC",
+  "Hand Wash",
+  "Glass Cleaner",
+  "Bamboo Towel",
+  "Floor Cleaner"
 ];
 
 const PLATFORMS_MAP: Record<string, string[]> = {

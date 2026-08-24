@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar } from 'lucide-react';
+import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { AddCampaignInfluencer } from './AddCampaignInfluencer';
 import { CampaignInfluencerList } from './CampaignInfluencerList';
@@ -11,6 +11,7 @@ import { CampaignInfoTab } from './CampaignInfoTab';
 import { EditCampaignModal } from './EditCampaignModal';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
+import { useCampaigns } from '../../hooks/marketing/useCampaigns';
 import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -32,6 +33,40 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const [dispatchingInfluencer, setDispatchingInfluencer] = useState<CampaignInfluencer | null>(null);
   const [isEditingCampaign, setIsEditingCampaign] = useState(false);
   const { influencers, refresh } = useCampaignInfluencers(campaign.id);
+
+  const { updateCampaign } = useCampaigns();
+
+  const handleArchiveCampaign = async () => {
+    try {
+      const updated = await updateCampaign(campaign.id, { status: 'archived' });
+      if (updated && updated.length > 0) {
+        toast.success("Campaign archived successfully.");
+        if (onCampaignUpdate) {
+          onCampaignUpdate(updated[0] as Campaign);
+        }
+        onBack();
+      }
+    } catch (err) {
+      console.error("Failed to archive campaign:", err);
+      toast.error("Failed to archive campaign.");
+    }
+  };
+
+  const handleRestoreCampaign = async () => {
+    try {
+      const updated = await updateCampaign(campaign.id, { status: 'active' });
+      if (updated && updated.length > 0) {
+        toast.success("Campaign restored successfully.");
+        if (onCampaignUpdate) {
+          onCampaignUpdate(updated[0] as Campaign);
+        }
+        onBack();
+      }
+    } catch (err) {
+      console.error("Failed to restore campaign:", err);
+      toast.error("Failed to restore campaign.");
+    }
+  };
 
   const activeInfluencers = influencers.filter(inf => !isArchived(inf.is_archived));
   const budgetUsed = activeInfluencers.reduce((sum, inf) => sum + (inf.pricing?.final_price || 0), 0);
@@ -154,6 +189,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                  onBack={() => {
                    setEditingInfluencer(null);
                    setCurrentView('overview');
+                   refresh();
                  }} 
                />;
       case 'influencer-list':
@@ -215,6 +251,21 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           >
             <Edit size={14} /> Edit Campaign
           </button>
+          {campaign.status?.toLowerCase() === 'archived' ? (
+            <button 
+              onClick={handleRestoreCampaign}
+              className="px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 bg-emerald-600/80 hover:bg-emerald-600 text-white animate-fade-in"
+            >
+              <ArchiveRestore size={14} /> Restore Campaign
+            </button>
+          ) : (
+            <button 
+              onClick={handleArchiveCampaign}
+              className="px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 bg-rose-600/80 hover:bg-rose-600 text-white animate-fade-in"
+            >
+              <Archive size={14} /> Archive Campaign
+            </button>
+          )}
           <button 
             onClick={() => {
               setEditingInfluencer(null);

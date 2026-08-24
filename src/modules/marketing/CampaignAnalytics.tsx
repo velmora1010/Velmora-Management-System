@@ -253,7 +253,15 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
       'diy detergent liquid': '1B',
       'diy dishwash liquid': '1Y',
       'diy fabric conditioner': '1P',
-      'magic sponge': '1S'
+      'magic sponge': '1S',
+      'kitchen cleaner': 'KC',
+      'car wash': 'CW',
+      'bike wash': 'BW',
+      'bbc': 'BBC',
+      'hand wash': 'HW',
+      'glass cleaner': 'GC',
+      'bamboo towel': 'BT',
+      'floor cleaner': 'FC'
     };
 
     const headers = ['User Name', 'Influencer Name', 'Phone Number', 'Alt Phone', 'City', 'State', 'Address', 'Products'];

@@ -205,7 +205,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               total_videos: (influencerData.pricing as any).total_videos,
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              final_price: (influencerData.pricing as any).final_price
+              final_price: (influencerData.pricing as any).final_price,
+              product_pricing: influencerData.pricing.product_pricing || {}
             };
 
             const { error: priceErr } = await supabase
@@ -395,7 +396,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           total_videos: (influencerData.pricing as any).total_videos,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          final_price: (influencerData.pricing as any).final_price
+          final_price: (influencerData.pricing as any).final_price,
+          product_pricing: influencerData.pricing.product_pricing || {}
         };
 
         const { error: priceErr } = await supabase

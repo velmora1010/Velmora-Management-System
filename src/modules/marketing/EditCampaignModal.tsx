@@ -12,7 +12,7 @@ interface EditCampaignModalProps {
 
 const LANGUAGES = [
   "Tamil", "English", "Hindi", "Telugu", "Kannada", 
-  "Malayalam", "Marathi", "Bengali", "Gujarati", "Punjabi", "Other"
+  "Malayalam", "Marathi", "Bengali", "Gujarati", "Punjabi", "Magahi", "Other"
 ];
 
 export const EditCampaignModal: React.FC<EditCampaignModalProps> = ({ campaign, onSuccess, onClose }) => {
@@ -53,7 +53,19 @@ export const EditCampaignModal: React.FC<EditCampaignModalProps> = ({ campaign, 
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => {
+      const next = { ...prev, [name]: value };
+      if (name === 'total_budget' || name === 'expected_videos') {
+        const budget = parseFloat(name === 'total_budget' ? value : prev.total_budget) || 0;
+        const videos = parseFloat(name === 'expected_videos' ? value : prev.expected_videos) || 0;
+        if (videos > 0) {
+          next.avg_video_cost = Math.round(budget / videos).toString();
+        } else {
+          next.avg_video_cost = '0';
+        }
+      }
+      return next;
+    });
   };
 
   const handleLanguageChange = (lang: string) => {

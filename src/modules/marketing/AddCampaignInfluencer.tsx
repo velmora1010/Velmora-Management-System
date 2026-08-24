@@ -5,6 +5,34 @@ import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluen
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
+export const PRODUCT_LIST = [
+  'DIY Dishwash Liquid',
+  'DIY Fabric Conditioner',
+  'DIY Detergent Liquid',
+  'Magic Sponge',
+  'Kitchen Cleaner',
+  'Car Wash',
+  'Bike Wash',
+  'BBC',
+  'Hand Wash',
+  'Glass Cleaner',
+  'Bamboo Towel',
+  'Floor Cleaner'
+];
+
+export const PRICING_PRODUCTS = [
+  'DIY',
+  'Sponge',
+  'Kitchen Cleaner',
+  'Car Wash',
+  'Bike Wash',
+  'BBC',
+  'Hand Wash',
+  'Glass Cleaner',
+  'Bamboo Towel',
+  'Floor Cleaner'
+];
+
 interface AddCampaignInfluencerProps {
   campaign: Campaign;
   initialData?: CampaignInfluencer;
@@ -111,15 +139,24 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         const v1p = Number(initialData.pricing.video1_price) || 0;
         const v2c = Number(initialData.pricing.video2_count) || 0;
         const v2p = Number(initialData.pricing.video2_price) || 0;
+        const prodPricing = (initialData.pricing as any).product_pricing || {};
+
+        let extraVideos = 0;
+        let extraPrice = 0;
+        Object.values(prodPricing).forEach((p: any) => {
+          extraVideos += Number(p?.qty) || 0;
+          extraPrice += (Number(p?.qty) || 0) * (Number(p?.price) || 0);
+        });
 
         setPricing({
           video1_count: v1c,
           video1_price: v1p,
           video2_count: v2c,
           video2_price: v2p,
-          total_videos: v1c + v2c,
-          final_price: (v1c * v1p) + (v2c * v2p),
-          bargainHistory: (initialData.pricing as any).bargainHistory || []
+          total_videos: v1c + v2c + extraVideos,
+          final_price: (v1c * v1p) + (v2c * v2p) + extraPrice,
+          bargainHistory: (initialData.pricing as any).bargainHistory || [],
+          product_pricing: prodPricing
         });
       }
 
@@ -206,16 +243,39 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     setPlatforms(updated);
   };
 
-  const handlePricingChange = (field: keyof InfluencerPricing, value: number) => {
+  const handlePricingChange = (field: string, value: number, isProductPricing = false, productName?: string) => {
     setPricing(prev => {
-      const updated = { ...prev, [field]: value };
+      let updated = { ...prev };
+      if (isProductPricing && productName) {
+        const currentProdPricing = prev.product_pricing || {};
+        const prodData = currentProdPricing[productName] || { qty: 0, price: 0 };
+        updated.product_pricing = {
+          ...currentProdPricing,
+          [productName]: {
+            ...prodData,
+            [field]: value
+          }
+        };
+      } else {
+        updated = { ...prev, [field]: value };
+      }
+      
       const v1c = Number(updated.video1_count) || 0;
       const v1p = Number(updated.video1_price) || 0;
       const v2c = Number(updated.video2_count) || 0;
       const v2p = Number(updated.video2_price) || 0;
       
-      updated.total_videos = v1c + v2c;
-      updated.final_price = (v1c * v1p) + (v2c * v2p);
+      let extraVideos = 0;
+      let extraPrice = 0;
+      if (updated.product_pricing) {
+        Object.values(updated.product_pricing).forEach((p: any) => {
+          extraVideos += Number(p?.qty) || 0;
+          extraPrice += (Number(p?.qty) || 0) * (Number(p?.price) || 0);
+        });
+      }
+
+      updated.total_videos = v1c + v2c + extraVideos;
+      updated.final_price = (v1c * v1p) + (v2c * v2p) + extraPrice;
       
       return updated;
     });
@@ -279,6 +339,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         : await addInfluencer(payload);
         
       if (success) {
+        toast.success(initialData?.id ? 'Influencer updated successfully!' : 'Influencer saved successfully!');
         onBack();
       }
     } catch (err: any) {
@@ -447,7 +508,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Languages</label>
                 <div className="flex flex-wrap gap-2">
-                  {['English', 'Hindi', 'Tamil', 'Telugu', 'Kannada', 'Malayalam'].map(lang => (
+                  {['English', 'Hindi', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Magahi', 'Other'].map(lang => (
                     <label key={lang} className="flex items-center gap-2 text-sm text-slate-300">
                       <input 
                         type="checkbox" 
@@ -595,54 +656,72 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
         {activeTab === 'pricing' && (
           <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1 font-medium">Video 1 (DIY)</label>
-                <input 
-                  type="number" 
-                  value={pricing.video1_count === 0 ? '' : pricing.video1_count} 
-                  onChange={e => handlePricingChange('video1_count', parseInt(e.target.value) || 0)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
-                  placeholder="Quantity" min="0"
-                />
+            <div className="space-y-4">
+              <div className="hidden sm:grid grid-cols-3 gap-4 border-b border-slate-700 pb-2 text-sm font-semibold text-slate-400">
+                <div>Product</div>
+                <div>Quantity</div>
+                <div>Price / Amount</div>
               </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1 font-medium">Video 1 (DIY) Price</label>
-                <input 
-                  type="number" 
-                  value={pricing.video1_price === 0 ? '' : pricing.video1_price} 
-                  onChange={e => handlePricingChange('video1_price', parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
-                  placeholder="Amount" min="0"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1 font-medium">Video 2 (Sponge)</label>
-                <input 
-                  type="number" 
-                  value={pricing.video2_count === 0 ? '' : pricing.video2_count} 
-                  onChange={e => handlePricingChange('video2_count', parseInt(e.target.value) || 0)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
-                  placeholder="Quantity" min="0"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1 font-medium">Video 2 (Sponge) Price</label>
-                <input 
-                  type="number" 
-                  value={pricing.video2_price === 0 ? '' : pricing.video2_price} 
-                  onChange={e => handlePricingChange('video2_price', parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
-                  placeholder="Amount" min="0"
-                />
-              </div>
+              
+              {PRICING_PRODUCTS.map(prod => {
+                let qtyValue: string | number = '';
+                let priceValue: string | number = '';
+                let onQtyChange: (val: number) => void;
+                let onPriceChange: (val: number) => void;
+
+                if (prod === 'DIY') {
+                  qtyValue = pricing.video1_count || '';
+                  priceValue = pricing.video1_price || '';
+                  onQtyChange = (val) => handlePricingChange('video1_count', val);
+                  onPriceChange = (val) => handlePricingChange('video1_price', val);
+                } else if (prod === 'Sponge') {
+                  qtyValue = pricing.video2_count || '';
+                  priceValue = pricing.video2_price || '';
+                  onQtyChange = (val) => handlePricingChange('video2_count', val);
+                  onPriceChange = (val) => handlePricingChange('video2_price', val);
+                } else {
+                  qtyValue = pricing.product_pricing?.[prod]?.qty || '';
+                  priceValue = pricing.product_pricing?.[prod]?.price || '';
+                  onQtyChange = (val) => handlePricingChange('qty', val, true, prod);
+                  onPriceChange = (val) => handlePricingChange('price', val, true, prod);
+                }
+
+                return (
+                  <div key={prod} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center bg-slate-900/40 p-3 sm:p-2.5 rounded-lg border border-slate-700/50">
+                    <div className="text-sm text-slate-200 font-medium">{prod}</div>
+                    <div>
+                      <label className="block sm:hidden text-xs text-slate-500 mb-1">Quantity</label>
+                      <input 
+                        type="number" 
+                        value={qtyValue} 
+                        onChange={e => onQtyChange(parseInt(e.target.value) || 0)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm focus:border-purple-500 focus:outline-none" 
+                        placeholder="Quantity" min="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block sm:hidden text-xs text-slate-500 mb-1">Price</label>
+                      <input 
+                        type="number" 
+                        value={priceValue} 
+                        onChange={e => onPriceChange(parseFloat(e.target.value) || 0)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm focus:border-purple-500 focus:outline-none" 
+                        placeholder="Amount" min="0"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-slate-700 pt-6">
               <div>
                 <label className="block text-sm text-slate-400 mb-1 font-medium">Total Videos</label>
                 <input 
                   type="number" 
                   value={pricing.total_videos === 0 ? '' : pricing.total_videos} 
                   readOnly
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-slate-400 cursor-not-allowed" 
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-slate-400 cursor-not-allowed text-sm" 
                   placeholder="Auto Calculated"
                 />
               </div>
@@ -652,7 +731,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                   type="number" 
                   value={pricing.final_price === 0 ? '' : pricing.final_price} 
                   readOnly
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-slate-400 cursor-not-allowed" 
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-slate-400 cursor-not-allowed text-sm font-semibold" 
                   placeholder="Auto Calculated"
                 />
               </div>
@@ -747,7 +826,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                   <div key={videoNum} className="mb-6">
                     <h4 className="text-base font-semibold text-purple-400 mb-4 pb-2 border-b border-slate-700">Video {videoNum}</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                      {['DIY Dishwash Liquid', 'DIY Fabric Conditioner', 'DIY Detergent Liquid', 'Magic Sponge'].map(productName => {
+                      {PRODUCT_LIST.map(productName => {
                         const prod = products.find(p => p.video_number === videoNum && p.product_name === productName) || { selected: false, qty: 0 };
                         return (
                           <div key={productName} className="bg-slate-900 p-3 rounded-lg border border-slate-700 flex flex-col gap-3">

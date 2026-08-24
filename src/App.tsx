@@ -32,6 +32,7 @@ const FinanceCategoryManagement = lazy(() => import('./modules/finance/FinanceCa
 const FinanceManagementLayout = lazy(() => import('./modules/finance/FinanceManagementLayout').then(module => ({ default: module.FinanceManagementLayout })));
 const TaskManager = lazy(() => import('./modules/tasks/TaskManager').then(module => ({ default: module.TaskManager })));
 const MarketingHome = lazy(() => import('./modules/marketing/MarketingHome').then(module => ({ default: module.MarketingHome })));
+const ArchivePage = lazy(() => import('./pages/ArchivePage').then(module => ({ default: module.ArchivePage })));
 
 const InventoryDashboard = lazy(() => import('./modules/inventory/InventoryDashboard').then(module => ({ default: module.InventoryDashboard })));
 const RawMaterial = lazy(() => import('./modules/inventory/RawMaterial').then(module => ({ default: module.RawMaterial })));
@@ -163,6 +164,7 @@ function App() {
                   <Route path="/documents" element={<PlaceholderPage title="Document Room" icon={<FolderOpen size={32} />} />} />
                   <Route path="/marketing" element={<MarketingHome />} />
                   <Route path="/tasks" element={<TaskManager />} />
+                  <Route path="/archive" element={<ArchivePage />} />
                   <Route path="/research" element={<PlaceholderPage title="Research & Development" icon={<Lightbulb size={32} />} />} />
                   <Route path="/hr" element={<PlaceholderPage title="Human Resources" icon={<Users size={32} />} />} />
                   <Route path="/brand" element={<PlaceholderPage title="Brand Management" icon={<Tag size={32} />} />} />

@@ -72,9 +72,19 @@ export const useCampaigns = () => {
   }, []);
 
   const addCampaign = async (campaignData: Partial<Campaign>) => {
+    const { data: maxIdData } = await supabase
+      .from('influencer_create_campaigns_rows')
+      .select('id')
+      .not('id', 'is', null)
+      .order('id', { ascending: false })
+      .limit(1);
+    
+    const maxId = maxIdData && maxIdData.length > 0 ? Number(maxIdData[0].id) : 0;
+    const newCampaignId = (isNaN(maxId) ? 0 : maxId) + 1;
+
     const { data, error } = await supabase
       .from('influencer_create_campaigns_rows')
-      .insert([campaignData])
+      .insert([{ ...campaignData, id: newCampaignId as any }])
       .select();
     
     if (error) throw error;

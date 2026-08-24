@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Megaphone, Database, Video } from 'lucide-react';
 import { InfluencerDashboard } from './InfluencerDashboard';
 import { InfluenceDatabase } from './InfluenceDatabase';
+import { useLocation } from 'react-router-dom';
 
 type MarketingView = 'home' | 'influencer-dashboard' | 'own-content' | 'influence-db';
 
 export const MarketingHome: React.FC = () => {
   const [currentView, setCurrentView] = useState<MarketingView>('home');
+  const location = useLocation();
+  const state = location.state as { openCampaignId?: string } | null;
+
+  useEffect(() => {
+    if (state?.openCampaignId) {
+      setCurrentView('influencer-dashboard');
+    }
+  }, [state?.openCampaignId]);
 
   const renderView = () => {
     switch (currentView) {
@@ -50,7 +59,7 @@ export const MarketingHome: React.FC = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
               {/* Option Cards matching the old UI module-cards-grid */}
               
               <button
@@ -60,19 +69,8 @@ export const MarketingHome: React.FC = () => {
                 <div className="w-16 h-16 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
                   <Megaphone size={32} />
                 </div>
-                <h3 className="text-xl font-semibold text-slate-200 mb-2">Justmixx Influencers</h3>
+                <h3 className="text-xl font-semibold text-slate-200 mb-2">Influencers Marketing</h3>
                 <p className="text-slate-400 text-center text-sm">Manage influencer marketing campaigns</p>
-              </button>
-
-              <button
-                onClick={() => setCurrentView('own-content')}
-                className="flex flex-col items-center justify-center p-8 bg-slate-800/50 border border-slate-700 rounded-2xl hover:bg-slate-800 hover:border-blue-500/50 hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all duration-300 group"
-              >
-                <div className="w-16 h-16 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                  <Video size={32} />
-                </div>
-                <h3 className="text-xl font-semibold text-slate-200 mb-2">Own Content</h3>
-                <p className="text-slate-400 text-center text-sm">Manage internal content creation</p>
               </button>
 
               <button

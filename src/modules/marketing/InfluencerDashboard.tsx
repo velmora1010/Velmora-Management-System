@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Plus, RefreshCcw, BarChart2, Users, Package, DollarSign, Menu, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCampaigns } from '../../hooks/marketing/useCampaigns';
 import type { Campaign } from '../../types';
 import { CampaignForm } from './CampaignForm';
 import { CampaignDetails } from './CampaignDetails';
+import { useLocation } from 'react-router-dom';
 
 interface InfluencerDashboardProps {
   onBack: () => void;
@@ -15,6 +16,19 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
   const { campaigns, isLoading, error, refreshCampaigns } = useCampaigns();
   const [view, setView] = useState<DashboardView>('overview');
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  
+  const location = useLocation();
+  const state = location.state as { openCampaignId?: string } | null;
+
+  useEffect(() => {
+    if (state?.openCampaignId && campaigns.length > 0) {
+      const match = campaigns.find(c => c.id === state.openCampaignId);
+      if (match) {
+        setSelectedCampaign(match);
+        setView('campaign-details');
+      }
+    }
+  }, [state?.openCampaignId, campaigns]);
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -104,7 +118,7 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
             <div className={`text-slate-500 text-sm italic transition-opacity duration-300 ${isCollapsed ? 'opacity-0 hidden' : 'opacity-100'}`}>No campaigns found</div>
           ) : (
             <ul className="space-y-2">
-              {campaigns.map(campaign => {
+              {campaigns.filter(c => c.status?.toLowerCase() !== 'archived').map(campaign => {
                 // Determine a short placeholder for collapsed mode (e.g. first letter)
                 const shortName = campaign.campaign_name.charAt(0).toUpperCase();
                 return (
