@@ -1,4 +1,4 @@
-import { FinanceExpense } from '../../../hooks/finance/useExpenses';
+import { FinanceExpense } from '../../hooks/finance/useExpenses';
 
 export enum DocumentType {
   BANK_STATEMENT = 'BANK_STATEMENT',
@@ -35,7 +35,17 @@ export interface NormalizedTransaction extends Partial<FinanceExpense> {
   postedDateTime?: string;
   amount: number;
   date?: string; // Formatted date
-  notes?: string; 
+  notes?: string;
+  main_category?: string | null;
+  sub_category1?: string | null;
+  sub_category2?: string | null;
+  sub_category3?: string | null;
+  vendor?: string | null;
+  payment_mode?: string | null;
+  gst_status?: string | null;
+  purchased_by?: string | null;
+  approved_by?: string | null;
+  source?: string | null; // Credit specific
 }
 
 export interface DocumentParser {

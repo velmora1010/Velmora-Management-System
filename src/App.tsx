@@ -27,6 +27,7 @@ const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then(module => 
 
 const FinanceBills = lazy(() => import('./modules/finance/FinanceBills').then(module => ({ default: module.FinanceBills })));
 const FinanceExpense = lazy(() => import('./modules/finance/FinanceExpense').then(module => ({ default: module.FinanceExpense })));
+const FinanceCredit = lazy(() => import('./modules/finance/FinanceCredit').then(module => ({ default: module.FinanceCredit })));
 const FinanceCategoryManagement = lazy(() => import('./modules/finance/FinanceCategoryManagement').then(module => ({ default: module.FinanceCategoryManagement })));
 const FinanceManagementLayout = lazy(() => import('./modules/finance/FinanceManagementLayout').then(module => ({ default: module.FinanceManagementLayout })));
 const TaskManager = lazy(() => import('./modules/tasks/TaskManager').then(module => ({ default: module.TaskManager })));
@@ -112,6 +113,7 @@ function App() {
                       <Route index element={<Navigate to="bills" replace />} />
                       <Route path="bills" element={<FinanceBills />} />
                       <Route path="expense" element={<FinanceExpense />} />
+                      <Route path="credit" element={<FinanceCredit />} />
                       
                       <Route element={<ProtectedRoute />}>
                         <Route path="purchase-order" element={<PurchaseOrderPage />} />
