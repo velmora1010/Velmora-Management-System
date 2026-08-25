@@ -258,7 +258,7 @@ export interface InfluencerPricing {
   total_videos: number;
   final_price: number;
   bargainHistory?: InfluencerBargainHistory[];
-  product_pricing?: Record<string, { qty: number; price: number }>;
+  product_pricing?: any;
 }
 
 export interface InfluencerProduct {

@@ -238,73 +238,75 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             {campaign.status}
           </span>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-nowrap items-center gap-2 overflow-x-auto max-w-full pb-1 scrollbar-thin scrollbar-thumb-slate-700">
           <button 
             onClick={() => setCurrentView('overview')}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'overview' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'overview' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <LayoutDashboard size={14} /> Campaign Details
           </button>
           <button 
             onClick={() => setIsEditingCampaign(true)}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white`}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white shrink-0`}
           >
             <Edit size={14} /> Edit Campaign
           </button>
-          {campaign.status?.toLowerCase() === 'archived' ? (
-            <button 
-              onClick={handleRestoreCampaign}
-              className="px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 bg-emerald-600/80 hover:bg-emerald-600 text-white animate-fade-in"
-            >
-              <ArchiveRestore size={14} /> Restore Campaign
-            </button>
-          ) : (
-            <button 
-              onClick={handleArchiveCampaign}
-              className="px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 bg-rose-600/80 hover:bg-rose-600 text-white animate-fade-in"
-            >
-              <Archive size={14} /> Archive Campaign
-            </button>
-          )}
           <button 
             onClick={() => {
               setEditingInfluencer(null);
               setCurrentView('add-influencer');
             }}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'add-influencer' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'add-influencer' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Users size={14} /> + Add Influencer
           </button>
           <button 
             onClick={() => setCurrentView('influencer-list')}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'influencer-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'influencer-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Users size={14} /> Influencer List
           </button>
           <button 
             onClick={() => setCurrentView('dispatched-list')}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'dispatched-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'dispatched-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Package size={14} /> Dispatched List
           </button>
           <button 
             onClick={() => setCurrentView('status-tracking')}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'status-tracking' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'status-tracking' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Settings size={14} /> Status Tracking
           </button>
           <button 
             onClick={() => setCurrentView('calendar')}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'calendar' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'calendar' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Calendar size={14} /> Calendar
           </button>
           <button 
             onClick={() => setCurrentView('analytics')}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 ${currentView === 'analytics' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'analytics' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <BarChart2 size={14} /> Analytics
           </button>
+          {campaign.status?.toLowerCase() === 'archived' ? (
+            <button 
+              onClick={handleRestoreCampaign}
+              title="Restore Campaign"
+              className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-emerald-600/80 hover:bg-emerald-600 text-white animate-fade-in shrink-0 aspect-square h-[32px] w-[32px]"
+            >
+              <ArchiveRestore size={16} />
+            </button>
+          ) : (
+            <button 
+              onClick={handleArchiveCampaign}
+              title="Archive Campaign"
+              className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-rose-600/80 hover:bg-rose-600 text-white animate-fade-in shrink-0 aspect-square h-[32px] w-[32px]"
+            >
+              <Archive size={16} />
+            </button>
+          )}
         </div>
       </div>
 

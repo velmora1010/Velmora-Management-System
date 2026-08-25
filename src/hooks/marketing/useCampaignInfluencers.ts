@@ -246,9 +246,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
           // 6. Products
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if (influencerData.products && (influencerData.products as any[]).length > 0) {
+          const activeProducts = (influencerData.products as any[] || []).filter(p => p.selected && p.qty > 0);
+          if (activeProducts.length > 0) {
             let nextProductId = await getMaxId(SUPABASE_TABLES.influencerProduct);
-            const productsToInsert = (influencerData.products as any[]).map(p => {
+            const productsToInsert = activeProducts.map(p => {
               nextProductId++;
               return {
                 ...p,
@@ -438,10 +439,11 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
       // 6. Products
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (influencerData.products && (influencerData.products as any[]).length > 0) {
+      const activeProducts = (influencerData.products as any[] || []).filter(p => p.selected && p.qty > 0);
+      if (activeProducts.length > 0) {
         let nextProductId = await getMaxId(SUPABASE_TABLES.influencerProduct);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const productsToInsert = (influencerData.products as any[]).map(p => {
+        const productsToInsert = activeProducts.map(p => {
           nextProductId++;
           return {
             ...p,

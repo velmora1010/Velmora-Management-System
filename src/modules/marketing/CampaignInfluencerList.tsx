@@ -190,21 +190,40 @@ City: ${influencer.city}`;
                {influencer.pricing ? (
                  <>
                    <div className="grid grid-cols-2 gap-4 bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
-                     <div><span className="text-slate-500 block text-xs">Video 1 (DIY)</span><span className="text-slate-200">{influencer.pricing.video1_count || 0}</span></div>
-                     <div><span className="text-slate-500 block text-xs">Price</span><span className="text-slate-200">₹{influencer.pricing.video1_price || 0}</span></div>
-                     <div><span className="text-slate-500 block text-xs">Video 2 (Sponge)</span><span className="text-slate-200">{influencer.pricing.video2_count || 0}</span></div>
-                     <div><span className="text-slate-500 block text-xs">Price</span><span className="text-slate-200">₹{influencer.pricing.video2_price || 0}</span></div>
-                     {influencer.pricing.product_pricing && Object.entries(influencer.pricing.product_pricing).map(([prodName, pVal]: [string, any]) => (
-                        pVal && pVal.qty > 0 ? (
-                          <React.Fragment key={prodName}>
-                            <div><span className="text-slate-500 block text-xs">{prodName}</span><span className="text-slate-200">{pVal.qty || 0}</span></div>
-                            <div><span className="text-slate-500 block text-xs">Price</span><span className="text-slate-200">₹{pVal.price || 0}</span></div>
-                          </React.Fragment>
-                        ) : null
-                      ))}
+                      {Array.isArray(influencer.pricing.product_pricing?.videos) ? (
+                        influencer.pricing.product_pricing.videos.map((v: any, idx: number) => {
+                          const comb = (v && typeof v === 'object') ? v.combination : '';
+                          const amount = (v && typeof v === 'object') ? (v.amount || 0) : (Number(v) || 0);
+                          return (
+                            <React.Fragment key={idx}>
+                              <div className="col-span-2">
+                                <span className="text-slate-500 block text-xs">Video {idx + 1}</span>
+                                <span className="text-slate-200">
+                                  {comb ? `${comb} — ` : ''}₹{amount.toLocaleString()}
+                                </span>
+                              </div>
+                            </React.Fragment>
+                          );
+                        })
+                      ) : (
+                        <>
+                          <div><span className="text-slate-500 block text-xs">Video 1 (DIY)</span><span className="text-slate-200">{influencer.pricing.video1_count || 0}</span></div>
+                          <div><span className="text-slate-500 block text-xs">Price</span><span className="text-slate-200">₹{(Number(influencer.pricing.video1_price) || 0).toLocaleString()}</span></div>
+                          <div><span className="text-slate-500 block text-xs">Video 2 (Sponge)</span><span className="text-slate-200">{influencer.pricing.video2_count || 0}</span></div>
+                          <div><span className="text-slate-500 block text-xs">Price</span><span className="text-slate-200">₹{(Number(influencer.pricing.video2_price) || 0).toLocaleString()}</span></div>
+                          {influencer.pricing.product_pricing && Object.entries(influencer.pricing.product_pricing).map(([prodName, pVal]: [string, any]) => (
+                            pVal && pVal.qty > 0 && prodName !== 'videos' ? (
+                              <React.Fragment key={prodName}>
+                                <div><span className="text-slate-500 block text-xs">{prodName}</span><span className="text-slate-200">{pVal.qty || 0}</span></div>
+                                <div><span className="text-slate-500 block text-xs">Price</span><span className="text-slate-200">₹{(pVal.price || 0).toLocaleString()}</span></div>
+                              </React.Fragment>
+                            ) : null
+                          ))}
+                        </>
+                      )}
                      <div className="col-span-2 border-t border-slate-700 mt-2 pt-2 grid grid-cols-2">
                         <div><span className="text-slate-400 block text-xs">Total Videos</span><span className="text-slate-100 font-bold">{influencer.pricing.total_videos || 0}</span></div>
-                        <div><span className="text-slate-400 block text-xs">Final Price</span><span className="text-slate-100 font-bold">₹{influencer.pricing.final_price || 0}</span></div>
+                        <div><span className="text-slate-400 block text-xs">Final Price</span><span className="text-slate-100 font-bold">₹{(influencer.pricing.final_price || 0).toLocaleString()}</span></div>
                      </div>
                    </div>
 
