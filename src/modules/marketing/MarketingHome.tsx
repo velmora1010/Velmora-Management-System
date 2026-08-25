@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Megaphone, Database, Video } from 'lucide-react';
+import { Megaphone, Database } from 'lucide-react';
 import { InfluencerDashboard } from './InfluencerDashboard';
 import { InfluenceDatabase } from './InfluenceDatabase';
 import { useLocation } from 'react-router-dom';
 
-type MarketingView = 'home' | 'influencer-dashboard' | 'own-content' | 'influence-db';
+type MarketingView = 'home' | 'influencer-dashboard' | 'influence-db';
 
 export const MarketingHome: React.FC = () => {
   const [currentView, setCurrentView] = useState<MarketingView>('home');
@@ -21,20 +21,6 @@ export const MarketingHome: React.FC = () => {
     switch (currentView) {
       case 'influencer-dashboard':
         return <InfluencerDashboard onBack={() => setCurrentView('home')} />;
-      case 'own-content':
-        return (
-          <div className="flex flex-col items-center justify-center h-[50vh] text-slate-400">
-            <Video size={48} className="mb-4 opacity-50" />
-            <h3 className="text-xl font-semibold mb-2 text-slate-200">Own Content</h3>
-            <p>Content management system coming soon.</p>
-            <button 
-              onClick={() => setCurrentView('home')}
-              className="mt-6 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
-            >
-              Back to Marketing
-            </button>
-          </div>
-        );
       case 'influence-db':
         return <InfluenceDatabase onBack={() => setCurrentView('home')} />;
       case 'home':
