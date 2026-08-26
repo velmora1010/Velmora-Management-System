@@ -5,7 +5,7 @@ import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluen
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
-import { calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from './AddCampaignInfluencer';
+import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from './AddCampaignInfluencer';
 
 const InfluencerCard = ({ 
   influencer, 
@@ -435,9 +435,18 @@ interface CampaignInfluencerListProps {
   onBack: () => void;
   onEdit: (influencer: CampaignInfluencer) => void;
   onDispatch?: (influencer: CampaignInfluencer) => void;
+  editingInfluencerId?: string | null;
+  onCancelEdit?: () => void;
 }
 
-export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({ campaign, onBack, onEdit, onDispatch }) => {
+export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({ 
+  campaign, 
+  onBack, 
+  onEdit, 
+  onDispatch,
+  editingInfluencerId,
+  onCancelEdit
+}) => {
   const { influencers, isLoading, refresh, toggleArchiveStatus } = useCampaignInfluencers(campaign.id);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'active' | 'archived'>('active');
@@ -521,15 +530,28 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({ 
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredInfluencers.map(inf => (
-              <InfluencerCard 
-                key={inf.id} 
-                influencer={inf} 
-                onEdit={onEdit} 
-                onToggleArchive={toggleArchiveStatus} 
-                onDispatch={onDispatch}
-              />
-            ))}
+            {filteredInfluencers.map(inf => {
+              if (editingInfluencerId && String(inf.id) === String(editingInfluencerId)) {
+                return (
+                  <div key={inf.id} className="col-span-full">
+                    <AddCampaignInfluencer 
+                      campaign={campaign} 
+                      initialData={inf} 
+                      onBack={onCancelEdit || (() => {})} 
+                    />
+                  </div>
+                );
+              }
+              return (
+                <InfluencerCard 
+                  key={inf.id} 
+                  influencer={inf} 
+                  onEdit={onEdit} 
+                  onToggleArchive={toggleArchiveStatus} 
+                  onDispatch={onDispatch}
+                />
+              );
+            })}
           </div>
         )}
       </div>

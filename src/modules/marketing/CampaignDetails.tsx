@@ -236,10 +236,23 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         return <CampaignInfluencerList 
                  campaign={campaign} 
                  onBack={() => handleViewChange('overview')} 
+                 editingInfluencerId={editingInfluencerId}
                  onEdit={(inf) => {
                    setEditingInfluencer(inf);
                    setEditingInfluencerId(String(inf.id));
-                   handleViewChange('add-influencer', { editingInfluencerId: String(inf.id) });
+                   saveDepartmentNavigation('marketing', '/marketing', {
+                     campaignView: 'influencer-list',
+                     editingInfluencerId: String(inf.id)
+                   });
+                 }}
+                 onCancelEdit={() => {
+                   setEditingInfluencer(null);
+                   setEditingInfluencerId(null);
+                   saveDepartmentNavigation('marketing', '/marketing', {
+                     campaignView: 'influencer-list',
+                     editingInfluencerId: undefined
+                   });
+                   refresh();
                  }}
                  onDispatch={(inf) => {
                    setDispatchingInfluencer(inf);
