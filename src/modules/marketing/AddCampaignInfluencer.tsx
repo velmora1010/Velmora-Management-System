@@ -84,7 +84,7 @@ export const parseViewCount = (val: any): number => {
     const num = parseFloat(str.slice(0, -1));
     return isNaN(num) ? 0 : Math.round(num * 1000);
   }
-  const parsed = parseInt(str, 10);
+  const parsed = parseFloat(str);
   return isNaN(parsed) ? 0 : parsed;
 };
 
@@ -715,11 +715,11 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       const visiblePlats = getVisiblePlatforms();
       const cleanedPlatforms = platforms
         .filter(p => visiblePlats.includes(p.platform))
-        .filter(p => p.username || p.profile_link)
+        .filter(p => p.username || p.profile_link || (Array.isArray(p.video_views) && p.video_views.some(v => v !== undefined && v !== null && String(v).trim() !== '')))
         .map(p => ({
           ...p,
           video_views: Array.isArray(p.video_views) 
-            ? p.video_views.map(v => parseInt(v as unknown as string) || 0)
+            ? p.video_views.map(v => (v === undefined || v === null || String(v).trim() === '') ? null : parseViewCount(v)) as any
             : []
         }));
 

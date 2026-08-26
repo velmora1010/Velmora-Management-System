@@ -283,7 +283,7 @@ City: ${influencer.city}`;
                             <div key={idx} className="bg-slate-900 border border-slate-700 rounded p-2 text-center flex flex-col justify-between">
                               <div>
                                 <div className="text-[10px] text-slate-500">Video {idx + 1}</div>
-                                <div className="text-xs font-semibold text-slate-200">{v}</div>
+                                <div className="text-xs font-semibold text-slate-200">{v !== null && v !== undefined && (v as any) !== '' ? v : '—'}</div>
                               </div>
                               {p.platform === 'Instagram' && p.video_views_dates?.[idx] && (
                                 <div className="text-[9px] text-slate-500 mt-1 select-none font-medium truncate" title={p.video_views_dates[idx]}>

@@ -209,6 +209,22 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     return isNaN(maxVal) ? 0 : maxVal;
   };
 
+  const parseViewCountLocal = (val: any): number => {
+    if (val === undefined || val === null || val === '') return 0;
+    let str = String(val).trim().toUpperCase();
+    str = str.replace(/,/g, '');
+    if (str.endsWith('M')) {
+      const num = parseFloat(str.slice(0, -1));
+      return isNaN(num) ? 0 : num * 1000000;
+    }
+    if (str.endsWith('K')) {
+      const num = parseFloat(str.slice(0, -1));
+      return isNaN(num) ? 0 : num * 1000;
+    }
+    const parsed = parseFloat(str);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
   const buildPlatformViewsPayload = (platforms: any[]) => {
     const platformViews: Record<string, any[]> = {};
     (platforms || []).forEach(p => {
@@ -222,7 +238,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         const date = datesArray[i];
         
         if (val !== undefined && val !== null && val !== '' && String(val).trim() !== '') {
-          const viewVal = parseInt(String(val), 10);
+          const viewVal = parseViewCountLocal(val);
           
           let enteredDate = date;
           if (!enteredDate || String(enteredDate).trim() === '' || enteredDate === '—') {
