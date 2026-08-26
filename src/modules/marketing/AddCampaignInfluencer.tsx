@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, InfluencerPricing, InfluencerProduct, InfluencerBrandPerformance } from '../../types';
 import { Save, X, Plus } from 'lucide-react';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
@@ -203,53 +203,139 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   const { addInfluencer, updateInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
 
   // Form State
-  const [basicInfo, setBasicInfo] = useState<Partial<CampaignInfluencer>>({
-    name: '',
-    influencer_name: '',
-    phone_number: '',
-    alternative_number: '',
-    upi_number: '',
-    city: '',
-    complete_address: '',
-    state: '',
-    languages: [],
-    profile_file_url: '',
-    auto_dm: false
+  const getFormStorageKey = () => {
+    return `influencer_form_${campaign.id}_${initialData?.id || 'new'}`;
+  };
+
+  const getSavedForm = () => {
+    try {
+      const key = getFormStorageKey();
+      const saved = sessionStorage.getItem(key);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        console.log('[FORM PERSISTENCE] Loading:', parsed);
+        return parsed;
+      }
+    } catch (e) {
+      console.error('[FORM PERSISTENCE] Error parsing saved form:', e);
+    }
+    return null;
+  };
+
+  const savedForm = getSavedForm();
+
+  const [basicInfo, setBasicInfo] = useState<Partial<CampaignInfluencer>>(() => {
+    if (savedForm?.basicInfo) return savedForm.basicInfo;
+    return {
+      name: '',
+      influencer_name: '',
+      phone_number: '',
+      alternative_number: '',
+      upi_number: '',
+      city: '',
+      complete_address: '',
+      state: '',
+      languages: [],
+      profile_file_url: '',
+      auto_dm: false
+    };
   });
 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [uploadError, setUploadError] = useState('');
-  const [uploadedFileName, setUploadedFileName] = useState('');
-
-  const [platformAvailability, setPlatformAvailability] = useState<string>('All');
-  const [platformAgreed, setPlatformAgreed] = useState<string>('All');
-
-  const [platforms, setPlatforms] = useState<InfluencerPlatformDetail[]>([
-    { platform: 'Instagram', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
-    { platform: 'Youtube', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
-    { platform: 'Facebook', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' }
-  ]);
-  
-  const [videos, setVideos] = useState<VideoPricingDetail[]>([
-    { combination: '', amount: 0, products: [] }
-  ]);
-
-  const [pricing, setPricing] = useState<InfluencerPricing>({
-    video1_count: 1,
-    video1_price: 0,
-    video2_count: 0,
-    video2_price: 0,
-    total_videos: 1,
-    final_price: 0,
-    bargainHistory: [{ creator_request: 0, brand_request: 0 }],
-    product_pricing: { videos: [{ combination: '', amount: 0, products: [] }] }
+  const [uploadedFileName, setUploadedFileName] = useState(() => {
+    if (savedForm?.basicInfo?.profile_file_url) {
+      return savedForm.basicInfo.profile_file_url.split('/').pop() || 'Existing File';
+    }
+    return '';
   });
 
-  const [products, setProducts] = useState<InfluencerProduct[]>([]);
-  const [performance, setPerformance] = useState<InfluencerBrandPerformance[]>([]);
+  const [platformAvailability, setPlatformAvailability] = useState<string>(() => {
+    if (savedForm?.platformAvailability) return savedForm.platformAvailability;
+    return 'All';
+  });
+
+  const [platformAgreed, setPlatformAgreed] = useState<string>(() => {
+    if (savedForm?.platformAgreed) return savedForm.platformAgreed;
+    return 'All';
+  });
+
+  const [platforms, setPlatforms] = useState<InfluencerPlatformDetail[]>(() => {
+    if (savedForm?.platforms) return savedForm.platforms;
+    return [
+      { platform: 'Instagram', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
+      { platform: 'Youtube', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
+      { platform: 'Facebook', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' }
+    ];
+  });
+  
+  const [videos, setVideos] = useState<VideoPricingDetail[]>(() => {
+    if (savedForm?.videos) return savedForm.videos;
+    return [
+      { combination: '', amount: 0, products: [] }
+    ];
+  });
+
+  const [pricing, setPricing] = useState<InfluencerPricing>(() => {
+    if (savedForm?.pricing) return savedForm.pricing;
+    return {
+      video1_count: 1,
+      video1_price: 0,
+      video2_count: 0,
+      video2_price: 0,
+      total_videos: 1,
+      final_price: 0,
+      bargainHistory: [{ creator_request: 0, brand_request: 0 }],
+      product_pricing: { videos: [{ combination: '', amount: 0, products: [] }] }
+    };
+  });
+
+  const [products, setProducts] = useState<InfluencerProduct[]>(() => {
+    if (savedForm?.products) return savedForm.products;
+    return [];
+  });
+
+  const [performance, setPerformance] = useState<InfluencerBrandPerformance[]>(() => {
+    if (savedForm?.performance) return savedForm.performance;
+    return [];
+  });
+
+  const lastInitializedIdRef = useRef<string | number | undefined>(undefined);
+
+  // Auto-Save Effect
+  useEffect(() => {
+    const isEditMode = !!initialData?.id;
+    const isLoaded = !isEditMode || (lastInitializedIdRef.current === initialData.id);
+    
+    if (isLoaded) {
+      const key = getFormStorageKey();
+      const dataToSave = {
+        basicInfo,
+        platformAvailability,
+        platformAgreed,
+        platforms,
+        videos,
+        pricing,
+        products,
+        performance
+      };
+      console.log('[FORM PERSISTENCE] Saving:', dataToSave);
+      sessionStorage.setItem(key, JSON.stringify(dataToSave));
+    }
+  }, [basicInfo, platformAvailability, platformAgreed, platforms, videos, pricing, products, performance, initialData?.id]);
 
   useEffect(() => {
     if (initialData) {
+      const key = getFormStorageKey();
+      if (sessionStorage.getItem(key)) {
+        lastInitializedIdRef.current = initialData.id;
+        return;
+      }
+      if (lastInitializedIdRef.current === initialData.id) {
+        return;
+      }
+      lastInitializedIdRef.current = initialData.id;
+      
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setBasicInfo({
         name: initialData.name || '',
@@ -622,6 +708,12 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     setPerformance(updated);
   };
 
+  const handleCancel = () => {
+    const key = getFormStorageKey();
+    sessionStorage.removeItem(key);
+    onBack();
+  };
+
   const handleSave = async () => {
     try {
       if (!basicInfo.languages || basicInfo.languages.length === 0) {
@@ -663,6 +755,8 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         : await addInfluencer(payload);
         
       if (success) {
+        const key = getFormStorageKey();
+        sessionStorage.removeItem(key);
         toast.success(initialData?.id ? 'Influencer updated successfully!' : 'Influencer saved successfully!');
         onBack();
       }
@@ -684,7 +778,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         </h3>
         <div className="flex gap-2">
           <button 
-            onClick={onBack}
+            onClick={handleCancel}
             className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm"
           >
             Cancel

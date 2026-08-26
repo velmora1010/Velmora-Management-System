@@ -188,11 +188,11 @@ export class IciciBankStatementPdfParser implements DocumentParser {
 
       const dataRows = headerRowIndex !== -1 ? rows.slice(headerRowIndex + 1) : rows;
 
-      const getColumnFromBounds = (x: number): keyof LogicalRow | null => {
+      const getColumnFromBounds = (x: number): Exclude<keyof LogicalRow, 'sequence'> | null => {
         if (!globalColBounds) return null;
         for (const [col, bounds] of Object.entries(globalColBounds)) {
           if (bounds && x >= bounds.xMin && x < bounds.xMax) {
-            return col as keyof LogicalRow;
+            return col as Exclude<keyof LogicalRow, 'sequence'>;
           }
         }
         return null;

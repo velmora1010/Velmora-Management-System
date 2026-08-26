@@ -197,7 +197,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
     try {
       const file = e.target.files[0];
       const newBatchId = await processFile(file, fileToReplace);
-      setActiveBatchId(newBatchId);
+      setActiveBatchId(newBatchId || null);
     } catch (err: any) {
       console.error("Pipeline replace error:", err);
       setParseError(err.message || "Failed to replace file.");

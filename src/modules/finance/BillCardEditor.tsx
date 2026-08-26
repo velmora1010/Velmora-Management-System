@@ -207,7 +207,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Billing Cycle</label>
               <select
                 name="billing_cycle"
-                value={formData.billing_cycle}
+                value={formData.billing_cycle || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -222,7 +222,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Payment Type</label>
               <select
                 name="payment_type"
-                value={formData.payment_type}
+                value={formData.payment_type || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -236,7 +236,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Mode of Pay</label>
               <select
                 name="mode_of_pay"
-                value={formData.mode_of_pay}
+                value={formData.mode_of_pay || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -274,7 +274,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Bill Status</label>
               <select
                 name="bill_status"
-                value={formData.bill_status}
+                value={formData.bill_status || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >

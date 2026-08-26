@@ -307,7 +307,7 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Vendor</label>
               <select
                 name="vendor"
-                value={formData.vendor}
+                value={formData.vendor || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -319,7 +319,7 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">GST Status</label>
               <select
                 name="gst_status"
-                value={formData.gst_status}
+                value={formData.gst_status || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -340,7 +340,7 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Payment Mode</label>
               <select
                 name="payment_mode"
-                value={formData.payment_mode}
+                value={formData.payment_mode || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -374,7 +374,7 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Purchased By</label>
               <select
                 name="purchased_by"
-                value={formData.purchased_by}
+                value={formData.purchased_by || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >

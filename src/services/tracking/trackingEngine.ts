@@ -18,7 +18,7 @@ export const trackingEngine = {
     orderId: number, 
     originalStatus?: string,
     options?: { timeoutMs?: number; maxAttempts?: number }
-  ): Promise<{ success: boolean; status: string; supported?: boolean }> {
+  ): Promise<{ success: boolean; status: string; supported?: boolean; error?: string }> {
     const order = await db.logistics_orders.get(orderId);
     if (!order || !order.awbNumber) {
       return { success: false, status: 'Sync Failed' };
