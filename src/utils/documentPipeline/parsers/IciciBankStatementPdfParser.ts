@@ -235,7 +235,7 @@ export class IciciBankStatementPdfParser implements DocumentParser {
 
         for (const item of row) {
           const colName = getColumnFromBounds(item.x);
-          if (colName) {
+          if (colName && colName !== 'sequence') {
             logicalRow[colName] += (logicalRow[colName] ? ' ' : '') + item.text;
           }
         }

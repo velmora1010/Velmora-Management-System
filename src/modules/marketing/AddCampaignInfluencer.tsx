@@ -202,6 +202,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
   const { addInfluencer, updateInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
 
+<<<<<<< Updated upstream
   // Form State
   const getFormStorageKey = () => {
     return `influencer_form_${campaign.id}_${initialData?.id || 'new'}`;
@@ -338,6 +339,37 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setBasicInfo({
+=======
+  // Form State Storage Helpers
+  const getFormStorageKey = () => {
+    if (initialData?.id) {
+      return `influencer_form_${initialData.id}`;
+    }
+    return `influencer_form_new_${campaign.id}`;
+  };
+
+  const getSavedForm = () => {
+    try {
+      const key = getFormStorageKey();
+      const saved = sessionStorage.getItem(key);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        console.log('[FORM PERSISTENCE] Loading:', parsed);
+        return parsed;
+      }
+    } catch (e) {
+      console.error('[FORM PERSISTENCE] Error parsing saved form:', e);
+    }
+    return null;
+  };
+
+  const savedForm = getSavedForm();
+
+  const [basicInfo, setBasicInfo] = useState<Partial<CampaignInfluencer>>(() => {
+    if (savedForm?.basicInfo) return savedForm.basicInfo;
+    if (initialData) {
+      return {
+>>>>>>> Stashed changes
         name: initialData.name || '',
         influencer_name: initialData.influencer_name || '',
         phone_number: initialData.phone_number || '',
@@ -349,156 +381,260 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         languages: initialData.languages || [],
         profile_file_url: initialData.profile_file_url || '',
         auto_dm: initialData.auto_dm || false
-      });
-      if (initialData.profile_file_url) {
-        setUploadedFileName(initialData.profile_file_url.split('/').pop() || 'Existing File');
-      }
+      };
+    }
+    return {
+      name: '',
+      influencer_name: '',
+      phone_number: '',
+      alternative_number: '',
+      upi_number: '',
+      city: '',
+      complete_address: '',
+      state: '',
+      languages: [],
+      profile_file_url: '',
+      auto_dm: false
+    };
+  });
 
-      // Platforms mapping
-      let pAvail = 'All';
-      if (initialData.platforms && initialData.platforms.length > 0) {
-        const pNames = initialData.platforms.map(p => p.platform.toLowerCase());
-        const hasInsta = pNames.includes('instagram');
-        const hasYoutube = pNames.includes('youtube');
-        const hasFb = pNames.includes('facebook');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadedFileName, setUploadedFileName] = useState(() => {
+    const pUrl = savedForm?.basicInfo?.profile_file_url || initialData?.profile_file_url;
+    if (pUrl) {
+      return pUrl.split('/').pop() || 'Existing File';
+    }
+    return '';
+  });
 
-        if (hasInsta && hasYoutube && hasFb) pAvail = 'All';
-        else if (hasInsta && hasYoutube) pAvail = 'Instagram and Youtube';
-        else if (hasInsta && hasFb) pAvail = 'Instagram and Facebook';
-        else if (hasYoutube && hasFb) pAvail = 'Youtube and Facebook';
-        else if (hasInsta) pAvail = 'Instagram';
-        else if (hasYoutube) pAvail = 'Youtube';
-        else if (hasFb) pAvail = 'Facebook';
-        setPlatformAvailability(pAvail);
+  const [platformAvailability, setPlatformAvailability] = useState<string>(() => {
+    if (savedForm?.platformAvailability) return savedForm.platformAvailability;
+    if (initialData?.platforms && initialData.platforms.length > 0) {
+      const pNames = initialData.platforms.map(p => p.platform.toLowerCase());
+      const hasInsta = pNames.includes('instagram');
+      const hasYoutube = pNames.includes('youtube');
+      const hasFb = pNames.includes('facebook');
+
+      if (hasInsta && hasYoutube && hasFb) return 'All';
+      if (hasInsta && hasYoutube) return 'Instagram and Youtube';
+      if (hasInsta && hasFb) return 'Instagram and Facebook';
+      if (hasYoutube && hasFb) return 'Youtube and Facebook';
+      if (hasInsta) return 'Instagram';
+      if (hasYoutube) return 'Youtube';
+      if (hasFb) return 'Facebook';
+    }
+    return 'All';
+  });
+
+  const [platformAgreed, setPlatformAgreed] = useState<string>(() => {
+    if (savedForm?.platformAgreed) return savedForm.platformAgreed;
+    if (initialData?.platforms && initialData.platforms.length > 0) {
+      const pNames = initialData.platforms.map(p => p.platform.toLowerCase());
+      const hasInsta = pNames.includes('instagram');
+      const hasYoutube = pNames.includes('youtube');
+      const hasFb = pNames.includes('facebook');
+
+      if (hasInsta && hasYoutube && hasFb) return 'All';
+      if (hasInsta && hasYoutube) return 'Instagram and Youtube';
+      if (hasInsta && hasFb) return 'Instagram and Facebook';
+      if (hasYoutube && hasFb) return 'Youtube and Facebook';
+      if (hasInsta) return 'Instagram';
+      if (hasYoutube) return 'Youtube';
+      if (hasFb) return 'Facebook';
+    }
+    return 'All';
+  });
+
+  const [platforms, setPlatforms] = useState<InfluencerPlatformDetail[]>(() => {
+    if (savedForm?.platforms) return savedForm.platforms;
+    
+    const defaultPlatforms = [
+      { platform: 'Instagram', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
+      { platform: 'Youtube', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
+      { platform: 'Facebook', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' }
+    ];
+
+    if (initialData?.platforms && initialData.platforms.length > 0) {
+      return defaultPlatforms.map(p => {
+        const match = initialData.platforms?.find(x => x.platform.toLowerCase() === p.platform.toLowerCase());
         
-        const loadedInstagramViews = initialData.platforms.find(p => p.platform.toLowerCase() === 'instagram')?.video_views || [];
-        const loadedFacebookViews = initialData.platforms.find(p => p.platform.toLowerCase() === 'facebook')?.video_views || [];
-        const loadedYouTubeViews = initialData.platforms.find(p => p.platform.toLowerCase() === 'youtube')?.video_views || [];
-
-        console.log("Loaded Instagram Views:", loadedInstagramViews);
-        console.log("Loaded Facebook Views:", loadedFacebookViews);
-        console.log("Loaded YouTube Views:", loadedYouTubeViews);
-
-        setPlatforms(prev => prev.map(p => {
-          const match = initialData.platforms?.find(x => x.platform.toLowerCase() === p.platform.toLowerCase());
+        let dbCode = '';
+        if (match && Array.isArray(match.video_views)) {
+          if (p.platform === 'Instagram') dbCode = calculateInstagramViewCode(match.video_views).code;
+          else if (p.platform === 'Facebook') dbCode = calculateFacebookViewCode(match.video_views).code;
+          else if (p.platform === 'Youtube') dbCode = calculateYoutubeViewCode(match.video_views).code;
+        }
+        
+        if (match) {
+          const views = Array.isArray(match.video_views) ? match.video_views : [];
+          const paddedViews = [...views, ...Array(15).fill('')].slice(0, 15);
           
-          let dbCode = '';
-          if (match && Array.isArray(match.video_views)) {
-            if (p.platform === 'Instagram') dbCode = calculateInstagramViewCode(match.video_views).code;
-            else if (p.platform === 'Facebook') dbCode = calculateFacebookViewCode(match.video_views).code;
-            else if (p.platform === 'Youtube') dbCode = calculateYoutubeViewCode(match.video_views).code;
-          }
+          const dates = Array.isArray((match as any).video_views_dates) ? (match as any).video_views_dates : [];
+          const paddedDates = [...dates, ...Array(15).fill('')].slice(0, 15);
           
-          if (match) {
-             const views = Array.isArray(match.video_views) ? match.video_views : [];
-             const paddedViews = [...views, ...Array(15).fill('')].slice(0, 15);
-             
-             const dates = Array.isArray((match as any).video_views_dates) ? (match as any).video_views_dates : [];
-             const paddedDates = [...dates, ...Array(15).fill('')].slice(0, 15);
-             
-             return { 
-               ...p, 
-               ...match, 
-               platform: p.platform, 
-               video_views: paddedViews as unknown as number[],
-               video_views_dates: paddedDates,
-               performance_code: dbCode || (match as any).performance_code || ''
-             };
+          return { 
+            ...p, 
+            ...match, 
+            platform: p.platform, 
+            video_views: paddedViews as unknown as number[],
+            video_views_dates: paddedDates,
+            performance_code: dbCode || (match as any).performance_code || ''
+          };
+        }
+        return {
+          ...p,
+          performance_code: dbCode
+        };
+      });
+    }
+
+    return defaultPlatforms;
+  });
+
+  const [videos, setVideos] = useState<VideoPricingDetail[]>(() => {
+    if (savedForm?.videos) return savedForm.videos;
+    
+    if (initialData?.pricing) {
+      const v1c = Number(initialData.pricing.video1_count) || 0;
+      const v1p = Number(initialData.pricing.video1_price) || 0;
+      const v2c = Number(initialData.pricing.video2_count) || 0;
+      const v2p = Number(initialData.pricing.video2_price) || 0;
+      const prodPricing = (initialData.pricing as any).product_pricing || {};
+
+      let loadedVideos: VideoPricingDetail[] = [];
+      if (Array.isArray(prodPricing?.videos)) {
+        loadedVideos = prodPricing.videos.map((v: any, index: number) => {
+          const videoNum = index + 1;
+          let videoProds: VideoProductDetail[] = [];
+          if (Array.isArray(v.products)) {
+            videoProds = v.products.map((p: any) => ({
+              product_name: p.product_name || '',
+              qty: Number(p.qty) || 1
+            }));
+          } else {
+            const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
+            videoProds = matchingProds.map(p => ({
+              product_name: p.product_name,
+              qty: p.qty
+            }));
           }
           return {
-            ...p,
-            performance_code: dbCode
+            combination: v.combination || '',
+            amount: Number(v.amount) || 0,
+            products: videoProds
           };
-        }));
-      }
-
-      if (initialData.pricing) {
-        const v1c = Number(initialData.pricing.video1_count) || 0;
-        const v1p = Number(initialData.pricing.video1_price) || 0;
-        const v2c = Number(initialData.pricing.video2_count) || 0;
-        const v2p = Number(initialData.pricing.video2_price) || 0;
-        const prodPricing = (initialData.pricing as any).product_pricing || {};
-
-        let loadedVideos: VideoPricingDetail[] = [];
-        if (Array.isArray(prodPricing?.videos)) {
-          loadedVideos = prodPricing.videos.map((v: any, index: number) => {
-            const videoNum = index + 1;
-            let videoProds: VideoProductDetail[] = [];
-            if (Array.isArray(v.products)) {
-              videoProds = v.products.map((p: any) => ({
-                product_name: p.product_name || '',
-                qty: Number(p.qty) || 1
-              }));
-            } else {
-              const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
-              videoProds = matchingProds.map(p => ({
-                product_name: p.product_name,
-                qty: p.qty
-              }));
-            }
-            return {
-              combination: v.combination || '',
-              amount: Number(v.amount) || 0,
-              products: videoProds
-            };
-          });
-        } else {
-          // Fallback to legacy count & price fields
-          if (v1c > 0) {
-            for (let i = 0; i < v1c; i++) {
-              const videoNum = i + 1;
-              const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
-              loadedVideos.push({
-                combination: v1c === 1 && v2c === 0 ? 'Detergent' : '',
-                amount: v1p,
-                products: matchingProds.map(p => ({ product_name: p.product_name, qty: p.qty }))
-              });
-            }
-          }
-          if (v2c > 0) {
-            for (let i = 0; i < v2c; i++) {
-              const videoNum = v1c + i + 1;
-              const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
-              loadedVideos.push({
-                combination: '',
-                amount: v2p,
-                products: matchingProds.map(p => ({ product_name: p.product_name, qty: p.qty }))
-              });
-            }
-          }
-        }
-
-        if (loadedVideos.length === 0) {
-          loadedVideos = [{ combination: '', amount: 0, products: [] }];
-        }
-
-        setVideos(loadedVideos);
-
-        const bHistory = (initialData.pricing as any).bargainHistory || [];
-        const cleanBHistory = bHistory.length > 0 ? bHistory : [{ creator_request: 0, brand_request: 0 }];
-
-        setPricing({
-          video1_count: v1c,
-          video1_price: v1p,
-          video2_count: v2c,
-          video2_price: v2p,
-          total_videos: loadedVideos.length,
-          final_price: loadedVideos.reduce((a, b) => a + b.amount, 0),
-          bargainHistory: cleanBHistory,
-          product_pricing: prodPricing
         });
+      } else {
+        // Fallback to legacy fields
+        if (v1c > 0) {
+          for (let i = 0; i < v1c; i++) {
+            const videoNum = i + 1;
+            const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
+            loadedVideos.push({
+              combination: v1c === 1 && v2c === 0 ? 'Detergent' : '',
+              amount: v1p,
+              products: matchingProds.map(p => ({ product_name: p.product_name, qty: p.qty }))
+            });
+          }
+        }
+        if (v2c > 0) {
+          for (let i = 0; i < v2c; i++) {
+            const videoNum = v1c + i + 1;
+            const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
+            loadedVideos.push({
+              combination: '',
+              amount: v2p,
+              products: matchingProds.map(p => ({ product_name: p.product_name, qty: p.qty }))
+            });
+          }
+        }
       }
 
-      if (initialData.products) {
-        setProducts(initialData.products.map(p => ({ ...p, selected: true })));
-      }
-
-      const perfData = initialData.brandPerformance || initialData.performance;
-      if (perfData) {
-        setPerformance(perfData);
+      if (loadedVideos.length > 0) {
+        return loadedVideos;
       }
     }
-  }, [initialData]);
+    return [{ combination: '', amount: 0, products: [] }];
+  });
+
+  const [pricing, setPricing] = useState<InfluencerPricing>(() => {
+    if (savedForm?.pricing) return savedForm.pricing;
+    
+    if (initialData?.pricing) {
+      const v1c = Number(initialData.pricing.video1_count) || 0;
+      const v1p = Number(initialData.pricing.video1_price) || 0;
+      const v2c = Number(initialData.pricing.video2_count) || 0;
+      const v2p = Number(initialData.pricing.video2_price) || 0;
+      const prodPricing = (initialData.pricing as any).product_pricing || {};
+
+      let totalVideosCount = 1;
+      let finalPriceCalc = 0;
+      if (Array.isArray(prodPricing?.videos)) {
+        totalVideosCount = prodPricing.videos.length;
+        finalPriceCalc = prodPricing.videos.reduce((a: number, b: any) => a + (Number(b.amount) || 0), 0);
+      } else {
+        totalVideosCount = (v1c > 0 ? v1c : 0) + (v2c > 0 ? v2c : 0);
+        finalPriceCalc = (v1c * v1p) + (v2c * v2p);
+      }
+      if (totalVideosCount === 0) totalVideosCount = 1;
+
+      const bHistory = (initialData.pricing as any).bargainHistory || [];
+      const cleanBHistory = bHistory.length > 0 ? bHistory : [{ creator_request: 0, brand_request: 0 }];
+
+      return {
+        video1_count: v1c,
+        video1_price: v1p,
+        video2_count: v2c,
+        video2_price: v2p,
+        total_videos: totalVideosCount,
+        final_price: finalPriceCalc,
+        bargainHistory: cleanBHistory,
+        product_pricing: prodPricing
+      };
+    }
+    return {
+      video1_count: 1,
+      video1_price: 0,
+      video2_count: 0,
+      video2_price: 0,
+      total_videos: 1,
+      final_price: 0,
+      bargainHistory: [{ creator_request: 0, brand_request: 0 }],
+      product_pricing: { videos: [{ combination: '', amount: 0, products: [] }] }
+    };
+  });
+
+  const [products, setProducts] = useState<InfluencerProduct[]>(() => {
+    if (savedForm?.products) return savedForm.products;
+    if (initialData?.products) {
+      return initialData.products.map(p => ({ ...p, selected: true }));
+    }
+    return [];
+  });
+
+  const [performance, setPerformance] = useState<InfluencerBrandPerformance[]>(() => {
+    if (savedForm?.performance) return savedForm.performance;
+    const perfData = initialData?.brandPerformance || initialData?.performance;
+    return perfData || [];
+  });
+
+  // Auto-Save Effect
+  useEffect(() => {
+    const key = getFormStorageKey();
+    const dataToSave = {
+      basicInfo,
+      platformAvailability,
+      platformAgreed,
+      platforms,
+      videos,
+      pricing,
+      products,
+      performance
+    };
+    console.log('[FORM PERSISTENCE] Saving:', dataToSave);
+    sessionStorage.setItem(key, JSON.stringify(dataToSave));
+  }, [basicInfo, platformAvailability, platformAgreed, platforms, videos, pricing, products, performance]);
 
   // Helpers
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -648,7 +784,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   };
 
   const updatePricingState = (nextVideos: VideoPricingDetail[]) => {
-    const total = nextVideos.reduce((sum, v) => sum + v.amount, 0);
+    const total = nextVideos.reduce((sum, v) => sum + (Number(v.amount) || 0), 0);
     setPricing(prev => {
       const updated = {
         ...prev,
@@ -662,10 +798,10 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
       // Synchronize with legacy fields
       updated.video1_count = nextVideos.length > 0 ? 1 : 0;
-      updated.video1_price = nextVideos.length > 0 ? nextVideos[0].amount : 0;
+      updated.video1_price = nextVideos.length > 0 ? (Number(nextVideos[0].amount) || 0) : 0;
       if (nextVideos.length > 1) {
         updated.video2_count = nextVideos.length - 1;
-        const remainingSum = nextVideos.slice(1).reduce((a, b) => a + b.amount, 0);
+        const remainingSum = nextVideos.slice(1).reduce((a, b) => a + (Number(b.amount) || 0), 0);
         updated.video2_price = Math.round(remainingSum / (nextVideos.length - 1));
       } else {
         updated.video2_count = 0;
@@ -677,12 +813,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   };
 
   const handleAddVideo = () => {
-    const lastVideo = videos[videos.length - 1];
-    if (!lastVideo || !lastVideo.combination || !lastVideo.amount || lastVideo.amount <= 0) {
-      toast.error(`Please select a combination and enter the amount for Video ${videos.length}.`);
-      return;
-    }
-
     const nextVideos = [...videos, { combination: '', amount: 0, products: [] }];
     setVideos(nextVideos);
     syncProductsFromVideos(nextVideos);
@@ -1167,24 +1297,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                   <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Video Pricing</h3>
                   <p className="text-xs text-slate-500 mt-1">Add videos, select combinations, set quantities and amount for each video.</p>
                 </div>
-                {(() => {
-                  const lastVideo = videos[videos.length - 1];
-                  const isAddVideoDisabled = !lastVideo || !lastVideo.combination || !lastVideo.amount || lastVideo.amount <= 0;
-                  return (
-                    <button 
-                      type="button"
-                      onClick={handleAddVideo}
-                      disabled={isAddVideoDisabled}
-                      className={`h-10 px-4 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 ${
-                        isAddVideoDisabled 
-                          ? 'bg-slate-800/40 text-slate-650 border-slate-850 cursor-not-allowed' 
-                          : 'border-purple-500/30 text-purple-300 hover:bg-purple-950/20 hover:border-purple-500 bg-slate-900/60 shadow-sm'
-                      }`}
-                    >
-                      <Plus size={14} /> Add Video
-                    </button>
-                  );
-                })()}
               </div>
 
               {/* Video Pricing Rows */}
@@ -1314,6 +1426,15 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                     </div>
                   );
                 })}
+              </div>
+              <div className="flex justify-start mt-4">
+                <button 
+                  type="button"
+                  onClick={handleAddVideo}
+                  className="h-10 px-4 text-xs font-semibold rounded-lg border border-purple-500/30 text-purple-300 hover:bg-purple-950/20 hover:border-purple-500 bg-slate-900/60 shadow-sm flex items-center gap-1.5"
+                >
+                  <Plus size={14} /> Add Video
+                </button>
               </div>
             </div>
 
