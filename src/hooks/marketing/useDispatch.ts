@@ -23,6 +23,7 @@ export interface DispatchPayload {
   dispatch_date: string;
   expected_delivery_date: string | null;
   dispatch_status: string;
+  influencer_code?: string | null;
 }
 
 export const useDispatch = () => {
@@ -90,9 +91,11 @@ export const useDispatch = () => {
         created_at: new Date().toISOString()
       };
 
+      const { influencer_code, ...dbPayload } = finalPayload;
+
       const { error: dispatchError } = await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
-        .insert([finalPayload]);
+        .insert([dbPayload]);
 
       if (dispatchError) throw dispatchError;
 

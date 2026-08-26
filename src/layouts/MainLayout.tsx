@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Home, CheckSquare, Archive, Settings, Menu, LogOut } from 'lucide-react';
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
@@ -7,12 +7,25 @@ import { NotificationCenter } from '../components/notifications/NotificationCent
 import { AiAssistantPanel } from '../components/ai/AiAssistantPanel';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
+import { getNavigationState, saveNavigationState, saveDepartmentNavigation } from '../utils/navigationPersistence';
 
 export const MainLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { user } = useAuth();
+  
+  useEffect(() => {
+    const path = location.pathname;
+    const firstSegment = path.split('/')[1];
+    if (firstSegment && firstSegment !== 'login' && firstSegment !== 'archive' && firstSegment !== 'settings' && path !== '/') {
+      let deptName = firstSegment;
+      if (firstSegment === 'tickets') {
+        deptName = 'customer-tickets';
+      }
+      saveDepartmentNavigation(deptName, path);
+    }
+  }, [location.pathname]);
   
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -98,6 +111,11 @@ export const MainLayout = () => {
                       to={item.href}
                       onClick={() => {
                         setIsMobileMenuOpen(false);
+                        if (item.href === '/') {
+                          const navState = getNavigationState();
+                          navState.lastActiveDepartment = null;
+                          saveNavigationState(navState);
+                        }
                       }}
                       className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl text-[15px] font-medium transition-all ${
                         isActive 

@@ -5,6 +5,7 @@ import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluen
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
+import { calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from './AddCampaignInfluencer';
 
 const InfluencerCard = ({ 
   influencer, 
@@ -89,7 +90,12 @@ City: ${influencer.city}`;
           </div>
           <div>
             <h4 className="text-slate-100 font-semibold">{influencer.influencer_name}</h4>
-            <p className="text-slate-400 text-xs">@{influencer.name} &bull; {influencer.code}</p>
+            <p className="text-slate-400 text-xs flex flex-wrap items-center gap-1.5 mt-0.5">
+              @{influencer.name} &bull; 
+              <span className="bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-1.5 py-0.5 rounded text-[10px] font-mono select-none" title="Influencer Code">
+                {influencer.code || 'No Code'}
+              </span>
+            </p>
           </div>
           <div className="ml-4 hidden sm:block">
             <span className={`px-2 py-0.5 rounded text-xs font-semibold ${isArchived(influencer.is_archived) ? 'bg-slate-700 text-slate-300' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
@@ -123,20 +129,119 @@ City: ${influencer.city}`;
 
         {/* Tab Content */}
         <div className="text-sm">
-          {activeTab === 'basic' && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-               <div><span className="text-slate-500 block text-xs">User Name</span><span className="text-slate-200">{influencer.name || '-'}</span></div>
-               <div><span className="text-slate-500 block text-xs">Influencer Name</span><span className="text-slate-200">{influencer.influencer_name || '-'}</span></div>
-               <div><span className="text-slate-500 block text-xs">Phone</span><span className="text-slate-200">{influencer.phone_number || '-'}</span></div>
-               <div><span className="text-slate-500 block text-xs">Alt Phone</span><span className="text-slate-200">{influencer.alternative_number || '-'}</span></div>
-               <div><span className="text-slate-500 block text-xs">UPI</span><span className="text-slate-200">{influencer.upi_number || '-'}</span></div>
-               <div><span className="text-slate-500 block text-xs">City</span><span className="text-slate-200">{influencer.city || '-'}</span></div>
-               <div><span className="text-slate-500 block text-xs">State</span><span className="text-slate-200">{influencer.state || '-'}</span></div>
-               <div><span className="text-slate-500 block text-xs">Auto DM Tool</span><span className="text-slate-200">{influencer.auto_dm ? 'Yes' : 'No'}</span></div>
-               <div className="col-span-2 md:col-span-4"><span className="text-slate-500 block text-xs">Languages</span><span className="text-slate-200">{Array.isArray(influencer.languages) ? influencer.languages.join(', ') : '-'}</span></div>
-               <div className="col-span-2 md:col-span-4"><span className="text-slate-500 block text-xs">Address</span><span className="text-slate-200">{influencer.complete_address || '-'}</span></div>
-            </div>
-          )}
+          {activeTab === 'basic' && (() => {
+            const getDisplayViewCode = (platformName: string): string => {
+              const plat = influencer.platforms?.find(p => p.platform.toLowerCase() === platformName.toLowerCase());
+              if (!plat || !plat.video_views || !plat.video_views.some(v => v !== null && v !== 0 && String(v) !== '')) {
+                return '—';
+              }
+              let code = '—';
+              if (platformName === 'Instagram') {
+                code = calculateInstagramViewCode(plat.video_views).code;
+              } else if (platformName === 'Facebook') {
+                code = calculateFacebookViewCode(plat.video_views).code;
+              } else if (platformName === 'Youtube') {
+                code = calculateYoutubeViewCode(plat.video_views).code;
+              }
+              return code === 'Not Eligible' ? '—' : code;
+            };
+
+            const displayInsta = getDisplayViewCode('Instagram');
+            const displayFb = getDisplayViewCode('Facebook');
+            const displayYt = getDisplayViewCode('Youtube');
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-6 text-sm text-slate-200">
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Influencer Name</span>
+                  <span className="text-slate-200 font-medium break-words">{influencer.influencer_name || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Influencer Code</span>
+                  <span className="text-purple-400 font-bold font-mono break-all">{influencer.code || '—'}</span>
+                </div>
+                <div className="col-span-1 sm:col-span-2 md:col-span-2"></div>
+
+                {/* View Codes Row */}
+                <div className="col-span-1 sm:col-span-2 md:col-span-4 grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-950/40 p-3 rounded-lg border border-slate-800/60 my-1">
+                  <div>
+                    <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">Instagram</span>
+                    <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded border inline-block ${
+                      displayInsta && displayInsta !== '—'
+                        ? 'bg-purple-900/30 text-purple-400 border-purple-800/30'
+                        : 'bg-slate-900/40 text-slate-500 border-slate-800/30'
+                    }`}>
+                      {displayInsta}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">Facebook</span>
+                    <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded border inline-block ${
+                      displayFb && displayFb !== '—'
+                        ? 'bg-purple-900/30 text-purple-400 border-purple-800/30'
+                        : 'bg-slate-900/40 text-slate-500 border-slate-800/30'
+                    }`}>
+                      {displayFb}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px] font-bold uppercase tracking-wider mb-1">YouTube</span>
+                    <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded border inline-block ${
+                      displayYt && displayYt !== '—'
+                        ? 'bg-purple-900/30 text-purple-400 border-purple-800/30'
+                        : 'bg-slate-900/40 text-slate-500 border-slate-800/30'
+                    }`}>
+                      {displayYt}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Phone</span>
+                  <span className="text-slate-200 font-medium break-all">{influencer.phone_number || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Alt Phone</span>
+                  <span className="text-slate-200 font-medium break-all">{influencer.alternative_number || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">UPI</span>
+                  <span className="text-slate-200 font-medium break-all">{influencer.upi_number || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">User Name</span>
+                  <span className="text-slate-200 font-medium break-words">{influencer.name || '—'}</span>
+                </div>
+
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">City</span>
+                  <span className="text-slate-200 font-medium break-words">{influencer.city || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">State</span>
+                  <span className="text-slate-200 font-medium break-words">{influencer.state || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Auto DM Tool</span>
+                  <span className="text-slate-200 font-medium">{influencer.auto_dm ? 'Yes' : 'No'}</span>
+                </div>
+                <div></div>
+
+                <div className="col-span-1 sm:col-span-2 md:col-span-4">
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Languages</span>
+                  <span className="text-slate-200 font-medium break-words">
+                    {Array.isArray(influencer.languages) && influencer.languages.length > 0 
+                      ? influencer.languages.join(', ') 
+                      : '—'}
+                  </span>
+                </div>
+                
+                <div className="col-span-1 sm:col-span-2 md:col-span-4">
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Address</span>
+                  <span className="text-slate-200 font-medium break-words">{influencer.complete_address || '—'}</span>
+                </div>
+              </div>
+            );
+          })()}
 
           {activeTab === 'platform' && (
             <div className="space-y-4">
@@ -151,9 +256,17 @@ City: ${influencer.city}`;
                         </a>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
                       <div><span className="text-slate-500 block text-xs">Username</span><span className="text-slate-200">{p.username || '-'}</span></div>
                       <div><span className="text-slate-500 block text-xs">Followers</span><span className="text-slate-200">{p.followers_count || '-'}</span></div>
+                      {p.platform === 'Instagram' && p.performance_code && (
+                        <div>
+                          <span className="text-slate-500 block text-xs">Performance Code</span>
+                          <span className="inline-block bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-2 py-0.5 rounded text-xs font-mono select-all mt-0.5">
+                            {p.performance_code}
+                          </span>
+                        </div>
+                      )}
                     </div>
                     {p.video_views && p.video_views.length > 0 ? (
                       <div>
@@ -167,9 +280,16 @@ City: ${influencer.city}`;
                         </div>
                         <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                           {p.video_views.slice(0, expandedPlatforms[p.platform] ? p.video_views.length : 3).map((v, idx) => (
-                            <div key={idx} className="bg-slate-900 border border-slate-700 rounded p-2 text-center">
-                               <div className="text-[10px] text-slate-500">Video {idx + 1}</div>
-                               <div className="text-xs font-semibold text-slate-200">{v}</div>
+                            <div key={idx} className="bg-slate-900 border border-slate-700 rounded p-2 text-center flex flex-col justify-between">
+                              <div>
+                                <div className="text-[10px] text-slate-500">Video {idx + 1}</div>
+                                <div className="text-xs font-semibold text-slate-200">{v}</div>
+                              </div>
+                              {p.platform === 'Instagram' && p.video_views_dates?.[idx] && (
+                                <div className="text-[9px] text-slate-500 mt-1 select-none font-medium truncate" title={p.video_views_dates[idx]}>
+                                  {p.video_views_dates[idx]}
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>

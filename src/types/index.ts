@@ -238,6 +238,19 @@ export interface InfluencerPlatformDetail {
   followers_count: number;
   profile_link: string;
   video_views: number[];
+  video_views_dates?: string[];
+  performance_code?: string;
+}
+
+export interface InfluencerPlatformView {
+  id?: string;
+  influencer_id: number;
+  platform: 'Instagram' | 'Facebook' | 'YouTube';
+  video_number: number;
+  views: number | null;
+  entered_date: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface InfluencerBargainHistory {
@@ -299,6 +312,9 @@ export interface CampaignInfluencer {
   auto_dm: boolean;
   status?: string;
   is_archived?: boolean;
+  instagram_view_code?: string | null;
+  facebook_view_code?: string | null;
+  youtube_view_code?: string | null;
   created_at?: string;
   
   // Relational data mapped in hooks

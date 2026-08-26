@@ -3,26 +3,35 @@ import { Megaphone, Database } from 'lucide-react';
 import { InfluencerDashboard } from './InfluencerDashboard';
 import { InfluenceDatabase } from './InfluenceDatabase';
 import { useLocation } from 'react-router-dom';
+import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
 
 type MarketingView = 'home' | 'influencer-dashboard' | 'influence-db';
 
 export const MarketingHome: React.FC = () => {
-  const [currentView, setCurrentView] = useState<MarketingView>('home');
+  const [currentView, setCurrentView] = useState<MarketingView>(() => {
+    const nav = getDepartmentNavigation('marketing');
+    return nav?.marketingView || 'home';
+  });
   const location = useLocation();
   const state = location.state as { openCampaignId?: string } | null;
 
+  const handleViewChange = (newView: MarketingView) => {
+    setCurrentView(newView);
+    saveDepartmentNavigation('marketing', '/marketing', { marketingView: newView });
+  };
+
   useEffect(() => {
     if (state?.openCampaignId) {
-      setCurrentView('influencer-dashboard');
+      handleViewChange('influencer-dashboard');
     }
   }, [state?.openCampaignId]);
 
   const renderView = () => {
     switch (currentView) {
       case 'influencer-dashboard':
-        return <InfluencerDashboard onBack={() => setCurrentView('home')} />;
+        return <InfluencerDashboard onBack={() => handleViewChange('home')} />;
       case 'influence-db':
-        return <InfluenceDatabase onBack={() => setCurrentView('home')} />;
+        return <InfluenceDatabase onBack={() => handleViewChange('home')} />;
       case 'home':
       default:
         return (
@@ -49,7 +58,7 @@ export const MarketingHome: React.FC = () => {
               {/* Option Cards matching the old UI module-cards-grid */}
               
               <button
-                onClick={() => setCurrentView('influencer-dashboard')}
+                onClick={() => handleViewChange('influencer-dashboard')}
                 className="flex flex-col items-center justify-center p-8 bg-slate-800/50 border border-slate-700 rounded-2xl hover:bg-slate-800 hover:border-purple-500/50 hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] transition-all duration-300 group"
               >
                 <div className="w-16 h-16 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
@@ -60,7 +69,7 @@ export const MarketingHome: React.FC = () => {
               </button>
 
               <button
-                onClick={() => setCurrentView('influence-db')}
+                onClick={() => handleViewChange('influence-db')}
                 className="flex flex-col items-center justify-center p-8 bg-slate-800/50 border border-slate-700 rounded-2xl hover:bg-slate-800 hover:border-emerald-500/50 hover:shadow-[0_0_20px_rgba(16,185,129,0.15)] transition-all duration-300 group"
               >
                 <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">

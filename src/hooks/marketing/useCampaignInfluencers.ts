@@ -3,6 +3,60 @@ import { supabase } from '../../lib/supabase';
 import type { CampaignInfluencer, InfluencerBargainHistory } from '../../types';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 
+// Language and Campaign code generation mapping helper
+export const LANGUAGE_MAPPING: Record<string, string> = {
+  Kannada: 'KA',
+  Hindi: 'HI',
+  Tamil: 'TN',
+  Telugu: 'TL',
+  Malayalam: 'KL',
+  Punjabi: 'PB',
+  Marathi: 'MH',
+  Gujarati: 'GJ',
+  Rajasthani: 'RJ',
+  Haryanvi: 'HR',
+  Bhojpuri: 'BR',
+  Odia: 'OD',
+  Bengali: 'WL',
+  Magahi: 'JH'
+};
+
+export const getLanguageCode = (langs: string[]): string | null => {
+  if (!langs || langs.length === 0) return null;
+  for (const lang of langs) {
+    if (LANGUAGE_MAPPING[lang]) {
+      return LANGUAGE_MAPPING[lang];
+    }
+  }
+  if (langs.includes('English')) return 'EN';
+  if (langs.includes('Other')) return 'OT';
+  return null;
+};
+
+export const getCampaignCode = (campaignName: string): string => {
+  if (!campaignName) return 'CC';
+  const cleanName = campaignName.trim().toLowerCase();
+  
+  if (cleanName.includes('june')) return 'JC';
+  if (cleanName.includes('sep')) return 'SC';
+  if (cleanName.includes('oct')) return 'OC';
+  if (cleanName.includes('nov')) return 'NC';
+  if (cleanName.includes('dec')) return 'DC';
+  if (cleanName.includes('jan')) return 'JC';
+  if (cleanName.includes('feb')) return 'FC';
+  if (cleanName.includes('mar')) return 'MC';
+  if (cleanName.includes('apr')) return 'AC';
+  if (cleanName.includes('may')) return 'MC';
+  if (cleanName.includes('jul')) return 'JC';
+  if (cleanName.includes('aug')) return 'AC';
+  
+  const words = cleanName.split(/\s+/);
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).toUpperCase();
+  }
+  return (cleanName.substring(0, 2)).toUpperCase();
+};
+
 export const useCampaignInfluencers = (campaignId?: string) => {
   const [influencers, setInfluencers] = useState<CampaignInfluencer[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,7 +108,59 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         }
 
         combinedData = infoList.map(inf => {
-          const platforms = (platformsData || []).filter(p => p.influencer_id === inf.id);
+          let platformViews: any = null;
+          const matchViewsElement = Array.isArray(inf.languages) 
+            ? inf.languages.find((l: string) => l.startsWith('views_data:')) 
+            : null;
+          if (matchViewsElement) {
+            try {
+              const viewsJson = JSON.parse(matchViewsElement.substring('views_data:'.length));
+              platformViews = viewsJson?.platform_views || {};
+            } catch (e) {
+              console.error('Error parsing views_data:', e);
+            }
+          }
+
+          const cleanLangs = Array.isArray(inf.languages)
+            ? inf.languages.filter((l: string) => !l.startsWith('views_data:'))
+            : [];
+
+          const platforms = (platformsData || []).filter(p => p.influencer_id === inf.id).map(p => {
+            const video_views = Array(15).fill(null);
+            const video_views_dates = Array(15).fill(null);
+            
+            let normKey = p.platform;
+            if (p.platform.toLowerCase() === 'instagram') normKey = 'Instagram';
+            else if (p.platform.toLowerCase() === 'facebook') normKey = 'Facebook';
+            else if (p.platform.toLowerCase() === 'youtube') normKey = 'YouTube';
+
+            const savedViewsList = platformViews?.[normKey] || [];
+            savedViewsList.forEach((v: any) => {
+              const idx = v.video_number - 1;
+              if (idx >= 0 && idx < 15) {
+                video_views[idx] = v.views !== null ? Number(v.views) : null;
+                if (v.entered_date) {
+                  const parts = v.entered_date.split('-');
+                  if (parts.length === 3) {
+                    const [yr, mo, dy] = parts;
+                    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                    const monthName = months[parseInt(mo, 10) - 1] || 'Jan';
+                    video_views_dates[idx] = `${dy}-${monthName}-${yr}`;
+                  } else {
+                    video_views_dates[idx] = v.entered_date;
+                  }
+                } else {
+                  video_views_dates[idx] = null;
+                }
+              }
+            });
+
+            return {
+              ...p,
+              video_views,
+              video_views_dates
+            };
+          });
           const pricing = (pricingData || []).find(p => p.influencer_id === inf.id) || {};
           const bargainHistory = bargainData.filter(b => b.pricing_id === pricing.id);
           const products = (productsData || []).filter(p => p.influencer_id === inf.id);
@@ -63,6 +169,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
           return {
             ...inf,
+            languages: cleanLangs,
             platforms,
             pricing: { ...pricing, bargainHistory },
             products,
@@ -102,39 +209,114 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     return isNaN(maxVal) ? 0 : maxVal;
   };
 
+  const buildPlatformViewsPayload = (platforms: any[]) => {
+    const platformViews: Record<string, any[]> = {};
+    (platforms || []).forEach(p => {
+      const platformName = p.platform;
+      const viewsArray = Array.isArray(p.video_views) ? p.video_views : [];
+      const datesArray = Array.isArray(p.video_views_dates) ? p.video_views_dates : [];
+      const videosList: any[] = [];
+      
+      for (let i = 0; i < 15; i++) {
+        const val = viewsArray[i];
+        const date = datesArray[i];
+        
+        if (val !== undefined && val !== null && val !== '' && String(val).trim() !== '') {
+          const viewVal = parseInt(String(val), 10);
+          
+          let enteredDate = date;
+          if (!enteredDate || String(enteredDate).trim() === '' || enteredDate === '—') {
+            const now = new Date();
+            const yr = now.getFullYear();
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const monthName = months[now.getMonth()];
+            const dy = String(now.getDate()).padStart(2, '0');
+            enteredDate = `${dy}-${monthName}-${yr}`;
+          }
+
+          let ymdDate = enteredDate;
+          if (enteredDate && enteredDate.includes('-')) {
+            const parts = enteredDate.split('-');
+            if (parts.length === 3) {
+              const [dy, moName, yr] = parts;
+              const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+              const monthIdx = months.indexOf(moName);
+              const mo = String(monthIdx !== -1 ? monthIdx + 1 : 1).padStart(2, '0');
+              ymdDate = `${yr}-${mo}-${dy}`;
+            }
+          }
+
+          videosList.push({
+            video_number: i + 1,
+            views: viewVal,
+            entered_date: ymdDate
+          });
+        }
+      }
+      
+      if (videosList.length > 0) {
+        let normPlatform = platformName;
+        if (platformName.toLowerCase() === 'instagram') normPlatform = 'Instagram';
+        else if (platformName.toLowerCase() === 'facebook') normPlatform = 'Facebook';
+        else if (platformName.toLowerCase() === 'youtube') normPlatform = 'YouTube';
+        
+        platformViews[normPlatform] = videosList;
+      }
+    });
+    
+    return { platform_views: platformViews };
+  };
+
   const addInfluencer = async (influencerData: Partial<CampaignInfluencer>): Promise<boolean> => {
     if (!campaignId) return false;
     
     setIsSaving(true);
     setError(null);
     try {
-        const prefix = influencerData.name ? 
-          influencerData.name.split(' ').map(w => w[0]?.toUpperCase() || '').join('').substring(0, 3).toUpperCase() : 'INF';
-        
+        // 1. Get Campaign Name
+        let campaignName = '';
+        const { data: campaignData } = await supabase
+          .from('influencer_create_campaigns_rows')
+          .select('campaign_name')
+          .eq('id', campaignId)
+          .single();
+        if (campaignData) {
+          campaignName = campaignData.campaign_name || '';
+        }
+
+        const campaignCode = getCampaignCode(campaignName);
+        const langCode = getLanguageCode(influencerData.languages || []) || 'INF';
+
+        // 2. Query all existing codes for this campaign
         const { data: existingCodes, error: codeErr } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
           .select('code')
-          .eq('campaign_id', campaignId)
-          .ilike('code', `${prefix}%`);
+          .eq('campaign_id', campaignId);
         
         if (codeErr) throw codeErr;
 
         let maxNum = 0;
         if (existingCodes && existingCodes.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (existingCodes as any[]).forEach(row => {
-            const numStr = (row.code || '').replace(prefix, '');
+            const codeStr = (row.code || '').trim();
+            const parts = codeStr.split('-');
+            const numStr = parts[parts.length - 1];
             const num = parseInt(numStr, 10);
             if (!isNaN(num) && num > maxNum) {
               maxNum = num;
             }
           });
         }
-        const newCode = `${prefix}${maxNum + 1}`;
+        const serialNum = maxNum + 1;
+        const newCode = `${langCode}-${campaignCode}-${serialNum}`;
 
         // Get max ID for influencersInfo
         const maxInfoId = await getMaxId(SUPABASE_TABLES.influencersInfo);
         const newInfluencerId = maxInfoId + 1;
+
+        const platformViewsPayload = buildPlatformViewsPayload(influencerData.platforms || []);
+        const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
+        const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
 
         const infoPayload = {
           id: newInfluencerId,
@@ -148,18 +330,23 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           complete_address: influencerData.complete_address,
           city: influencerData.city,
           state: influencerData.state,
-          languages: influencerData.languages,
+          languages: finalLanguages,
           profile_file_url: influencerData.profile_file_url,
           auto_dm: influencerData.auto_dm || false,
           is_archived: false
         };
 
-        const { error: insertInfoErr } = await supabase
+        console.log("FINAL INFLUENCER SAVE PAYLOAD", infoPayload);
+
+        const { data, error: insertInfoErr } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
-          .insert([infoPayload]);
+          .insert([infoPayload])
+          .select();
+
+        console.log("INFLUENCER SAVE RESULT", { data, error: insertInfoErr });
 
         if (insertInfoErr) {
-          console.error(insertInfoErr);
+          console.error("[Database Error] Table:", SUPABASE_TABLES.influencersInfo, "Operation: INSERT", "Payload Keys:", Object.keys(infoPayload), "Error:", insertInfoErr);
           throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencersInfo}: ${insertInfoErr.message || JSON.stringify(insertInfoErr)}`);
         }
 
@@ -171,8 +358,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             let nextPlatformId = await getMaxId(SUPABASE_TABLES.influencerPlatform);
             const platformsToInsert = (influencerData.platforms as any[]).map(p => {
               nextPlatformId++;
+              const { performance_code, video_views, video_views_dates, ...dbFields } = p;
               return {
-                ...p,
+                ...dbFields,
                 id: nextPlatformId,
                 influencer_id: newInfluencerId
               };
@@ -316,6 +504,30 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     try {
       // 1. Update basic info
       console.log("Saving table:", SUPABASE_TABLES.influencersInfo);
+      
+      const { data: currentInf } = await supabase
+        .from(SUPABASE_TABLES.influencersInfo)
+        .select('code')
+        .eq('id', id)
+        .single();
+      
+      let finalCode = currentInf?.code || '';
+      
+      if (finalCode) {
+        const parts = finalCode.split('-');
+        if (parts.length === 3) {
+          const [oldLang, campaignPart, serialPart] = parts;
+          const newLangCode = getLanguageCode(influencerData.languages || []);
+          if (newLangCode && newLangCode !== oldLang) {
+            finalCode = `${newLangCode}-${campaignPart}-${serialPart}`;
+          }
+        }
+      }
+
+      const platformViewsPayload = buildPlatformViewsPayload(influencerData.platforms || []);
+      const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
+      const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
+
       const updatePayload = {
         name: influencerData.name,
         influencer_name: influencerData.influencer_name,
@@ -325,17 +537,23 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         complete_address: influencerData.complete_address,
         city: influencerData.city,
         state: influencerData.state,
-        languages: influencerData.languages,
+        languages: finalLanguages,
         profile_file_url: influencerData.profile_file_url,
-        auto_dm: influencerData.auto_dm || false
+        auto_dm: influencerData.auto_dm || false,
+        code: finalCode
       };
-      const { error: updateInfoErr } = await supabase
+      console.log("FINAL INFLUENCER SAVE PAYLOAD", updatePayload);
+
+      const { data, error: updateInfoErr } = await supabase
         .from(SUPABASE_TABLES.influencersInfo)
         .update(updatePayload)
-        .eq('id', id);
+        .eq('id', id)
+        .select();
+
+      console.log("INFLUENCER SAVE RESULT", { data, error: updateInfoErr });
 
       if (updateInfoErr) {
-        console.error(updateInfoErr);
+        console.error("[Database Error] Table:", SUPABASE_TABLES.influencersInfo, "Operation: UPDATE", "Payload Keys:", Object.keys(updatePayload), "Error:", updateInfoErr);
         throw new Error(`Failed updating ${SUPABASE_TABLES.influencersInfo}: ${updateInfoErr.message || JSON.stringify(updateInfoErr)}`);
       }
 
@@ -363,8 +581,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const platformsToInsert = (influencerData.platforms as any[]).map(p => {
           nextPlatformId++;
+          const { performance_code, video_views, video_views_dates, ...dbFields } = p;
           return {
-            ...p,
+            ...dbFields,
             id: nextPlatformId,
             influencer_id: id
           };

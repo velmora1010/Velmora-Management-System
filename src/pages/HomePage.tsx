@@ -33,10 +33,23 @@ const DEPARTMENTS = [
 
 import { useRBAC } from '../hooks/useRBAC';
 import type { AppModule } from '../types/rbac';
+import { getNavigationState, saveActiveDepartment, getDepartmentNavigation } from '../utils/navigationPersistence';
+import React, { useEffect } from 'react';
 
 export const HomePage = () => {
   const navigate = useNavigate();
   const { canView } = useRBAC();
+
+  useEffect(() => {
+    const state = getNavigationState();
+    if (state.lastActiveDepartment) {
+      const deptNav = state.departments[state.lastActiveDepartment];
+      if (deptNav && deptNav.route) {
+        console.log('[NAV] Restored route:', deptNav.route);
+        navigate(deptNav.route, { replace: true });
+      }
+    }
+  }, [navigate]);
 
   const visibleDepartments = DEPARTMENTS.filter(dept => {
     const modId = dept.id === 'customer-tickets' ? 'tasks' : (dept.id as AppModule);
@@ -56,7 +69,12 @@ export const HomePage = () => {
           return (
             <div 
               key={dept.id}
-              onClick={() => navigate(dept.path)}
+              onClick={() => {
+                const nav = getDepartmentNavigation(dept.id);
+                const targetRoute = nav?.route || dept.path;
+                saveActiveDepartment(dept.id);
+                navigate(targetRoute);
+              }}
               className="flex flex-col items-center justify-center gap-4 p-6 bg-card border border-border rounded-xl cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:shadow-xl hover:shadow-black/20 group"
             >
               <div 

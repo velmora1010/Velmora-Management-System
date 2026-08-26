@@ -5,6 +5,7 @@ import type { Campaign } from '../../types';
 import { CampaignForm } from './CampaignForm';
 import { CampaignDetails } from './CampaignDetails';
 import { useLocation } from 'react-router-dom';
+import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
 
 interface InfluencerDashboardProps {
   onBack: () => void;
@@ -14,18 +15,52 @@ type DashboardView = 'overview' | 'create-campaign' | 'campaign-details';
 
 export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack }) => {
   const { campaigns, isLoading, error, refreshCampaigns } = useCampaigns();
-  const [view, setView] = useState<DashboardView>('overview');
+  
+  const [view, setView] = useState<DashboardView>(() => {
+    const nav = getDepartmentNavigation('marketing');
+    return nav?.dashboardView || 'overview';
+  });
+  
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(() => {
+    const nav = getDepartmentNavigation('marketing');
+    return nav?.selectedCampaignId || null;
+  });
+
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   
   const location = useLocation();
   const state = location.state as { openCampaignId?: string } | null;
 
+  // Resolve Campaign ID against campaigns data
   useEffect(() => {
-    if (state?.openCampaignId && campaigns.length > 0) {
-      const match = campaigns.find(c => c.id === state.openCampaignId);
+    if (selectedCampaignId && campaigns.length > 0) {
+      const match = campaigns.find(c => String(c.id) === String(selectedCampaignId));
       if (match) {
         setSelectedCampaign(match);
+      } else {
+        console.warn(`[NAV] Saved campaign ID ${selectedCampaignId} not found, resetting.`);
+        setSelectedCampaign(null);
+        setView('overview');
+        setSelectedCampaignId(null);
+        saveDepartmentNavigation('marketing', '/marketing', {
+          dashboardView: 'overview',
+          selectedCampaignId: undefined
+        });
+      }
+    }
+  }, [campaigns, selectedCampaignId]);
+
+  useEffect(() => {
+    if (state?.openCampaignId && campaigns.length > 0) {
+      const match = campaigns.find(c => String(c.id) === String(state.openCampaignId));
+      if (match) {
+        setSelectedCampaign(match);
+        setSelectedCampaignId(String(match.id));
         setView('campaign-details');
+        saveDepartmentNavigation('marketing', '/marketing', {
+          dashboardView: 'campaign-details',
+          selectedCampaignId: String(match.id)
+        });
       }
     }
   }, [state?.openCampaignId, campaigns]);
@@ -46,14 +81,24 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
 
   const handleCreateNew = () => {
     setSelectedCampaign(null);
+    setSelectedCampaignId(null);
     setView('create-campaign');
     setIsMobileSidebarOpen(false);
+    saveDepartmentNavigation('marketing', '/marketing', {
+      dashboardView: 'create-campaign',
+      selectedCampaignId: undefined
+    });
   };
 
   const handleSelectCampaign = (campaign: Campaign) => {
     setSelectedCampaign(campaign);
+    setSelectedCampaignId(String(campaign.id));
     setView('campaign-details');
     setIsMobileSidebarOpen(false);
+    saveDepartmentNavigation('marketing', '/marketing', {
+      dashboardView: 'campaign-details',
+      selectedCampaignId: String(campaign.id)
+    });
   };
 
   return (
@@ -233,7 +278,17 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
         {view === 'campaign-details' && selectedCampaign && (
           <CampaignDetails 
             campaign={selectedCampaign} 
-            onBack={() => setView('overview')} 
+            onBack={() => {
+              setView('overview');
+              setSelectedCampaign(null);
+              setSelectedCampaignId(null);
+              saveDepartmentNavigation('marketing', '/marketing', {
+                dashboardView: 'overview',
+                selectedCampaignId: undefined,
+                campaignView: undefined,
+                editingInfluencerId: undefined
+              });
+            }} 
             onCampaignUpdate={(updatedCampaign) => {
               setSelectedCampaign(updatedCampaign);
               refreshCampaigns();

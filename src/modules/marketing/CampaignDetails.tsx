@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { AddCampaignInfluencer } from './AddCampaignInfluencer';
@@ -16,6 +16,7 @@ import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
+import { getDepartmentNavigation, saveDepartmentNavigation, DepartmentNavigation } from '../../utils/navigationPersistence';
 
 interface CampaignDetailsProps {
   campaign: Campaign;
@@ -28,11 +29,49 @@ type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatc
 import { isArchived } from '../../utils/marketingUtils';
 
 export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBack, onCampaignUpdate }) => {
-  const [currentView, setCurrentView] = useState<CampaignView>('overview');
+  const [currentView, setCurrentView] = useState<CampaignView>(() => {
+    const nav = getDepartmentNavigation('marketing');
+    return nav?.campaignView || 'overview';
+  });
+
+  const [editingInfluencerId, setEditingInfluencerId] = useState<string | null>(() => {
+    const nav = getDepartmentNavigation('marketing');
+    return nav?.editingInfluencerId || null;
+  });
+
   const [editingInfluencer, setEditingInfluencer] = useState<CampaignInfluencer | null>(null);
   const [dispatchingInfluencer, setDispatchingInfluencer] = useState<CampaignInfluencer | null>(null);
   const [isEditingCampaign, setIsEditingCampaign] = useState(false);
   const { influencers, refresh } = useCampaignInfluencers(campaign.id);
+
+  const handleViewChange = (newView: CampaignView, edits: Partial<DepartmentNavigation> = {}) => {
+    setCurrentView(newView);
+    saveDepartmentNavigation('marketing', '/marketing', {
+      campaignView: newView,
+      ...edits
+    });
+  };
+
+  // Resolve Influencer ID against loaded influencers list
+  useEffect(() => {
+    if (editingInfluencerId && influencers.length > 0) {
+      const match = influencers.find(inf => String(inf.id) === String(editingInfluencerId));
+      if (match) {
+        setEditingInfluencer(match);
+      } else {
+        console.warn(`[NAV] Saved editing influencer ID ${editingInfluencerId} not found, resetting.`);
+        setEditingInfluencer(null);
+        setEditingInfluencerId(null);
+        if (currentView === 'add-influencer') {
+          handleViewChange('influencer-list', { editingInfluencerId: undefined });
+        } else {
+          saveDepartmentNavigation('marketing', '/marketing', {
+            editingInfluencerId: undefined
+          });
+        }
+      }
+    }
+  }, [influencers, editingInfluencerId, currentView]);
 
   const { updateCampaign } = useCampaigns();
 
@@ -173,7 +212,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
       }
 
       toast.success('Moved to Status Tracking successfully!');
-      setCurrentView('status-tracking');
+      handleViewChange('status-tracking');
     } catch (err: any) {
       console.error("Move To Status exception:", err);
       toast.error(err?.message || JSON.stringify(err));
@@ -188,17 +227,19 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                  initialData={editingInfluencer || undefined}
                  onBack={() => {
                    setEditingInfluencer(null);
-                   setCurrentView('overview');
+                   setEditingInfluencerId(null);
+                   handleViewChange('overview', { editingInfluencerId: undefined, activeTab: undefined });
                    refresh();
                  }} 
                />;
       case 'influencer-list':
         return <CampaignInfluencerList 
                  campaign={campaign} 
-                 onBack={() => setCurrentView('overview')} 
+                 onBack={() => handleViewChange('overview')} 
                  onEdit={(inf) => {
                    setEditingInfluencer(inf);
-                   setCurrentView('add-influencer');
+                   setEditingInfluencerId(String(inf.id));
+                   handleViewChange('add-influencer', { editingInfluencerId: String(inf.id) });
                  }}
                  onDispatch={(inf) => {
                    setDispatchingInfluencer(inf);
@@ -207,15 +248,15 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
       case 'dispatched-list':
         return <CampaignDispatchedList 
                  campaign={campaign} 
-                 onBack={() => setCurrentView('overview')} 
+                 onBack={() => handleViewChange('overview')} 
                  onMoveToStatus={handleMoveToStatus} 
                />;
       case 'status-tracking':
-        return <CampaignStatusTracking campaign={campaign} onBack={() => setCurrentView('overview')} />;
+        return <CampaignStatusTracking campaign={campaign} onBack={() => handleViewChange('overview')} />;
       case 'calendar':
-        return <CampaignCalendar campaign={campaign} onBack={() => setCurrentView('overview')} onNavigateToStatusTracking={() => setCurrentView('status-tracking')} />;
+        return <CampaignCalendar campaign={campaign} onBack={() => handleViewChange('overview')} onNavigateToStatusTracking={() => handleViewChange('status-tracking')} />;
       case 'analytics':
-        return <CampaignAnalytics campaign={campaign} influencers={influencers} onBack={() => setCurrentView('overview')} />;
+        return <CampaignAnalytics campaign={campaign} influencers={influencers} onBack={() => handleViewChange('overview')} />;
       case 'overview':
       default:
         return <CampaignInfoTab campaign={campaign} />;
@@ -240,7 +281,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         </div>
         <div className="flex flex-nowrap items-center gap-2 overflow-x-auto max-w-full pb-1 scrollbar-thin scrollbar-thumb-slate-700">
           <button 
-            onClick={() => setCurrentView('overview')}
+            onClick={() => handleViewChange('overview')}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'overview' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <LayoutDashboard size={14} /> Campaign Details
@@ -254,38 +295,39 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           <button 
             onClick={() => {
               setEditingInfluencer(null);
-              setCurrentView('add-influencer');
+              setEditingInfluencerId(null);
+              handleViewChange('add-influencer', { editingInfluencerId: undefined, activeTab: undefined });
             }}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'add-influencer' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Users size={14} /> + Add Influencer
           </button>
           <button 
-            onClick={() => setCurrentView('influencer-list')}
+            onClick={() => handleViewChange('influencer-list')}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'influencer-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Users size={14} /> Influencer List
           </button>
           <button 
-            onClick={() => setCurrentView('dispatched-list')}
+            onClick={() => handleViewChange('dispatched-list')}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'dispatched-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Package size={14} /> Dispatched List
           </button>
           <button 
-            onClick={() => setCurrentView('status-tracking')}
+            onClick={() => handleViewChange('status-tracking')}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'status-tracking' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Settings size={14} /> Status Tracking
           </button>
           <button 
-            onClick={() => setCurrentView('calendar')}
+            onClick={() => handleViewChange('calendar')}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'calendar' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Calendar size={14} /> Calendar
           </button>
           <button 
-            onClick={() => setCurrentView('analytics')}
+            onClick={() => handleViewChange('analytics')}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'analytics' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <BarChart2 size={14} /> Analytics
