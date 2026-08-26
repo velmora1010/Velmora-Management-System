@@ -203,6 +203,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   const { addInfluencer, updateInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   // Form State
   const getFormStorageKey = () => {
     return `influencer_form_${campaign.id}_${initialData?.id || 'new'}`;
@@ -339,6 +340,37 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setBasicInfo({
+=======
+  // Form State Storage Helpers
+  const getFormStorageKey = () => {
+    if (initialData?.id) {
+      return `influencer_form_${initialData.id}`;
+    }
+    return `influencer_form_new_${campaign.id}`;
+  };
+
+  const getSavedForm = () => {
+    try {
+      const key = getFormStorageKey();
+      const saved = sessionStorage.getItem(key);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        console.log('[FORM PERSISTENCE] Loading:', parsed);
+        return parsed;
+      }
+    } catch (e) {
+      console.error('[FORM PERSISTENCE] Error parsing saved form:', e);
+    }
+    return null;
+  };
+
+  const savedForm = getSavedForm();
+
+  const [basicInfo, setBasicInfo] = useState<Partial<CampaignInfluencer>>(() => {
+    if (savedForm?.basicInfo) return savedForm.basicInfo;
+    if (initialData) {
+      return {
+>>>>>>> Stashed changes
 =======
   // Form State Storage Helpers
   const getFormStorageKey = () => {
