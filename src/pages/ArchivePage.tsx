@@ -1,11 +1,11 @@
 import React from 'react';
 import { useCampaigns } from '../hooks/marketing/useCampaigns';
 import { useNavigate } from 'react-router-dom';
-import { Megaphone, ArchiveRestore, ExternalLink, Archive } from 'lucide-react';
+import { Megaphone, ArchiveRestore, ExternalLink, Archive, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const ArchivePage: React.FC = () => {
-  const { campaigns, isLoading, refreshCampaigns, updateCampaign } = useCampaigns();
+  const { campaigns, isLoading, refreshCampaigns, updateCampaign, deleteCampaign } = useCampaigns();
   const navigate = useNavigate();
 
   const archivedCampaigns = campaigns.filter(
@@ -20,6 +20,20 @@ export const ArchivePage: React.FC = () => {
     } catch (err) {
       console.error('Failed to restore campaign:', err);
       toast.error('Failed to restore campaign.');
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete campaign "${name}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      await deleteCampaign(id);
+      toast.success(`Campaign "${name}" deleted permanently.`);
+      refreshCampaigns();
+    } catch (err) {
+      console.error('Failed to delete campaign:', err);
+      toast.error('Failed to delete campaign.');
     }
   };
 
@@ -80,6 +94,13 @@ export const ArchivePage: React.FC = () => {
                         title="Restore campaign"
                       >
                         <ArchiveRestore size={13} /> Restore
+                      </button>
+                      <button
+                        onClick={() => handleDelete(campaign.id, campaign.campaign_name)}
+                        className="px-3 py-1.5 bg-rose-600/10 hover:bg-rose-600/20 border border-rose-500/20 hover:border-rose-500/40 text-rose-400 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-all"
+                        title="Delete campaign permanently"
+                      >
+                        <Trash2 size={13} /> Delete
                       </button>
                     </div>
                   </div>

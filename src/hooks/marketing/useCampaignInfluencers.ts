@@ -129,7 +129,20 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             ? inf.languages.filter((l: string) => !l.startsWith('views_data:'))
             : [];
 
-          const platforms = (platformsData || []).filter(p => p.influencer_id === inf.id).map(p => {
+          const rawPlatforms = (platformsData || []).filter(p => p.influencer_id === inf.id);
+          const uniquePlatformsMap: Record<string, any> = {};
+          rawPlatforms.forEach(p => {
+            let normKey = p.platform;
+            if (p.platform.toLowerCase() === 'instagram') normKey = 'Instagram';
+            else if (p.platform.toLowerCase() === 'facebook') normKey = 'Facebook';
+            else if (p.platform.toLowerCase() === 'youtube') normKey = 'YouTube';
+            
+            if (!uniquePlatformsMap[normKey] || p.id > uniquePlatformsMap[normKey].id) {
+              uniquePlatformsMap[normKey] = p;
+            }
+          });
+
+          const platforms = Object.values(uniquePlatformsMap).map((p: any) => {
             const video_views = Array(15).fill(null);
             const video_views_dates = Array(15).fill(null);
             
@@ -498,13 +511,17 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       setIsSaving(false);
     }
   };
-
   const updateInfluencer = async (id: string, influencerData: Partial<CampaignInfluencer>): Promise<boolean> => {
     if (!campaignId) return false;
     
     setIsSaving(true);
     setError(null);
     try {
+      const numericId = parseInt(id, 10);
+      if (isNaN(numericId)) {
+        throw new Error(`Invalid influencer ID: ${id}`);
+      }
+
       // 1. Update basic info
       console.log("Saving table:", SUPABASE_TABLES.influencersInfo);
       
@@ -538,7 +555,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       const { data, error: updateInfoErr } = await supabase
         .from(SUPABASE_TABLES.influencersInfo)
         .update(updatePayload)
-        .eq('id', id)
+        .eq('id', numericId)
         .select();
 
       console.log("INFLUENCER SAVE RESULT", { data, error: updateInfoErr });
@@ -548,20 +565,42 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         throw new Error(`Failed updating ${SUPABASE_TABLES.influencersInfo}: ${updateInfoErr.message || JSON.stringify(updateInfoErr)}`);
       }
 
-      // 2. Delete existing relational data safely
-      await supabase.from(SUPABASE_TABLES.influencerPlatform).delete().eq('influencer_id', id);
+      // 2. Delete existing relational data safely and throw on error
+      const { error: platDelErr } = await supabase.from(SUPABASE_TABLES.influencerPlatform).delete().eq('influencer_id', numericId);
+      if (platDelErr) {
+        console.error('Delete platforms error:', platDelErr);
+        throw platDelErr;
+      }
       
-      const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', id);
+      const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', numericId);
       if (oldPricing && oldPricing.length > 0) {
         const oldPricingIds = oldPricing.map(p => p.id).filter(Boolean);
         if (oldPricingIds.length > 0) {
-          await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
+          const { error: bargainDelErr } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
+          if (bargainDelErr) {
+            console.error('Delete bargain history error:', bargainDelErr);
+            throw bargainDelErr;
+          }
         }
       }
       
-      await supabase.from(SUPABASE_TABLES.influencerPricing).delete().eq('influencer_id', id);
-      await supabase.from(SUPABASE_TABLES.influencerProduct).delete().eq('influencer_id', id);
-      await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).delete().eq('influencer_id', id);
+      const { error: pricingDelErr } = await supabase.from(SUPABASE_TABLES.influencerPricing).delete().eq('influencer_id', numericId);
+      if (pricingDelErr) {
+        console.error('Delete pricing error:', pricingDelErr);
+        throw pricingDelErr;
+      }
+
+      const { error: prodDelErr } = await supabase.from(SUPABASE_TABLES.influencerProduct).delete().eq('influencer_id', numericId);
+      if (prodDelErr) {
+        console.error('Delete products error:', prodDelErr);
+        throw prodDelErr;
+      }
+
+      const { error: perfDelErr } = await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).delete().eq('influencer_id', numericId);
+      if (perfDelErr) {
+        console.error('Delete performance error:', perfDelErr);
+        throw perfDelErr;
+      }
 
       let newPricingId: number | null = null;
 
@@ -576,7 +615,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           return {
             ...dbFields,
             id: nextPlatformId,
-            influencer_id: id
+            influencer_id: numericId
           };
         });
 
@@ -595,7 +634,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         const nextPricingIdVal = (await getMaxId(SUPABASE_TABLES.influencerPricing)) + 1;
         const pricingPayload = {
           id: nextPricingIdVal,
-          influencer_id: id,
+          influencer_id: numericId,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           video1_count: (influencerData.pricing as any).video1_count,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -658,7 +697,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           return {
             ...p,
             id: nextProductId,
-            influencer_id: id
+            influencer_id: numericId
           };
         });
 
@@ -683,7 +722,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           return {
             ...p,
             id: nextPerfId,
-            influencer_id: id
+            influencer_id: numericId
           };
         });
 

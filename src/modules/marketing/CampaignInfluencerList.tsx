@@ -269,11 +269,11 @@ City: ${influencer.city}`;
                         </div>
                       )}
                     </div>
-                    {p.video_views && p.video_views.length > 0 ? (
+                    {p.video_views && p.video_views.some(v => v !== null && v !== undefined && (v as any) !== '') ? (
                       <div>
                         <div className="flex justify-between items-center mb-2">
                            <span className="text-xs text-slate-400 font-semibold">Previous 15 Videos Views</span>
-                           {p.video_views.length > 3 && (
+                           {p.video_views && p.video_views.slice(3).some(v => v !== null && v !== undefined && (v as any) !== '') && (
                              <button onClick={() => togglePlatformExpanded(p.platform)} className="text-xs text-blue-400 hover:text-blue-300">
                                {expandedPlatforms[p.platform] ? 'View Less' : 'View More'}
                              </button>
