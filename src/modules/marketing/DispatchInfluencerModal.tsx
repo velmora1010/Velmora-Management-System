@@ -185,17 +185,13 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       if (platformName === 'Instagram') {
                         return influencer.instagram_view_code || '—';
                       }
-                      const plat = influencer.platforms?.find(p => p.platform.toLowerCase() === platformName.toLowerCase());
-                      if (!plat || !plat.video_views || !plat.video_views.some(v => v !== null && v !== 0 && String(v) !== '')) {
-                        return '—';
-                      }
-                      let code = '—';
                       if (platformName === 'Facebook') {
-                        code = calculateFacebookViewCode(plat.video_views).code;
-                      } else if (platformName === 'Youtube') {
-                        code = calculateYoutubeViewCode(plat.video_views).code;
+                        return influencer.facebook_view_code || '—';
                       }
-                      return code === 'Not Eligible' ? '—' : code;
+                      if (platformName === 'Youtube') {
+                        return influencer.youtube_view_code || '—';
+                      }
+                      return '—';
                     };
 
                     const displayInsta = getDisplayViewCode('Instagram');

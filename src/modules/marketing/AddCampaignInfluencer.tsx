@@ -243,7 +243,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         profile_file_url: initialData.profile_file_url || '',
         auto_dm: initialData.auto_dm || false,
         code: initialData.code || '',
-        instagram_view_code: initialData.instagram_view_code || ''
+        instagram_view_code: initialData.instagram_view_code || '',
+        facebook_view_code: initialData.facebook_view_code || '',
+        youtube_view_code: initialData.youtube_view_code || ''
       };
     }
     return {
@@ -259,7 +261,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       profile_file_url: '',
       auto_dm: false,
       code: '',
-      instagram_view_code: ''
+      instagram_view_code: '',
+      facebook_view_code: '',
+      youtube_view_code: ''
     };
   });
 
@@ -1111,37 +1115,31 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       ))}
                     </div>
 
-                    {p.platform === 'Instagram' ? (
-                      <div className="mt-4 flex flex-col gap-1.5 max-w-xs">
-                        <label className="block text-xs font-semibold text-slate-400">Instagram View Code</label>
-                        <input 
-                          type="text" 
-                          value={basicInfo.instagram_view_code || ''}
-                          onChange={e => setBasicInfo(prev => ({ ...prev, instagram_view_code: e.target.value }))}
-                          className="bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-xs focus:outline-none focus:border-purple-500 font-mono"
-                          placeholder="Enter Instagram View Code (e.g. C4L2)"
-                        />
-                      </div>
-                    ) : (() => {
-                      let code = '';
-                      if (p.platform === 'Facebook') {
-                        code = calculateFacebookViewCode(p.video_views || []).code;
+                    {(p.platform === 'Instagram' || p.platform === 'Facebook' || p.platform === 'Youtube') && (() => {
+                      let value = '';
+                      let onChangeHandler = (val: string) => {};
+                      
+                      if (p.platform === 'Instagram') {
+                        value = basicInfo.instagram_view_code || '';
+                        onChangeHandler = (val) => setBasicInfo(prev => ({ ...prev, instagram_view_code: val }));
+                      } else if (p.platform === 'Facebook') {
+                        value = basicInfo.facebook_view_code || '';
+                        onChangeHandler = (val) => setBasicInfo(prev => ({ ...prev, facebook_view_code: val }));
                       } else if (p.platform === 'Youtube') {
-                        code = calculateYoutubeViewCode(p.video_views || []).code;
+                        value = basicInfo.youtube_view_code || '';
+                        onChangeHandler = (val) => setBasicInfo(prev => ({ ...prev, youtube_view_code: val }));
                       }
                       
-                      const displayVal = code && code !== 'Not Eligible' ? code : '—';
-                      
                       return (
-                        <div className="mt-4 flex items-center gap-3 bg-slate-950/30 border border-slate-800/80 rounded-xl px-4 py-2.5 max-w-xs">
-                          <span className="text-xs font-semibold text-slate-400">{p.platform} View Code:</span>
-                          <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded border ${
-                            displayVal && displayVal !== 'Not Eligible' && displayVal !== '—'
-                              ? 'bg-purple-900/30 text-purple-400 border-purple-800/30'
-                              : 'bg-slate-900/40 text-slate-500 border-slate-800/30'
-                          }`}>
-                            {displayVal}
-                          </span>
+                        <div className="mt-4 flex flex-col gap-1.5 max-w-xs">
+                          <label className="block text-xs font-semibold text-slate-400">Performance Code</label>
+                          <input 
+                            type="text" 
+                            value={value}
+                            onChange={e => onChangeHandler(e.target.value)}
+                            className="bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-xs focus:outline-none focus:border-purple-500 font-mono"
+                            placeholder="Enter Performance Code (e.g. C4L2)"
+                          />
                         </div>
                       );
                     })()}

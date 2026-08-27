@@ -122,6 +122,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             }
           }
           const instagram_view_code = viewsJson?.instagram_view_code || null;
+          const facebook_view_code = viewsJson?.facebook_view_code || null;
+          const youtube_view_code = viewsJson?.youtube_view_code || null;
 
           const cleanLangs = Array.isArray(inf.languages)
             ? inf.languages.filter((l: string) => !l.startsWith('views_data:'))
@@ -178,7 +180,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             performance: brandPerformance,
             brandPerformance,
             dispatchDetails,
-            instagram_view_code
+            instagram_view_code,
+            facebook_view_code,
+            youtube_view_code
           };
         });
       }
@@ -228,7 +232,12 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  const buildPlatformViewsPayload = (platforms: any[], instagramViewCode?: string | null) => {
+  const buildPlatformViewsPayload = (
+    platforms: any[],
+    instagramViewCode?: string | null,
+    facebookViewCode?: string | null,
+    youtubeViewCode?: string | null
+  ) => {
     const platformViews: Record<string, any[]> = {};
     (platforms || []).forEach(p => {
       const platformName = p.platform;
@@ -285,7 +294,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     
     return { 
       platform_views: platformViews,
-      instagram_view_code: instagramViewCode || null
+      instagram_view_code: instagramViewCode || null,
+      facebook_view_code: facebookViewCode || null,
+      youtube_view_code: youtubeViewCode || null
     };
   };
 
@@ -301,7 +312,12 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         const maxInfoId = await getMaxId(SUPABASE_TABLES.influencersInfo);
         const newInfluencerId = maxInfoId + 1;
 
-        const platformViewsPayload = buildPlatformViewsPayload(influencerData.platforms || [], influencerData.instagram_view_code);
+        const platformViewsPayload = buildPlatformViewsPayload(
+          influencerData.platforms || [],
+          influencerData.instagram_view_code,
+          influencerData.facebook_view_code,
+          influencerData.youtube_view_code
+        );
         const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
         const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
 
@@ -494,7 +510,12 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       
       const finalCode = (influencerData.code || '').trim();
 
-      const platformViewsPayload = buildPlatformViewsPayload(influencerData.platforms || [], influencerData.instagram_view_code);
+      const platformViewsPayload = buildPlatformViewsPayload(
+        influencerData.platforms || [],
+        influencerData.instagram_view_code,
+        influencerData.facebook_view_code,
+        influencerData.youtube_view_code
+      );
       const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
       const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
 

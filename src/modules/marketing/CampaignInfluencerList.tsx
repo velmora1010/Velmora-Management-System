@@ -134,17 +134,13 @@ City: ${influencer.city}`;
               if (platformName === 'Instagram') {
                 return influencer.instagram_view_code || '—';
               }
-              const plat = influencer.platforms?.find(p => p.platform.toLowerCase() === platformName.toLowerCase());
-              if (!plat || !plat.video_views || !plat.video_views.some(v => v !== null && v !== 0 && String(v) !== '')) {
-                return '—';
-              }
-              let code = '—';
               if (platformName === 'Facebook') {
-                code = calculateFacebookViewCode(plat.video_views).code;
-              } else if (platformName === 'Youtube') {
-                code = calculateYoutubeViewCode(plat.video_views).code;
+                return influencer.facebook_view_code || '—';
               }
-              return code === 'Not Eligible' ? '—' : code;
+              if (platformName === 'Youtube') {
+                return influencer.youtube_view_code || '—';
+              }
+              return '—';
             };
 
             const displayInsta = getDisplayViewCode('Instagram');
@@ -260,11 +256,15 @@ City: ${influencer.city}`;
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
                       <div><span className="text-slate-500 block text-xs">Username</span><span className="text-slate-200">{p.username || '-'}</span></div>
                       <div><span className="text-slate-500 block text-xs">Followers</span><span className="text-slate-200">{p.followers_count || '-'}</span></div>
-                      {p.platform === 'Instagram' && (
+                      {(p.platform === 'Instagram' || p.platform === 'Facebook' || p.platform === 'Youtube') && (
                         <div>
-                          <span className="text-slate-500 block text-xs">Instagram View Code</span>
+                          <span className="text-slate-500 block text-xs">Performance Code</span>
                           <span className="inline-block bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-2 py-0.5 rounded text-xs font-mono select-all mt-0.5">
-                            {influencer.instagram_view_code || '—'}
+                            {p.platform === 'Instagram' 
+                              ? (influencer.instagram_view_code || '—') 
+                              : p.platform === 'Facebook' 
+                                ? (influencer.facebook_view_code || '—') 
+                                : (influencer.youtube_view_code || '—')}
                           </span>
                         </div>
                       )}
