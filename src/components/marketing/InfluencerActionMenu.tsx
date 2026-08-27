@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MoreVertical, Truck, Edit, Copy, Archive, ArchiveRestore } from 'lucide-react';
+import { MoreVertical, Truck, Edit, Copy, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
 
 interface InfluencerActionMenuProps {
   isDispatched: boolean;
@@ -8,6 +8,7 @@ interface InfluencerActionMenuProps {
   onEdit: () => void;
   onCopy: () => void;
   onToggleArchive: () => void;
+  onDelete?: () => void;
 }
 
 export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
@@ -16,7 +17,8 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
   onDispatch,
   onEdit,
   onCopy,
-  onToggleArchive
+  onToggleArchive,
+  onDelete
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -96,6 +98,16 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
               {isArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
               {isArchived ? 'Restore' : 'Archive'}
             </button>
+
+            {onDelete && (
+              <button
+                onClick={() => handleAction(onDelete)}
+                className="w-full text-left px-4 py-3 flex items-center gap-3 text-sm text-red-400 hover:bg-slate-800 hover:text-red-300 transition-colors border-t border-slate-800"
+              >
+                <Trash2 size={16} />
+                Delete
+              </button>
+            )}
           </div>
         </div>
       )}

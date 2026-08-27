@@ -767,6 +767,55 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       setIsSaving(false);
     }
   };
+  const deleteInfluencer = async (id: string): Promise<boolean> => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const numericId = parseInt(id, 10);
+      if (isNaN(numericId)) {
+        throw new Error(`Invalid influencer ID: ${id}`);
+      }
+
+      // 1. Delete pricing and bargain history
+      const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', numericId);
+      if (oldPricing && oldPricing.length > 0) {
+        const oldPricingIds = oldPricing.map(p => p.id).filter(Boolean);
+        if (oldPricingIds.length > 0) {
+          const { error: bargainDelErr } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
+          if (bargainDelErr) throw bargainDelErr;
+        }
+      }
+
+      // 2. Delete other relational tables safely
+      const { error: platDelErr } = await supabase.from(SUPABASE_TABLES.influencerPlatform).delete().eq('influencer_id', numericId);
+      if (platDelErr) throw platDelErr;
+
+      const { error: pricingDelErr } = await supabase.from(SUPABASE_TABLES.influencerPricing).delete().eq('influencer_id', numericId);
+      if (pricingDelErr) throw pricingDelErr;
+
+      const { error: prodDelErr } = await supabase.from(SUPABASE_TABLES.influencerProduct).delete().eq('influencer_id', numericId);
+      if (prodDelErr) throw prodDelErr;
+
+      const { error: perfDelErr } = await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).delete().eq('influencer_id', numericId);
+      if (perfDelErr) throw perfDelErr;
+
+      const { error: dispatchDelErr } = await supabase.from(SUPABASE_TABLES.influencerDispatch).delete().eq('influencer_id', numericId);
+      if (dispatchDelErr) throw dispatchDelErr;
+
+      // 3. Delete base influencer info row
+      const { error: infoDelErr } = await supabase.from(SUPABASE_TABLES.influencersInfo).delete().eq('id', numericId);
+      if (infoDelErr) throw infoDelErr;
+
+      await loadInfluencers();
+      return true;
+    } catch (err: any) {
+      console.error('Error deleting influencer:', err);
+      setError(err instanceof Error ? err : new Error(err?.message || JSON.stringify(err)));
+      throw err;
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return {
     influencers,
@@ -776,6 +825,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     addInfluencer,
     updateInfluencer,
     toggleArchiveStatus,
+    deleteInfluencer,
     refresh: () => loadInfluencers()
   };
 };

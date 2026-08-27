@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2 } from 'lucide-react';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
@@ -11,12 +11,14 @@ const InfluencerCard = ({
   influencer, 
   onEdit, 
   onToggleArchive,
-  onDispatch 
+  onDispatch,
+  onDelete
 }: { 
   influencer: CampaignInfluencer, 
   onEdit: (inf: CampaignInfluencer) => void,
   onToggleArchive: (id: string, isArchived: boolean) => void,
-  onDispatch?: (inf: CampaignInfluencer) => void
+  onDispatch?: (inf: CampaignInfluencer) => void,
+  onDelete: (id: string, name: string) => void
 }) => {
   const [activeTab, setActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance'>('basic');
   const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
@@ -65,6 +67,7 @@ City: ${influencer.city}`;
             ) : (
                 <button onClick={() => onToggleArchive(influencer.id, true)} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-red-400 transition-colors" title="Archive"><Archive size={14} /></button>
             )}
+            <button onClick={() => onDelete(influencer.id, influencer.influencer_name || influencer.name || '')} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-red-550 transition-colors" title="Delete Permanently"><Trash2 size={14} /></button>
         </div>
 
         {/* Header Actions - Mobile (<768px) */}
@@ -76,6 +79,7 @@ City: ${influencer.city}`;
               onEdit={() => onEdit(influencer)}
               onCopy={handleCopy}
               onToggleArchive={() => onToggleArchive(influencer.id, !isArchived(influencer.is_archived))}
+              onDelete={() => onDelete(influencer.id, influencer.influencer_name || influencer.name || '')}
             />
         </div>
 
@@ -448,7 +452,20 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   editingInfluencerId,
   onCancelEdit
 }) => {
-  const { influencers, isLoading, refresh, toggleArchiveStatus } = useCampaignInfluencers(campaign.id);
+  const { influencers, isLoading, refresh, toggleArchiveStatus, deleteInfluencer } = useCampaignInfluencers(campaign.id);
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete influencer "${name}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      await deleteInfluencer(id);
+      toast.success(`Influencer "${name}" deleted permanently.`);
+    } catch (err) {
+      console.error('Failed to delete influencer:', err);
+      toast.error('Failed to delete influencer.');
+    }
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'active' | 'archived'>('active');
 
@@ -554,6 +571,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                 onEdit={onEdit} 
                 onToggleArchive={toggleArchiveStatus} 
                 onDispatch={onDispatch}
+                onDelete={handleDelete}
               />
             ))}
           </div>
