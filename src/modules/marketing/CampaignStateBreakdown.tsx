@@ -225,15 +225,15 @@ export const CampaignStateBreakdown: React.FC<CampaignStateBreakdownProps> = ({ 
               <div className="space-y-2">
                 <div className="flex justify-between font-medium border-b border-slate-700 pb-1">
                   <span className="text-slate-300">Influencers</span>
-                  <span className="text-slate-100">{card.influencersTotal.toLocaleString()}</span>
+                  <span className="text-slate-100">{(card?.influencersTotal ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>DIY</span>
-                  <span className="text-slate-300">{card.influencersDIY.toLocaleString()}</span>
+                  <span className="text-slate-300">{(card?.influencersDIY ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Sponge</span>
-                  <span className="text-slate-300">{card.influencersSponge.toLocaleString()}</span>
+                  <span className="text-slate-300">{(card?.influencersSponge ?? 0).toLocaleString()}</span>
                 </div>
               </div>
 
@@ -241,15 +241,15 @@ export const CampaignStateBreakdown: React.FC<CampaignStateBreakdownProps> = ({ 
               <div className="space-y-2">
                 <div className="flex justify-between font-medium border-b border-slate-700 pb-1">
                   <span className="text-slate-300">Videos</span>
-                  <span className="text-slate-100">{card.videosTotal.toLocaleString()}</span>
+                  <span className="text-slate-100">{(card?.videosTotal ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>DIY</span>
-                  <span className="text-slate-300">{card.videosDIY.toLocaleString()}</span>
+                  <span className="text-slate-300">{(card?.videosDIY ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Sponge</span>
-                  <span className="text-slate-300">{card.videosSponge.toLocaleString()}</span>
+                  <span className="text-slate-300">{(card?.videosSponge ?? 0).toLocaleString()}</span>
                 </div>
               </div>
 
@@ -257,15 +257,15 @@ export const CampaignStateBreakdown: React.FC<CampaignStateBreakdownProps> = ({ 
               <div className="space-y-2">
                 <div className="flex justify-between font-medium border-b border-slate-700 pb-1">
                   <span className="text-slate-300">Budget</span>
-                  <span className="text-slate-100">₹{card.budgetTotal.toLocaleString()}</span>
+                  <span className="text-slate-100">₹{(card?.budgetTotal ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>DIY</span>
-                  <span className="text-slate-300">₹{card.budgetDIY.toLocaleString()}</span>
+                  <span className="text-slate-300">₹{(card?.budgetDIY ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Sponge</span>
-                  <span className="text-slate-300">₹{card.budgetSponge.toLocaleString()}</span>
+                  <span className="text-slate-300">₹{(card?.budgetSponge ?? 0).toLocaleString()}</span>
                 </div>
               </div>
 

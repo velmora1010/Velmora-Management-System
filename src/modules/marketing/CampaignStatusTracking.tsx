@@ -1289,9 +1289,16 @@ const FinalPostForm = ({ record, onSave }: any) => {
   const expectedDate = record[draftDateKey];
   const expectedTime = record[draftTimeKey];
   
-  const formattedExpectedDate = expectedDate && expectedTime 
-    ? new Date(`${expectedDate}T${expectedTime}`).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).replace(',', ' •')
-    : 'Not Set';
+  const formattedExpectedDate = (() => {
+    if (!expectedDate || !expectedTime) return 'Not Set';
+    try {
+      const d = new Date(`${expectedDate}T${expectedTime}`);
+      if (Number.isNaN(d.getTime())) return 'Not Set';
+      return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).replace(',', ' •');
+    } catch {
+      return 'Not Set';
+    }
+  })();
 
   // Video 1 Status
   const isV1Completed = !!v1Confirmed && !isFakeUrl(v1Link) && !!v1PostedAt;

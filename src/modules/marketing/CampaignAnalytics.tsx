@@ -342,17 +342,17 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
             </div>
             <div>
               <div className="text-sm text-slate-400 font-medium">Total Influencers</div>
-              <div className="text-2xl font-bold text-slate-100 mt-1">{metrics.totalInfluencers.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-slate-100 mt-1">{(metrics?.totalInfluencers ?? 0).toLocaleString()}</div>
             </div>
           </div>
           <div className="flex justify-between items-end mt-4 pt-4 border-t border-slate-700/50 text-sm">
             <div>
               <span className="text-slate-500 block text-xs">DIY</span>
-              <span className="text-slate-200 font-medium">{metrics.diyCount.toLocaleString()}</span>
+              <span className="text-slate-200 font-medium">{(metrics?.diyCount ?? 0).toLocaleString()}</span>
             </div>
             <div className="text-right">
               <span className="text-slate-500 block text-xs">Sponge</span>
-              <span className="text-slate-200 font-medium">{metrics.spongeCount.toLocaleString()}</span>
+              <span className="text-slate-200 font-medium">{(metrics?.spongeCount ?? 0).toLocaleString()}</span>
             </div>
           </div>
         </div>
@@ -365,17 +365,17 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
             </div>
             <div>
               <div className="text-sm text-slate-400 font-medium">Total Videos</div>
-              <div className="text-2xl font-bold text-slate-100 mt-1">{metrics.totalVideos.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-slate-100 mt-1">{(metrics?.totalVideos ?? 0).toLocaleString()}</div>
             </div>
           </div>
           <div className="flex justify-between items-end mt-4 pt-4 border-t border-slate-700/50 text-sm">
             <div>
               <span className="text-slate-500 block text-xs">DIY</span>
-              <span className="text-slate-200 font-medium">{metrics.diyVideos.toLocaleString()}</span>
+              <span className="text-slate-200 font-medium">{(metrics?.diyVideos ?? 0).toLocaleString()}</span>
             </div>
             <div className="text-right">
               <span className="text-slate-500 block text-xs">Sponge</span>
-              <span className="text-slate-200 font-medium">{metrics.spongeVideos.toLocaleString()}</span>
+              <span className="text-slate-200 font-medium">{(metrics?.spongeVideos ?? 0).toLocaleString()}</span>
             </div>
           </div>
         </div>
@@ -388,17 +388,17 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
             </div>
             <div>
               <div className="text-sm text-slate-400 font-medium">Total Budget</div>
-              <div className="text-2xl font-bold text-slate-100 mt-1">₹{metrics.totalBudget.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-slate-100 mt-1">₹{(metrics?.totalBudget ?? 0).toLocaleString()}</div>
             </div>
           </div>
           <div className="flex justify-between items-end mt-4 pt-4 border-t border-slate-700/50 text-sm">
             <div>
               <span className="text-slate-500 block text-xs">DIY</span>
-              <span className="text-slate-200 font-medium">₹{metrics.diyBudget.toLocaleString()}</span>
+              <span className="text-slate-200 font-medium">₹{(metrics?.diyBudget ?? 0).toLocaleString()}</span>
             </div>
             <div className="text-right">
               <span className="text-slate-500 block text-xs">Sponge</span>
-              <span className="text-slate-200 font-medium">₹{metrics.spongeBudget.toLocaleString()}</span>
+              <span className="text-slate-200 font-medium">₹{(metrics?.spongeBudget ?? 0).toLocaleString()}</span>
             </div>
           </div>
         </div>
@@ -411,17 +411,17 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
             </div>
             <div>
               <div className="text-sm text-slate-400 font-medium">Avg Budget Per Video</div>
-              <div className="text-2xl font-bold text-slate-100 mt-1">₹{metrics.avgBudget.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-slate-100 mt-1">₹{(metrics?.avgBudget ?? 0).toLocaleString()}</div>
             </div>
           </div>
           <div className="flex justify-between items-end mt-4 pt-4 border-t border-slate-700/50 text-sm">
             <div>
               <span className="text-slate-500 block text-xs">DIY</span>
-              <span className="text-slate-200 font-medium">₹{metrics.avgDiy.toLocaleString()}</span>
+              <span className="text-slate-200 font-medium">₹{(metrics?.avgDiy ?? 0).toLocaleString()}</span>
             </div>
             <div className="text-right">
               <span className="text-slate-500 block text-xs">Sponge</span>
-              <span className="text-slate-200 font-medium">₹{metrics.avgSponge.toLocaleString()}</span>
+              <span className="text-slate-200 font-medium">₹{(metrics?.avgSponge ?? 0).toLocaleString()}</span>
             </div>
           </div>
         </div>
@@ -436,7 +436,7 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
           <div className="space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-slate-400">Budget Used</span>
-              <span className="text-slate-200 font-semibold">₹{budgetUsed.toLocaleString()} / ₹{campaign.total_budget.toLocaleString()}</span>
+              <span className="text-slate-200 font-semibold">₹{(budgetUsed ?? 0).toLocaleString()} / ₹{(campaign?.total_budget ?? 0).toLocaleString()}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Onboarded Influencers</span>
@@ -561,15 +561,15 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-400">Total Budget Booked</span>
-                <span className="text-slate-200 font-semibold">₹{budgetUsed.toLocaleString()}</span>
+                <span className="text-slate-200 font-semibold">₹{(budgetUsed ?? 0).toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Total Paid Amount</span>
-                <span className="text-slate-205 text-emerald-400 font-bold">₹{totalPaid.toLocaleString()}</span>
+                <span className="text-slate-205 text-emerald-400 font-bold">₹{(totalPaid ?? 0).toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Total Remaining Payment</span>
-                <span className="text-slate-205 text-orange-400 font-bold">₹{remainingPayment.toLocaleString()}</span>
+                <span className="text-slate-205 text-orange-400 font-bold">₹{(remainingPayment ?? 0).toLocaleString()}</span>
               </div>
               <div className="flex justify-between pt-2 border-t border-slate-700/50">
                 <span className="text-slate-300 font-semibold">Pending Remaining Payments</span>

@@ -41,19 +41,19 @@ export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ campaign }) =>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-slate-400">Total Budget</span>
-            <span className="text-slate-200 font-medium">₹{campaign.total_budget?.toLocaleString() || 0}</span>
+            <span className="text-slate-200 font-medium">₹{(campaign?.total_budget ?? 0).toLocaleString()}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-slate-400">Expected Influencers</span>
-            <span className="text-slate-200 font-medium">{campaign.expected_influencers || 0}</span>
+            <span className="text-slate-200 font-medium">{campaign?.expected_influencers || 0}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-slate-400">Expected Videos</span>
-            <span className="text-slate-200 font-medium">{campaign.expected_total_videos || 0}</span>
+            <span className="text-slate-200 font-medium">{campaign?.expected_total_videos || 0}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-slate-400">Average Per Video Cost</span>
-            <span className="text-slate-200 font-medium">₹{campaign.avg_per_video_cost?.toLocaleString() || 0}</span>
+            <span className="text-slate-200 font-medium">₹{(campaign?.avg_per_video_cost ?? 0).toLocaleString()}</span>
           </div>
         </div>
 

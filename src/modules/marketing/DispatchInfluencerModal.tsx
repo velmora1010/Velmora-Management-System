@@ -288,7 +288,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                             <li key={idx} className="flex justify-between items-center text-sm border-b border-slate-800 pb-2 last:border-0 last:pb-0">
                               <div className="flex flex-col">
                                 <span className="text-slate-300 font-medium">{p.product_name}</span>
-                                <span className="text-[10px] text-slate-500">₹{unitPrice.toLocaleString('en-IN')} / unit</span>
+                                <span className="text-[10px] text-slate-500">₹{(unitPrice ?? 0).toLocaleString('en-IN')} / unit</span>
                               </div>
                               <span className="bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono border border-slate-700/50 text-xs">Qty: {p.quantity}</span>
                             </li>
@@ -309,7 +309,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <label className="block text-xs font-medium text-slate-400 mb-1">Total Value (₹)</label>
                       <input 
                         type="text" 
-                        value={totalValue ? `₹${Number(totalValue).toLocaleString('en-IN')}` : '₹0'} 
+                        value={totalValue ? `₹${(Number(totalValue) || 0).toLocaleString('en-IN')}` : '₹0'} 
                         readOnly 
                         className="w-full bg-slate-900 border border-slate-705 rounded-lg px-3 py-2 text-sm text-slate-450 cursor-not-allowed font-semibold" 
                       />

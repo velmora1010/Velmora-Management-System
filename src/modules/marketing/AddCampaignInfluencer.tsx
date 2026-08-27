@@ -1420,7 +1420,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               <div className="bg-slate-900/40 p-[18px] h-[110px] rounded-xl border border-slate-800 shadow-sm flex flex-col justify-between hover:border-slate-700 transition-colors">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-1">Final Price</span>
                 <div className="text-[26px] font-bold text-purple-400 leading-none">
-                  ₹ {pricing.final_price.toLocaleString('en-IN') || '0'}
+                  ₹ {(pricing?.final_price ?? 0).toLocaleString('en-IN')}
                 </div>
                 <span className="text-xs text-slate-500 block">Total negotiated amount</span>
               </div>
