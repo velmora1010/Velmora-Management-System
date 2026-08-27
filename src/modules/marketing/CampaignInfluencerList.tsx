@@ -6,6 +6,7 @@ import { InfluencerActionMenu } from '../../components/marketing/InfluencerActio
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from './AddCampaignInfluencer';
+import { logActivity } from '../../services/activityService';
 
 interface InfluencerFilterState {
   missingPhone: boolean;
@@ -594,6 +595,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const handleApplyFilter = () => {
     setFilterState(tempFilterState);
     setIsFilterOpen(false);
+    logActivity('Marketing', 'Influencer Filter Updated', 'Updated the Influencer List filter options.');
   };
 
   const handleClearFilter = () => {

@@ -264,7 +264,7 @@ export const DashboardPage = () => {
 
       {/* ── Bottom row: Recent Activity + Dept/Section Panel ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <RecentActivity items={data.recentActivity} isLoading={isLoading} />
+        <RecentActivity />
         <DeptSectionPanel
           departments={departments}
           sections={sections}

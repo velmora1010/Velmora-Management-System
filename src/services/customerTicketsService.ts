@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import type { CustomerTicket } from '../types/customer-tickets';
+import { logActivity } from './activityService';
 
 const mapToDb = (ticket: Partial<CustomerTicket>) => {
   const dbObj: any = {};
@@ -122,6 +123,13 @@ export const customerTicketsService = {
       .single();
     if (error) throw error;
 
+    // Non-blocking activity logging
+    logActivity(
+      'Customer Tickets',
+      'Ticket Created',
+      `Ticket ${newTicketId} was created for customer "${ticket.customerName || 'Unknown'}" (Issue: ${ticket.issueType || 'N/A'}).`
+    );
+
     return { id: data.id, ticketId: newTicketId };
   },
 
@@ -137,6 +145,14 @@ export const customerTicketsService = {
       .update(dbPayload)
       .eq('id', id);
     if (error) throw error;
+
+    // Non-blocking activity logging
+    const action = updates.status === 'Resolved' ? 'Ticket Resolved' : 'Ticket Updated';
+    logActivity(
+      'Customer Tickets',
+      action,
+      `Ticket ID ${id} was ${updates.status === 'Resolved' ? 'resolved' : 'updated'}${updates.customerName ? ` for "${updates.customerName}"` : ''}.`
+    );
   },
 
   async deleteTicket(id: number) {

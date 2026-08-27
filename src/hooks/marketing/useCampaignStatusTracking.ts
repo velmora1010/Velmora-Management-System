@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { logActivity } from '../../services/activityService';
 
 export interface StatusTrackingRecord {
   id: string;
@@ -199,6 +200,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
   // Save specific milestone data (PATCH only the provided fields)
   const saveMilestone = async (trackingId: string, updates: Partial<StatusTrackingRecord>) => {
     try {
+      const targetRecord = trackingRecords.find(r => String(r.id) === String(trackingId));
+      const influencerName = (targetRecord as any)?.influencer_name || (targetRecord as any)?.creator_name || `ID ${targetRecord?.influencer_id || 'Unknown'}`;
+
       const { error } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerStatus)
         .update(updates)
@@ -210,6 +214,13 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
       setTrackingRecords(prev => prev.map(record => 
         record.id === trackingId ? { ...record, ...updates } : record
       ));
+
+      // Non-blocking activity logging
+      logActivity(
+        'Logistics',
+        'Dispatch Updated',
+        `Milestone tracking updated for influencer "${influencerName}".`
+      );
       
       return { success: true };
     } catch (err: any) {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { logActivity } from '../../services/activityService';
 
 export interface DispatchPayload {
   influencer_id: string;
@@ -98,6 +99,13 @@ export const useDispatch = () => {
         .insert([dbPayload]);
 
       if (dispatchError) throw dispatchError;
+
+      // Non-blocking activity logging
+      logActivity(
+        'Logistics',
+        'Order Dispatched',
+        `Order for influencer "${payload.creator_name || 'Unknown'}" was dispatched with tracking ID ${payload.tracking_id || 'N/A'}.`
+      );
 
       return true;
     } catch (err: unknown) {

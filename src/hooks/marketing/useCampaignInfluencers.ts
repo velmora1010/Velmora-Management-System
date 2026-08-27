@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import type { CampaignInfluencer, InfluencerBargainHistory } from '../../types';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { logActivity } from '../../services/activityService';
 
 // Language and Campaign code generation mapping helper
 export const LANGUAGE_MAPPING: Record<string, string> = {
@@ -513,6 +514,29 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         }
 
         await loadInfluencers();
+
+        // Non-blocking activity logging
+        (async () => {
+          let campaignName = 'Campaign';
+          try {
+            const { data: campData } = await supabase
+              .from('influencer_create_campaigns_rows')
+              .select('campaign_name')
+              .eq('id', campaignId)
+              .single();
+            if (campData?.campaign_name) {
+              campaignName = campData.campaign_name;
+            }
+          } catch (err) {
+            console.error('Failed to fetch campaign name for log:', err);
+          }
+          logActivity(
+            'Marketing',
+            'Influencer Added',
+            `Influencer "${influencerData.influencer_name || influencerData.name || 'Unknown'}" was added to ${campaignName}.`
+          );
+        })();
+
         return true;
     } catch (err: any) {
       console.error('Error saving campaign influencer:', err);
@@ -751,6 +775,29 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       }
 
       await loadInfluencers();
+
+      // Non-blocking activity logging
+      (async () => {
+        let campaignName = 'Campaign';
+        try {
+          const { data: campData } = await supabase
+            .from('influencer_create_campaigns_rows')
+            .select('campaign_name')
+            .eq('id', campaignId)
+            .single();
+          if (campData?.campaign_name) {
+            campaignName = campData.campaign_name;
+          }
+        } catch (err) {
+          console.error('Failed to fetch campaign name for log:', err);
+        }
+        logActivity(
+          'Marketing',
+          'Influencer Updated',
+          `Influencer "${influencerData.influencer_name || influencerData.name || id}" was updated in ${campaignName}.`
+        );
+      })();
+
       return true;
     } catch (err: any) {
       console.error('Error updating campaign influencer:', err);
@@ -790,6 +837,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         throw new Error(`Invalid influencer ID: ${id}`);
       }
 
+      const targetInfluencer = influencers.find(inf => String(inf.id) === String(id));
+      const influencerName = targetInfluencer?.influencer_name || targetInfluencer?.name || `ID ${id}`;
+
       // 1. Delete pricing and bargain history
       const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', numericId);
       if (oldPricing && oldPricing.length > 0) {
@@ -821,6 +871,14 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       if (infoDelErr) throw infoDelErr;
 
       await loadInfluencers();
+
+      // Non-blocking activity logging
+      logActivity(
+        'Marketing',
+        'Influencer Deleted',
+        `Influencer "${influencerName}" was deleted.`
+      );
+
       return true;
     } catch (err: any) {
       console.error('Error deleting influencer:', err);

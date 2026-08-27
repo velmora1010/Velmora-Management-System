@@ -17,6 +17,7 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { getDepartmentNavigation, saveDepartmentNavigation, DepartmentNavigation } from '../../utils/navigationPersistence';
+import { logActivity } from '../../services/activityService';
 
 interface CampaignDetailsProps {
   campaign: Campaign;
@@ -210,6 +211,14 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
       if (updateError) {
         console.error("Update dispatch status error:", updateError);
       }
+
+      // Non-blocking activity logging
+      const influencerName = record.influencer_name || record.creator_name || `ID ${record.influencer_id || 'Unknown'}`;
+      logActivity(
+        'Logistics',
+        'Tracking Information Added',
+        `Influencer "${influencerName}" dispatch moved to status tracking.`
+      );
 
       toast.success('Moved to Status Tracking successfully!');
       handleViewChange('status-tracking');

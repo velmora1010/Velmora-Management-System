@@ -4,6 +4,7 @@ import { SUPABASE_TABLES } from '../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { deriveScanCodeFromBarcode } from '../modules/inventory/production/productHelpers';
 import { barcodeService } from './barcodeService';
+import { logActivity } from './activityService';
 
 export const getMasterBarcode = (item: any) => {
   return (
@@ -629,6 +630,13 @@ class LocalInventoryService {
     const payload = { ...material, id: material.id || crypto.randomUUID() };
     list.push(payload);
     await this.saveSettingsList('inventory_materials', list);
+
+    // Non-blocking activity logging
+    logActivity(
+      'Inventory',
+      'Material Added',
+      `Raw material "${material.name || material.material_name || 'Unknown'}" was added.`
+    );
   }
 
   async updateMaterial(id: string, updates: any) {
@@ -637,6 +645,13 @@ class LocalInventoryService {
     if (idx > -1) {
       list[idx] = { ...list[idx], ...updates };
       await this.saveSettingsList('inventory_materials', list);
+
+      // Non-blocking activity logging
+      logActivity(
+        'Inventory',
+        'Material Updated',
+        `Raw material "${updates.name || updates.material_name || list[idx].name || id}" was updated.`
+      );
     }
   }
 
@@ -772,6 +787,14 @@ class LocalInventoryService {
     }));
     
     await this.saveBatches(newBatches);
+
+    // Non-blocking activity logging
+    logActivity(
+      'Inventory',
+      'Stock Intake Recorded',
+      `Raw material intake recorded with ${newBatches.length} batch(es) for "${inventoryInRecord.material_name || inventoryInRecord.name || 'Unknown'}".`
+    );
+
     return newBatches.map(b => b.id);
   }
 

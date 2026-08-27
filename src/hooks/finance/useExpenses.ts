@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { logActivity } from '../../services/activityService';
 
 export interface FinanceExpense {
   id?: string;
@@ -124,6 +125,14 @@ export const useExpenses = () => {
       }
 
       setExpenses(prev => [data, ...prev]);
+
+      // Non-blocking activity logging
+      logActivity(
+        'Finance',
+        'Expense Added',
+        `Expense of ₹${data.amount || expenseData.amount} was added for vendor "${data.vendor || expenseData.vendor || 'Unknown'}" under category "${data.main_category || expenseData.main_category}".`
+      );
+
       return { success: true, data };
     } catch (e: unknown) {
       console.error('Failed to add expense:', e);
@@ -149,6 +158,14 @@ export const useExpenses = () => {
       }
 
       setExpenses(prev => prev.map(e => e.id === id ? data : e));
+
+      // Non-blocking activity logging
+      logActivity(
+        'Finance',
+        'Expense Updated',
+        `Expense ID ${id} was updated (vendor: "${data.vendor || updates.vendor || 'Unknown'}").`
+      );
+
       return { success: true, data };
     } catch (e: unknown) {
       console.error('Failed to update expense:', e);

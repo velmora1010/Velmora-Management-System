@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import type { Campaign } from '../../types';
+import { logActivity } from '../../services/activityService';
 
 export const useCampaigns = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -93,6 +94,14 @@ export const useCampaigns = () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const inserted = (data as any[])[0] as Campaign;
       setCampaigns(prev => [inserted, ...prev]);
+
+      // Non-blocking activity logging
+      logActivity(
+        'Marketing',
+        'Campaign Created',
+        `Campaign "${inserted.campaign_name}" was created.`
+      );
+
       return inserted;
     }
     return null;
@@ -108,6 +117,13 @@ export const useCampaigns = () => {
     if (error) throw error;
     if (data && data.length > 0) {
       setCampaigns(prev => prev.map(c => c.id === id ? data[0] : c));
+
+      // Non-blocking activity logging
+      logActivity(
+        'Marketing',
+        'Campaign Updated',
+        `Campaign "${data[0].campaign_name || campaignData.campaign_name || id}" was updated.`
+      );
     }
     return data;
   };

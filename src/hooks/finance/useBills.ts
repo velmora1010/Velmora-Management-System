@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { logActivity } from '../../services/activityService';
 
 export interface FinanceBill {
   id?: string;
@@ -101,6 +102,14 @@ export const useBills = () => {
       }
 
       setBills(prev => [data, ...prev]);
+
+      // Non-blocking activity logging
+      logActivity(
+        'Finance',
+        'Bill Added',
+        `Bill of ₹${data.amount || billData.amount} was added under category "${data.main_category || billData.main_category}".`
+      );
+
       return { success: true, data };
     } catch (e: unknown) {
       console.error('Failed to add bill:', e);

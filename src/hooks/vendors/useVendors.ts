@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import type { Vendor } from '../../types';
+import { logActivity } from '../../services/activityService';
 
 export const useVendors = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -39,7 +40,8 @@ export const useVendors = () => {
     setIsLoading(true);
     setError(null);
     try {
-      if (vendorData.id) {
+      const isUpdate = !!vendorData.id;
+      if (isUpdate) {
         // Update existing
         const { error: updateError } = await supabase
           .from('Vendors_row')
@@ -59,6 +61,15 @@ export const useVendors = () => {
         if (insertError) throw insertError;
       }
       await fetchVendors();
+
+      // Non-blocking activity logging
+      const vendorName = vendorData.vendor_name || 'Unknown';
+      logActivity(
+        'Finance',
+        isUpdate ? 'Vendor Updated' : 'Vendor Created',
+        `Vendor "${vendorName}" was ${isUpdate ? 'updated' : 'created'}.`
+      );
+
       return true;
     } catch (err: unknown) {
       console.error('Error saving vendor:', err);

@@ -56,6 +56,9 @@ const TicketDetails = lazy(() => import('./modules/customer-tickets/TicketDetail
 // Logistics
 const LogisticsPage = lazy(() => import('./modules/Logistics/LogisticsPage').then(module => ({ default: module.LogisticsPage })));
 
+// Activity History
+const ActivityHistoryPage = lazy(() => import('./pages/ActivityHistoryPage').then(module => ({ default: module.ActivityHistoryPage })));
+
 // Sales Department
 const SalesHome = lazy(() => import('./modules/sales/SalesHome').then(module => ({ default: module.SalesHome })));
 const WebsiteSales = lazy(() => import('./modules/sales/WebsiteSales').then(module => ({ default: module.WebsiteSales })));
@@ -96,6 +99,9 @@ function App() {
                   
                   {/* Dashboard */}
                   <Route path="/dashboard" element={<DashboardPage />} />
+                  
+                  {/* Activity History */}
+                  <Route path="/activity-history" element={<ActivityHistoryPage />} />
                   
                   {/* Operations Department */}
                   <Route path="/operations" element={<OperationsLayout />}>
