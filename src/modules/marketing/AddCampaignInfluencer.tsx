@@ -232,7 +232,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   const savedForm = getSavedForm();
 
   const [basicInfo, setBasicInfo] = useState<Partial<CampaignInfluencer>>(() => {
-    if (savedForm?.basicInfo) return savedForm.basicInfo;
     if (initialData) {
       return {
         name: initialData.name || '',
@@ -274,7 +273,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState(() => {
-    const pUrl = savedForm?.basicInfo?.profile_file_url || initialData?.profile_file_url;
+    const pUrl = initialData?.profile_file_url;
     if (pUrl) {
       return pUrl.split('/').pop() || 'Existing File';
     }
@@ -282,7 +281,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   });
 
   const [platformAvailability, setPlatformAvailability] = useState<string>(() => {
-    if (savedForm?.platformAvailability) return savedForm.platformAvailability;
     if (initialData?.platforms && initialData.platforms.length > 0) {
       const pNames = initialData.platforms.map(p => p.platform.toLowerCase());
       const hasInsta = pNames.includes('instagram');
@@ -301,7 +299,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   });
 
   const [platformAgreed, setPlatformAgreed] = useState<string>(() => {
-    if (savedForm?.platformAgreed) return savedForm.platformAgreed;
     if (initialData?.platforms && initialData.platforms.length > 0) {
       const pNames = initialData.platforms.map(p => p.platform.toLowerCase());
       const hasInsta = pNames.includes('instagram');
@@ -320,8 +317,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   });
 
   const [platforms, setPlatforms] = useState<InfluencerPlatformDetail[]>(() => {
-    if (savedForm?.platforms) return savedForm.platforms;
-    
     const defaultPlatforms = [
       { platform: 'Instagram', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
       { platform: 'Youtube', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
@@ -331,13 +326,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     if (initialData?.platforms && initialData.platforms.length > 0) {
       return defaultPlatforms.map(p => {
         const match = initialData.platforms?.find(x => x.platform.toLowerCase() === p.platform.toLowerCase());
-        
-        let dbCode = '';
-        if (match && Array.isArray(match.video_views)) {
-          if (p.platform === 'Instagram') dbCode = calculateInstagramViewCode(match.video_views).code;
-          else if (p.platform === 'Facebook') dbCode = calculateFacebookViewCode(match.video_views).code;
-          else if (p.platform === 'Youtube') dbCode = calculateYoutubeViewCode(match.video_views).code;
-        }
         
         if (match) {
           const views = Array.isArray(match.video_views) ? match.video_views : [];
@@ -352,13 +340,10 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
             platform: p.platform, 
             video_views: paddedViews as unknown as number[],
             video_views_dates: paddedDates,
-            performance_code: dbCode || (match as any).performance_code || ''
+            performance_code: (match as any).performance_code || ''
           };
         }
-        return {
-          ...p,
-          performance_code: dbCode
-        };
+        return p;
       });
     }
 
@@ -366,8 +351,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   });
 
   const [videos, setVideos] = useState<VideoPricingDetail[]>(() => {
-    if (savedForm?.videos) return savedForm.videos;
-    
     if (initialData?.pricing) {
       const v1c = Number(initialData.pricing.video1_count) || 0;
       const v1p = Number(initialData.pricing.video1_price) || 0;
@@ -432,8 +415,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   });
 
   const [pricing, setPricing] = useState<InfluencerPricing>(() => {
-    if (savedForm?.pricing) return savedForm.pricing;
-    
     if (initialData?.pricing) {
       const v1c = Number(initialData.pricing.video1_count) || 0;
       const v1p = Number(initialData.pricing.video1_price) || 0;
@@ -479,7 +460,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   });
 
   const [products, setProducts] = useState<InfluencerProduct[]>(() => {
-    if (savedForm?.products) return savedForm.products;
     if (initialData?.products) {
       return initialData.products.map(p => ({ ...p, selected: true }));
     }
@@ -487,10 +467,15 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   });
 
   const [performance, setPerformance] = useState<InfluencerBrandPerformance[]>(() => {
-    if (savedForm?.performance) return savedForm.performance;
     const perfData = initialData?.brandPerformance || initialData?.performance;
     return perfData || [];
   });
+
+  // Clear any existing sessionStorage draft on mount to prevent stale data carry-over
+  useEffect(() => {
+    const key = getFormStorageKey();
+    sessionStorage.removeItem(key);
+  }, [initialData?.id]);
 
   // Auto-Save Effect
   useEffect(() => {
@@ -732,7 +717,19 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       const visiblePlats = getVisiblePlatforms();
       const cleanedPlatforms = platforms
         .filter(p => visiblePlats.includes(p.platform))
-        .filter(p => p.username || p.profile_link || (Array.isArray(p.video_views) && p.video_views.some(v => v !== undefined && v !== null && String(v).trim() !== '')))
+        .filter(p => {
+          const hasUsername = (p.username || '').trim() !== '';
+          const hasProfileLink = (p.profile_link || '').trim() !== '';
+          const hasFollowers = p.followers_count !== undefined && p.followers_count !== null && p.followers_count !== 0;
+          const hasViews = Array.isArray(p.video_views) && p.video_views.some(v => v !== undefined && v !== null && String(v).trim() !== '');
+          
+          let hasPerfCode = false;
+          if (p.platform === 'Instagram') hasPerfCode = (basicInfo.instagram_view_code || '').trim() !== '';
+          else if (p.platform === 'Facebook') hasPerfCode = (basicInfo.facebook_view_code || '').trim() !== '';
+          else if (p.platform === 'Youtube') hasPerfCode = (basicInfo.youtube_view_code || '').trim() !== '';
+
+          return hasUsername || hasProfileLink || hasFollowers || hasViews || hasPerfCode;
+        })
         .map(p => ({
           ...p,
           video_views: Array.isArray(p.video_views) 
@@ -1094,19 +1091,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                                 }
                               }
                               
-                              let viewCodeVal = '';
-                              if (p.platform === 'Instagram') {
-                                viewCodeVal = calculateInstagramViewCode(newViews).code;
-                              } else if (p.platform === 'Facebook') {
-                                viewCodeVal = calculateFacebookViewCode(newViews).code;
-                              } else if (p.platform === 'Youtube') {
-                                viewCodeVal = calculateYoutubeViewCode(newViews).code;
-                              }
-                              
                               updatePlatformFields(idx, {
                                 video_views: newViews as unknown as number[],
-                                video_views_dates: newDates,
-                                performance_code: viewCodeVal
+                                video_views_dates: newDates
                               });
                             }}
                             className="w-full bg-slate-800 border border-slate-700 rounded-lg p-1.5 text-slate-200 text-xs text-center focus:outline-none focus:border-purple-500" 

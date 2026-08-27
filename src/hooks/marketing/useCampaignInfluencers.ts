@@ -265,25 +265,21 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         if (val !== undefined && val !== null && val !== '' && String(val).trim() !== '') {
           const viewVal = parseViewCountLocal(val);
           
-          let enteredDate = date;
-          if (!enteredDate || String(enteredDate).trim() === '' || enteredDate === '—') {
-            const now = new Date();
-            const yr = now.getFullYear();
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const monthName = months[now.getMonth()];
-            const dy = String(now.getDate()).padStart(2, '0');
-            enteredDate = `${dy}-${monthName}-${yr}`;
-          }
-
-          let ymdDate = enteredDate;
-          if (enteredDate && enteredDate.includes('-')) {
-            const parts = enteredDate.split('-');
-            if (parts.length === 3) {
-              const [dy, moName, yr] = parts;
-              const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-              const monthIdx = months.indexOf(moName);
-              const mo = String(monthIdx !== -1 ? monthIdx + 1 : 1).padStart(2, '0');
-              ymdDate = `${yr}-${mo}-${dy}`;
+          let ymdDate = null;
+          if (date && String(date).trim() !== '' && date !== '—') {
+            if (date.includes('-')) {
+              const parts = date.split('-');
+              if (parts.length === 3) {
+                const [dy, moName, yr] = parts;
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const monthIdx = months.indexOf(moName);
+                const mo = String(monthIdx !== -1 ? monthIdx + 1 : 1).padStart(2, '0');
+                ymdDate = `${yr}-${mo}-${dy}`;
+              } else {
+                ymdDate = date;
+              }
+            } else {
+              ymdDate = date;
             }
           }
 
