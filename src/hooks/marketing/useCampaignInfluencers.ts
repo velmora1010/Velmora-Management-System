@@ -109,17 +109,19 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
         combinedData = infoList.map(inf => {
           let platformViews: any = null;
+          let viewsJson: any = null;
           const matchViewsElement = Array.isArray(inf.languages) 
             ? inf.languages.find((l: string) => l.startsWith('views_data:')) 
             : null;
           if (matchViewsElement) {
             try {
-              const viewsJson = JSON.parse(matchViewsElement.substring('views_data:'.length));
+              viewsJson = JSON.parse(matchViewsElement.substring('views_data:'.length));
               platformViews = viewsJson?.platform_views || {};
             } catch (e) {
               console.error('Error parsing views_data:', e);
             }
           }
+          const instagram_view_code = viewsJson?.instagram_view_code || null;
 
           const cleanLangs = Array.isArray(inf.languages)
             ? inf.languages.filter((l: string) => !l.startsWith('views_data:'))
@@ -175,7 +177,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             products,
             performance: brandPerformance,
             brandPerformance,
-            dispatchDetails
+            dispatchDetails,
+            instagram_view_code
           };
         });
       }
@@ -225,7 +228,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     return isNaN(parsed) ? 0 : parsed;
   };
 
-  const buildPlatformViewsPayload = (platforms: any[]) => {
+  const buildPlatformViewsPayload = (platforms: any[], instagramViewCode?: string | null) => {
     const platformViews: Record<string, any[]> = {};
     (platforms || []).forEach(p => {
       const platformName = p.platform;
@@ -280,7 +283,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       }
     });
     
-    return { platform_views: platformViews };
+    return { 
+      platform_views: platformViews,
+      instagram_view_code: instagramViewCode || null
+    };
   };
 
   const addInfluencer = async (influencerData: Partial<CampaignInfluencer>): Promise<boolean> => {
@@ -289,55 +295,20 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     setIsSaving(true);
     setError(null);
     try {
-        // 1. Get Campaign Name
-        let campaignName = '';
-        const { data: campaignData } = await supabase
-          .from('influencer_create_campaigns_rows')
-          .select('campaign_name')
-          .eq('id', campaignId)
-          .single();
-        if (campaignData) {
-          campaignName = campaignData.campaign_name || '';
-        }
-
-        const campaignCode = getCampaignCode(campaignName);
-        const langCode = getLanguageCode(influencerData.languages || []) || 'INF';
-
-        // 2. Query all existing codes for this campaign
-        const { data: existingCodes, error: codeErr } = await supabase
-          .from(SUPABASE_TABLES.influencersInfo)
-          .select('code')
-          .eq('campaign_id', campaignId);
-        
-        if (codeErr) throw codeErr;
-
-        let maxNum = 0;
-        if (existingCodes && existingCodes.length > 0) {
-          (existingCodes as any[]).forEach(row => {
-            const codeStr = (row.code || '').trim();
-            const parts = codeStr.split('-');
-            const numStr = parts[parts.length - 1];
-            const num = parseInt(numStr, 10);
-            if (!isNaN(num) && num > maxNum) {
-              maxNum = num;
-            }
-          });
-        }
-        const serialNum = maxNum + 1;
-        const newCode = `${langCode}-${campaignCode}-${serialNum}`;
+        const finalCode = (influencerData.code || '').trim();
 
         // Get max ID for influencersInfo
         const maxInfoId = await getMaxId(SUPABASE_TABLES.influencersInfo);
         const newInfluencerId = maxInfoId + 1;
 
-        const platformViewsPayload = buildPlatformViewsPayload(influencerData.platforms || []);
+        const platformViewsPayload = buildPlatformViewsPayload(influencerData.platforms || [], influencerData.instagram_view_code);
         const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
         const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
 
         const infoPayload = {
           id: newInfluencerId,
           campaign_id: campaignId,
-          code: newCode,
+          code: finalCode,
           name: influencerData.name,
           influencer_name: influencerData.influencer_name,
           phone_number: influencerData.phone_number,
@@ -521,26 +492,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       // 1. Update basic info
       console.log("Saving table:", SUPABASE_TABLES.influencersInfo);
       
-      const { data: currentInf } = await supabase
-        .from(SUPABASE_TABLES.influencersInfo)
-        .select('code')
-        .eq('id', id)
-        .single();
-      
-      let finalCode = currentInf?.code || '';
-      
-      if (finalCode) {
-        const parts = finalCode.split('-');
-        if (parts.length === 3) {
-          const [oldLang, campaignPart, serialPart] = parts;
-          const newLangCode = getLanguageCode(influencerData.languages || []);
-          if (newLangCode && newLangCode !== oldLang) {
-            finalCode = `${newLangCode}-${campaignPart}-${serialPart}`;
-          }
-        }
-      }
+      const finalCode = (influencerData.code || '').trim();
 
-      const platformViewsPayload = buildPlatformViewsPayload(influencerData.platforms || []);
+      const platformViewsPayload = buildPlatformViewsPayload(influencerData.platforms || [], influencerData.instagram_view_code);
       const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
       const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
 

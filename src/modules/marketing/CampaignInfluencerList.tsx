@@ -131,14 +131,15 @@ City: ${influencer.city}`;
         <div className="text-sm">
           {activeTab === 'basic' && (() => {
             const getDisplayViewCode = (platformName: string): string => {
+              if (platformName === 'Instagram') {
+                return influencer.instagram_view_code || '—';
+              }
               const plat = influencer.platforms?.find(p => p.platform.toLowerCase() === platformName.toLowerCase());
               if (!plat || !plat.video_views || !plat.video_views.some(v => v !== null && v !== 0 && String(v) !== '')) {
                 return '—';
               }
               let code = '—';
-              if (platformName === 'Instagram') {
-                code = calculateInstagramViewCode(plat.video_views).code;
-              } else if (platformName === 'Facebook') {
+              if (platformName === 'Facebook') {
                 code = calculateFacebookViewCode(plat.video_views).code;
               } else if (platformName === 'Youtube') {
                 code = calculateYoutubeViewCode(plat.video_views).code;
@@ -259,11 +260,11 @@ City: ${influencer.city}`;
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
                       <div><span className="text-slate-500 block text-xs">Username</span><span className="text-slate-200">{p.username || '-'}</span></div>
                       <div><span className="text-slate-500 block text-xs">Followers</span><span className="text-slate-200">{p.followers_count || '-'}</span></div>
-                      {p.platform === 'Instagram' && p.performance_code && (
+                      {p.platform === 'Instagram' && (
                         <div>
-                          <span className="text-slate-500 block text-xs">Performance Code</span>
+                          <span className="text-slate-500 block text-xs">Instagram View Code</span>
                           <span className="inline-block bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-2 py-0.5 rounded text-xs font-mono select-all mt-0.5">
-                            {p.performance_code}
+                            {influencer.instagram_view_code || '—'}
                           </span>
                         </div>
                       )}
@@ -451,6 +452,22 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'active' | 'archived'>('active');
 
+  const editingInfluencer = useMemo(() => {
+    if (!editingInfluencerId) return null;
+    return influencers.find(inf => String(inf.id) === String(editingInfluencerId)) || null;
+  }, [influencers, editingInfluencerId]);
+
+  React.useEffect(() => {
+    if (editingInfluencerId) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [editingInfluencerId]);
+
   const filteredInfluencers = useMemo(() => {
     return influencers.filter(inf => {
       const matchStatus = filter === 'active' ? !isArchived(inf.is_archived) : isArchived(inf.is_archived);
@@ -530,31 +547,32 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredInfluencers.map(inf => {
-              if (editingInfluencerId && String(inf.id) === String(editingInfluencerId)) {
-                return (
-                  <div key={inf.id} className="col-span-full">
-                    <AddCampaignInfluencer 
-                      campaign={campaign} 
-                      initialData={inf} 
-                      onBack={onCancelEdit || (() => {})} 
-                    />
-                  </div>
-                );
-              }
-              return (
-                <InfluencerCard 
-                  key={inf.id} 
-                  influencer={inf} 
-                  onEdit={onEdit} 
-                  onToggleArchive={toggleArchiveStatus} 
-                  onDispatch={onDispatch}
-                />
-              );
-            })}
+            {filteredInfluencers.map(inf => (
+              <InfluencerCard 
+                key={inf.id} 
+                influencer={inf} 
+                onEdit={onEdit} 
+                onToggleArchive={toggleArchiveStatus} 
+                onDispatch={onDispatch}
+              />
+            ))}
           </div>
         )}
       </div>
+
+      {editingInfluencer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-hidden">
+          <div className="bg-slate-800 rounded-xl border border-slate-700 w-full max-w-5xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="flex-1 overflow-y-auto">
+              <AddCampaignInfluencer 
+                campaign={campaign} 
+                initialData={editingInfluencer} 
+                onBack={onCancelEdit || (() => {})} 
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

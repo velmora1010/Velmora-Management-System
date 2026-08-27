@@ -176,20 +176,21 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                         readOnly 
                         className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-purple-450 font-mono font-bold cursor-not-allowed select-all" 
                       />
-                      <span className="text-[9px] text-slate-500 mt-1 block leading-none">Automatically assigned</span>
+                      <span className="text-[9px] text-slate-500 mt-1 block leading-none">Assigned influencer code</span>
                     </div>
                   </div>
 
                   {(() => {
                     const getDisplayViewCode = (platformName: string): string => {
+                      if (platformName === 'Instagram') {
+                        return influencer.instagram_view_code || '—';
+                      }
                       const plat = influencer.platforms?.find(p => p.platform.toLowerCase() === platformName.toLowerCase());
                       if (!plat || !plat.video_views || !plat.video_views.some(v => v !== null && v !== 0 && String(v) !== '')) {
                         return '—';
                       }
                       let code = '—';
-                      if (platformName === 'Instagram') {
-                        code = calculateInstagramViewCode(plat.video_views).code;
-                      } else if (platformName === 'Facebook') {
+                      if (platformName === 'Facebook') {
                         code = calculateFacebookViewCode(plat.video_views).code;
                       } else if (platformName === 'Youtube') {
                         code = calculateYoutubeViewCode(plat.video_views).code;

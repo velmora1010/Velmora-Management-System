@@ -241,7 +241,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         state: initialData.state || '',
         languages: initialData.languages || [],
         profile_file_url: initialData.profile_file_url || '',
-        auto_dm: initialData.auto_dm || false
+        auto_dm: initialData.auto_dm || false,
+        code: initialData.code || '',
+        instagram_view_code: initialData.instagram_view_code || ''
       };
     }
     return {
@@ -255,7 +257,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       state: '',
       languages: [],
       profile_file_url: '',
-      auto_dm: false
+      auto_dm: false,
+      code: '',
+      instagram_view_code: ''
     };
   });
 
@@ -707,8 +711,13 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
   const handleSave = async () => {
     try {
+      if (!basicInfo.code || !basicInfo.code.trim()) {
+        toast.error('Influencer Code is required.');
+        return;
+      }
+
       if (!basicInfo.languages || basicInfo.languages.length === 0) {
-        toast.error('Please select at least one language. A language is required to generate the Influencer Code.');
+        toast.error('Please select at least one language.');
         return;
       }
 
@@ -810,23 +819,16 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         {activeTab === 'basic' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
-              {/* Influencer Code display card */}
-              <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800 flex justify-between items-center shadow-sm">
-                <div>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Influencer Code</span>
-                  <span className="text-sm font-semibold text-slate-300 mt-1 block">
-                    {initialData?.code ? (
-                      <span className="text-purple-400 font-mono font-extrabold">{initialData.code}</span>
-                    ) : (
-                      <span className="text-slate-500 italic">Auto-generated based on selected language</span>
-                    )}
-                  </span>
-                </div>
-                {initialData?.code && (
-                  <span className="bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-2 py-0.5 rounded text-[11px] font-mono select-none">
-                    Active Code
-                  </span>
-                )}
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Influencer Code</label>
+                <input 
+                  type="text" 
+                  name="code" 
+                  value={basicInfo.code || ''} 
+                  onChange={handleBasicChange}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 font-mono" 
+                  placeholder="Enter influencer code (e.g. HI-SC-2)"
+                />
               </div>
 
               <div>
@@ -1109,25 +1111,26 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       ))}
                     </div>
 
-                    {(() => {
+                    {p.platform === 'Instagram' ? (
+                      <div className="mt-4 flex flex-col gap-1.5 max-w-xs">
+                        <label className="block text-xs font-semibold text-slate-400">Instagram View Code</label>
+                        <input 
+                          type="text" 
+                          value={basicInfo.instagram_view_code || ''}
+                          onChange={e => setBasicInfo(prev => ({ ...prev, instagram_view_code: e.target.value }))}
+                          className="bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-xs focus:outline-none focus:border-purple-500 font-mono"
+                          placeholder="Enter Instagram View Code (e.g. C4L2)"
+                        />
+                      </div>
+                    ) : (() => {
                       let code = '';
-                      if (p.platform === 'Instagram') {
-                        code = calculateInstagramViewCode(p.video_views || []).code;
-                      } else if (p.platform === 'Facebook') {
+                      if (p.platform === 'Facebook') {
                         code = calculateFacebookViewCode(p.video_views || []).code;
                       } else if (p.platform === 'Youtube') {
                         code = calculateYoutubeViewCode(p.video_views || []).code;
                       }
                       
                       const displayVal = code && code !== 'Not Eligible' ? code : '—';
-                      
-                      if (p.platform === 'Instagram') {
-                        console.log("Instagram View Code:", displayVal);
-                      } else if (p.platform === 'Facebook') {
-                        console.log("Facebook View Code:", displayVal);
-                      } else if (p.platform === 'Youtube') {
-                        console.log("YouTube View Code:", displayVal);
-                      }
                       
                       return (
                         <div className="mt-4 flex items-center gap-3 bg-slate-950/30 border border-slate-800/80 rounded-xl px-4 py-2.5 max-w-xs">
