@@ -1,11 +1,71 @@
 import React, { useState, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2 } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal } from 'lucide-react';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from './AddCampaignInfluencer';
+
+interface InfluencerFilterState {
+  missingPhone: boolean;
+  missingAltPhone: boolean;
+  missingUpi: boolean;
+  missingCity: boolean;
+  missingState: boolean;
+  missingAddress: boolean;
+  missingInfluencerName: boolean;
+  missingUserName: boolean;
+  missingLanguage: boolean;
+  missingProfileImage: boolean;
+  platformCombo: 'all' | 'instagram' | 'youtube' | 'facebook' | 'instagram_youtube' | 'instagram_facebook' | 'youtube_facebook' | 'instagram_youtube_facebook' | 'none';
+}
+
+const initialFilterState: InfluencerFilterState = {
+  missingPhone: false,
+  missingAltPhone: false,
+  missingUpi: false,
+  missingCity: false,
+  missingState: false,
+  missingAddress: false,
+  missingInfluencerName: false,
+  missingUserName: false,
+  missingLanguage: false,
+  missingProfileImage: false,
+  platformCombo: 'all'
+};
+
+const resolvePerformanceCode = (
+  influencer: CampaignInfluencer,
+  platformName: string,
+  videoViews: number[]
+): { code: string; mode: 'auto' | 'manual' } => {
+  let mode: 'auto' | 'manual' = 'auto';
+  let manualCode: string | null = null;
+  
+  const platformLower = platformName.toLowerCase();
+  if (platformLower === 'instagram') {
+    mode = (influencer as any).instagram_view_code_mode || 'auto';
+    manualCode = influencer.instagram_view_code || null;
+  } else if (platformLower === 'facebook') {
+    mode = (influencer as any).facebook_view_code_mode || 'auto';
+    manualCode = influencer.facebook_view_code || null;
+  } else if (platformLower === 'youtube') {
+    mode = (influencer as any).youtube_view_code_mode || 'auto';
+    manualCode = influencer.youtube_view_code || null;
+  }
+
+  // Calculate auto code
+  let autoCode = 'Not Eligible';
+  if (platformLower === 'instagram') autoCode = calculateInstagramViewCode(videoViews || []).code;
+  else if (platformLower === 'facebook') autoCode = calculateFacebookViewCode(videoViews || []).code;
+  else if (platformLower === 'youtube') autoCode = calculateYoutubeViewCode(videoViews || []).code;
+
+  if (mode === 'manual' && manualCode) {
+    return { code: manualCode, mode: 'manual' };
+  }
+  return { code: autoCode === 'Not Eligible' ? '' : autoCode, mode: 'auto' };
+};
 
 const InfluencerCard = ({ 
   influencer, 
@@ -264,11 +324,7 @@ City: ${influencer.city}`;
                         <div>
                           <span className="text-slate-500 block text-xs">Performance Code</span>
                           <span className="inline-block bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-2 py-0.5 rounded text-xs font-mono select-all mt-0.5">
-                            {p.platform === 'Instagram' 
-                              ? (influencer.instagram_view_code || '—') 
-                              : p.platform === 'Facebook' 
-                                ? (influencer.facebook_view_code || '—') 
-                                : (influencer.youtube_view_code || '—')}
+                            {resolvePerformanceCode(influencer, p.platform, p.video_views).code || '—'}
                           </span>
                         </div>
                       )}
@@ -468,6 +524,101 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   };
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'active' | 'archived'>('active');
+  const [filterState, setFilterState] = useState<InfluencerFilterState>(initialFilterState);
+  const [tempFilterState, setTempFilterState] = useState<InfluencerFilterState>(initialFilterState);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  const isEmptyValue = (val: any): boolean => {
+    if (val === undefined || val === null) return true;
+    if (typeof val === 'string') return val.trim() === '';
+    if (Array.isArray(val)) return val.length === 0;
+    return false;
+  };
+
+  const matchesFilters = (influencer: CampaignInfluencer): boolean => {
+    if (filterState.missingPhone && !isEmptyValue(influencer.phone_number)) return false;
+    if (filterState.missingAltPhone && !isEmptyValue(influencer.alternative_number)) return false;
+    if (filterState.missingUpi && !isEmptyValue(influencer.upi_number)) return false;
+    if (filterState.missingCity && !isEmptyValue(influencer.city)) return false;
+    if (filterState.missingState && !isEmptyValue(influencer.state)) return false;
+    if (filterState.missingAddress && !isEmptyValue(influencer.complete_address)) return false;
+    if (filterState.missingInfluencerName && !isEmptyValue(influencer.name)) return false;
+    if (filterState.missingUserName && !isEmptyValue(influencer.influencer_name)) return false;
+    if (filterState.missingLanguage && !isEmptyValue(influencer.languages)) return false;
+    if (filterState.missingProfileImage && !isEmptyValue(influencer.profile_file_url)) return false;
+
+    const influencerPlatforms = (influencer.platforms || []).map(p => p.platform.toLowerCase());
+    const hasInstagram = influencerPlatforms.includes('instagram');
+    const hasFacebook = influencerPlatforms.includes('facebook');
+    const hasYoutube = influencerPlatforms.includes('youtube');
+
+    if (filterState.platformCombo !== 'all') {
+      switch (filterState.platformCombo) {
+        case 'instagram':
+          if (!(hasInstagram && !hasFacebook && !hasYoutube)) return false;
+          break;
+        case 'youtube':
+          if (!(hasYoutube && !hasInstagram && !hasFacebook)) return false;
+          break;
+        case 'facebook':
+          if (!(hasFacebook && !hasInstagram && !hasYoutube)) return false;
+          break;
+        case 'instagram_youtube':
+          if (!(hasInstagram && hasYoutube && !hasFacebook)) return false;
+          break;
+        case 'instagram_facebook':
+          if (!(hasInstagram && hasFacebook && !hasYoutube)) return false;
+          break;
+        case 'youtube_facebook':
+          if (!(hasYoutube && hasFacebook && !hasInstagram)) return false;
+          break;
+        case 'instagram_youtube_facebook':
+          if (!(hasInstagram && hasYoutube && hasFacebook)) return false;
+          break;
+        case 'none':
+          if (hasInstagram || hasFacebook || hasYoutube) return false;
+          break;
+        default:
+          break;
+      }
+    }
+
+    return true;
+  };
+
+  const handleOpenFilter = () => {
+    setTempFilterState(filterState);
+    setIsFilterOpen(!isFilterOpen);
+  };
+
+  const handleApplyFilter = () => {
+    setFilterState(tempFilterState);
+    setIsFilterOpen(false);
+  };
+
+  const handleClearFilter = () => {
+    setFilterState(initialFilterState);
+    setTempFilterState(initialFilterState);
+    setIsFilterOpen(false);
+  };
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filterState.missingPhone) count++;
+    if (filterState.missingAltPhone) count++;
+    if (filterState.missingUpi) count++;
+    if (filterState.missingCity) count++;
+    if (filterState.missingState) count++;
+    if (filterState.missingAddress) count++;
+    if (filterState.missingInfluencerName) count++;
+    if (filterState.missingUserName) count++;
+    if (filterState.missingLanguage) count++;
+    if (filterState.missingProfileImage) count++;
+    if (filterState.platformCombo !== 'all') count++;
+    return count;
+  }, [filterState]);
+
+  const isFilterApplied = activeFilterCount > 0;
 
   const editingInfluencer = useMemo(() => {
     if (!editingInfluencerId) return null;
@@ -486,16 +637,25 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   }, [editingInfluencerId]);
 
   const filteredInfluencers = useMemo(() => {
-    return influencers.filter(inf => {
+    let list = influencers.filter(inf => {
       const matchStatus = filter === 'active' ? !isArchived(inf.is_archived) : isArchived(inf.is_archived);
-      const term = searchTerm.toLowerCase();
-      const matchSearch = ((inf.name || '').toLowerCase().includes(term)) ||
-                          ((inf.influencer_name || '').toLowerCase().includes(term)) ||
-                          ((inf.code || '').toLowerCase().includes(term)) ||
-                          ((inf.city || '').toLowerCase().includes(term));
-      return matchStatus && matchSearch;
+      return matchStatus;
     });
-  }, [influencers, searchTerm, filter]);
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      list = list.filter(inf => 
+        (inf.name || '').toLowerCase().includes(term) ||
+        (inf.influencer_name || '').toLowerCase().includes(term) ||
+        (inf.code || '').toLowerCase().includes(term) ||
+        (inf.phone_number || '').toLowerCase().includes(term) ||
+        (inf.city || '').toLowerCase().includes(term) ||
+        (inf.state || '').toLowerCase().includes(term)
+      );
+    }
+
+    return list.filter(matchesFilters);
+  }, [influencers, searchTerm, filter, filterState]);
 
   return (
     <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col h-[700px]">
@@ -539,17 +699,232 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </button>
         </div>
 
-        <div className="relative w-full sm:w-64">
-          <input 
-            type="text" 
-            placeholder="Search influencers..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-          />
-          <Search size={16} className="absolute left-3 top-2.5 text-slate-500" />
+        <div className="flex gap-2 w-full sm:w-auto">
+          <div className="relative w-full sm:w-64">
+            <input 
+              type="text" 
+              placeholder="Search influencers..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+            />
+            <Search size={16} className="absolute left-3 top-2.5 text-slate-500" />
+          </div>
+          <button
+            onClick={handleOpenFilter}
+            className={`flex items-center gap-1.5 px-3 py-2 bg-slate-900 border ${isFilterApplied ? 'border-purple-500 text-purple-400 font-medium' : 'border-slate-700 text-slate-300'} hover:bg-slate-800 rounded-lg text-sm transition-colors focus:outline-none`}
+          >
+            <span>{isFilterApplied ? 'Filter' : '🔽 Filter'}</span>
+            {activeFilterCount > 0 && (
+              <span className="bg-purple-600 text-slate-100 text-[10px] font-bold rounded-full px-1.5 py-0.5 flex items-center justify-center select-none font-sans">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
+
+      {isFilterOpen && (
+        <div className="p-5 bg-slate-900/95 border-b border-slate-700 shadow-xl animate-fade-in relative z-20">
+          <div className="max-w-4xl mx-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center pb-3 border-b border-slate-800 mb-4">
+              <div className="flex items-center gap-2.5">
+                <SlidersHorizontal size={18} className="text-purple-400" />
+                <div>
+                  <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wide">Filter Influencers</h4>
+                  <p className="text-[11px] text-slate-500">Refine your influencer list</p>
+                </div>
+              </div>
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={handleClearFilter}
+                  className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 font-medium transition-colors focus:outline-none"
+                >
+                  <span>{activeFilterCount} Active</span>
+                  <span className="text-lg leading-none font-light">&times;</span>
+                </button>
+              )}
+            </div>
+
+            {/* Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Left Column: Basic Information */}
+              <div>
+                <div className="mb-3">
+                  <span className="block text-xs font-semibold text-purple-300 uppercase tracking-wider">Basic Information</span>
+                  <span className="block text-[10px] text-slate-500">Find influencers with missing details</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  {(() => {
+                    const basicInfoFields = [
+                      { key: 'missingPhone', label: 'Phone Number' },
+                      { key: 'missingAddress', label: 'Address' },
+                      { key: 'missingCity', label: 'City' },
+                      { key: 'missingState', label: 'State' },
+                      { key: 'missingUpi', label: 'UPI' },
+                      { key: 'missingLanguage', label: 'Language' },
+                      { key: 'missingInfluencerName', label: 'Influencer Name' },
+                      { key: 'missingUserName', label: 'User Name' },
+                      { key: 'missingProfileImage', label: 'Profile Image' },
+                    ] as const;
+
+                    return basicInfoFields.map((f, idx) => {
+                      const isChecked = tempFilterState[f.key];
+                      const isLast = idx === basicInfoFields.length - 1;
+                      return (
+                        <label
+                          key={f.key}
+                          className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all select-none ${isLast ? 'col-span-2' : ''} ${
+                            isChecked
+                              ? 'bg-purple-950/20 border-purple-500 text-slate-100 shadow-[0_0_12px_rgba(147,51,234,0.08)]'
+                              : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={e => setTempFilterState(prev => ({ ...prev, [f.key]: e.target.checked }))}
+                            className="rounded border-slate-700 bg-slate-950 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 w-3.5 h-3.5"
+                          />
+                          <span className="text-[11px] font-medium truncate">{f.label}</span>
+                        </label>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+
+              {/* Right Column: Platform Combination */}
+              <div>
+                <div className="mb-3">
+                  <span className="block text-xs font-semibold text-purple-300 uppercase tracking-wider">Platform Combination</span>
+                  <span className="block text-[10px] text-slate-500">Choose creator platform setup</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {(() => {
+                    const platformOptions = [
+                      { value: 'all', label: 'All Platforms', icons: [] },
+                      { value: 'instagram', label: 'Instagram Only', icons: [<svg key="ig" className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>] },
+                      { value: 'youtube', label: 'YouTube Only', icons: [<svg key="yt" className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></svg>] },
+                      { value: 'facebook', label: 'Facebook Only', icons: [<svg key="fb" className="w-3.5 h-3.5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>] },
+                      { value: 'instagram_youtube', label: 'Instagram + YouTube', icons: [<svg key="ig" className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>, <svg key="yt" className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></svg>] },
+                      { value: 'instagram_facebook', label: 'Instagram + Facebook', icons: [<svg key="ig" className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>, <svg key="fb" className="w-3.5 h-3.5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>] },
+                      { value: 'youtube_facebook', label: 'YouTube + Facebook', icons: [<svg key="yt" className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></svg>, <svg key="fb" className="w-3.5 h-3.5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>] },
+                      { value: 'instagram_youtube_facebook', label: 'Instagram + YouTube + FB', icons: [<svg key="ig" className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>, <svg key="yt" className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></svg>, <svg key="fb" className="w-3.5 h-3.5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>] },
+                      { value: 'none', label: 'No Platform', icons: [] }
+                    ] as const;
+
+                    return platformOptions.map((opt, idx) => {
+                      const isSelected = tempFilterState.platformCombo === opt.value;
+                      const isLast = idx === platformOptions.length - 1;
+                      return (
+                        <label
+                          key={opt.value}
+                          className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-all select-none ${isLast ? 'sm:col-span-2' : ''} ${
+                            isSelected
+                              ? 'bg-purple-950/20 border-purple-500 text-slate-100 shadow-[0_0_12px_rgba(147,51,234,0.08)]'
+                              : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="platformCombo"
+                              value={opt.value}
+                              checked={isSelected}
+                              onChange={() => setTempFilterState(prev => ({ ...prev, platformCombo: opt.value }))}
+                              className="border-slate-700 bg-slate-950 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 w-3.5 h-3.5"
+                            />
+                            <span className="text-[11px] font-medium">{opt.label}</span>
+                          </div>
+                          {opt.icons.length > 0 && (
+                            <div className="flex items-center gap-1.5 opacity-80 select-none">
+                              {opt.icons}
+                            </div>
+                          )}
+                        </label>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* Active Filters Summary Strip */}
+            <div className="bg-slate-900/40 border border-slate-800 rounded-lg p-3 my-4">
+              <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-2 select-none">Active Filters</span>
+              <div className="flex flex-wrap gap-1.5">
+                {(() => {
+                  const summaryChips: string[] = [];
+                  if (tempFilterState.missingPhone) summaryChips.push('Missing Phone');
+                  if (tempFilterState.missingAddress) summaryChips.push('Missing Address');
+                  if (tempFilterState.missingCity) summaryChips.push('Missing City');
+                  if (tempFilterState.missingState) summaryChips.push('Missing State');
+                  if (tempFilterState.missingUpi) summaryChips.push('Missing UPI');
+                  if (tempFilterState.missingLanguage) summaryChips.push('Missing Language');
+                  if (tempFilterState.missingInfluencerName) summaryChips.push('Missing Name');
+                  if (tempFilterState.missingUserName) summaryChips.push('Missing Username');
+                  if (tempFilterState.missingProfileImage) summaryChips.push('Missing Profile Image');
+                  
+                  if (tempFilterState.platformCombo !== 'all') {
+                    const labelMap: Record<string, string> = {
+                      instagram: 'Instagram Only',
+                      youtube: 'YouTube Only',
+                      facebook: 'Facebook Only',
+                      instagram_youtube: 'Instagram + YouTube',
+                      instagram_facebook: 'Instagram + Facebook',
+                      youtube_facebook: 'YouTube + Facebook',
+                      instagram_youtube_facebook: 'Instagram + YouTube + FB',
+                      none: 'No Platform'
+                    };
+                    summaryChips.push(labelMap[tempFilterState.platformCombo] || tempFilterState.platformCombo);
+                  }
+
+                  if (summaryChips.length === 0) {
+                    return <span className="text-xs text-slate-500 italic select-none">No filters selected</span>;
+                  }
+
+                  return summaryChips.map((chip, idx) => (
+                    <span key={idx} className="inline-flex items-center bg-purple-950/40 text-purple-300 border border-purple-800/30 px-2 py-0.5 rounded text-[10px] font-medium font-mono select-none">
+                      {chip}
+                    </span>
+                  ));
+                })()}
+              </div>
+            </div>
+
+            {/* Bottom Action Bar */}
+            <div className="flex justify-between items-center mt-6 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={handleClearFilter}
+                className="text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors focus:outline-none"
+              >
+                Clear all
+              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsFilterOpen(false)}
+                  className="px-4 py-2 border border-slate-800 hover:bg-slate-700/60 text-slate-300 text-xs font-semibold rounded-lg transition-colors focus:outline-none"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyFilter}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-slate-100 text-xs font-semibold rounded-lg transition-colors focus:outline-none shadow-md"
+                >
+                  Apply Filters
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* List Content */}
       <div className="flex-1 overflow-y-auto p-4">
