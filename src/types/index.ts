@@ -315,6 +315,9 @@ export interface CampaignInfluencer {
   instagram_view_code?: string | null;
   facebook_view_code?: string | null;
   youtube_view_code?: string | null;
+  instagram_view_code_mode?: string | null;
+  facebook_view_code_mode?: string | null;
+  youtube_view_code_mode?: string | null;
   created_at?: string;
   
   // Relational data mapped in hooks

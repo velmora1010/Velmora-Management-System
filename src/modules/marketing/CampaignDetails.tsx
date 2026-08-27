@@ -222,7 +222,15 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const renderContent = () => {
     switch (currentView) {
       case 'add-influencer':
+        if (editingInfluencerId && !editingInfluencer) {
+          return (
+            <div className="flex h-64 items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+            </div>
+          );
+        }
         return <AddCampaignInfluencer 
+                 key={editingInfluencer?.id ? `edit_${editingInfluencer.id}` : 'add'}
                  campaign={campaign} 
                  initialData={editingInfluencer || undefined}
                  onBack={() => {
@@ -238,6 +246,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                  onBack={() => handleViewChange('overview')} 
                  editingInfluencerId={editingInfluencerId}
                  onEdit={(inf) => {
+                   sessionStorage.removeItem(`influencer_edit_draft_${campaign.id}_${inf.id}`);
                    setEditingInfluencer(inf);
                    setEditingInfluencerId(String(inf.id));
                    saveDepartmentNavigation('marketing', '/marketing', {

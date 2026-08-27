@@ -231,100 +231,45 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
   const savedForm = getSavedForm();
 
-  const [basicInfo, setBasicInfo] = useState<Partial<CampaignInfluencer>>(() => {
+  // Consolidation of separate states into a single persistent formState object
+  interface FormState {
+    basicInfo: Partial<CampaignInfluencer>;
+    platformAvailability: string;
+    platformAgreed: string;
+    platforms: InfluencerPlatformDetail[];
+    videos: VideoPricingDetail[];
+    pricing: InfluencerPricing;
+    products: InfluencerProduct[];
+    performance: InfluencerBrandPerformance[];
+  }
+
+  const [formState, setFormState] = useState<FormState>(() => {
+    if (savedForm) {
+      return savedForm;
+    }
+
     if (initialData) {
-      return {
-        name: initialData.name || '',
-        influencer_name: initialData.influencer_name || '',
-        phone_number: initialData.phone_number || '',
-        alternative_number: initialData.alternative_number || '',
-        upi_number: initialData.upi_number || '',
-        city: initialData.city || '',
-        complete_address: initialData.complete_address || '',
-        state: initialData.state || '',
-        languages: initialData.languages || [],
-        profile_file_url: initialData.profile_file_url || '',
-        auto_dm: initialData.auto_dm || false,
-        code: initialData.code || '',
-        instagram_view_code: initialData.instagram_view_code || '',
-        facebook_view_code: initialData.facebook_view_code || '',
-        youtube_view_code: initialData.youtube_view_code || ''
-      };
-    }
-    return {
-      name: '',
-      influencer_name: '',
-      phone_number: '',
-      alternative_number: '',
-      upi_number: '',
-      city: '',
-      complete_address: '',
-      state: '',
-      languages: [],
-      profile_file_url: '',
-      auto_dm: false,
-      code: '',
-      instagram_view_code: '',
-      facebook_view_code: '',
-      youtube_view_code: ''
-    };
-  });
-
-  const [isUploadingImage, setIsUploadingImage] = useState(false);
-  const [uploadError, setUploadError] = useState('');
-  const [uploadedFileName, setUploadedFileName] = useState(() => {
-    const pUrl = initialData?.profile_file_url;
-    if (pUrl) {
-      return pUrl.split('/').pop() || 'Existing File';
-    }
-    return '';
-  });
-
-  const [platformAvailability, setPlatformAvailability] = useState<string>(() => {
-    if (initialData?.platforms && initialData.platforms.length > 0) {
-      const pNames = initialData.platforms.map(p => p.platform.toLowerCase());
+      const pNames = initialData.platforms?.map(p => p.platform.toLowerCase()) || [];
       const hasInsta = pNames.includes('instagram');
       const hasYoutube = pNames.includes('youtube');
       const hasFb = pNames.includes('facebook');
 
-      if (hasInsta && hasYoutube && hasFb) return 'All';
-      if (hasInsta && hasYoutube) return 'Instagram and Youtube';
-      if (hasInsta && hasFb) return 'Instagram and Facebook';
-      if (hasYoutube && hasFb) return 'Youtube and Facebook';
-      if (hasInsta) return 'Instagram';
-      if (hasYoutube) return 'Youtube';
-      if (hasFb) return 'Facebook';
-    }
-    return 'All';
-  });
+      let initialPlatformAvailability = 'All';
+      if (hasInsta && hasYoutube && hasFb) initialPlatformAvailability = 'All';
+      else if (hasInsta && hasYoutube) initialPlatformAvailability = 'Instagram and Youtube';
+      else if (hasInsta && hasFb) initialPlatformAvailability = 'Instagram and Facebook';
+      else if (hasYoutube && hasFb) initialPlatformAvailability = 'Youtube and Facebook';
+      else if (hasInsta) initialPlatformAvailability = 'Instagram';
+      else if (hasYoutube) initialPlatformAvailability = 'Youtube';
+      else if (hasFb) initialPlatformAvailability = 'Facebook';
 
-  const [platformAgreed, setPlatformAgreed] = useState<string>(() => {
-    if (initialData?.platforms && initialData.platforms.length > 0) {
-      const pNames = initialData.platforms.map(p => p.platform.toLowerCase());
-      const hasInsta = pNames.includes('instagram');
-      const hasYoutube = pNames.includes('youtube');
-      const hasFb = pNames.includes('facebook');
+      const defaultPlatforms = [
+        { platform: 'Instagram', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
+        { platform: 'Youtube', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
+        { platform: 'Facebook', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' }
+      ];
 
-      if (hasInsta && hasYoutube && hasFb) return 'All';
-      if (hasInsta && hasYoutube) return 'Instagram and Youtube';
-      if (hasInsta && hasFb) return 'Instagram and Facebook';
-      if (hasYoutube && hasFb) return 'Youtube and Facebook';
-      if (hasInsta) return 'Instagram';
-      if (hasYoutube) return 'Youtube';
-      if (hasFb) return 'Facebook';
-    }
-    return 'All';
-  });
-
-  const [platforms, setPlatforms] = useState<InfluencerPlatformDetail[]>(() => {
-    const defaultPlatforms = [
-      { platform: 'Instagram', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
-      { platform: 'Youtube', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
-      { platform: 'Facebook', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' }
-    ];
-
-    if (initialData?.platforms && initialData.platforms.length > 0) {
-      return defaultPlatforms.map(p => {
+      const mappedPlatforms = defaultPlatforms.map(p => {
         const match = initialData.platforms?.find(x => x.platform.toLowerCase() === p.platform.toLowerCase());
         
         if (match) {
@@ -345,154 +290,191 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         }
         return p;
       });
-    }
 
-    return defaultPlatforms;
-  });
+      const initialVideos: VideoPricingDetail[] = [];
+      if (initialData.pricing) {
+        const v1c = Number(initialData.pricing.video1_count) || 0;
+        const v1p = Number(initialData.pricing.video1_price) || 0;
+        const v2c = Number(initialData.pricing.video2_count) || 0;
+        const v2p = Number(initialData.pricing.video2_price) || 0;
+        const prodPricing = (initialData.pricing as any).product_pricing || {};
 
-  const [videos, setVideos] = useState<VideoPricingDetail[]>(() => {
-    if (initialData?.pricing) {
-      const v1c = Number(initialData.pricing.video1_count) || 0;
-      const v1p = Number(initialData.pricing.video1_price) || 0;
-      const v2c = Number(initialData.pricing.video2_count) || 0;
-      const v2p = Number(initialData.pricing.video2_price) || 0;
-      const prodPricing = (initialData.pricing as any).product_pricing || {};
-
-      let loadedVideos: VideoPricingDetail[] = [];
-      if (Array.isArray(prodPricing?.videos)) {
-        loadedVideos = prodPricing.videos.map((v: any, index: number) => {
-          const videoNum = index + 1;
-          let videoProds: VideoProductDetail[] = [];
-          if (Array.isArray(v.products)) {
-            videoProds = v.products.map((p: any) => ({
-              product_name: p.product_name || '',
-              qty: Number(p.qty) || 1
-            }));
-          } else {
-            const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
-            videoProds = matchingProds.map(p => ({
-              product_name: p.product_name,
-              qty: p.qty
-            }));
-          }
-          return {
-            combination: v.combination || '',
-            amount: Number(v.amount) || 0,
-            products: videoProds
-          };
-        });
-      } else {
-        // Fallback to legacy fields
-        if (v1c > 0) {
-          for (let i = 0; i < v1c; i++) {
-            const videoNum = i + 1;
-            const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
-            loadedVideos.push({
-              combination: v1c === 1 && v2c === 0 ? 'Detergent' : '',
-              amount: v1p,
-              products: matchingProds.map(p => ({ product_name: p.product_name, qty: p.qty }))
+        if (Array.isArray(prodPricing?.videos)) {
+          prodPricing.videos.forEach((v: any, index: number) => {
+            const videoNum = index + 1;
+            let videoProds: VideoProductDetail[] = [];
+            if (Array.isArray(v.products)) {
+              videoProds = v.products.map((p: any) => ({
+                product_name: p.product_name || '',
+                qty: Number(p.qty) || 1
+              }));
+            } else {
+              const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
+              videoProds = matchingProds.map(p => ({
+                product_name: p.product_name,
+                qty: p.qty
+              }));
+            }
+            initialVideos.push({
+              combination: v.combination || '',
+              amount: Number(v.amount) || 0,
+              products: videoProds
             });
+          });
+        } else {
+          // Fallback to legacy fields
+          if (v1c > 0) {
+            for (let i = 0; i < v1c; i++) {
+              const videoNum = i + 1;
+              const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
+              initialVideos.push({
+                combination: v1c === 1 && v2c === 0 ? 'Detergent' : '',
+                amount: v1p,
+                products: matchingProds.map(p => ({ product_name: p.product_name, qty: p.qty }))
+              });
+            }
           }
-        }
-        if (v2c > 0) {
-          for (let i = 0; i < v2c; i++) {
-            const videoNum = v1c + i + 1;
-            const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
-            loadedVideos.push({
-              combination: '',
-              amount: v2p,
-              products: matchingProds.map(p => ({ product_name: p.product_name, qty: p.qty }))
-            });
+          if (v2c > 0) {
+            for (let i = 0; i < v2c; i++) {
+              const videoNum = v1c + i + 1;
+              const matchingProds = (initialData.products || []).filter(p => p.video_number === videoNum);
+              initialVideos.push({
+                combination: '',
+                amount: v2p,
+                products: matchingProds.map(p => ({ product_name: p.product_name, qty: p.qty }))
+              });
+            }
           }
         }
       }
 
-      if (loadedVideos.length > 0) {
-        return loadedVideos;
+      if (initialVideos.length === 0) {
+        initialVideos.push({ combination: '', amount: 0, products: [] });
       }
-    }
-    return [{ combination: '', amount: 0, products: [] }];
-  });
 
-  const [pricing, setPricing] = useState<InfluencerPricing>(() => {
-    if (initialData?.pricing) {
-      const v1c = Number(initialData.pricing.video1_count) || 0;
-      const v1p = Number(initialData.pricing.video1_price) || 0;
-      const v2c = Number(initialData.pricing.video2_count) || 0;
-      const v2p = Number(initialData.pricing.video2_price) || 0;
-      const prodPricing = (initialData.pricing as any).product_pricing || {};
+      const v1c = Number(initialData.pricing?.video1_count) || 0;
+      const v1p = Number(initialData.pricing?.video1_price) || 0;
+      const v2c = Number(initialData.pricing?.video2_count) || 0;
+      const v2p = Number(initialData.pricing?.video2_price) || 0;
+      const prodPricing = (initialData.pricing as any)?.product_pricing || {};
 
-      let totalVideosCount = 1;
-      let finalPriceCalc = 0;
-      if (Array.isArray(prodPricing?.videos)) {
-        totalVideosCount = prodPricing.videos.length;
-        finalPriceCalc = prodPricing.videos.reduce((a: number, b: any) => a + (Number(b.amount) || 0), 0);
-      } else {
-        totalVideosCount = (v1c > 0 ? v1c : 0) + (v2c > 0 ? v2c : 0);
-        finalPriceCalc = (v1c * v1p) + (v2c * v2p);
-      }
-      if (totalVideosCount === 0) totalVideosCount = 1;
-
-      const bHistory = (initialData.pricing as any).bargainHistory || [];
+      let totalVideosCount = initialVideos.length;
+      let finalPriceCalc = initialVideos.reduce((a, b) => a + (Number(b.amount) || 0), 0);
+      const bHistory = (initialData.pricing as any)?.bargainHistory || [];
       const cleanBHistory = bHistory.length > 0 ? bHistory : [{ creator_request: 0, brand_request: 0 }];
 
       return {
-        video1_count: v1c,
-        video1_price: v1p,
-        video2_count: v2c,
-        video2_price: v2p,
-        total_videos: totalVideosCount,
-        final_price: finalPriceCalc,
-        bargainHistory: cleanBHistory,
-        product_pricing: prodPricing
+        basicInfo: {
+          name: initialData.name || '',
+          influencer_name: initialData.influencer_name || '',
+          phone_number: initialData.phone_number || '',
+          alternative_number: initialData.alternative_number || '',
+          upi_number: initialData.upi_number || '',
+          city: initialData.city || '',
+          complete_address: initialData.complete_address || '',
+          state: initialData.state || '',
+          languages: initialData.languages || [],
+          profile_file_url: initialData.profile_file_url || '',
+          auto_dm: initialData.auto_dm || false,
+          code: initialData.code || '',
+          instagram_view_code: initialData.instagram_view_code || '',
+          facebook_view_code: initialData.facebook_view_code || '',
+          youtube_view_code: initialData.youtube_view_code || '',
+          instagram_view_code_mode: (initialData as any).instagram_view_code_mode || 'auto',
+          facebook_view_code_mode: (initialData as any).facebook_view_code_mode || 'auto',
+          youtube_view_code_mode: (initialData as any).youtube_view_code_mode || 'auto'
+        },
+        platformAvailability: initialPlatformAvailability,
+        platformAgreed: initialPlatformAvailability,
+        platforms: mappedPlatforms,
+        videos: initialVideos,
+        pricing: {
+          video1_count: v1c,
+          video1_price: v1p,
+          video2_count: v2c,
+          video2_price: v2p,
+          total_videos: totalVideosCount,
+          final_price: finalPriceCalc,
+          bargainHistory: cleanBHistory,
+          product_pricing: prodPricing
+        },
+        products: initialData.products?.map(p => ({ ...p, selected: true })) || [],
+        performance: initialData.brandPerformance || initialData.performance || []
       };
     }
+
     return {
-      video1_count: 1,
-      video1_price: 0,
-      video2_count: 0,
-      video2_price: 0,
-      total_videos: 1,
-      final_price: 0,
-      bargainHistory: [{ creator_request: 0, brand_request: 0 }],
-      product_pricing: { videos: [{ combination: '', amount: 0, products: [] }] }
+      basicInfo: {
+        name: '',
+        influencer_name: '',
+        phone_number: '',
+        alternative_number: '',
+        upi_number: '',
+        city: '',
+        complete_address: '',
+        state: '',
+        languages: [],
+        profile_file_url: '',
+        auto_dm: false,
+        code: '',
+        instagram_view_code: '',
+        facebook_view_code: '',
+        youtube_view_code: '',
+        instagram_view_code_mode: 'auto',
+        facebook_view_code_mode: 'auto',
+        youtube_view_code_mode: 'auto'
+      },
+      platformAvailability: 'All',
+      platformAgreed: 'All',
+      platforms: [
+        { platform: 'Instagram', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
+        { platform: 'Youtube', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
+        { platform: 'Facebook', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' }
+      ],
+      videos: [
+        { video_number: 1, amount: 0, combination: '', platforms: [], products: [] }
+      ],
+      pricing: {
+        instagram_per_video: 0,
+        youtube_per_video: 0,
+        facebook_per_video: 0,
+        total_videos: 1,
+        total_amount: 0
+      },
+      products: [],
+      performance: []
     };
   });
 
-  const [products, setProducts] = useState<InfluencerProduct[]>(() => {
-    if (initialData?.products) {
-      return initialData.products.map(p => ({ ...p, selected: true }));
+  const {
+    basicInfo,
+    platformAvailability,
+    platformAgreed,
+    platforms,
+    videos,
+    pricing,
+    products,
+    performance
+  } = formState;
+
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadedFileName, setUploadedFileName] = useState(() => {
+    const pUrl = savedForm?.basicInfo?.profile_file_url || initialData?.profile_file_url;
+    if (pUrl) {
+      return pUrl.split('/').pop() || 'Existing File';
     }
-    return [];
+    return '';
   });
 
-  const [performance, setPerformance] = useState<InfluencerBrandPerformance[]>(() => {
-    const perfData = initialData?.brandPerformance || initialData?.performance;
-    return perfData || [];
-  });
-
-  // Clear any existing sessionStorage draft on mount to prevent stale data carry-over
-  useEffect(() => {
-    const key = getFormStorageKey();
-    sessionStorage.removeItem(key);
-  }, [initialData?.id]);
+  const [editingPlatformCode, setEditingPlatformCode] = useState<Record<string, boolean>>({});
 
   // Auto-Save Effect
   useEffect(() => {
     const key = getFormStorageKey();
-    const dataToSave = {
-      basicInfo,
-      platformAvailability,
-      platformAgreed,
-      platforms,
-      videos,
-      pricing,
-      products,
-      performance
-    };
-    console.log('[FORM PERSISTENCE] Saving:', dataToSave);
-    sessionStorage.setItem(key, JSON.stringify(dataToSave));
-  }, [basicInfo, platformAvailability, platformAgreed, platforms, videos, pricing, products, performance]);
+    console.log('[FORM PERSISTENCE] Saving:', formState);
+    sessionStorage.setItem(key, JSON.stringify(formState));
+  }, [formState]);
 
   // Helpers
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -517,7 +499,10 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         .from('influencer-profiles')
         .getPublicUrl(filePath);
 
-      setBasicInfo(prev => ({ ...prev, profile_file_url: publicData.publicUrl }));
+      setFormState(prev => ({
+        ...prev,
+        basicInfo: { ...prev.basicInfo, profile_file_url: publicData.publicUrl }
+      }));
       setUploadedFileName(file.name);
     } catch (err: unknown) {
       console.error("Upload error:", err);
@@ -531,19 +516,26 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     const { name, value, type } = e.target;
     if (type === 'checkbox') {
       const checked = (e.target as HTMLInputElement).checked;
-      setBasicInfo(prev => ({ ...prev, [name]: checked }));
+      setFormState(prev => ({
+        ...prev,
+        basicInfo: { ...prev.basicInfo, [name]: checked }
+      }));
     } else {
-      setBasicInfo(prev => ({ ...prev, [name]: value }));
+      setFormState(prev => ({
+        ...prev,
+        basicInfo: { ...prev.basicInfo, [name]: value }
+      }));
     }
   };
 
   const handleLanguageToggle = (lang: string) => {
-    setBasicInfo(prev => {
-      const langs = prev.languages || [];
-      if (langs.includes(lang)) {
-        return { ...prev, languages: langs.filter(l => l !== lang) };
-      }
-      return { ...prev, languages: [...langs, lang] };
+    setFormState(prev => {
+      const langs = prev.basicInfo.languages || [];
+      const nextLangs = langs.includes(lang) ? langs.filter(l => l !== lang) : [...langs, lang];
+      return {
+        ...prev,
+        basicInfo: { ...prev.basicInfo, languages: nextLangs }
+      };
     });
   };
 
@@ -561,139 +553,264 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   };
 
   const updatePlatform = <K extends keyof InfluencerPlatformDetail>(idx: number, field: K, value: InfluencerPlatformDetail[K]) => {
-    const updated = [...platforms];
-    updated[idx] = { ...updated[idx], [field]: value };
-    setPlatforms(updated);
+    setFormState(prev => {
+      const updated = [...prev.platforms];
+      updated[idx] = { ...updated[idx], [field]: value };
+      return { ...prev, platforms: updated };
+    });
   };
 
   const updatePlatformFields = (idx: number, fields: Partial<InfluencerPlatformDetail>) => {
-    const updated = [...platforms];
-    updated[idx] = { ...updated[idx], ...fields };
-    setPlatforms(updated);
+    setFormState(prev => {
+      const updated = [...prev.platforms];
+      updated[idx] = { ...updated[idx], ...fields };
+      return { ...prev, platforms: updated };
+    });
   };
 
-  const syncProductsFromVideos = (nextVideos: VideoPricingDetail[]) => {
-    const flatProducts: InfluencerProduct[] = [];
-    nextVideos.forEach((v, idx) => {
-      const videoNum = idx + 1;
-      (v.products || []).forEach(p => {
-        if (p.qty > 0) {
-          flatProducts.push({
-            video_number: videoNum,
-            product_name: p.product_name,
-            qty: p.qty,
-            selected: true
-          });
-        }
-      });
-    });
-    setProducts(flatProducts);
+  const getUpdatedPricing = (prevPricing: InfluencerPricing, nextVideos: VideoPricingDetail[]): InfluencerPricing => {
+    const total = nextVideos.reduce((sum, v) => sum + (Number(v.amount) || 0), 0);
+    const updated = {
+      ...prevPricing,
+      total_videos: nextVideos.length,
+      final_price: total,
+      product_pricing: {
+        ...prevPricing.product_pricing,
+        videos: nextVideos
+      }
+    };
+
+    // Synchronize with legacy fields
+    updated.video1_count = nextVideos.length > 0 ? 1 : 0;
+    updated.video1_price = nextVideos.length > 0 ? (Number(nextVideos[0].amount) || 0) : 0;
+    if (nextVideos.length > 1) {
+      updated.video2_count = nextVideos.length - 1;
+      const remainingSum = nextVideos.slice(1).reduce((a, b) => a + (Number(b.amount) || 0), 0);
+      updated.video2_price = Math.round(remainingSum / (nextVideos.length - 1));
+    } else {
+      updated.video2_count = 0;
+      updated.video2_price = 0;
+    }
+
+    return updated;
   };
 
   const handleCombinationChange = (videoIndex: number, comb: string) => {
-    const nextVideos = [...videos];
-    
-    let nextProds: VideoProductDetail[] = [];
-    if (comb && comb !== '5-6 Products') {
-      const prodNames = COMBINATION_PRODUCTS_MAP[comb] || [];
-      nextProds = prodNames.map(name => ({ product_name: name, qty: 1 }));
-    }
-    
-    nextVideos[videoIndex] = {
-      ...nextVideos[videoIndex],
-      combination: comb,
-      products: nextProds
-    };
-    setVideos(nextVideos);
-    syncProductsFromVideos(nextVideos);
-    updatePricingState(nextVideos);
+    setFormState(prev => {
+      const nextVideos = [...prev.videos];
+      
+      let nextProds: VideoProductDetail[] = [];
+      if (comb && comb !== '5-6 Products') {
+        const prodNames = COMBINATION_PRODUCTS_MAP[comb] || [];
+        nextProds = prodNames.map(name => ({ product_name: name, qty: 1 }));
+      }
+      
+      nextVideos[videoIndex] = {
+        ...nextVideos[videoIndex],
+        combination: comb,
+        products: nextProds
+      };
+
+      const flatProducts: InfluencerProduct[] = [];
+      nextVideos.forEach((v, idx) => {
+        const videoNum = idx + 1;
+        (v.products || []).forEach(p => {
+          if (p.qty > 0) {
+            flatProducts.push({
+              video_number: videoNum,
+              product_name: p.product_name,
+              qty: p.qty,
+              selected: true
+            });
+          }
+        });
+      });
+
+      const updatedPricing = getUpdatedPricing(prev.pricing, nextVideos);
+
+      return {
+        ...prev,
+        videos: nextVideos,
+        products: flatProducts,
+        pricing: updatedPricing
+      };
+    });
   };
 
   const handleUpdateProductQty = (videoIndex: number, productIndex: number, nextQty: number) => {
     if (nextQty < 1) return;
-    const nextVideos = [...videos];
-    nextVideos[videoIndex].products[productIndex].qty = nextQty;
-    setVideos(nextVideos);
-    syncProductsFromVideos(nextVideos);
-    updatePricingState(nextVideos);
+    setFormState(prev => {
+      const nextVideos = [...prev.videos];
+      const productsList = [...(nextVideos[videoIndex].products || [])];
+      productsList[productIndex] = { ...productsList[productIndex], qty: nextQty };
+      nextVideos[videoIndex] = {
+        ...nextVideos[videoIndex],
+        products: productsList
+      };
+
+      const flatProducts: InfluencerProduct[] = [];
+      nextVideos.forEach((v, idx) => {
+        const videoNum = idx + 1;
+        (v.products || []).forEach(p => {
+          if (p.qty > 0) {
+            flatProducts.push({
+              video_number: videoNum,
+              product_name: p.product_name,
+              qty: p.qty,
+              selected: true
+            });
+          }
+        });
+      });
+
+      const updatedPricing = getUpdatedPricing(prev.pricing, nextVideos);
+
+      return {
+        ...prev,
+        videos: nextVideos,
+        products: flatProducts,
+        pricing: updatedPricing
+      };
+    });
   };
 
   const handleToggleSpecialProduct = (videoIndex: number, productName: string) => {
-    const nextVideos = [...videos];
-    const currentProds = nextVideos[videoIndex].products || [];
-    const existingIdx = currentProds.findIndex(p => p.product_name === productName);
-    
-    if (existingIdx !== -1) {
-      nextVideos[videoIndex].products = currentProds.filter((_, i) => i !== existingIdx);
-    } else {
-      nextVideos[videoIndex].products = [...currentProds, { product_name: productName, qty: 1 }];
-    }
-    setVideos(nextVideos);
-    syncProductsFromVideos(nextVideos);
-    updatePricingState(nextVideos);
+    setFormState(prev => {
+      const nextVideos = [...prev.videos];
+      const currentProds = nextVideos[videoIndex].products || [];
+      const existingIdx = currentProds.findIndex(p => p.product_name === productName);
+      
+      let updatedProds = [...currentProds];
+      if (existingIdx !== -1) {
+        updatedProds = currentProds.filter((_, i) => i !== existingIdx);
+      } else {
+        updatedProds = [...currentProds, { product_name: productName, qty: 1 }];
+      }
+
+      nextVideos[videoIndex] = {
+        ...nextVideos[videoIndex],
+        products: updatedProds
+      };
+
+      const flatProducts: InfluencerProduct[] = [];
+      nextVideos.forEach((v, idx) => {
+        const videoNum = idx + 1;
+        (v.products || []).forEach(p => {
+          if (p.qty > 0) {
+            flatProducts.push({
+              video_number: videoNum,
+              product_name: p.product_name,
+              qty: p.qty,
+              selected: true
+            });
+          }
+        });
+      });
+
+      const updatedPricing = getUpdatedPricing(prev.pricing, nextVideos);
+
+      return {
+        ...prev,
+        videos: nextVideos,
+        products: flatProducts,
+        pricing: updatedPricing
+      };
+    });
   };
 
   const handleVideoAmountChange = (videoIndex: number, amountVal: string) => {
     const amount = parseFloat(amountVal) || 0;
-    const nextVideos = [...videos];
-    nextVideos[videoIndex].amount = amount;
-    setVideos(nextVideos);
-    updatePricingState(nextVideos);
-  };
-
-  const updatePricingState = (nextVideos: VideoPricingDetail[]) => {
-    const total = nextVideos.reduce((sum, v) => sum + (Number(v.amount) || 0), 0);
-    setPricing(prev => {
-      const updated = {
-        ...prev,
-        total_videos: nextVideos.length,
-        final_price: total,
-        product_pricing: {
-          ...prev.product_pricing,
-          videos: nextVideos
-        }
+    setFormState(prev => {
+      const nextVideos = [...prev.videos];
+      nextVideos[videoIndex] = {
+        ...nextVideos[videoIndex],
+        amount
       };
 
-      // Synchronize with legacy fields
-      updated.video1_count = nextVideos.length > 0 ? 1 : 0;
-      updated.video1_price = nextVideos.length > 0 ? (Number(nextVideos[0].amount) || 0) : 0;
-      if (nextVideos.length > 1) {
-        updated.video2_count = nextVideos.length - 1;
-        const remainingSum = nextVideos.slice(1).reduce((a, b) => a + (Number(b.amount) || 0), 0);
-        updated.video2_price = Math.round(remainingSum / (nextVideos.length - 1));
-      } else {
-        updated.video2_count = 0;
-        updated.video2_price = 0;
-      }
+      const updatedPricing = getUpdatedPricing(prev.pricing, nextVideos);
 
-      return updated;
+      return {
+        ...prev,
+        videos: nextVideos,
+        pricing: updatedPricing
+      };
     });
   };
 
   const handleAddVideo = () => {
-    const nextVideos = [...videos, { combination: '', amount: 0, products: [] }];
-    setVideos(nextVideos);
-    syncProductsFromVideos(nextVideos);
-    updatePricingState(nextVideos);
+    setFormState(prev => {
+      const nextVideos = [...prev.videos, { combination: '', amount: 0, products: [] }];
+      
+      const flatProducts: InfluencerProduct[] = [];
+      nextVideos.forEach((v, idx) => {
+        const videoNum = idx + 1;
+        (v.products || []).forEach(p => {
+          if (p.qty > 0) {
+            flatProducts.push({
+              video_number: videoNum,
+              product_name: p.product_name,
+              qty: p.qty,
+              selected: true
+            });
+          }
+        });
+      });
+
+      const updatedPricing = getUpdatedPricing(prev.pricing, nextVideos);
+
+      return {
+        ...prev,
+        videos: nextVideos,
+        products: flatProducts,
+        pricing: updatedPricing
+      };
+    });
   };
 
   const handleDeleteVideo = (videoIndex: number) => {
-    const nextVideos = videos.filter((_, i) => i !== videoIndex);
-    const finalVideos = nextVideos.length > 0 ? nextVideos : [{ combination: '', amount: 0, products: [] }];
-    setVideos(finalVideos);
-    syncProductsFromVideos(finalVideos);
-    updatePricingState(finalVideos);
+    setFormState(prev => {
+      const nextVideos = prev.videos.filter((_, i) => i !== videoIndex);
+      const finalVideos = nextVideos.length > 0 ? nextVideos : [{ combination: '', amount: 0, products: [] }];
+      
+      const flatProducts: InfluencerProduct[] = [];
+      finalVideos.forEach((v, idx) => {
+        const videoNum = idx + 1;
+        (v.products || []).forEach(p => {
+          if (p.qty > 0) {
+            flatProducts.push({
+              video_number: videoNum,
+              product_name: p.product_name,
+              qty: p.qty,
+              selected: true
+            });
+          }
+        });
+      });
+
+      const updatedPricing = getUpdatedPricing(prev.pricing, finalVideos);
+
+      return {
+        ...prev,
+        videos: finalVideos,
+        products: flatProducts,
+        pricing: updatedPricing
+      };
+    });
   };
 
-
   const addPerformance = () => {
-    setPerformance([...performance, { brand_name: '', product_name: '', views: '', uploaded_platforms: 'All' }]);
+    setFormState(prev => ({
+      ...prev,
+      performance: [...prev.performance, { brand_name: '', product_name: '', views: '', uploaded_platforms: 'All' }]
+    }));
   };
 
   const updatePerformance = <K extends keyof InfluencerBrandPerformance>(idx: number, field: K, value: InfluencerBrandPerformance[K]) => {
-    const updated = [...performance];
-    updated[idx] = { ...updated[idx], [field]: value };
-    setPerformance(updated);
+    setFormState(prev => {
+      const updated = [...prev.performance];
+      updated[idx] = { ...updated[idx], [field]: value };
+      return { ...prev, performance: updated };
+    });
   };
 
   const handleCancel = () => {
@@ -821,7 +938,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       </div>
 
       <div className="p-6 h-[500px] overflow-y-auto">
-        {activeTab === 'basic' && (
+        <div className={activeTab === 'basic' ? '' : 'hidden'}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <div>
@@ -991,16 +1108,16 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               </div>
             </div>
           </div>
-        )}
+        </div>
 
-        {activeTab === 'platform' && (
+        <div className={activeTab === 'platform' ? '' : 'hidden'}>
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Platform Availability</label>
                 <select 
                   value={platformAvailability}
-                  onChange={e => setPlatformAvailability(e.target.value)}
+                  onChange={e => setFormState(prev => ({ ...prev, platformAvailability: e.target.value }))}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-sm"
                 >
                   <option value="All">All</option>
@@ -1016,7 +1133,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                 <label className="block text-sm text-slate-400 mb-1">Platform Agreed</label>
                 <select 
                   value={platformAgreed}
-                  onChange={e => setPlatformAgreed(e.target.value)}
+                  onChange={e => setFormState(prev => ({ ...prev, platformAgreed: e.target.value }))}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-sm"
                 >
                   <option value="All">All</option>
@@ -1112,13 +1229,13 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       
                       if (p.platform === 'Instagram') {
                         value = basicInfo.instagram_view_code || '';
-                        onChangeHandler = (val) => setBasicInfo(prev => ({ ...prev, instagram_view_code: val }));
+                        onChangeHandler = (val) => setFormState(prev => ({ ...prev, basicInfo: { ...prev.basicInfo, instagram_view_code: val } }));
                       } else if (p.platform === 'Facebook') {
                         value = basicInfo.facebook_view_code || '';
-                        onChangeHandler = (val) => setBasicInfo(prev => ({ ...prev, facebook_view_code: val }));
+                        onChangeHandler = (val) => setFormState(prev => ({ ...prev, basicInfo: { ...prev.basicInfo, facebook_view_code: val } }));
                       } else if (p.platform === 'Youtube') {
                         value = basicInfo.youtube_view_code || '';
-                        onChangeHandler = (val) => setBasicInfo(prev => ({ ...prev, youtube_view_code: val }));
+                        onChangeHandler = (val) => setFormState(prev => ({ ...prev, basicInfo: { ...prev.basicInfo, youtube_view_code: val } }));
                       }
                       
                       return (
@@ -1139,9 +1256,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               })}
             </div>
           </div>
-        )}
+        </div>
 
-        {activeTab === 'pricing' && (
+        <div className={activeTab === 'pricing' ? '' : 'hidden'}>
           <div className="space-y-8 animate-fade-in text-slate-200">
             {/* VIDEO PRICING SECTION */}
             <div>
@@ -1319,9 +1436,12 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                 <button 
                   type="button"
                   onClick={() => {
-                    setPricing(prev => ({
-                      ...prev, 
-                      bargainHistory: [...(prev.bargainHistory || []), { creator_request: 0, brand_request: 0 }]
+                    setFormState(prev => ({
+                      ...prev,
+                      pricing: {
+                        ...prev.pricing,
+                        bargainHistory: [...(prev.pricing.bargainHistory || []), { creator_request: 0, brand_request: 0 }]
+                      }
                     }));
                   }}
                   className="h-10 px-4 text-xs font-semibold rounded-lg bg-slate-900 border border-purple-500/30 text-purple-300 hover:bg-purple-950/20 hover:border-purple-500 transition-colors flex items-center gap-1.5"
@@ -1340,7 +1460,10 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                         onClick={() => {
                           const newHistory = (pricing.bargainHistory || []).filter((_, i) => i !== idx);
                           const finalHistory = newHistory.length > 0 ? newHistory : [{ creator_request: 0, brand_request: 0 }];
-                          setPricing(prev => ({ ...prev, bargainHistory: finalHistory }));
+                          setFormState(prev => ({
+                            ...prev,
+                            pricing: { ...prev.pricing, bargainHistory: finalHistory }
+                          }));
                         }}
                         className="text-slate-500 hover:text-rose-400 transition-colors p-1"
                         title="Remove Negotiation Set"
@@ -1359,7 +1482,10 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                             onChange={e => {
                               const newHistory = [...(pricing.bargainHistory || [])];
                               newHistory[idx] = { ...newHistory[idx], creator_request: parseFloat(e.target.value) || 0 };
-                              setPricing(prev => ({ ...prev, bargainHistory: newHistory }));
+                              setFormState(prev => ({
+                                ...prev,
+                                pricing: { ...prev.pricing, bargainHistory: newHistory }
+                              }));
                             }}
                             className="w-full bg-transparent border-0 p-0 text-slate-200 text-sm focus:ring-0 focus:outline-none font-semibold" 
                             placeholder="Amount"
@@ -1376,7 +1502,10 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                             onChange={e => {
                               const newHistory = [...(pricing.bargainHistory || [])];
                               newHistory[idx] = { ...newHistory[idx], brand_request: parseFloat(e.target.value) || 0 };
-                              setPricing(prev => ({ ...prev, bargainHistory: newHistory }));
+                              setFormState(prev => ({
+                                ...prev,
+                                pricing: { ...prev.pricing, bargainHistory: newHistory }
+                              }));
                             }}
                             className="w-full bg-transparent border-0 p-0 text-slate-200 text-sm focus:ring-0 focus:outline-none font-semibold" 
                             placeholder="Amount"
@@ -1396,8 +1525,8 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
             </div>
           </div>
-        )}
-        {activeTab === 'products' && (
+        </div>
+        <div className={activeTab === 'products' ? '' : 'hidden'}>
           <div className="space-y-6 animate-fade-in text-slate-200">
             {!pricing.total_videos || pricing.total_videos <= 0 ? (
               <div className="text-slate-500 text-center py-10 italic">No products selected yet. Fill in Pricing Info first.</div>
@@ -1434,9 +1563,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               })
             )}
           </div>
-        )}
+        </div>
 
-        {activeTab === 'performance' && (
+        <div className={activeTab === 'performance' ? '' : 'hidden'}>
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {performance.map((p, idx) => {
@@ -1458,7 +1587,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                 return (
                   <div key={idx} className="bg-slate-900 p-5 rounded-xl border border-slate-700 relative shadow-sm">
                     <button 
-                      onClick={() => setPerformance(performance.filter((_, i) => i !== idx))}
+                      onClick={() => setFormState(prev => ({ ...prev, performance: prev.performance.filter((_, i) => i !== idx) }))}
                       className="absolute top-4 right-4 px-2 py-1 bg-red-900/30 text-red-400 hover:bg-red-900/50 hover:text-red-300 rounded text-xs font-medium transition-colors"
                     >
                       Remove Set
@@ -1553,7 +1682,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               + Add Performance
             </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

@@ -124,6 +124,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           const instagram_view_code = viewsJson?.instagram_view_code || null;
           const facebook_view_code = viewsJson?.facebook_view_code || null;
           const youtube_view_code = viewsJson?.youtube_view_code || null;
+          const instagram_view_code_mode = viewsJson?.instagram_view_code_mode || 'auto';
+          const facebook_view_code_mode = viewsJson?.facebook_view_code_mode || 'auto';
+          const youtube_view_code_mode = viewsJson?.youtube_view_code_mode || 'auto';
 
           const cleanLangs = Array.isArray(inf.languages)
             ? inf.languages.filter((l: string) => !l.startsWith('views_data:'))
@@ -195,7 +198,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             dispatchDetails,
             instagram_view_code,
             facebook_view_code,
-            youtube_view_code
+            youtube_view_code,
+            instagram_view_code_mode,
+            facebook_view_code_mode,
+            youtube_view_code_mode
           };
         });
       }
@@ -249,7 +255,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     platforms: any[],
     instagramViewCode?: string | null,
     facebookViewCode?: string | null,
-    youtubeViewCode?: string | null
+    youtubeViewCode?: string | null,
+    instagramViewCodeMode?: string | null,
+    facebookViewCodeMode?: string | null,
+    youtubeViewCodeMode?: string | null
   ) => {
     const platformViews: Record<string, any[]> = {};
     (platforms || []).forEach(p => {
@@ -305,7 +314,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       platform_views: platformViews,
       instagram_view_code: instagramViewCode || null,
       facebook_view_code: facebookViewCode || null,
-      youtube_view_code: youtubeViewCode || null
+      youtube_view_code: youtubeViewCode || null,
+      instagram_view_code_mode: instagramViewCodeMode || 'auto',
+      facebook_view_code_mode: facebookViewCodeMode || 'auto',
+      youtube_view_code_mode: youtubeViewCodeMode || 'auto'
     };
   };
 
@@ -325,7 +337,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           influencerData.platforms || [],
           influencerData.instagram_view_code,
           influencerData.facebook_view_code,
-          influencerData.youtube_view_code
+          influencerData.youtube_view_code,
+          (influencerData as any).instagram_view_code_mode,
+          (influencerData as any).facebook_view_code_mode,
+          (influencerData as any).youtube_view_code_mode
         );
         const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
         const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
@@ -527,7 +542,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         influencerData.platforms || [],
         influencerData.instagram_view_code,
         influencerData.facebook_view_code,
-        influencerData.youtube_view_code
+        influencerData.youtube_view_code,
+        (influencerData as any).instagram_view_code_mode,
+        (influencerData as any).facebook_view_code_mode,
+        (influencerData as any).youtube_view_code_mode
       );
       const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
       const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
