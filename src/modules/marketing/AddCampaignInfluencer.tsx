@@ -417,6 +417,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           alternative_number: initialData.alternative_number || '',
           upi_number: initialData.upi_number || '',
           city: initialData.city || '',
+          complete_address: initialData.complete_address || (initialData as any).address || '',
           state: (function(input?: string | null) {
             if (!input || !input.trim()) return '';
             const allStates = [

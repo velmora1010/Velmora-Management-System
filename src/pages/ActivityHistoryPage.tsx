@@ -31,17 +31,21 @@ const USER_OPTIONS = [
 const DEPT_OPTIONS = [
   { value: '', label: 'All Departments' },
   { value: 'Marketing', label: 'Marketing' },
-  { value: 'Logistics', label: 'Logistics' },
+  { value: 'Task', label: 'Task' },
   { value: 'Finance', label: 'Finance' },
+  { value: 'Vendors', label: 'Vendors' },
   { value: 'Inventory', label: 'Inventory' },
+  { value: 'Logistics', label: 'Logistics' },
   { value: 'Customer Tickets', label: 'Customer Tickets' },
 ];
 
 const DEPT_CONFIG: Record<string, { icon: typeof Activity; color: string; badgeBg: string }> = {
   Marketing:          { icon: Megaphone,   color: '#a78bfa', badgeBg: 'rgba(167,139,250,0.12)' },
-  Logistics:          { icon: Truck,       color: '#34d399', badgeBg: 'rgba(52,211,153,0.12)' },
+  Task:               { icon: Activity,    color: '#38bdf8', badgeBg: 'rgba(56,189,248,0.12)' },
   Finance:            { icon: IndianRupee, color: '#f87171', badgeBg: 'rgba(248,113,113,0.12)' },
+  Vendors:            { icon: Factory,     color: '#facc15', badgeBg: 'rgba(250,204,21,0.12)' },
   Inventory:          { icon: Factory,     color: '#fb923c', badgeBg: 'rgba(251,146,60,0.12)' },
+  Logistics:          { icon: Truck,       color: '#34d399', badgeBg: 'rgba(52,211,153,0.12)' },
   'Customer Tickets': { icon: HelpCircle,  color: '#60a5fa', badgeBg: 'rgba(96,165,250,0.12)' },
 };
 
@@ -117,16 +121,16 @@ export const ActivityHistoryPage = () => {
     setIsLoading(true);
     try {
       let query = supabase
-        .from('activity_logs')
+        .from('audit_logs')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(300);
+        .limit(500);
 
       if (filterDept) {
-        query = query.eq('department', filterDept);
+        query = query.eq('module', filterDept);
       }
       if (filterUser) {
-        query = query.eq('user_email', filterUser);
+        query = query.eq('user_name', filterUser);
       }
       if (dateRange.startDate) {
         query = query.gte('created_at', dateRange.startDate.toISOString());
@@ -138,13 +142,28 @@ export const ActivityHistoryPage = () => {
       const { data, error } = await query;
 
       if (error) {
-        console.error('Failed to fetch activity logs:', error);
+        console.error('Failed to fetch audit logs:', error);
         setLogs([]);
       } else {
-        setLogs((data as ActivityLog[]) || []);
+        const mappedLogs: ActivityLog[] = (data || []).map((row: any) => {
+          let desc = row.metadata?.description || row.record_name || row.action || '';
+          if (!desc || desc === row.action) {
+            desc = row.record_name ? `${row.action} for "${row.record_name}"` : row.action;
+          }
+          return {
+            id: row.id,
+            user_id: row.user_id || undefined,
+            user_email: row.user_name || 'admin@velmora.com',
+            department: row.module || 'System',
+            action: row.action,
+            description: desc,
+            created_at: row.created_at
+          };
+        });
+        setLogs(mappedLogs);
       }
     } catch (err) {
-      console.error('Error loading activity logs:', err);
+      console.error('Error loading audit logs:', err);
       setLogs([]);
     } finally {
       setIsLoading(false);

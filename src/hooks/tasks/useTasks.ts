@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import type { Task } from '../../types';
 import { useAuth } from '../useAuth';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { logActivity } from '../../services/activityService';
 
 export const useTasks = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -128,6 +129,13 @@ export const useTasks = () => {
       }
 
       await fetchTasks();
+      logActivity({
+        department: 'Task',
+        action: 'Created Task',
+        description: `Created task "${newTask.task_title || (newTask as any).title || 'New Task'}"`,
+        record_id: String(newTask.id),
+        record_name: newTask.task_title || (newTask as any).title
+      });
       return true;
     } catch (err: unknown) {
       console.error('Error saving task:', err);
@@ -148,6 +156,12 @@ export const useTasks = () => {
         
       if (error) throw error;
       await fetchTasks();
+      logActivity({
+        department: 'Task',
+        action: 'Updated Task Status',
+        description: `Updated task status to "${newStatus}"`,
+        record_id: taskId
+      });
       return true;
     } catch (err: unknown) {
       console.error('Error updating task status:', err);
@@ -180,6 +194,12 @@ export const useTasks = () => {
         
       if (error) throw error;
       await fetchTasks();
+      logActivity({
+        department: 'Task',
+        action: 'Archived Task',
+        description: `Archived task ID ${taskId}`,
+        record_id: taskId
+      });
       return true;
     } catch (err: unknown) {
       console.error('Error archiving task:', err);
@@ -198,6 +218,12 @@ export const useTasks = () => {
 
       if (error) throw error;
       await fetchTasks();
+      logActivity({
+        department: 'Task',
+        action: 'Updated Task',
+        description: `Updated details for task "${taskPayload.task_title || (taskPayload as any).title || taskId}"`,
+        record_id: taskId
+      });
       return true;
     } catch (err: unknown) {
       console.error('Error updating task:', err);

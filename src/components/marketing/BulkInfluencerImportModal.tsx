@@ -30,8 +30,14 @@ interface ParsedRow {
   name: string; // Influencer Name
   userId: string; // Username / User ID
   phone: string | null;
-  languages: string | null;
+  altPhone: string | null;
+  upi: string | null;
+  city: string | null;
   state: string | null;
+  address: string | null; // Complete Address
+  languages: string | null;
+  autoDm: boolean | null;
+  profileImg: string | null;
   status: 'New' | 'Existing' | 'Invalid';
   reason?: string;
   existingId?: string | number;
@@ -42,8 +48,14 @@ interface ColumnMapping {
   nameCol: string;
   userIdCol: string;
   phoneCol: string;
-  languagesCol: string;
+  altPhoneCol: string;
+  upiCol: string;
+  cityCol: string;
   stateCol: string;
+  addressCol: string;
+  languagesCol: string;
+  autoDmCol: string;
+  profileImgCol: string;
 }
 
 export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps> = ({
@@ -61,8 +73,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     nameCol: '',
     userIdCol: '',
     phoneCol: '',
+    altPhoneCol: '',
+    upiCol: '',
+    cityCol: '',
+    stateCol: '',
+    addressCol: '',
     languagesCol: '',
-    stateCol: ''
+    autoDmCol: '',
+    profileImgCol: ''
   });
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -71,7 +89,44 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
   // Normalize string helper
   const normalize = (str: any): string => {
     if (str === undefined || str === null) return '';
-    return String(str).trim();
+    if (typeof str === 'number') {
+      return String(Math.floor(str)).trim();
+    }
+    return String(str).trim().replace(/\.0$/, '');
+  };
+
+  // Robust State Normalizer
+  const normalizeState = (input?: string | null): string | null => {
+    if (!input || !input.trim()) return null;
+    const allStates = [
+      "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+      "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+      "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+      "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+      "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+      "Andaman and Nicobar Islands", "Chandigarh",
+      "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Jammu and Kashmir",
+      "Ladakh", "Lakshadweep", "Puducherry"
+    ];
+    const clean = input.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const found = allStates.find(s => s.toLowerCase().replace(/[^a-z0-9]/g, '') === clean);
+    return found || input.trim();
+  };
+
+  // Robust Language Normalizer
+  const normalizeLanguages = (input?: string | null): string[] => {
+    if (!input || !input.trim()) return [];
+    const knownLangs = [
+      "English", "Hindi", "Tamil", "Telugu", "Kannada", "Malayalam",
+      "Marathi", "Bengali", "Gujarati", "Punjabi", "Magahi", "Odia",
+      "Rajasthani", "Haryanvi", "Bhojpuri", "Other"
+    ];
+    const parts = input.split(/[,/;|]+/).map(s => s.trim()).filter(Boolean);
+    return parts.map(p => {
+      const clean = p.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const found = knownLangs.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === clean);
+      return found || p;
+    });
   };
 
   // Robust column auto-detection using header variations
@@ -80,8 +135,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     let nameCol = '';
     let userIdCol = '';
     let phoneCol = '';
-    let languagesCol = '';
+    let altPhoneCol = '';
+    let upiCol = '';
+    let cityCol = '';
     let stateCol = '';
+    let addressCol = '';
+    let languagesCol = '';
+    let autoDmCol = '';
+    let profileImgCol = '';
 
     headers.forEach(h => {
       const clean = h.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -90,27 +151,53 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       if (!codeCol && (clean === 'influencercode' || clean === 'code' || clean === 'infcode' || clean === 'codeid')) {
         codeCol = h;
       }
-      // 2. Influencer Name vs User Name / User ID
+      // 2. User Name / User ID / Handle
       else if (!userIdCol && (clean === 'username' || clean === 'userid' || clean === 'user' || clean === 'handle' || clean === 'userhandle' || clean === 'user_name' || clean === 'user_id')) {
         userIdCol = h;
-      } else if (!nameCol && (clean === 'influencername' || clean === 'name' || clean === 'fullname' || clean === 'influencer_name')) {
+      }
+      // 3. Influencer Name / Name
+      else if (!nameCol && (clean === 'influencername' || clean === 'name' || clean === 'fullname' || clean === 'influencer_name')) {
         nameCol = h;
       }
-      // 3. Phone
-      else if (!phoneCol && (clean === 'phonenumber' || clean === 'phone' || clean === 'mobile' || clean === 'mobilenumber' || clean === 'contact')) {
+      // 4. Phone Number / Mobile Number
+      else if (!phoneCol && (clean === 'phonenumber' || clean === 'phone' || clean === 'mobile' || clean === 'mobilenumber' || clean === 'contact' || clean === 'contactnumber')) {
         phoneCol = h;
       }
-      // 4. Languages
-      else if (!languagesCol && (clean === 'languages' || clean === 'language' || clean === 'lang' || clean === 'targetlanguages')) {
+      // 5. Alternative Number / Alt Phone
+      else if (!altPhoneCol && (clean === 'alternativenumber' || clean === 'altnumber' || clean === 'alternatephone' || clean === 'altphone' || clean === 'alternatemobilenumber')) {
+        altPhoneCol = h;
+      }
+      // 6. UPI Number / UPI ID
+      else if (!upiCol && (clean === 'upinumber' || clean === 'upi' || clean === 'upiid' || clean === 'upihandle')) {
+        upiCol = h;
+      }
+      // 7. City
+      else if (!cityCol && (clean === 'city' || clean === 'district' || clean === 'town')) {
+        cityCol = h;
+      }
+      // 8. State
+      else if (!stateCol && (clean === 'state' || clean === 'statename' || clean === 'province')) {
+        stateCol = h;
+      }
+      // 9. Complete Address / Address
+      else if (!addressCol && (clean === 'completeaddress' || clean === 'address' || clean === 'fulladdress' || clean === 'streetaddress' || clean === 'locationaddress' || clean === 'location')) {
+        addressCol = h;
+      }
+      // 10. Languages
+      else if (!languagesCol && (clean === 'languages' || clean === 'language' || clean === 'lang' || clean === 'targetlanguages' || clean === 'spokenlanguages')) {
         languagesCol = h;
       }
-      // 5. State
-      else if (!stateCol && (clean === 'state' || clean === 'location' || clean === 'province')) {
-        stateCol = h;
+      // 11. Auto DM Tool
+      else if (!autoDmCol && (clean === 'autodmtool' || clean === 'autodm' || clean === 'dmtool' || clean === 'autodmstatus')) {
+        autoDmCol = h;
+      }
+      // 12. Profile Image / Photo
+      else if (!profileImgCol && (clean === 'influencerprofileimage' || clean === 'profileimage' || clean === 'profilephoto' || clean === 'profileurl' || clean === 'imageurl' || clean === 'photo')) {
+        profileImgCol = h;
       }
     });
 
-    // Secondary pass for headers like "User Name" vs "Influencer Name"
+    // Secondary pass for ambiguous headers
     if (!userIdCol || !nameCol) {
       headers.forEach(h => {
         const clean = h.trim().toLowerCase();
@@ -123,15 +210,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       });
     }
 
-    // Position-based fallbacks only if unassigned
-    if (!codeCol && headers.length > 0) codeCol = headers[0];
-    if (!userIdCol && headers.length > 1) userIdCol = headers[1];
-    if (!nameCol && headers.length > 2) nameCol = headers[2];
-    if (!phoneCol && headers.length > 3) phoneCol = headers[3];
-    if (!languagesCol && headers.length > 4) languagesCol = headers[4];
-    if (!stateCol && headers.length > 5) stateCol = headers[5];
-
-    return { codeCol, nameCol, userIdCol, phoneCol, languagesCol, stateCol };
+    return { codeCol, nameCol, userIdCol, phoneCol, altPhoneCol, upiCol, cityCol, stateCol, addressCol, languagesCol, autoDmCol, profileImgCol };
   };
 
   // Process rows into ParsedRow objects based on column mapping
@@ -149,20 +228,38 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       const name = normalize(row[map.nameCol]);
       const userId = normalize(row[map.userIdCol]);
 
-      let phone = normalize(row[map.phoneCol]);
-      if (phone === '' || phone.toLowerCase() === 'null' || phone.toLowerCase() === 'undefined' || phone === '—') {
-        phone = null as any;
+      let phone: string | null = normalize(row[map.phoneCol]);
+      if (phone === '' || phone.toLowerCase() === 'null' || phone.toLowerCase() === 'undefined' || phone === '—') phone = null;
+
+      let altPhone: string | null = normalize(row[map.altPhoneCol]);
+      if (altPhone === '' || altPhone.toLowerCase() === 'null' || altPhone.toLowerCase() === 'undefined' || altPhone === '—') altPhone = null;
+
+      let upi: string | null = normalize(row[map.upiCol]);
+      if (upi === '' || upi.toLowerCase() === 'null' || upi.toLowerCase() === 'undefined' || upi === '—') upi = null;
+
+      let city: string | null = normalize(row[map.cityCol]);
+      if (city === '' || city.toLowerCase() === 'null' || city.toLowerCase() === 'undefined' || city === '—') city = null;
+
+      let state: string | null = normalize(row[map.stateCol]);
+      if (state === '' || state.toLowerCase() === 'null' || state.toLowerCase() === 'undefined' || state === '—') state = null;
+
+      let address: string | null = normalize(row[map.addressCol]);
+      if (address === '' || address.toLowerCase() === 'null' || address.toLowerCase() === 'undefined' || address === '—') address = null;
+
+      let languages: string | null = normalize(row[map.languagesCol]);
+      if (languages === '' || languages.toLowerCase() === 'null' || languages.toLowerCase() === 'undefined' || languages === '—') languages = null;
+
+      let rawAutoDm = row[map.autoDmCol];
+      let autoDm: boolean | null = null;
+      if (typeof rawAutoDm === 'boolean') autoDm = rawAutoDm;
+      else if (typeof rawAutoDm === 'string' && rawAutoDm.trim() !== '') {
+        const lower = rawAutoDm.trim().toLowerCase();
+        if (['true', 'yes', '1', 'enable', 'enabled'].includes(lower)) autoDm = true;
+        else if (['false', 'no', '0', 'disable', 'disabled'].includes(lower)) autoDm = false;
       }
 
-      let languages = normalize(row[map.languagesCol]);
-      if (languages === '' || languages.toLowerCase() === 'null' || languages.toLowerCase() === 'undefined' || languages === '—') {
-        languages = null as any;
-      }
-
-      let state = normalize(row[map.stateCol]);
-      if (state === '' || state.toLowerCase() === 'null' || state.toLowerCase() === 'undefined' || state === '—') {
-        state = null as any;
-      }
+      let profileImg: string | null = normalize(row[map.profileImgCol]);
+      if (profileImg === '' || profileImg.toLowerCase() === 'null' || profileImg.toLowerCase() === 'undefined' || profileImg === '—') profileImg = null;
 
       // Validation
       if (!code && !name && !userId) {
@@ -171,8 +268,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           name: name || '—',
           userId: userId || '—',
           phone,
-          languages,
+          altPhone,
+          upi,
+          city,
           state,
+          address,
+          languages,
+          autoDm,
+          profileImg,
           status: 'Invalid',
           reason: 'Row is empty'
         };
@@ -184,8 +287,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           name: name || '—',
           userId: userId || '—',
           phone,
-          languages,
+          altPhone,
+          upi,
+          city,
           state,
+          address,
+          languages,
+          autoDm,
+          profileImg,
           status: 'Invalid',
           reason: 'Missing required Influencer Code'
         };
@@ -198,8 +307,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           name: name || userId || '—',
           userId: userId || name || '—',
           phone,
-          languages,
+          altPhone,
+          upi,
+          city,
           state,
+          address,
+          languages,
+          autoDm,
+          profileImg,
           status: 'Invalid',
           reason: 'Duplicate Influencer Code in file'
         };
@@ -212,8 +327,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           name: '—',
           userId: '—',
           phone,
-          languages,
+          altPhone,
+          upi,
+          city,
           state,
+          address,
+          languages,
+          autoDm,
+          profileImg,
           status: 'Invalid',
           reason: 'Missing required Influencer Name and User ID'
         };
@@ -231,8 +352,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           name: effectiveName,
           userId: effectiveUserId,
           phone: phone || (existingRecord.phone_number || null),
-          languages: languages || (Array.isArray(existingRecord.languages) ? existingRecord.languages.join(', ') : null),
+          altPhone: altPhone || (existingRecord.alternative_number || null),
+          upi: upi || (existingRecord.upi_number || null),
+          city: city || (existingRecord.city || null),
           state: state || (existingRecord.state || null),
+          address: address || (existingRecord.complete_address || null),
+          languages: languages || (Array.isArray(existingRecord.languages) ? existingRecord.languages.join(', ') : null),
+          autoDm: autoDm ?? (existingRecord.auto_dm ?? null),
+          profileImg: profileImg || (existingRecord.profile_file_url || null),
           status: 'Existing',
           reason: 'Influencer already exists in this campaign',
           existingId: existingRecord.id
@@ -244,8 +371,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         name: effectiveName,
         userId: effectiveUserId,
         phone,
-        languages,
+        altPhone,
+        upi,
+        city,
         state,
+        address,
+        languages,
+        autoDm,
+        profileImg,
         status: 'New'
       };
     });
@@ -350,16 +483,22 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         return;
       }
 
-      const headers = ['Influencer Code', 'User Name', 'Influencer Name', 'Phone Number', 'Languages', 'State'];
+      const headers = ['Influencer Code', 'User Name', 'Influencer Name', 'Phone Number', 'Languages', 'State', 'Complete Address'];
       setRawHeaders(headers);
       setRawRows(extractedRows);
-      const map = {
+      const map: ColumnMapping = {
         codeCol: 'Influencer Code',
         userIdCol: 'User Name',
         nameCol: 'Influencer Name',
         phoneCol: 'Phone Number',
+        altPhoneCol: '',
+        upiCol: '',
+        cityCol: '',
+        stateCol: 'State',
+        addressCol: 'Complete Address',
         languagesCol: 'Languages',
-        stateCol: 'State'
+        autoDmCol: '',
+        profileImgCol: ''
       };
       setMapping(map);
       processRowsWithMapping(extractedRows, map);
@@ -443,9 +582,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
         const newRecords = validRows.map(row => {
           nextIdVal++;
-          const langArray = row.languages
-            ? row.languages.split(/[,/]+/).map(s => s.trim()).filter(Boolean)
-            : [];
+          const langArray = normalizeLanguages(row.languages);
+          const normStateVal = normalizeState(row.state);
 
           return {
             id: nextIdVal,
@@ -454,9 +592,15 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
             influencer_name: row.name,
             name: row.userId,
             phone_number: row.phone || null,
-            state: row.state || null,
+            alternative_number: row.altPhone || null,
+            upi_number: row.upi || null,
+            city: row.city || null,
+            state: normStateVal || null,
+            complete_address: row.address || null,
             languages: langArray,
-            is_archived: false,
+            auto_dm: row.autoDm ?? false,
+            profile_file_url: row.profileImg || null,
+            is_archived: 'false',
             created_at: new Date().toISOString()
           };
         });
@@ -473,22 +617,29 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         insertedCount = newRecords.length;
       }
 
-      // 2. Safe Update for Existing Influencers (filling in missing fields only)
+      // 2. Safe Update for Existing Influencers (Never overwrite non-empty DB value with empty Excel cell!)
       for (const row of existingRows) {
         if (row.existingId) {
           const existingRec = existingInfluencers.find(i => String(i.id) === String(row.existingId));
           const updates: Record<string, any> = {};
 
-          if (row.phone && (!existingRec?.phone_number || String(existingRec.phone_number).trim() === '')) {
-            updates.phone_number = row.phone;
-          }
-          if (row.state && (!existingRec?.state || String(existingRec.state).trim() === '')) {
-            updates.state = row.state;
-          }
-          if (row.languages && (!existingRec?.languages || existingRec.languages.length === 0)) {
-            const langArray = row.languages.split(/[,/]+/).map(s => s.trim()).filter(Boolean);
-            updates.languages = langArray;
-          }
+          if (row.name && row.name.trim() !== '') updates.influencer_name = row.name;
+          if (row.userId && row.userId.trim() !== '') updates.name = row.userId;
+          if (row.phone && row.phone.trim() !== '') updates.phone_number = row.phone;
+          if (row.altPhone && row.altPhone.trim() !== '') updates.alternative_number = row.altPhone;
+          if (row.upi && row.upi.trim() !== '') updates.upi_number = row.upi;
+          if (row.city && row.city.trim() !== '') updates.city = row.city;
+
+          const normStateVal = normalizeState(row.state);
+          if (normStateVal && normStateVal.trim() !== '') updates.state = normStateVal;
+
+          if (row.address && row.address.trim() !== '') updates.complete_address = row.address;
+
+          const normLangs = normalizeLanguages(row.languages);
+          if (normLangs.length > 0) updates.languages = normLangs;
+
+          if (row.autoDm !== null && row.autoDm !== undefined) updates.auto_dm = row.autoDm;
+          if (row.profileImg && row.profileImg.trim() !== '') updates.profile_file_url = row.profileImg;
 
           if (Object.keys(updates).length > 0) {
             const { error: updateErr } = await supabase
@@ -599,13 +750,16 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                 <h5 className="font-bold text-slate-300 flex items-center gap-1.5">
                   <HelpCircle size={14} className="text-purple-400" /> Recognized File Columns
                 </h5>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-400">
+                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-slate-400">
                   <li><strong className="text-slate-300">Influencer Code</strong> (e.g. DDS1, OD5188) — Required</li>
                   <li><strong className="text-slate-300">User Name</strong> (e.g. DINESH_11) — Required</li>
                   <li><strong className="text-slate-300">Influencer Name</strong> (e.g. DINESH) — Required</li>
-                  <li><strong className="text-slate-300">Phone Number</strong> (e.g. 12, 9876543210) — Optional</li>
+                  <li><strong className="text-slate-300">Phone Number</strong> (e.g. 9876543210) — Optional</li>
                   <li><strong className="text-slate-300">Languages</strong> (e.g. TAMIL, ODIA) — Optional</li>
-                  <li><strong className="text-slate-300">State</strong> (e.g. TAMIL NADU, ODISHA) — Optional</li>
+                  <li><strong className="text-slate-300">State</strong> (e.g. TAMIL NADU, TELANGANA) — Optional</li>
+                  <li><strong className="text-slate-300">Complete Address / Address</strong> (e.g. Abc) — Optional</li>
+                  <li><strong className="text-slate-300">City</strong> — Optional</li>
+                  <li><strong className="text-slate-300">Alternative Number</strong> — Optional</li>
                 </ul>
               </div>
             </div>
@@ -703,6 +857,20 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                     {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Complete Address / Address <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.addressCol}
+                    onChange={(e) => setMapping(m => ({ ...m, addressCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
@@ -737,7 +905,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                   <span className="text-lg font-bold text-green-300">{newCount}</span>
                 </div>
                 <div className="bg-yellow-950/30 border border-yellow-800/40 p-3 rounded-xl">
-                  <span className="text-[10px] font-semibold text-yellow-400 block uppercase">Existing</span>
+                  <span className="text-[10px] font-semibold text-yellow-400 block uppercase">Existing (Will Update)</span>
                   <span className="text-lg font-bold text-yellow-300">{existingCount}</span>
                 </div>
                 <div className="bg-red-950/30 border border-red-800/40 p-3 rounded-xl">
@@ -745,6 +913,33 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                   <span className="text-lg font-bold text-red-300">{invalidCount}</span>
                 </div>
               </div>
+
+              {/* Column Mapping Status Banner */}
+              {rawHeaders.length > 0 && (
+                <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl text-xs space-y-1.5">
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    <span className="font-bold text-slate-300">Mapped Columns:</span>
+                    {Object.entries(mapping).map(([key, col]) => {
+                      if (!col) return null;
+                      return (
+                        <span key={key} className="px-2 py-0.5 bg-purple-900/40 border border-purple-700/50 text-purple-200 rounded text-[11px]">
+                          {col}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {rawHeaders.filter(h => !Object.values(mapping).includes(h)).length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      <span className="font-bold text-slate-400">Unmapped Columns (Ignored):</span>
+                      {rawHeaders.filter(h => !Object.values(mapping).includes(h)).map(h => (
+                        <span key={h} className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-400 rounded text-[11px]">
+                          {h} (Unmapped)
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Preview Table */}
               <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40">
@@ -758,6 +953,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                         <th className="p-3">Phone</th>
                         <th className="p-3">Languages</th>
                         <th className="p-3">State</th>
+                        <th className="p-3">Complete Address</th>
                         <th className="p-3">Status</th>
                       </tr>
                     </thead>
@@ -770,15 +966,16 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                           <td className="p-3 text-slate-400">{row.phone || '—'}</td>
                           <td className="p-3 text-slate-300 font-sans">{row.languages || '—'}</td>
                           <td className="p-3 text-slate-300 font-sans">{row.state || '—'}</td>
+                          <td className="p-3 text-slate-300 font-sans">{row.address || '—'}</td>
                           <td className="p-3 font-sans">
                             {row.status === 'New' && (
                               <span className="px-2 py-0.5 bg-green-500/20 border border-green-500/30 text-green-400 text-[10px] font-bold rounded-full inline-flex items-center gap-1">
-                                <CheckCircle2 size={10} /> New
+                                <CheckCircle2 size={10} /> New - Will Create
                               </span>
                             )}
                             {row.status === 'Existing' && (
                               <span className="px-2 py-0.5 bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[10px] font-bold rounded-full inline-flex items-center gap-1" title={row.reason}>
-                                <AlertCircle size={10} /> Existing
+                                <AlertCircle size={10} /> Existing - Will Update
                               </span>
                             )}
                             {row.status === 'Invalid' && (
