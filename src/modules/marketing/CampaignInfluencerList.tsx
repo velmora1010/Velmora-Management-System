@@ -962,7 +962,12 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               <AddCampaignInfluencer 
                 campaign={campaign} 
                 initialData={editingInfluencer} 
-                onBack={onCancelEdit || (() => {})} 
+                onBack={async () => {
+                  await refresh();
+                  if (onCancelEdit) {
+                    onCancelEdit();
+                  }
+                }} 
               />
             </div>
           </div>

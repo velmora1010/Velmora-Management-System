@@ -263,15 +263,15 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                      editingInfluencerId: String(inf.id)
                    });
                  }}
-                 onCancelEdit={() => {
-                   setEditingInfluencer(null);
-                   setEditingInfluencerId(null);
-                   saveDepartmentNavigation('marketing', '/marketing', {
-                     campaignView: 'influencer-list',
-                     editingInfluencerId: undefined
-                   });
-                   refresh();
-                 }}
+                  onCancelEdit={async () => {
+                    setEditingInfluencer(null);
+                    setEditingInfluencerId(null);
+                    saveDepartmentNavigation('marketing', '/marketing', {
+                      campaignView: 'influencer-list',
+                      editingInfluencerId: undefined
+                    });
+                    await refresh();
+                  }}
                  onDispatch={(inf) => {
                    setDispatchingInfluencer(inf);
                  }}

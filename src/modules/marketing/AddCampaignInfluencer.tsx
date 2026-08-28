@@ -834,19 +834,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       const visiblePlats = getVisiblePlatforms();
       const cleanedPlatforms = platforms
         .filter(p => visiblePlats.includes(p.platform))
-        .filter(p => {
-          const hasUsername = (p.username || '').trim() !== '';
-          const hasProfileLink = (p.profile_link || '').trim() !== '';
-          const hasFollowers = p.followers_count !== undefined && p.followers_count !== null && p.followers_count !== 0;
-          const hasViews = Array.isArray(p.video_views) && p.video_views.some(v => v !== undefined && v !== null && String(v).trim() !== '');
-          
-          let hasPerfCode = false;
-          if (p.platform === 'Instagram') hasPerfCode = (basicInfo.instagram_view_code || '').trim() !== '';
-          else if (p.platform === 'Facebook') hasPerfCode = (basicInfo.facebook_view_code || '').trim() !== '';
-          else if (p.platform === 'Youtube') hasPerfCode = (basicInfo.youtube_view_code || '').trim() !== '';
-
-          return hasUsername || hasProfileLink || hasFollowers || hasViews || hasPerfCode;
-        })
         .map(p => ({
           ...p,
           video_views: Array.isArray(p.video_views) 
@@ -879,8 +866,11 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       if (success) {
         const key = getFormStorageKey();
         sessionStorage.removeItem(key);
+        if (initialData?.id) {
+          sessionStorage.removeItem(`influencer_edit_draft_${campaign.id}_${initialData.id}`);
+        }
         toast.success(initialData?.id ? 'Influencer updated successfully!' : 'Influencer saved successfully!');
-        onBack();
+        await onBack();
       }
     } catch (err: any) {
       console.error(err);
@@ -910,7 +900,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
             disabled={isSaving}
             className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm flex items-center gap-2 disabled:opacity-50"
           >
-            <Save size={16} /> {isSaving ? 'Saving...' : (initialData?.id ? 'Update Influencer' : 'Save Influencer')}
+            <Save size={16} /> {isSaving ? (initialData?.id ? 'Updating...' : 'Saving...') : (initialData?.id ? 'Update Influencer' : 'Save Influencer')}
           </button>
         </div>
       </div>
