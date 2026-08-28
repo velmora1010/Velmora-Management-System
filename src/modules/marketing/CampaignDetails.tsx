@@ -245,7 +245,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                  onBack={() => {
                    setEditingInfluencer(null);
                    setEditingInfluencerId(null);
-                   handleViewChange('overview', { editingInfluencerId: undefined, activeTab: undefined });
+                   handleViewChange('influencer-list', { editingInfluencerId: undefined, activeTab: undefined });
                    refresh();
                  }} 
                />;

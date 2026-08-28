@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
+import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
-import type { Campaign } from '../../types';
+import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { 
   ChevronLeft, 
@@ -37,7 +38,42 @@ interface CalendarEvent {
   avatarUrl: string;
   record: StatusTrackingRecord;
   bill?: any;
+  videoNumber?: number;
+  postDateStr?: string | null;
+  draftDateStr?: string | null;
 }
+
+const createFallbackRecord = (inf: CampaignInfluencer, campaign: Campaign): StatusTrackingRecord => {
+  return {
+    id: `inf-${inf.id}`,
+    campaign_id: campaign.id,
+    influencer_id: inf.id as any,
+    dispatch_id: `disp-${inf.id}`,
+    delivered_confirmed: false,
+    draft_video_url: null,
+    re_draft_video_url: null,
+    final_post_completed: false,
+    current_step: 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    dispatch: {
+      id: `disp-${inf.id}`,
+      campaign_id: campaign.id,
+      campaign_name: campaign.campaign_name,
+      influencer_id: inf.id as any,
+      influencer_name: inf.influencer_name || inf.name || 'Unknown',
+      influencer_code: inf.name || inf.code || '',
+      influencer_avatar: inf.profile_file_url || '',
+      phone_number: inf.phone_number || '',
+      courier_partner: 'N/A',
+      tracking_id: 'N/A',
+      product_name: inf.products?.[0]?.product_name || 'N/A',
+      total_products: inf.products?.[0]?.qty || 0,
+      expected_delivery_date: null,
+      dispatch_date: null
+    }
+  } as unknown as StatusTrackingRecord;
+};
 
 
 
@@ -252,7 +288,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   onBack, 
   onNavigateToStatusTracking 
 }) => {
-  const { trackingRecords, isLoading, refresh } = useCampaignStatusTracking(campaign.id);
+  const { trackingRecords, isLoading: isTrackingLoading, refresh: refreshTracking } = useCampaignStatusTracking(campaign.id);
+  const { influencers, isLoading: isInfluencersLoading, refresh: refreshInfluencers } = useCampaignInfluencers(campaign.id);
+
+  const isLoading = isTrackingLoading || isInfluencersLoading;
+
+  const refresh = async () => {
+    await Promise.all([refreshTracking(), refreshInfluencers()]);
+  };
   
   // Date state for month selector
   const [currentDate, setCurrentDate] = useState(() => new Date());
@@ -301,7 +344,9 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   // Fetch influencer platforms reactively
   useEffect(() => {
     const fetchPlatforms = async () => {
-      const influencerIds = Array.from(new Set(trackingRecords.map(r => r.influencer_id).filter(Boolean)));
+      const trackingIds = trackingRecords.map(r => r.influencer_id).filter(Boolean);
+      const infIds = (influencers || []).map(i => i.id).filter(Boolean);
+      const influencerIds = Array.from(new Set([...trackingIds, ...infIds]));
       if (influencerIds.length === 0) return;
 
       try {
@@ -326,7 +371,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     };
 
     fetchPlatforms();
-  }, [trackingRecords]);
+  }, [trackingRecords, influencers]);
 
   // Filter bills for this campaign once in memory using preferred order matching
   const campaignBills = useMemo(() => {
@@ -583,8 +628,81 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       }
     }
 
+    // Add Post Date & Draft Date events for each influencer in this campaign
+    for (const inf of influencers) {
+      const influencerName = inf.influencer_name || inf.name || 'Unknown';
+      const influencerUsername = inf.name || inf.code || '';
+      const campaignName = campaign.campaign_name;
+      const avatarUrl = inf.profile_file_url || '';
+      const postDates = inf.postDates || [];
+
+      // Find matching status tracking record if available
+      const matchingRecord = trackingRecords.find(r => 
+        String(r.influencer_id) === String(inf.id) ||
+        (r.dispatch?.influencer_code && r.dispatch.influencer_code.toLowerCase() === influencerUsername.toLowerCase())
+      ) || createFallbackRecord(inf, campaign);
+
+      for (const pd of postDates) {
+        const vNum = pd.video_number || 1;
+
+        // 1. Draft Date Event
+        if (pd.draft_date && String(pd.draft_date).trim() !== '') {
+          const drDate = parseDateOnly(pd.draft_date);
+          if (drDate) {
+            const exists = list.some(e => e.dateStr === drDate && e.type === 'Draft' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
+            if (!exists) {
+              list.push({
+                id: `inf-${inf.id}-v${vNum}-draft`,
+                recordId: String(inf.id),
+                type: 'Draft',
+                label: `Video ${vNum} Draft`,
+                icon: '🎬',
+                colorClass: 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
+                dateStr: drDate,
+                influencerName,
+                influencerUsername,
+                campaignName,
+                avatarUrl,
+                record: matchingRecord,
+                videoNumber: vNum,
+                postDateStr: pd.post_date,
+                draftDateStr: pd.draft_date
+              });
+            }
+          }
+        }
+
+        // 2. Final Post Event
+        if (pd.post_date && String(pd.post_date).trim() !== '') {
+          const fpDate = parseDateOnly(pd.post_date);
+          if (fpDate) {
+            const exists = list.some(e => e.dateStr === fpDate && e.type === 'Final Post' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
+            if (!exists) {
+              list.push({
+                id: `inf-${inf.id}-v${vNum}-finalpost`,
+                recordId: String(inf.id),
+                type: 'Final Post',
+                label: `Video ${vNum} Final Post`,
+                icon: '🚀',
+                colorClass: 'bg-blue-500/10 border border-blue-500/30 text-blue-400',
+                dateStr: fpDate,
+                influencerName,
+                influencerUsername,
+                campaignName,
+                avatarUrl,
+                record: matchingRecord,
+                videoNumber: vNum,
+                postDateStr: pd.post_date,
+                draftDateStr: pd.draft_date
+              });
+            }
+          }
+        }
+      }
+    }
+
     return list;
-  }, [trackingRecords, campaign, bills, todayStr]);
+  }, [trackingRecords, influencers, campaign, bills, todayStr]);
 
   // Calculate Today's Stats dynamically adapting to active filters
   const todaySummaryStats = useMemo(() => {

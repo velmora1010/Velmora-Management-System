@@ -295,6 +295,17 @@ export interface InfluencerBrandPerformance {
   facebook_link?: string;
 }
 
+export interface InfluencerPostDate {
+  id?: number | string;
+  influencer_id?: number | string;
+  campaign_id?: string;
+  video_number: number;
+  post_date: string | null;
+  draft_date: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface CampaignInfluencer {
   id: string;
   campaign_id: string;
@@ -326,6 +337,7 @@ export interface CampaignInfluencer {
   products?: InfluencerProduct[];
   performance?: InfluencerBrandPerformance[];
   brandPerformance?: InfluencerBrandPerformance[];
+  postDates?: InfluencerPostDate[];
   dispatchDetails?: any;
 }
 

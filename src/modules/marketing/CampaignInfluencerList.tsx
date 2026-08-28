@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload } from 'lucide-react';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
-import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from './AddCampaignInfluencer';
+import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
+import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 
 interface InfluencerFilterState {
   missingPhone: boolean;
@@ -81,7 +82,7 @@ const InfluencerCard = ({
   onDispatch?: (inf: CampaignInfluencer) => void,
   onDelete: (id: string, name: string) => void
 }) => {
-  const [activeTab, setActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance'>('basic');
+  const [activeTab, setActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>('basic');
   const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
 
   const togglePlatformExpanded = (platformName: string) => {
@@ -106,6 +107,7 @@ City: ${influencer.city}`;
             {onDispatch && (
               influencer.dispatchDetails ? (
                 <button 
+                  type="button"
                   disabled
                   className="px-4 py-1.5 text-[13px] rounded-md pointer-events-none"
                   style={{ backgroundColor: 'rgba(40, 167, 69, 0.1)', color: '#28a745', border: '1px solid rgba(40, 167, 69, 0.3)' }}
@@ -114,6 +116,7 @@ City: ${influencer.city}`;
                 </button>
               ) : (
                 <button 
+                  type="button"
                   onClick={() => onDispatch(influencer)} 
                   className="px-4 py-1.5 text-[13px] rounded-md bg-purple-600 hover:bg-purple-500 text-white transition-colors"
                 >
@@ -121,14 +124,38 @@ City: ${influencer.city}`;
                 </button>
               )
             )}
-            <button onClick={() => onEdit(influencer)} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-blue-400 transition-colors" title="Edit"><Edit size={14} /></button>
-            <button onClick={handleCopy} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-slate-200 transition-colors" title="Copy"><Copy size={14} /></button>
-            {isArchived(influencer.is_archived) ? (
-                <button onClick={() => onToggleArchive(influencer.id, false)} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-green-400 transition-colors" title="Restore"><ArchiveRestore size={14} /></button>
-            ) : (
-                <button onClick={() => onToggleArchive(influencer.id, true)} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-red-400 transition-colors" title="Archive"><Archive size={14} /></button>
-            )}
-            <button onClick={() => onDelete(influencer.id, influencer.influencer_name || influencer.name || '')} className="p-1.5 bg-slate-800 border border-slate-600 rounded text-slate-400 hover:text-red-550 transition-colors" title="Delete Permanently"><Trash2 size={14} /></button>
+            <button 
+              type="button"
+              onClick={() => onEdit(influencer)}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+              title="Edit Influencer"
+            >
+              <Edit size={16} />
+            </button>
+            <button 
+              type="button"
+              onClick={handleCopy}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+              title="Copy details"
+            >
+              <Copy size={16} />
+            </button>
+            <button 
+              type="button"
+              onClick={() => onToggleArchive(influencer.id, !!influencer.is_archived)}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+              title={isArchived(influencer.is_archived) ? "Unarchive Influencer" : "Archive Influencer"}
+            >
+              <Archive size={16} />
+            </button>
+            <button 
+              type="button"
+              onClick={() => onDelete(influencer.id, influencer.influencer_name || influencer.name)}
+              className="p-1.5 bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-400 rounded-lg transition-colors border border-slate-700 hover:border-red-800/40"
+              title="Delete Influencer"
+            >
+              <Trash2 size={16} />
+            </button>
         </div>
 
         {/* Header Actions - Mobile (<768px) */}
@@ -144,23 +171,24 @@ City: ${influencer.city}`;
             />
         </div>
 
-        {/* Profile Info */}
-        <div className="flex items-center gap-4 mb-4 mt-2 sm:mt-0">
-          <div className="w-12 h-12 bg-purple-500/10 text-purple-400 rounded-full flex items-center justify-center font-bold text-lg border border-purple-500/20 overflow-hidden shrink-0">
+        {/* Profile Info Header */}
+        <div className="flex items-center mb-4">
+          <div className="w-12 h-12 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-lg border-2 border-purple-500/30">
             {influencer.profile_file_url ? (
-              <img src={influencer.profile_file_url} alt="Profile" className="w-full h-full object-cover" />
+              <img src={influencer.profile_file_url} alt={influencer.name} className="w-full h-full object-cover" />
             ) : (
-              influencer.name?.charAt(0)?.toUpperCase() || '?'
+              (influencer.influencer_name || influencer.name || 'A').charAt(0).toUpperCase()
             )}
           </div>
-          <div>
-            <h4 className="text-slate-100 font-semibold">{influencer.influencer_name}</h4>
-            <p className="text-slate-400 text-xs flex flex-wrap items-center gap-1.5 mt-0.5">
-              @{influencer.name} &bull; 
-              <span className="bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-1.5 py-0.5 rounded text-[10px] font-mono select-none" title="Influencer Code">
-                {influencer.code || 'No Code'}
-              </span>
-            </p>
+          <div className="ml-3">
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-white text-base">@{influencer.name || influencer.influencer_name}</h3>
+              {influencer.code && (
+                <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded">
+                  {influencer.code}
+                </span>
+              )}
+            </div>
           </div>
           <div className="ml-4 hidden sm:block">
             <span className={`px-2 py-0.5 rounded text-xs font-semibold ${isArchived(influencer.is_archived) ? 'bg-slate-700 text-slate-300' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
@@ -176,7 +204,8 @@ City: ${influencer.city}`;
             { id: 'platform', label: 'Platform Details' },
             { id: 'pricing', label: 'Pricing Info' },
             { id: 'products', label: 'Products' },
-            { id: 'performance', label: 'Brand Performance' }
+            { id: 'performance', label: 'Brand Performance' },
+            { id: 'postdate', label: 'Post Date' }
           ].map(tab => (
             <button
               key={tab.id}
@@ -486,6 +515,44 @@ City: ${influencer.city}`;
                })()}
              </div>
           )}
+
+          {activeTab === 'postdate' && (() => {
+            const dates = (influencer.postDates || []).slice().sort((a, b) => (a.video_number || 0) - (b.video_number || 0));
+            if (dates.length === 0) {
+              return (
+                <div className="text-slate-400 py-3 text-sm italic">
+                  No post dates scheduled.
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">POST DATE SCHEDULE</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {dates.map((d, i) => (
+                    <div key={d.id || d.video_number || i} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-[11px] font-bold rounded">
+                          VIDEO {d.video_number}
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Post Date:</span>
+                          <span className="text-slate-200 font-medium font-mono">{formatDisplayDate(d.post_date)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Draft Date:</span>
+                          <span className="text-purple-300 font-medium font-mono">{formatDisplayDate(d.draft_date)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
      </div>
   );
@@ -527,6 +594,13 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [filterState, setFilterState] = useState<InfluencerFilterState>(initialFilterState);
   const [tempFilterState, setTempFilterState] = useState<InfluencerFilterState>(initialFilterState);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [activeEditInfluencer, setActiveEditInfluencer] = useState<CampaignInfluencer | null>(null);
+
+  const handleEditInfluencerClick = (inf: CampaignInfluencer) => {
+    setActiveEditInfluencer(inf);
+    onEdit(inf);
+  };
 
   const isEmptyValue = (val: any): boolean => {
     if (val === undefined || val === null) return true;
@@ -721,6 +795,14 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                 {activeFilterCount}
               </span>
             )}
+          </button>
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer shrink-0"
+            title="Import Influencers from Excel / CSV / PDF"
+          >
+            <Upload size={16} />
+            <span>Import Influencers</span>
           </button>
         </div>
       </div>
@@ -944,7 +1026,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               <InfluencerCard 
                 key={inf.id} 
                 influencer={inf} 
-                onEdit={onEdit} 
+                onEdit={handleEditInfluencerClick} 
                 onToggleArchive={toggleArchiveStatus} 
                 onDispatch={onDispatch}
                 onDelete={handleDelete}
@@ -954,23 +1036,40 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         )}
       </div>
 
-      {editingInfluencer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-hidden">
-          <div className="bg-slate-800 rounded-xl border border-slate-700 w-full max-w-5xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-            <div className="flex-1 overflow-y-auto">
-              <AddCampaignInfluencer 
-                campaign={campaign} 
-                initialData={editingInfluencer} 
-                onBack={async () => {
-                  await refresh();
-                  if (onCancelEdit) {
-                    onCancelEdit();
-                  }
-                }} 
-              />
+      {(activeEditInfluencer || editingInfluencerId) && (() => {
+        const targetInfluencer = activeEditInfluencer || influencers.find(inf => String(inf.id) === String(editingInfluencerId));
+        if (!targetInfluencer) return null;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-hidden">
+            <div className="bg-slate-800 rounded-xl border border-slate-700 w-full max-w-5xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+              <div className="flex-1 overflow-y-auto">
+                <AddCampaignInfluencer 
+                  campaign={campaign} 
+                  initialData={targetInfluencer} 
+                  onBack={async () => {
+                    setActiveEditInfluencer(null);
+                    await refresh();
+                    if (onCancelEdit) {
+                      onCancelEdit();
+                    }
+                  }} 
+                />
+              </div>
             </div>
           </div>
-        </div>
+        );
+      })()}
+
+      {isImportModalOpen && (
+        <BulkInfluencerImportModal
+          campaign={campaign}
+          existingInfluencers={influencers}
+          onClose={() => setIsImportModalOpen(false)}
+          onSuccess={() => {
+            refresh();
+          }}
+        />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import type { CampaignInfluencer, InfluencerBargainHistory } from '../../types';
+import type { CampaignInfluencer, InfluencerBargainHistory, InfluencerPlatformDetail, InfluencerPostDate } from '../../types';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 
@@ -58,19 +58,33 @@ export const getCampaignCode = (campaignName: string): string => {
   return (cleanName.substring(0, 2)).toUpperCase();
 };
 
+export const notifyInfluencerChange = (campaignId?: string | number) => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('velmora:influencer-updated', { 
+      detail: { campaignId: campaignId ? String(campaignId) : undefined } 
+    }));
+  }
+};
+
 export const useCampaignInfluencers = (campaignId?: string) => {
   const [influencers, setInfluencers] = useState<CampaignInfluencer[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const fetchIdRef = useRef(0);
 
   const loadInfluencers = useCallback(async () => {
-    if (!campaignId) return;
+    if (!campaignId) {
+      setInfluencers([]);
+      return;
+    }
     
+    const currentFetchId = ++fetchIdRef.current;
     setIsLoading(true);
     setError(null);
+
     try {
-      console.log('Loading', SUPABASE_TABLES.influencersInfo, '...');
+      console.log('Loading', SUPABASE_TABLES.influencersInfo, 'for campaign', campaignId, '...');
       const { data: infData, error: infError } = await supabase
         .from(SUPABASE_TABLES.influencersInfo)
         .select('*')
@@ -78,9 +92,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         .order('created_at', { ascending: false });
 
       if (infError) throw infError;
-      
-      console.log('Loaded table:', SUPABASE_TABLES.influencersInfo, infData?.length, infError);
 
+      if (fetchIdRef.current !== currentFetchId) return;
+      
       const infoList = infData || [];
       const influencerIds = infoList.map(inf => inf.id);
 
@@ -92,14 +106,18 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           { data: pricingData },
           { data: productsData },
           { data: performanceData },
-          { data: dispatchData }
+          { data: dispatchData },
+          { data: postDatesData }
         ] = await Promise.all([
           supabase.from(SUPABASE_TABLES.influencerPlatform).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerPricing).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerProduct).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerBrandPerformance).select('*').in('influencer_id', influencerIds),
-          supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('influencer_id', influencerIds).eq('campaign_id', campaignId)
+          supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('influencer_id', influencerIds).eq('campaign_id', campaignId),
+          supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', influencerIds)
         ]);
+
+        if (fetchIdRef.current !== currentFetchId) return;
 
         let bargainData: InfluencerBargainHistory[] = [];
         if (pricingData && pricingData.length > 0) {
@@ -108,11 +126,13 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           bargainData = bData || [];
         }
 
+        if (fetchIdRef.current !== currentFetchId) return;
+
         combinedData = infoList.map(inf => {
           let platformViews: any = null;
           let viewsJson: any = null;
           const matchViewsElement = Array.isArray(inf.languages) 
-            ? inf.languages.find((l: string) => l.startsWith('views_data:')) 
+            ? inf.languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:')) 
             : null;
           if (matchViewsElement) {
             try {
@@ -129,11 +149,30 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           const facebook_view_code_mode = viewsJson?.facebook_view_code_mode || 'auto';
           const youtube_view_code_mode = viewsJson?.youtube_view_code_mode || 'auto';
 
-          const cleanLangs = Array.isArray(inf.languages)
-            ? inf.languages.filter((l: string) => !l.startsWith('views_data:'))
-            : [];
+          const postDatesFromJSON = (viewsJson?.post_dates || []).map((pd: any) => ({
+            video_number: pd.video_number,
+            post_date: pd.post_date || null,
+            draft_date: pd.draft_date || null
+          }));
+          const postDatesFromTable = (postDatesData || [])
+            .filter(pd => String(pd.influencer_id) === String(inf.id))
+            .map(pd => ({
+              id: pd.id,
+              influencer_id: pd.influencer_id,
+              campaign_id: pd.campaign_id,
+              video_number: pd.video_number,
+              post_date: pd.post_date || null,
+              draft_date: pd.draft_date || null
+            }));
+            
+          const rawPostDates = postDatesFromTable.length > 0 ? postDatesFromTable : postDatesFromJSON;
+          const postDates = rawPostDates.sort((a: any, b: any) => (a.video_number || 0) - (b.video_number || 0));
 
-          const rawPlatforms = (platformsData || []).filter(p => p.influencer_id === inf.id);
+          const cleanLangs = Array.isArray(inf.languages)
+            ? inf.languages.filter((l: string) => typeof l === 'string' && !l.startsWith('views_data:'))
+            : (typeof inf.languages === 'string' ? inf.languages.split(/[,/]+/).map((s: string) => s.trim()).filter(Boolean) : []);
+
+          const rawPlatforms = (platformsData || []).filter(p => String(p.influencer_id) === String(inf.id));
           const uniquePlatformsMap: Record<string, any> = {};
           rawPlatforms.forEach(p => {
             let normKey = p.platform;
@@ -157,21 +196,11 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
             const savedViewsList = platformViews?.[normKey] || [];
             savedViewsList.forEach((v: any) => {
-              const idx = v.video_number - 1;
+              const idx = (v.video_number || 1) - 1;
               if (idx >= 0 && idx < 15) {
-                video_views[idx] = v.views !== null ? Number(v.views) : null;
+                video_views[idx] = v.views || null;
                 if (v.entered_date) {
-                  const parts = v.entered_date.split('-');
-                  if (parts.length === 3) {
-                    const [yr, mo, dy] = parts;
-                    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                    const monthName = months[parseInt(mo, 10) - 1] || 'Jan';
-                    video_views_dates[idx] = `${dy}-${monthName}-${yr}`;
-                  } else {
-                    video_views_dates[idx] = v.entered_date;
-                  }
-                } else {
-                  video_views_dates[idx] = null;
+                  video_views_dates[idx] = v.entered_date;
                 }
               }
             });
@@ -182,11 +211,11 @@ export const useCampaignInfluencers = (campaignId?: string) => {
               video_views_dates
             };
           });
-          const pricing = (pricingData || []).find(p => p.influencer_id === inf.id) || {};
+          const pricing = (pricingData || []).find(p => String(p.influencer_id) === String(inf.id)) || {};
           const bargainHistory = bargainData.filter(b => b.pricing_id === pricing.id);
-          const products = (productsData || []).filter(p => p.influencer_id === inf.id);
-          const brandPerformance = (performanceData || []).filter(p => p.influencer_id === inf.id);
-          const dispatchDetails = (dispatchData || []).find(d => d.influencer_id === inf.id);
+          const products = (productsData || []).filter(p => String(p.influencer_id) === String(inf.id));
+          const brandPerformance = (performanceData || []).filter(p => String(p.influencer_id) === String(inf.id));
+          const dispatchDetails = (dispatchData || []).find(d => String(d.influencer_id) === String(inf.id));
 
           return {
             ...inf,
@@ -197,6 +226,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             performance: brandPerformance,
             brandPerformance,
             dispatchDetails,
+            postDates,
             instagram_view_code,
             facebook_view_code,
             youtube_view_code,
@@ -207,19 +237,38 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         });
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setInfluencers(combinedData as any[]);
-    } catch (err: unknown) {
-      console.error('Error fetching campaign influencers:', err);
-      setError(err instanceof Error ? err : new Error(String(err)));
+      if (fetchIdRef.current === currentFetchId) {
+        setInfluencers(combinedData as any[]);
+      }
+    } catch (err: any) {
+      if (fetchIdRef.current === currentFetchId) {
+        console.error('Error loading campaign influencers:', err);
+        setError(err instanceof Error ? err : new Error(err?.message || String(err)));
+      }
     } finally {
-      setIsLoading(false);
+      if (fetchIdRef.current === currentFetchId) {
+        setIsLoading(false);
+      }
     }
   }, [campaignId]);
 
   useEffect(() => {
+    setInfluencers([]);
     loadInfluencers();
-  }, [loadInfluencers]);
+  }, [campaignId, loadInfluencers]);
+
+  useEffect(() => {
+    const handleGlobalUpdate = (e: any) => {
+      const targetCampId = e.detail?.campaignId;
+      if (!targetCampId || String(targetCampId) === String(campaignId)) {
+        loadInfluencers();
+      }
+    };
+    window.addEventListener('velmora:influencer-updated', handleGlobalUpdate);
+    return () => {
+      window.removeEventListener('velmora:influencer-updated', handleGlobalUpdate);
+    };
+  }, [campaignId, loadInfluencers]);
 
   const getMaxId = async (table: string): Promise<number> => {
     const { data, error } = await supabase
@@ -253,34 +302,37 @@ export const useCampaignInfluencers = (campaignId?: string) => {
   };
 
   const buildPlatformViewsPayload = (
-    platforms: any[],
+    platforms: InfluencerPlatformDetail[],
     instagramViewCode?: string | null,
     facebookViewCode?: string | null,
     youtubeViewCode?: string | null,
     instagramViewCodeMode?: string | null,
     facebookViewCodeMode?: string | null,
-    youtubeViewCodeMode?: string | null
+    youtubeViewCodeMode?: string | null,
+    postDates?: InfluencerPostDate[]
   ) => {
     const platformViews: Record<string, any[]> = {};
-    (platforms || []).forEach(p => {
+    
+    platforms.forEach(p => {
       const platformName = p.platform;
-      const viewsArray = Array.isArray(p.video_views) ? p.video_views : [];
-      const datesArray = Array.isArray(p.video_views_dates) ? p.video_views_dates : [];
+      const viewsArr = p.video_views || [];
+      const datesArr = p.video_views_dates || [];
       const videosList: any[] = [];
       
       for (let i = 0; i < 15; i++) {
-        const val = viewsArray[i];
-        const date = datesArray[i];
+        const viewVal = viewsArr[i];
+        const dateVal = datesArr[i];
         
-        if (val !== undefined && val !== null && val !== '' && String(val).trim() !== '') {
-          const viewVal = parseViewCountLocal(val);
-          
+        if (viewVal !== undefined && viewVal !== null && String(viewVal).trim() !== '') {
           let ymdDate = null;
-          if (date && String(date).trim() !== '' && date !== '—') {
+          if (dateVal && typeof dateVal === 'string') {
+            const date = dateVal.trim();
             if (date.includes('-')) {
               const parts = date.split('-');
               if (parts.length === 3) {
-                const [dy, moName, yr] = parts;
+                const dy = parts[0].padStart(2, '0');
+                const moName = parts[1];
+                const yr = parts[2];
                 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                 const monthIdx = months.indexOf(moName);
                 const mo = String(monthIdx !== -1 ? monthIdx + 1 : 1).padStart(2, '0');
@@ -295,7 +347,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
           videosList.push({
             video_number: i + 1,
-            views: viewVal,
+            views: parseViewCountLocal(viewVal),
             entered_date: ymdDate
           });
         }
@@ -318,7 +370,12 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       youtube_view_code: youtubeViewCode || null,
       instagram_view_code_mode: instagramViewCodeMode || 'auto',
       facebook_view_code_mode: facebookViewCodeMode || 'auto',
-      youtube_view_code_mode: youtubeViewCodeMode || 'auto'
+      youtube_view_code_mode: youtubeViewCodeMode || 'auto',
+      post_dates: (postDates || []).map(pd => ({
+        video_number: pd.video_number,
+        post_date: pd.post_date || null,
+        draft_date: pd.draft_date || null
+      }))
     };
   };
 
@@ -341,7 +398,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           influencerData.youtube_view_code,
           (influencerData as any).instagram_view_code_mode,
           (influencerData as any).facebook_view_code_mode,
-          (influencerData as any).youtube_view_code_mode
+          (influencerData as any).youtube_view_code_mode,
+          influencerData.postDates
         );
         const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
         const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
@@ -507,6 +565,33 @@ export const useCampaignInfluencers = (campaignId?: string) => {
               throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBrandPerformance}: ${perfErr.message || JSON.stringify(perfErr)}`);
             }
           }
+
+          // Save Post Dates if provided
+          if (influencerData.postDates && influencerData.postDates.length > 0) {
+            const validPostDates = influencerData.postDates.filter(pd => pd.post_date && String(pd.post_date).trim() !== '');
+            if (validPostDates.length > 0) {
+              let nextPostDateId = await getMaxId(SUPABASE_TABLES.influencerPostDates);
+              const postDatesToInsert = validPostDates.map(pd => {
+                nextPostDateId++;
+                return {
+                  id: nextPostDateId,
+                  influencer_id: newInfluencerId,
+                  campaign_id: campaignId,
+                  video_number: pd.video_number,
+                  post_date: pd.post_date,
+                  draft_date: pd.draft_date || null
+                };
+              });
+
+              const { error: postDateErr } = await supabase
+                .from(SUPABASE_TABLES.influencerPostDates)
+                .insert(postDatesToInsert);
+
+              if (postDateErr) {
+                console.error("Error inserting post dates:", postDateErr);
+              }
+            }
+          }
         } catch (innerErr) {
           console.error("Error copying related data, rolling back:", innerErr);
           await supabase.from(SUPABASE_TABLES.influencersInfo).delete().eq('id', newInfluencerId);
@@ -514,6 +599,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         }
 
         await loadInfluencers();
+        notifyInfluencerChange(campaignId);
 
         // Non-blocking activity logging
         (async () => {
@@ -569,7 +655,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         influencerData.youtube_view_code,
         (influencerData as any).instagram_view_code_mode,
         (influencerData as any).facebook_view_code_mode,
-        (influencerData as any).youtube_view_code_mode
+        (influencerData as any).youtube_view_code_mode,
+        influencerData.postDates
       );
       const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
       const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
@@ -774,7 +861,66 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         }
       }
 
+      // 8. Post Dates (Sync / Upsert)
+      if (influencerData.postDates !== undefined) {
+        const currentPostDates = (influencerData.postDates || []).filter(pd => pd.post_date && String(pd.post_date).trim() !== '');
+        const { data: existingPostDates } = await supabase
+          .from(SUPABASE_TABLES.influencerPostDates)
+          .select('*')
+          .eq('influencer_id', numericId)
+          .eq('campaign_id', campaignId);
+
+        const existingMap = new Map((existingPostDates || []).map(ep => [ep.video_number, ep]));
+        let nextPostDateId = await getMaxId(SUPABASE_TABLES.influencerPostDates);
+
+        const rowsToInsert: any[] = [];
+        const currentVideoNumbers = new Set<number>();
+
+        for (const pd of currentPostDates) {
+          currentVideoNumbers.add(pd.video_number);
+          const existing = existingMap.get(pd.video_number);
+          if (existing) {
+            if (existing.post_date !== pd.post_date || existing.draft_date !== pd.draft_date) {
+              await supabase
+                .from(SUPABASE_TABLES.influencerPostDates)
+                .update({
+                  post_date: pd.post_date,
+                  draft_date: pd.draft_date || null,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', existing.id);
+            }
+          } else {
+            nextPostDateId++;
+            rowsToInsert.push({
+              id: nextPostDateId,
+              influencer_id: numericId,
+              campaign_id: campaignId,
+              video_number: pd.video_number,
+              post_date: pd.post_date,
+              draft_date: pd.draft_date || null
+            });
+          }
+        }
+
+        if (rowsToInsert.length > 0) {
+          await supabase
+            .from(SUPABASE_TABLES.influencerPostDates)
+            .insert(rowsToInsert);
+        }
+
+        for (const existing of (existingPostDates || [])) {
+          if (!currentVideoNumbers.has(existing.video_number)) {
+            await supabase
+              .from(SUPABASE_TABLES.influencerPostDates)
+              .delete()
+              .eq('id', existing.id);
+          }
+        }
+      }
+
       await loadInfluencers();
+      notifyInfluencerChange(campaignId);
 
       // Non-blocking activity logging
       (async () => {
@@ -819,6 +965,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       if (error) throw error;
       
       setInfluencers(prev => prev.map(inf => inf.id === id ? { ...inf, is_archived: isArchived } : inf));
+      notifyInfluencerChange(campaignId);
       return true;
     } catch (err: unknown) {
       console.error('Error toggling archive status:', err);
@@ -871,6 +1018,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       if (infoDelErr) throw infoDelErr;
 
       await loadInfluencers();
+      notifyInfluencerChange(campaignId);
 
       // Non-blocking activity logging
       logActivity(

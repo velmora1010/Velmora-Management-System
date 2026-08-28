@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, InfluencerPricing, InfluencerProduct, InfluencerBrandPerformance } from '../../types';
+import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, InfluencerPricing, InfluencerProduct, InfluencerBrandPerformance, InfluencerPostDate } from '../../types';
 import { Save, X, Plus } from 'lucide-react';
-import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
+import { useCampaignInfluencers, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
@@ -185,13 +185,58 @@ export const getYoutubeViewCode = (platforms: InfluencerPlatformDetail[]): strin
   return calc.code;
 };
 
+export const calculateDraftDate = (postDateStr: string | null | undefined): string => {
+  if (!postDateStr || !postDateStr.trim()) return '';
+  try {
+    const parts = postDateStr.trim().split('-');
+    if (parts.length !== 3) return '';
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return '';
+
+    const d = new Date(year, month - 1, day);
+    if (isNaN(d.getTime())) return '';
+
+    d.setDate(d.getDate() - 3);
+
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  } catch (e) {
+    return '';
+  }
+};
+
+export const formatDisplayDate = (dateStr: string | null | undefined): string => {
+  if (!dateStr || !dateStr.trim()) return '—';
+  try {
+    const parts = dateStr.trim().split('-');
+    if (parts.length !== 3) return dateStr;
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return dateStr;
+
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthName = months[month - 1] || '';
+    const dd = String(day).padStart(2, '0');
+    return `${dd} ${monthName} ${year}`;
+  } catch (e) {
+    return dateStr;
+  }
+};
+
 interface AddCampaignInfluencerProps {
   campaign: Campaign;
   initialData?: CampaignInfluencer;
   onBack: () => void;
 }
 
-type TabKey = 'basic' | 'platform' | 'pricing' | 'products' | 'performance';
+type TabKey = 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate';
 
 export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ campaign, initialData, onBack }) => {
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
@@ -204,7 +249,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     saveDepartmentNavigation('marketing', '/marketing', { activeTab: tabId });
   };
 
-  const { addInfluencer, updateInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
+  const { influencers, addInfluencer, updateInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
 
   // Form State Storage Helpers
   const getFormStorageKey = () => {
@@ -241,6 +286,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     pricing: InfluencerPricing;
     products: InfluencerProduct[];
     performance: InfluencerBrandPerformance[];
+    postDates: InfluencerPostDate[];
   }
 
   const [formState, setFormState] = useState<FormState>(() => {
@@ -371,9 +417,32 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           alternative_number: initialData.alternative_number || '',
           upi_number: initialData.upi_number || '',
           city: initialData.city || '',
-          complete_address: initialData.complete_address || '',
-          state: initialData.state || '',
-          languages: initialData.languages || [],
+          state: (function(input?: string | null) {
+            if (!input || !input.trim()) return '';
+            const allStates = [
+              "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh",
+              "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka",
+              "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
+              "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu",
+              "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+              "Andaman and Nicobar Islands", "Chandigarh",
+              "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Jammu and Kashmir",
+              "Ladakh", "Lakshadweep", "Puducherry"
+            ];
+            const clean = input.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            const found = allStates.find(s => s.toLowerCase().replace(/[^a-z0-9]/g, '') === clean);
+            return found || input.trim();
+          })(initialData.state),
+          languages: (function(rawLangs?: any) {
+            if (!rawLangs) return [];
+            if (Array.isArray(rawLangs)) {
+              return rawLangs.filter(l => typeof l === 'string' && !l.startsWith('views_data:'));
+            }
+            if (typeof rawLangs === 'string') {
+              return rawLangs.split(/[,/]+/).map(s => s.trim()).filter(Boolean);
+            }
+            return [];
+          })(initialData.languages),
           profile_file_url: initialData.profile_file_url || '',
           auto_dm: initialData.auto_dm || false,
           code: initialData.code || '',
@@ -399,7 +468,14 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           product_pricing: prodPricing
         },
         products: initialData.products?.map(p => ({ ...p, selected: true })) || [],
-        performance: initialData.brandPerformance || initialData.performance || []
+        performance: initialData.brandPerformance || initialData.performance || [],
+        postDates: (initialData.postDates && initialData.postDates.length > 0)
+          ? initialData.postDates.map(pd => ({
+              ...pd,
+              post_date: pd.post_date || '',
+              draft_date: pd.draft_date || calculateDraftDate(pd.post_date)
+            }))
+          : [{ video_number: 1, post_date: '', draft_date: '' }]
       };
     }
 
@@ -442,7 +518,8 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         total_amount: 0
       },
       products: [],
-      performance: []
+      performance: [],
+      postDates: [{ video_number: 1, post_date: '', draft_date: '' }]
     };
   });
 
@@ -531,7 +608,11 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   const handleLanguageToggle = (lang: string) => {
     setFormState(prev => {
       const langs = prev.basicInfo.languages || [];
-      const nextLangs = langs.includes(lang) ? langs.filter(l => l !== lang) : [...langs, lang];
+      const cleanTarget = lang.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      const isPresent = langs.some(l => typeof l === 'string' && l.trim().toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTarget);
+      const nextLangs = isPresent
+        ? langs.filter(l => typeof l === 'string' && l.trim().toLowerCase().replace(/[^a-z0-9]/g, '') !== cleanTarget)
+        : [...langs, lang];
       return {
         ...prev,
         basicInfo: { ...prev.basicInfo, languages: nextLangs }
@@ -826,6 +907,18 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         return;
       }
 
+      const cleanCode = basicInfo.code.trim().toLowerCase();
+      const duplicateCodeInf = (influencers || []).find(inf => 
+        inf.code && 
+        inf.code.trim().toLowerCase() === cleanCode && 
+        String(inf.id) !== String(initialData?.id || '')
+      );
+
+      if (duplicateCodeInf) {
+        toast.error(`Influencer Code ${basicInfo.code.trim()} already exists. Please use a unique Influencer Code.`);
+        return;
+      }
+
       if (!basicInfo.languages || basicInfo.languages.length === 0) {
         toast.error('Please select at least one language.');
         return;
@@ -856,7 +949,8 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         platforms: cleanedPlatforms,
         pricing,
         products: cleanedProducts,
-        performance
+        performance,
+        postDates: formState.postDates || []
       };
 
       const success = initialData?.id 
@@ -870,6 +964,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           sessionStorage.removeItem(`influencer_edit_draft_${campaign.id}_${initialData.id}`);
         }
         toast.success(initialData?.id ? 'Influencer updated successfully!' : 'Influencer saved successfully!');
+        notifyInfluencerChange(campaign.id);
         await onBack();
       }
     } catch (err: any) {
@@ -911,7 +1006,8 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           { id: 'platform', label: 'Platform Details' },
           { id: 'pricing', label: 'Pricing Info' },
           { id: 'products', label: 'Products' },
-          { id: 'performance', label: 'Brand Performance' }
+          { id: 'performance', label: 'Brand Performance' },
+          { id: 'postdate', label: 'Post Date' }
         ].map(tab => (
           <button
             key={tab.id}
@@ -1054,7 +1150,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                     <label key={lang} className="flex items-center gap-2 text-sm text-slate-300">
                       <input 
                         type="checkbox" 
-                        checked={(basicInfo.languages || []).includes(lang)}
+                        checked={(basicInfo.languages || []).some(l => typeof l === 'string' && l.trim().toLowerCase().replace(/[^a-z0-9]/g, '') === lang.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))}
                         onChange={() => handleLanguageToggle(lang)}
                         className="rounded border-slate-600 bg-slate-900 text-purple-600 focus:ring-purple-500"
                       />
@@ -1700,6 +1796,125 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               className="mt-4 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg transition-colors border border-slate-600"
             >
               + Add Performance
+            </button>
+          </div>
+        </div>
+
+        {/* Post Date Tab */}
+        <div className={activeTab === 'postdate' ? '' : 'hidden'}>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-medium text-slate-200">POST DATE SCHEDULE</h3>
+                <p className="text-sm text-slate-400">Schedule the post and automatically calculate draft date.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {(formState.postDates || []).map((item, idx) => (
+                <div key={item.video_number || idx} className="bg-slate-900 border border-slate-700 rounded-xl p-5 relative">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="px-3 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold rounded-lg uppercase tracking-wider">
+                        VIDEO {item.video_number}
+                      </span>
+                    </div>
+                    {formState.postDates.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (item.id) {
+                            if (!window.confirm(`Are you sure you want to remove Video ${item.video_number} post date schedule?`)) {
+                              return;
+                            }
+                          }
+                          setFormState(prev => ({
+                            ...prev,
+                            postDates: prev.postDates.filter((_, i) => i !== idx)
+                          }));
+                        }}
+                        className="text-slate-500 hover:text-red-400 p-1 transition-colors"
+                        title="Remove video schedule"
+                      >
+                        <X size={18} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Post Date
+                      </label>
+                      <input
+                        type="date"
+                        value={item.post_date || ''}
+                        onChange={e => {
+                          const newPostDate = e.target.value;
+                          const newDraftDate = calculateDraftDate(newPostDate);
+                          setFormState(prev => {
+                            const updated = [...(prev.postDates || [])];
+                            updated[idx] = {
+                              ...updated[idx],
+                              post_date: newPostDate,
+                              draft_date: newDraftDate
+                            };
+                            return { ...prev, postDates: updated };
+                          });
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-purple-500 font-mono"
+                      />
+                      {item.post_date && (
+                        <span className="block text-[11px] text-slate-500 mt-1">
+                          Formatted: {formatDisplayDate(item.post_date)}
+                        </span>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                        <span>Draft Date</span>
+                        <span className="text-[10px] text-purple-400 font-normal lowercase">Automatically calculated • 3 days before</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="date"
+                          readOnly
+                          value={item.draft_date || ''}
+                          className="w-full bg-slate-950/50 border border-slate-800 rounded-lg px-3 py-2 text-slate-400 text-sm cursor-not-allowed select-none font-mono"
+                        />
+                        {item.draft_date && (
+                          <span className="block text-[11px] text-purple-300 font-medium mt-1">
+                            Formatted: {formatDisplayDate(item.draft_date)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setFormState(prev => {
+                  const currentList = prev.postDates || [];
+                  const nextVideoNumber = currentList.length > 0
+                    ? Math.max(...currentList.map(v => v.video_number)) + 1
+                    : 1;
+                  return {
+                    ...prev,
+                    postDates: [
+                      ...currentList,
+                      { video_number: nextVideoNumber, post_date: '', draft_date: '' }
+                    ]
+                  };
+                });
+              }}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-purple-400 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-slate-700"
+            >
+              <Plus size={16} /> Add Video
             </button>
           </div>
         </div>
