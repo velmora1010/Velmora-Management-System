@@ -377,12 +377,12 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           profile_file_url: initialData.profile_file_url || '',
           auto_dm: initialData.auto_dm || false,
           code: initialData.code || '',
-          instagram_view_code: initialData.instagram_view_code || '',
-          facebook_view_code: initialData.facebook_view_code || '',
-          youtube_view_code: initialData.youtube_view_code || '',
-          instagram_view_code_mode: (initialData as any).instagram_view_code_mode || 'auto',
-          facebook_view_code_mode: (initialData as any).facebook_view_code_mode || 'auto',
-          youtube_view_code_mode: (initialData as any).youtube_view_code_mode || 'auto'
+          instagram_view_code: initialData.instagram_view_code || getInstagramViewCode(mappedPlatforms) || '',
+          facebook_view_code: initialData.facebook_view_code || getFacebookViewCode(mappedPlatforms) || '',
+          youtube_view_code: initialData.youtube_view_code || getYoutubeViewCode(mappedPlatforms) || '',
+          instagram_view_code_mode: (initialData as any).instagram_view_code_mode || (initialData.instagram_view_code ? 'manual' : 'auto'),
+          facebook_view_code_mode: (initialData as any).facebook_view_code_mode || (initialData.facebook_view_code ? 'manual' : 'auto'),
+          youtube_view_code_mode: (initialData as any).youtube_view_code_mode || (initialData.youtube_view_code ? 'manual' : 'auto')
         },
         platformAvailability: initialPlatformAvailability,
         platformAgreed: initialPlatformAvailability,
@@ -1218,14 +1218,44 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       let onChangeHandler = (val: string) => {};
                       
                       if (p.platform === 'Instagram') {
-                        value = basicInfo.instagram_view_code || '';
-                        onChangeHandler = (val) => setFormState(prev => ({ ...prev, basicInfo: { ...prev.basicInfo, instagram_view_code: val } }));
+                        const autoCalc = getInstagramViewCode(platforms) || '';
+                        value = basicInfo.instagram_view_code !== undefined && basicInfo.instagram_view_code !== null && basicInfo.instagram_view_code !== '' 
+                          ? basicInfo.instagram_view_code 
+                          : autoCalc;
+                        onChangeHandler = (val) => setFormState(prev => ({ 
+                          ...prev, 
+                          basicInfo: { 
+                            ...prev.basicInfo, 
+                            instagram_view_code: val,
+                            instagram_view_code_mode: 'manual'
+                          } 
+                        }));
                       } else if (p.platform === 'Facebook') {
-                        value = basicInfo.facebook_view_code || '';
-                        onChangeHandler = (val) => setFormState(prev => ({ ...prev, basicInfo: { ...prev.basicInfo, facebook_view_code: val } }));
+                        const autoCalc = getFacebookViewCode(platforms) || '';
+                        value = basicInfo.facebook_view_code !== undefined && basicInfo.facebook_view_code !== null && basicInfo.facebook_view_code !== '' 
+                          ? basicInfo.facebook_view_code 
+                          : autoCalc;
+                        onChangeHandler = (val) => setFormState(prev => ({ 
+                          ...prev, 
+                          basicInfo: { 
+                            ...prev.basicInfo, 
+                            facebook_view_code: val,
+                            facebook_view_code_mode: 'manual'
+                          } 
+                        }));
                       } else if (p.platform === 'Youtube') {
-                        value = basicInfo.youtube_view_code || '';
-                        onChangeHandler = (val) => setFormState(prev => ({ ...prev, basicInfo: { ...prev.basicInfo, youtube_view_code: val } }));
+                        const autoCalc = getYoutubeViewCode(platforms) || '';
+                        value = basicInfo.youtube_view_code !== undefined && basicInfo.youtube_view_code !== null && basicInfo.youtube_view_code !== '' 
+                          ? basicInfo.youtube_view_code 
+                          : autoCalc;
+                        onChangeHandler = (val) => setFormState(prev => ({ 
+                          ...prev, 
+                          basicInfo: { 
+                            ...prev.basicInfo, 
+                            youtube_view_code: val,
+                            youtube_view_code_mode: 'manual'
+                          } 
+                        }));
                       }
                       
                       return (

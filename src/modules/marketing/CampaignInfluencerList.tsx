@@ -196,16 +196,15 @@ City: ${influencer.city}`;
         <div className="text-sm">
           {activeTab === 'basic' && (() => {
             const getDisplayViewCode = (platformName: string): string => {
-              if (platformName === 'Instagram') {
-                return influencer.instagram_view_code || '—';
-              }
-              if (platformName === 'Facebook') {
-                return influencer.facebook_view_code || '—';
-              }
-              if (platformName === 'Youtube') {
-                return influencer.youtube_view_code || '—';
-              }
-              return '—';
+              const plat = (influencer.platforms || []).find(
+                p => p.platform.toLowerCase() === platformName.toLowerCase()
+              );
+              const resolved = resolvePerformanceCode(
+                influencer, 
+                platformName, 
+                plat?.video_views || []
+              );
+              return resolved.code || '—';
             };
 
             const displayInsta = getDisplayViewCode('Instagram');
