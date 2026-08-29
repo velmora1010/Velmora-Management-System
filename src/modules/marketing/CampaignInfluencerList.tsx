@@ -142,7 +142,7 @@ City: ${influencer.city}`;
             </button>
             <button 
               type="button"
-              onClick={() => onToggleArchive(influencer.id, !!influencer.is_archived)}
+              onClick={() => onToggleArchive(influencer.id, !isArchived(influencer.is_archived))}
               className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
               title={isArchived(influencer.is_archived) ? "Unarchive Influencer" : "Archive Influencer"}
             >

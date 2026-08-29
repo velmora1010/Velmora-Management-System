@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import type { CampaignInfluencer, InfluencerBargainHistory, InfluencerPlatformDetail, InfluencerPostDate } from '../../types';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
+import toast from 'react-hot-toast';
 
 // Language and Campaign code generation mapping helper
 export const LANGUAGE_MAPPING: Record<string, string> = {
@@ -960,22 +961,27 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     }
   };
 
-  const toggleArchiveStatus = async (id: string, isArchived: boolean): Promise<boolean> => {
+  const toggleArchiveStatus = async (id: string, isArchivedTarget: boolean): Promise<boolean> => {
     setIsSaving(true);
     setError(null);
     try {
+      const numericId = parseInt(id, 10);
+      const targetId = isNaN(numericId) ? id : numericId;
+
       const { error } = await supabase
         .from(SUPABASE_TABLES.influencersInfo)
-        .update({ is_archived: isArchived })
-        .eq('id', id);
+        .update({ is_archived: isArchivedTarget ? 'true' : 'false' })
+        .eq('id', targetId);
       if (error) throw error;
       
-      setInfluencers(prev => prev.map(inf => inf.id === id ? { ...inf, is_archived: isArchived } : inf));
+      setInfluencers(prev => prev.map(inf => String(inf.id) === String(id) ? { ...inf, is_archived: isArchivedTarget } : inf));
       notifyInfluencerChange(campaignId);
+      toast.success(isArchivedTarget ? 'Influencer archived' : 'Influencer restored to main list');
       return true;
     } catch (err: unknown) {
       console.error('Error toggling archive status:', err);
       setError(err instanceof Error ? err : new Error(String(err)));
+      toast.error('Failed to update archive status');
       return false;
     } finally {
       setIsSaving(false);
