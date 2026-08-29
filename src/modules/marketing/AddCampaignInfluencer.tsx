@@ -290,7 +290,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   }
 
   const [formState, setFormState] = useState<FormState>(() => {
-    if (savedForm) {
+    if (savedForm && !initialData) {
       return savedForm;
     }
 
@@ -320,7 +320,11 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         
         if (match) {
           const views = Array.isArray(match.video_views) ? match.video_views : [];
-          const paddedViews = [...views, ...Array(15).fill('')].slice(0, 15);
+          const paddedViews = Array.from({ length: 15 }, (_, i) => {
+            const v = views[i];
+            if (v === undefined || v === null || String(v).trim() === '') return '';
+            return String(v);
+          });
           
           const dates = Array.isArray((match as any).video_views_dates) ? (match as any).video_views_dates : [];
           const paddedDates = [...dates, ...Array(15).fill('')].slice(0, 15);
@@ -927,12 +931,17 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
       const visiblePlats = getVisiblePlatforms();
       const cleanedPlatforms = platforms
-        .filter(p => visiblePlats.includes(p.platform))
+        .filter(p => (
+          visiblePlats.includes(p.platform) ||
+          (p.username && p.username.trim() !== '') ||
+          (p.followers_count && p.followers_count > 0) ||
+          (Array.isArray(p.video_views) && p.video_views.some(v => Number(v) > 0))
+        ))
         .map(p => ({
           ...p,
           video_views: Array.isArray(p.video_views) 
-            ? p.video_views.map(v => (v === undefined || v === null || String(v).trim() === '') ? null : parseViewCount(v)) as any
-            : []
+            ? p.video_views.map(v => (v === undefined || v === null || String(v).trim() === '') ? 0 : parseViewCount(v)) as any
+            : Array(15).fill(0)
         }));
 
       const cleanedProducts = products.filter(p => p.selected && p.video_number && p.video_number <= (pricing.total_videos || 0));

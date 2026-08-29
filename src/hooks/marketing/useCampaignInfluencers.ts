@@ -103,6 +103,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       if (influencerIds.length > 0) {
         const [
           { data: platformsData },
+          { data: videoViewsData },
           { data: pricingData },
           { data: productsData },
           { data: performanceData },
@@ -110,6 +111,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           { data: postDatesData }
         ] = await Promise.all([
           supabase.from(SUPABASE_TABLES.influencerPlatform).select('*').in('influencer_id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerVideoViews).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerPricing).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerProduct).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerBrandPerformance).select('*').in('influencer_id', influencerIds),
@@ -173,6 +175,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             : (typeof inf.languages === 'string' ? inf.languages.split(/[,/]+/).map((s: string) => s.trim()).filter(Boolean) : []);
 
           const rawPlatforms = (platformsData || []).filter(p => String(p.influencer_id) === String(inf.id));
+          const rawVideoViews = (videoViewsData || []).filter(v => String(v.influencer_id) === String(inf.id));
+
           const uniquePlatformsMap: Record<string, any> = {};
           rawPlatforms.forEach(p => {
             let normKey = p.platform;
@@ -186,29 +190,33 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           });
 
           const platforms = Object.values(uniquePlatformsMap).map((p: any) => {
-            const video_views = Array(15).fill(null);
-            const video_views_dates = Array(15).fill(null);
-            
             let normKey = p.platform;
             if (p.platform.toLowerCase() === 'instagram') normKey = 'Instagram';
             else if (p.platform.toLowerCase() === 'facebook') normKey = 'Facebook';
             else if (p.platform.toLowerCase() === 'youtube') normKey = 'YouTube';
 
-            const savedViewsList = platformViews?.[normKey] || [];
-            savedViewsList.forEach((v: any) => {
-              const idx = (v.video_number || 1) - 1;
-              if (idx >= 0 && idx < 15) {
-                video_views[idx] = v.views || null;
-                if (v.entered_date) {
-                  video_views_dates[idx] = v.entered_date;
+            const matchingViewsRec = rawVideoViews.find(v => 
+              v.platform && v.platform.toLowerCase() === normKey.toLowerCase()
+            );
+
+            const rawViews = (Array.isArray(p.video_views) && p.video_views.length > 0)
+              ? p.video_views
+              : (matchingViewsRec && Array.isArray(matchingViewsRec.video_views) ? matchingViewsRec.video_views : []);
+
+            const video_views = Array(15).fill(0);
+            if (Array.isArray(rawViews)) {
+              rawViews.forEach((val: any, idx: number) => {
+                if (idx < 15) {
+                  const num = parseViewCountLocal(val);
+                  video_views[idx] = isNaN(num) || num < 0 ? 0 : Math.round(num);
                 }
-              }
-            });
+              });
+            }
 
             return {
               ...p,
               video_views,
-              video_views_dates
+              video_views_dates: Array(15).fill('')
             };
           });
           const pricing = (pricingData || []).find(p => String(p.influencer_id) === String(inf.id)) || {};
@@ -391,18 +399,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         const maxInfoId = await getMaxId(SUPABASE_TABLES.influencersInfo);
         const newInfluencerId = maxInfoId + 1;
 
-        const platformViewsPayload = buildPlatformViewsPayload(
-          influencerData.platforms || [],
-          influencerData.instagram_view_code,
-          influencerData.facebook_view_code,
-          influencerData.youtube_view_code,
-          (influencerData as any).instagram_view_code_mode,
-          (influencerData as any).facebook_view_code_mode,
-          (influencerData as any).youtube_view_code_mode,
-          influencerData.postDates
-        );
-        const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
-        const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
+        const finalLanguages = (influencerData.languages || []).filter(l => typeof l === 'string' && !l.startsWith('views_data:'));
 
         const infoPayload = {
           id: newInfluencerId,
@@ -444,7 +441,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             let nextPlatformId = await getMaxId(SUPABASE_TABLES.influencerPlatform);
             const platformsToInsert = (influencerData.platforms as any[]).map(p => {
               nextPlatformId++;
-              const { performance_code, video_views, video_views_dates, ...dbFields } = p;
+              const { performance_code, video_views_dates, video_views, ...dbFields } = p;
               return {
                 ...dbFields,
                 id: nextPlatformId,
@@ -459,6 +456,39 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             if (platErr) {
               console.error(platErr);
               throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPlatform}: ${platErr.message || JSON.stringify(platErr)}`);
+            }
+
+            // Also insert into public.influencer_video_views
+            let nextViewsId = await getMaxId(SUPABASE_TABLES.influencerVideoViews);
+            const infCode = influencerData.code || (influencerData as any).influencer_code || '';
+            for (const p of (influencerData.platforms as any[])) {
+              if (!p || !p.platform) continue;
+              nextViewsId++;
+              const normPlatform = p.platform.toLowerCase() === 'instagram' ? 'Instagram' :
+                                   p.platform.toLowerCase() === 'youtube' ? 'YouTube' :
+                                   p.platform.toLowerCase() === 'facebook' ? 'Facebook' : p.platform;
+              const viewsArr = Array.isArray(p.video_views) ? p.video_views : [];
+              const numeric15Views = Array.from({ length: 15 }, (_, i) => {
+                const viewVal = viewsArr[i];
+                if (viewVal !== undefined && viewVal !== null && String(viewVal).trim() !== '') {
+                  const num = parseViewCountLocal(viewVal);
+                  return isNaN(num) || num < 0 ? 0 : Math.round(num);
+                }
+                return 0;
+              });
+
+              await supabase
+                .from(SUPABASE_TABLES.influencerVideoViews)
+                .insert([{
+                  id: nextViewsId,
+                  influencer_id: newInfluencerId,
+                  influencer_code: infCode,
+                  username: p.username || '',
+                  platform: normPlatform,
+                  video_views: numeric15Views,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                }]);
             }
           }
 
@@ -648,20 +678,9 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       
       const finalCode = (influencerData.code || '').trim();
 
-      const platformViewsPayload = buildPlatformViewsPayload(
-        influencerData.platforms || [],
-        influencerData.instagram_view_code,
-        influencerData.facebook_view_code,
-        influencerData.youtube_view_code,
-        (influencerData as any).instagram_view_code_mode,
-        (influencerData as any).facebook_view_code_mode,
-        (influencerData as any).youtube_view_code_mode,
-        influencerData.postDates
-      );
-      const cleanLangs = (influencerData.languages || []).filter(l => !l.startsWith('views_data:'));
-      const finalLanguages = [...cleanLangs, 'views_data:' + JSON.stringify(platformViewsPayload)];
+      const finalLanguages = (influencerData.languages || []).filter(l => typeof l === 'string' && !l.startsWith('views_data:'));
 
-      const updatePayload = {
+      const rawUpdatePayload: Record<string, any> = {
         name: influencerData.name,
         influencer_name: influencerData.influencer_name,
         phone_number: influencerData.phone_number,
@@ -672,9 +691,17 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         state: influencerData.state,
         languages: finalLanguages,
         profile_file_url: influencerData.profile_file_url,
-        auto_dm: influencerData.auto_dm || false,
+        auto_dm: influencerData.auto_dm !== undefined ? influencerData.auto_dm : undefined,
         code: finalCode
       };
+
+      const updatePayload: Record<string, any> = {};
+      Object.keys(rawUpdatePayload).forEach(k => {
+        if (rawUpdatePayload[k] !== undefined) {
+          updatePayload[k] = rawUpdatePayload[k];
+        }
+      });
+
       console.log("FINAL INFLUENCER SAVE PAYLOAD", updatePayload);
 
       const { data, error: updateInfoErr } = await supabase
@@ -690,174 +717,217 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         throw new Error(`Failed updating ${SUPABASE_TABLES.influencersInfo}: ${updateInfoErr.message || JSON.stringify(updateInfoErr)}`);
       }
 
-      // 2. Delete existing relational data safely and throw on error
-      const { error: platDelErr } = await supabase.from(SUPABASE_TABLES.influencerPlatform).delete().eq('influencer_id', numericId);
-      if (platDelErr) {
-        console.error('Delete platforms error:', platDelErr);
-        throw platDelErr;
-      }
-      
-      const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', numericId);
-      if (oldPricing && oldPricing.length > 0) {
-        const oldPricingIds = oldPricing.map(p => p.id).filter(Boolean);
-        if (oldPricingIds.length > 0) {
-          const { error: bargainDelErr } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
-          if (bargainDelErr) {
-            console.error('Delete bargain history error:', bargainDelErr);
-            throw bargainDelErr;
+      // 2. Safely Update Relational Tables (Only update sections passed in payload)
+      if (influencerData.platforms !== undefined && Array.isArray(influencerData.platforms)) {
+        for (const p of (influencerData.platforms as any[])) {
+          if (!p || !p.platform) continue;
+          const platformName = p.platform;
+          const viewsArr = Array.isArray(p.video_views) ? p.video_views : [];
+          const numeric15Views = Array.from({ length: 15 }, (_, i) => {
+            const viewVal = viewsArr[i];
+            if (viewVal !== undefined && viewVal !== null && String(viewVal).trim() !== '') {
+              const num = parseViewCountLocal(viewVal);
+              return isNaN(num) || num < 0 ? 0 : Math.round(num);
+            }
+            return 0;
+          });
+
+          // 2a. Update platform metadata in influencer_platforms_details_rows
+          const { data: existingPlats } = await supabase
+            .from(SUPABASE_TABLES.influencerPlatform)
+            .select('id, platform')
+            .eq('influencer_id', numericId);
+
+          const existingPlat = (existingPlats || []).find(ep => ep.platform && ep.platform.toLowerCase() === platformName.toLowerCase());
+
+          if (existingPlat?.id) {
+            await supabase
+              .from(SUPABASE_TABLES.influencerPlatform)
+              .update({
+                username: p.username || '',
+                profile_link: p.profile_link || '',
+                followers_count: Number(p.followers_count || 0),
+                video_views: numeric15Views
+              })
+              .eq('id', existingPlat.id);
+          } else {
+            let nextPlatformId = await getMaxId(SUPABASE_TABLES.influencerPlatform);
+            nextPlatformId++;
+            await supabase
+              .from(SUPABASE_TABLES.influencerPlatform)
+              .insert([{
+                id: nextPlatformId,
+                influencer_id: numericId,
+                platform: platformName,
+                username: p.username || '',
+                profile_link: p.profile_link || '',
+                followers_count: Number(p.followers_count || 0),
+                video_views: numeric15Views
+              }]);
+          }
+
+          // 2b. Upsert 15 video views into public.influencer_video_views
+          const infCode = influencerData.code || (influencerData as any).influencer_code || '';
+          const normPlatform = platformName.toLowerCase() === 'instagram' ? 'Instagram' :
+                               platformName.toLowerCase() === 'youtube' ? 'YouTube' :
+                               platformName.toLowerCase() === 'facebook' ? 'Facebook' : platformName;
+
+          const { data: existingViewsRec } = await supabase
+            .from(SUPABASE_TABLES.influencerVideoViews)
+            .select('id')
+            .eq('influencer_id', numericId)
+            .ilike('platform', normPlatform)
+            .maybeSingle();
+
+          if (existingViewsRec?.id) {
+            const { error: viewsUpdateErr } = await supabase
+              .from(SUPABASE_TABLES.influencerVideoViews)
+              .update({
+                influencer_code: infCode,
+                username: p.username || '',
+                video_views: numeric15Views,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', existingViewsRec.id);
+
+            if (viewsUpdateErr) {
+              console.error(`[Database Error] Failed to update video_views for ${normPlatform}:`, viewsUpdateErr);
+              throw viewsUpdateErr;
+            }
+          } else {
+            let nextViewsId = await getMaxId(SUPABASE_TABLES.influencerVideoViews);
+            nextViewsId++;
+            const { error: viewsInsertErr } = await supabase
+              .from(SUPABASE_TABLES.influencerVideoViews)
+              .insert([{
+                id: nextViewsId,
+                influencer_id: numericId,
+                influencer_code: infCode,
+                username: p.username || '',
+                platform: normPlatform,
+                video_views: numeric15Views,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }]);
+
+            if (viewsInsertErr) {
+              console.error(`[Database Error] Failed to insert video_views for ${normPlatform}:`, viewsInsertErr);
+              throw viewsInsertErr;
+            }
           }
         }
       }
-      
-      const { error: pricingDelErr } = await supabase.from(SUPABASE_TABLES.influencerPricing).delete().eq('influencer_id', numericId);
-      if (pricingDelErr) {
-        console.error('Delete pricing error:', pricingDelErr);
-        throw pricingDelErr;
-      }
-
-      const { error: prodDelErr } = await supabase.from(SUPABASE_TABLES.influencerProduct).delete().eq('influencer_id', numericId);
-      if (prodDelErr) {
-        console.error('Delete products error:', prodDelErr);
-        throw prodDelErr;
-      }
-
-      const { error: perfDelErr } = await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).delete().eq('influencer_id', numericId);
-      if (perfDelErr) {
-        console.error('Delete performance error:', perfDelErr);
-        throw perfDelErr;
-      }
 
       let newPricingId: number | null = null;
+      if (influencerData.pricing !== undefined) {
+        const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', numericId);
+        if (oldPricing && oldPricing.length > 0) {
+          const oldPricingIds = oldPricing.map(p => p.id).filter(Boolean);
+          if (oldPricingIds.length > 0) {
+            await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
+          }
+        }
+        await supabase.from(SUPABASE_TABLES.influencerPricing).delete().eq('influencer_id', numericId);
 
-      // 3. Platforms
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (influencerData.platforms && (influencerData.platforms as any[]).length > 0) {
-        let nextPlatformId = await getMaxId(SUPABASE_TABLES.influencerPlatform);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const platformsToInsert = (influencerData.platforms as any[]).map(p => {
-          nextPlatformId++;
-          const { performance_code, video_views, video_views_dates, ...dbFields } = p;
-          return {
-            ...dbFields,
-            id: nextPlatformId,
-            influencer_id: numericId
+        if (influencerData.pricing) {
+          const nextPricingIdVal = (await getMaxId(SUPABASE_TABLES.influencerPricing)) + 1;
+          const pricingPayload = {
+            id: nextPricingIdVal,
+            influencer_id: numericId,
+            video1_count: (influencerData.pricing as any).video1_count,
+            video1_price: (influencerData.pricing as any).video1_price,
+            video2_count: (influencerData.pricing as any).video2_count,
+            video2_price: (influencerData.pricing as any).video2_price,
+            total_videos: (influencerData.pricing as any).total_videos,
+            final_price: (influencerData.pricing as any).final_price,
+            product_pricing: influencerData.pricing.product_pricing || {}
           };
-        });
 
-        const { error: platErr } = await supabase
-          .from(SUPABASE_TABLES.influencerPlatform)
-          .insert(platformsToInsert);
+          const { error: priceErr } = await supabase
+            .from(SUPABASE_TABLES.influencerPricing)
+            .insert([pricingPayload]);
 
-        if (platErr) {
-          console.error(platErr);
-          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPlatform}: ${platErr.message || JSON.stringify(platErr)}`);
-        }
-      }
+          if (priceErr) {
+            console.error(priceErr);
+            throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPricing}: ${priceErr.message || JSON.stringify(priceErr)}`);
+          }
+          newPricingId = nextPricingIdVal;
 
-      // 4. Pricing
-      if (influencerData.pricing) {
-        const nextPricingIdVal = (await getMaxId(SUPABASE_TABLES.influencerPricing)) + 1;
-        const pricingPayload = {
-          id: nextPricingIdVal,
-          influencer_id: numericId,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          video1_count: (influencerData.pricing as any).video1_count,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          video1_price: (influencerData.pricing as any).video1_price,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          video2_count: (influencerData.pricing as any).video2_count,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          video2_price: (influencerData.pricing as any).video2_price,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          total_videos: (influencerData.pricing as any).total_videos,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          final_price: (influencerData.pricing as any).final_price,
-          product_pricing: influencerData.pricing.product_pricing || {}
-        };
+          if ((influencerData.pricing as any).bargainHistory && (influencerData.pricing as any).bargainHistory.length > 0) {
+            let nextBargainId = await getMaxId(SUPABASE_TABLES.influencerBargainHistory);
+            const bargainsToInsert = (influencerData.pricing as any).bargainHistory.map((b: any) => {
+              nextBargainId++;
+              return {
+                id: nextBargainId,
+                pricing_id: newPricingId,
+                creator_request: b.creator_request,
+                brand_request: b.brand_request
+              };
+            });
 
-        const { error: priceErr } = await supabase
-          .from(SUPABASE_TABLES.influencerPricing)
-          .insert([pricingPayload]);
+            const { error: bargainErr } = await supabase
+              .from(SUPABASE_TABLES.influencerBargainHistory)
+              .insert(bargainsToInsert);
 
-        if (priceErr) {
-          console.error(priceErr);
-          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPricing}: ${priceErr.message || JSON.stringify(priceErr)}`);
-        }
-        newPricingId = nextPricingIdVal;
-
-        // 5. Bargain History
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((influencerData.pricing as any).bargainHistory && (influencerData.pricing as any).bargainHistory.length > 0) {
-          let nextBargainId = await getMaxId(SUPABASE_TABLES.influencerBargainHistory);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const bargainsToInsert = (influencerData.pricing as any).bargainHistory.map((b: any) => {
-            nextBargainId++;
-            return {
-              id: nextBargainId,
-              pricing_id: newPricingId,
-              creator_request: b.creator_request,
-              brand_request: b.brand_request
-            };
-          });
-
-          const { error: bargainErr } = await supabase
-            .from(SUPABASE_TABLES.influencerBargainHistory)
-            .insert(bargainsToInsert);
-
-          if (bargainErr) {
-            console.error(bargainErr);
-            throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBargainHistory}: ${bargainErr.message || JSON.stringify(bargainErr)}`);
+            if (bargainErr) {
+              console.error(bargainErr);
+              throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBargainHistory}: ${bargainErr.message || JSON.stringify(bargainErr)}`);
+            }
           }
         }
       }
 
       // 6. Products
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const activeProducts = (influencerData.products as any[] || []).filter(p => p.selected && p.qty > 0);
-      if (activeProducts.length > 0) {
-        let nextProductId = await getMaxId(SUPABASE_TABLES.influencerProduct);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const productsToInsert = activeProducts.map(p => {
-          nextProductId++;
-          return {
-            ...p,
-            id: nextProductId,
-            influencer_id: numericId
-          };
-        });
+      if (influencerData.products !== undefined) {
+        await supabase.from(SUPABASE_TABLES.influencerProduct).delete().eq('influencer_id', numericId);
 
-        const { error: prodErr } = await supabase
-          .from(SUPABASE_TABLES.influencerProduct)
-          .insert(productsToInsert);
+        const activeProducts = (influencerData.products as any[] || []).filter(p => p.selected && p.qty > 0);
+        if (activeProducts.length > 0) {
+          let nextProductId = await getMaxId(SUPABASE_TABLES.influencerProduct);
+          const productsToInsert = activeProducts.map(p => {
+            nextProductId++;
+            return {
+              ...p,
+              id: nextProductId,
+              influencer_id: numericId
+            };
+          });
 
-        if (prodErr) {
-          console.error(prodErr);
-          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerProduct}: ${prodErr.message || JSON.stringify(prodErr)}`);
+          const { error: prodErr } = await supabase
+            .from(SUPABASE_TABLES.influencerProduct)
+            .insert(productsToInsert);
+
+          if (prodErr) {
+            console.error(prodErr);
+            throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerProduct}: ${prodErr.message || JSON.stringify(prodErr)}`);
+          }
         }
       }
 
       // 7. Performance
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const perfData = influencerData.brandPerformance || influencerData.performance;
-      if (perfData && (perfData as any[]).length > 0) {
-        let nextPerfId = await getMaxId(SUPABASE_TABLES.influencerBrandPerformance);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const perfsToInsert = (perfData as any[]).map(p => {
-          nextPerfId++;
-          return {
-            ...p,
-            id: nextPerfId,
-            influencer_id: numericId
-          };
-        });
+      if (perfData !== undefined) {
+        await supabase.from(SUPABASE_TABLES.influencerBrandPerformance).delete().eq('influencer_id', numericId);
 
-        const { error: perfErr } = await supabase
-          .from(SUPABASE_TABLES.influencerBrandPerformance)
-          .insert(perfsToInsert);
+        if (perfData && (perfData as any[]).length > 0) {
+          let nextPerfId = await getMaxId(SUPABASE_TABLES.influencerBrandPerformance);
+          const perfsToInsert = (perfData as any[]).map(p => {
+            nextPerfId++;
+            return {
+              ...p,
+              id: nextPerfId,
+              influencer_id: numericId
+            };
+          });
 
-        if (perfErr) {
-          console.error(perfErr);
-          throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBrandPerformance}: ${perfErr.message || JSON.stringify(perfErr)}`);
+          const { error: perfErr } = await supabase
+            .from(SUPABASE_TABLES.influencerBrandPerformance)
+            .insert(perfsToInsert);
+
+          if (perfErr) {
+            console.error(perfErr);
+            throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerBrandPerformance}: ${perfErr.message || JSON.stringify(perfErr)}`);
+          }
         }
       }
 
