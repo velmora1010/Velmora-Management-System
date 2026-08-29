@@ -395,7 +395,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           <div className="text-xl font-semibold text-slate-200">{activeInfluencers.length} / {campaign.expected_influencers}</div>
         </div>
         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-          <div className="text-slate-400 text-sm mb-1">Videos Live</div>
+          <div className="text-slate-400 text-sm mb-1">Total Video</div>
           <div className="text-xl font-semibold text-slate-200">{videosLive} / {campaign.expected_total_videos}</div>
         </div>
         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">

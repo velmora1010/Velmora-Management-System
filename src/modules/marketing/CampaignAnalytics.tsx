@@ -443,7 +443,7 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
               <span className="text-slate-200 font-semibold">{activeInfluencers.length} / {campaign.expected_influencers || 0}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">Videos Live</span>
+              <span className="text-slate-400">Total Video</span>
               <span className="text-slate-200 font-semibold">{totalVideosPosted} / {totalVideosRequired}</span>
             </div>
             <div className="flex justify-between">

@@ -34,6 +34,39 @@ export const getLanguageCode = (langs: string[]): string | null => {
   return null;
 };
 
+export const extractCodeNumber = (code?: string | null): { prefix: string; num: number } => {
+  if (!code) return { prefix: '', num: 0 };
+  const str = String(code).trim();
+  const match = str.match(/^(.*?)[^\d]*(\d+)$/);
+  if (match) {
+    const prefix = match[1].toUpperCase();
+    const num = parseInt(match[2], 10);
+    return { prefix, num: isNaN(num) ? 0 : num };
+  }
+  const digitsOnly = str.replace(/\D/g, '');
+  if (digitsOnly) {
+    const num = parseInt(digitsOnly, 10);
+    return { prefix: str.replace(/\d/g, '').toUpperCase(), num: isNaN(num) ? 0 : num };
+  }
+  return { prefix: str.toUpperCase(), num: 0 };
+};
+
+export const compareInfluencerCodesDesc = (a: any, b: any) => {
+  const codeA = (a.code || a.influencer_code || String(a.id || '')).trim();
+  const codeB = (b.code || b.influencer_code || String(b.id || '')).trim();
+
+  const parsedA = extractCodeNumber(codeA);
+  const parsedB = extractCodeNumber(codeB);
+
+  if (parsedA.num !== parsedB.num) {
+    return parsedB.num - parsedA.num;
+  }
+  if (parsedA.prefix !== parsedB.prefix) {
+    return parsedB.prefix.localeCompare(parsedA.prefix);
+  }
+  return codeB.localeCompare(codeA, undefined, { numeric: true, sensitivity: 'base' });
+};
+
 export const getCampaignCode = (campaignName: string): string => {
   if (!campaignName) return 'CC';
   const cleanName = campaignName.trim().toLowerCase();
@@ -231,7 +264,8 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       }
 
       if (fetchIdRef.current === currentFetchId) {
-        setInfluencers(combinedData as any[]);
+        const sortedData = (combinedData as any[]).sort(compareInfluencerCodesDesc);
+        setInfluencers(sortedData);
       }
     } catch (err: any) {
       if (fetchIdRef.current === currentFetchId) {

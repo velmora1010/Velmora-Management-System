@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload } from 'lucide-react';
-import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
+import { useCampaignInfluencers, compareInfluencerCodesDesc } from '../../hooks/marketing/useCampaignInfluencers';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
@@ -729,7 +729,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
       );
     }
 
-    return list.filter(matchesFilters);
+    return list.filter(matchesFilters).sort(compareInfluencerCodesDesc);
   }, [influencers, searchTerm, filter, filterState]);
 
   return (
