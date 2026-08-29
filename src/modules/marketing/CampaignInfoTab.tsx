@@ -1,21 +1,34 @@
 import React from 'react';
 import type { Campaign } from '../../types';
-import { DollarSign, Target, Globe, Info } from 'lucide-react';
+import { DollarSign, Target, Globe, Info, Edit } from 'lucide-react';
 
 interface CampaignInfoTabProps {
   campaign: Campaign;
+  onEditCampaign?: () => void;
 }
 
-export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ campaign }) => {
+export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ campaign, onEditCampaign }) => {
   return (
     <div className="animate-fade-in space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         
         {/* Basic Information */}
         <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700/50 space-y-4">
-          <div className="flex items-center gap-2 mb-6 border-b border-slate-700/50 pb-4">
-            <Info className="text-purple-400" size={20} />
-            <h3 className="text-lg font-semibold text-slate-200">Basic Information</h3>
+          <div className="flex items-center justify-between mb-6 border-b border-slate-700/50 pb-4">
+            <div className="flex items-center gap-2">
+              <Info className="text-purple-400" size={20} />
+              <h3 className="text-lg font-semibold text-slate-200">Basic Information</h3>
+            </div>
+            {onEditCampaign && (
+              <button
+                type="button"
+                onClick={onEditCampaign}
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-lg transition-colors border border-slate-700"
+                title="Edit Campaign"
+              >
+                <Edit size={16} />
+              </button>
+            )}
           </div>
           <div className="flex justify-between items-center">
             <span className="text-slate-400">Campaign Name</span>

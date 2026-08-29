@@ -290,7 +290,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         return <CampaignAnalytics campaign={campaign} influencers={influencers} onBack={() => handleViewChange('overview')} />;
       case 'overview':
       default:
-        return <CampaignInfoTab campaign={campaign} />;
+        return <CampaignInfoTab campaign={campaign} onEditCampaign={() => setIsEditingCampaign(true)} />;
     }
   };
 
@@ -316,12 +316,6 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'overview' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <LayoutDashboard size={14} /> Campaign Details
-          </button>
-          <button 
-            onClick={() => setIsEditingCampaign(true)}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white shrink-0`}
-          >
-            <Edit size={14} /> Edit Campaign
           </button>
           <button 
             onClick={() => {
