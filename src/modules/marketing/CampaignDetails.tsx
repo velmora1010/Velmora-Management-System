@@ -253,6 +253,11 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         return <CampaignInfluencerList 
                  campaign={campaign} 
                  onBack={() => handleViewChange('overview')} 
+                 onAddInfluencer={() => {
+                   setEditingInfluencer(null);
+                   setEditingInfluencerId(null);
+                   handleViewChange('add-influencer', { editingInfluencerId: undefined, activeTab: undefined });
+                 }}
                  editingInfluencerId={editingInfluencerId}
                  onEdit={(inf) => {
                    sessionStorage.removeItem(`influencer_edit_draft_${campaign.id}_${inf.id}`);
@@ -316,16 +321,6 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'overview' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <LayoutDashboard size={14} /> Campaign Details
-          </button>
-          <button 
-            onClick={() => {
-              setEditingInfluencer(null);
-              setEditingInfluencerId(null);
-              handleViewChange('add-influencer', { editingInfluencerId: undefined, activeTab: undefined });
-            }}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'add-influencer' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
-          >
-            <Users size={14} /> + Add Influencer
           </button>
           <button 
             onClick={() => handleViewChange('influencer-list')}

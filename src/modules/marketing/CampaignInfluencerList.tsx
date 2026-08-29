@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesDesc } from '../../hooks/marketing/useCampaignInfluencers';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
@@ -561,8 +561,9 @@ City: ${influencer.city}`;
 interface CampaignInfluencerListProps {
   campaign: Campaign;
   onBack: () => void;
-  onEdit: (influencer: CampaignInfluencer) => void;
-  onDispatch?: (influencer: CampaignInfluencer) => void;
+  onEdit: (inf: CampaignInfluencer) => void;
+  onDispatch?: (inf: CampaignInfluencer) => void;
+  onAddInfluencer?: () => void;
   editingInfluencerId?: string | null;
   onCancelEdit?: () => void;
 }
@@ -572,6 +573,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   onBack, 
   onEdit, 
   onDispatch,
+  onAddInfluencer,
   editingInfluencerId,
   onCancelEdit
 }) => {
@@ -740,7 +742,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           <UserCheck size={20} className="text-purple-400" />
           Influencer List: {campaign.campaign_name}
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button 
             onClick={refresh}
             className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
@@ -748,6 +750,14 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           >
             <RefreshCcw size={16} />
           </button>
+          {onAddInfluencer && (
+            <button 
+              onClick={onAddInfluencer}
+              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-2 shadow-sm"
+            >
+              <Users size={16} /> + Add Influencer
+            </button>
+          )}
           <button 
             onClick={onBack}
             className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm"
