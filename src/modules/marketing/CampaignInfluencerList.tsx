@@ -742,7 +742,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           <UserCheck size={20} className="text-purple-400" />
           Influencer List: {campaign.campaign_name}
         </h3>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
           <button 
             onClick={refresh}
             className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
@@ -753,9 +753,9 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           {onAddInfluencer && (
             <button 
               onClick={onAddInfluencer}
-              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-2 shadow-sm"
+              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-2 shrink-0"
             >
-              <Users size={16} /> + Add Influencer
+              <Users size={14} /> + Add Influencer
             </button>
           )}
           <button 
