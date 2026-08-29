@@ -421,7 +421,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
         const finalLanguages = (influencerData.languages || []).filter(l => typeof l === 'string' && !l.startsWith('views_data:'));
 
-        const infoPayload = {
+        const infoPayload: Record<string, any> = {
           id: newInfluencerId,
           campaign_id: campaignId,
           code: finalCode,
@@ -429,9 +429,11 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           influencer_name: influencerData.influencer_name,
           phone_number: influencerData.phone_number,
           alternative_number: influencerData.alternative_number,
+          email: influencerData.email || '',
           upi_number: influencerData.upi_number,
           complete_address: influencerData.complete_address,
           city: influencerData.city,
+          pincode: influencerData.pincode || '',
           state: influencerData.state,
           languages: finalLanguages,
           profile_file_url: influencerData.profile_file_url,
@@ -441,10 +443,19 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
         console.log("FINAL INFLUENCER SAVE PAYLOAD", infoPayload);
 
-        const { data, error: insertInfoErr } = await supabase
+        let { data, error: insertInfoErr } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
           .insert([infoPayload])
           .select();
+
+        if (insertInfoErr && (insertInfoErr.message?.includes('email') || insertInfoErr.message?.includes('pincode'))) {
+          const safePayload = { ...infoPayload };
+          delete safePayload.email;
+          delete safePayload.pincode;
+          const retry = await supabase.from(SUPABASE_TABLES.influencersInfo).insert([safePayload]).select();
+          data = retry.data;
+          insertInfoErr = retry.error;
+        }
 
         console.log("INFLUENCER SAVE RESULT", { data, error: insertInfoErr });
 
@@ -672,9 +683,11 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         influencer_name: influencerData.influencer_name,
         phone_number: influencerData.phone_number,
         alternative_number: influencerData.alternative_number,
+        email: influencerData.email,
         upi_number: influencerData.upi_number,
         complete_address: influencerData.complete_address,
         city: influencerData.city,
+        pincode: influencerData.pincode,
         state: influencerData.state,
         languages: finalLanguages,
         profile_file_url: influencerData.profile_file_url,
@@ -691,11 +704,20 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
       console.log("FINAL INFLUENCER SAVE PAYLOAD", updatePayload);
 
-      const { data, error: updateInfoErr } = await supabase
+      let { data, error: updateInfoErr } = await supabase
         .from(SUPABASE_TABLES.influencersInfo)
         .update(updatePayload)
         .eq('id', numericId)
         .select();
+
+      if (updateInfoErr && (updateInfoErr.message?.includes('email') || updateInfoErr.message?.includes('pincode'))) {
+        const safePayload = { ...updatePayload };
+        delete safePayload.email;
+        delete safePayload.pincode;
+        const retry = await supabase.from(SUPABASE_TABLES.influencersInfo).update(safePayload).eq('id', numericId).select();
+        data = retry.data;
+        updateInfoErr = retry.error;
+      }
 
       console.log("INFLUENCER SAVE RESULT", { data, error: updateInfoErr });
 

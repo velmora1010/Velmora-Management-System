@@ -1082,6 +1082,14 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                 />
               </div>
               <div>
+                <label className="block text-sm text-slate-400 mb-1">Email ID</label>
+                <input 
+                  type="email" name="email" value={basicInfo.email || ''} onChange={handleBasicChange}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
+                  placeholder="Enter email ID"
+                />
+              </div>
+              <div>
                 <label className="block text-sm text-slate-400 mb-1">UPI Number</label>
                 <input 
                   type="text" name="upi_number" value={basicInfo.upi_number} onChange={handleBasicChange}
@@ -1098,6 +1106,15 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                   type="text" name="city" value={basicInfo.city} onChange={handleBasicChange}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
                   placeholder="Enter city"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Pincode</label>
+                <input 
+                  type="text" name="pincode" value={basicInfo.pincode || ''} onChange={handleBasicChange}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
+                  placeholder="Enter pincode"
+                  maxLength={6}
                 />
               </div>
               <div>

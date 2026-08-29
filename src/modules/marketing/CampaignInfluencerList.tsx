@@ -76,11 +76,7 @@ City: ${influencer.city}`;
   const archived = isArchived(influencer.is_archived);
 
   return (
-     <div className={`bg-slate-900 p-4 rounded-xl transition-all relative mb-6 ${
-       archived 
-         ? 'border border-slate-700/70 opacity-85' 
-         : 'border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.06)] hover:border-green-500/50'
-     }`}>
+     <div className="bg-slate-900 border border-slate-700 p-4 rounded-xl hover:border-slate-600 transition-colors relative mb-6">
         {/* Header Actions - Desktop */}
         <div className="absolute top-4 right-4 hidden md:flex gap-2">
             {onDispatch && (
@@ -167,20 +163,10 @@ City: ${influencer.city}`;
                   {influencer.code}
                 </span>
               )}
+              {!archived && (
+                <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0 inline-block ml-1" title="Active"></span>
+              )}
             </div>
-          </div>
-          <div className="ml-4 hidden sm:block">
-            {archived ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
-                <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                Archived
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-950/40 text-green-400 border border-green-800/40">
-                <span className="w-2 h-2 rounded-full bg-green-400"></span>
-                Active
-              </span>
-            )}
           </div>
         </div>
 

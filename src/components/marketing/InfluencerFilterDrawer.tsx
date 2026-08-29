@@ -48,6 +48,17 @@ export const initialFilterState: InfluencerFilterState = {
   maxPrice: ''
 };
 
+export const CREATOR_CATEGORIES = [
+  'C1L1',
+  'C1L2',
+  'C2L1',
+  'C2L2',
+  'C3L1',
+  'C3L2',
+  'C4L1',
+  'C4L2'
+];
+
 export const FOLLOWER_RANGES = [
   { id: 'below_10k', label: 'Below 10K' },
   { id: '10k_25k', label: '10K - 25K' },
@@ -267,7 +278,7 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
                 className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
               >
                 <option value="">All Categories</option>
-                {availableCategories.map(cat => (
+                {CREATOR_CATEGORIES.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
               </select>

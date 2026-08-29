@@ -314,9 +314,11 @@ export interface CampaignInfluencer {
   influencer_name: string;
   phone_number: string;
   alternative_number: string;
+  email?: string;
   upi_number: string;
   complete_address: string;
   city: string;
+  pincode?: string;
   state: string;
   languages: string[];
   profile_file_url: string;
