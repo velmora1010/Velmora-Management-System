@@ -8,34 +8,7 @@ import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
-
-interface InfluencerFilterState {
-  missingPhone: boolean;
-  missingAltPhone: boolean;
-  missingUpi: boolean;
-  missingCity: boolean;
-  missingState: boolean;
-  missingAddress: boolean;
-  missingInfluencerName: boolean;
-  missingUserName: boolean;
-  missingLanguage: boolean;
-  missingProfileImage: boolean;
-  platformCombo: 'all' | 'instagram' | 'youtube' | 'facebook' | 'instagram_youtube' | 'instagram_facebook' | 'youtube_facebook' | 'instagram_youtube_facebook' | 'none';
-}
-
-const initialFilterState: InfluencerFilterState = {
-  missingPhone: false,
-  missingAltPhone: false,
-  missingUpi: false,
-  missingCity: false,
-  missingState: false,
-  missingAddress: false,
-  missingInfluencerName: false,
-  missingUserName: false,
-  missingLanguage: false,
-  missingProfileImage: false,
-  platformCombo: 'all'
-};
+import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES } from '../../components/marketing/InfluencerFilterDrawer';
 
 const resolvePerformanceCode = (
   influencer: CampaignInfluencer,
@@ -100,8 +73,14 @@ City: ${influencer.city}`;
 
 
 
+  const archived = isArchived(influencer.is_archived);
+
   return (
-     <div className="bg-slate-900 border border-slate-700 p-4 rounded-xl hover:border-slate-600 transition-colors relative mb-6">
+     <div className={`bg-slate-900 p-4 rounded-xl transition-all relative mb-6 ${
+       archived 
+         ? 'border border-slate-700/70 opacity-85' 
+         : 'border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.06)] hover:border-green-500/50'
+     }`}>
         {/* Header Actions - Desktop */}
         <div className="absolute top-4 right-4 hidden md:flex gap-2">
             {onDispatch && (
@@ -191,9 +170,17 @@ City: ${influencer.city}`;
             </div>
           </div>
           <div className="ml-4 hidden sm:block">
-            <span className={`px-2 py-0.5 rounded text-xs font-semibold ${isArchived(influencer.is_archived) ? 'bg-slate-700 text-slate-300' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}>
-              {isArchived(influencer.is_archived) ? 'Archived' : 'Active'}
-            </span>
+            {archived ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                Archived
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-950/40 text-green-400 border border-green-800/40">
+                <span className="w-2 h-2 rounded-full bg-green-400"></span>
+                Active
+              </span>
+            )}
           </div>
         </div>
 
@@ -351,7 +338,7 @@ City: ${influencer.city}`;
                       <div><span className="text-slate-500 block text-xs">Followers</span><span className="text-slate-200">{p.followers_count || '-'}</span></div>
                       {(p.platform === 'Instagram' || p.platform === 'Facebook' || p.platform === 'Youtube') && (
                         <div>
-                          <span className="text-slate-500 block text-xs">Performance Code</span>
+                          <span className="text-slate-500 block text-xs">Creator Category</span>
                           <span className="inline-block bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-2 py-0.5 rounded text-xs font-mono select-all mt-0.5">
                             {resolvePerformanceCode(influencer, p.platform, p.video_views).code || '—'}
                           </span>
@@ -612,6 +599,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   };
 
   const matchesFilters = (influencer: CampaignInfluencer): boolean => {
+    // 1. Missing Detail Checklist Filters
     if (filterState.missingPhone && !isEmptyValue(influencer.phone_number)) return false;
     if (filterState.missingAltPhone && !isEmptyValue(influencer.alternative_number)) return false;
     if (filterState.missingUpi && !isEmptyValue(influencer.upi_number)) return false;
@@ -623,12 +611,93 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     if (filterState.missingLanguage && !isEmptyValue(influencer.languages)) return false;
     if (filterState.missingProfileImage && !isEmptyValue(influencer.profile_file_url)) return false;
 
+    // 2. State Filter
+    if (filterState.state && (influencer.state || '').trim().toLowerCase() !== filterState.state.trim().toLowerCase()) {
+      return false;
+    }
+
+    // 3. City Filter
+    if (filterState.city && (influencer.city || '').trim().toLowerCase() !== filterState.city.trim().toLowerCase()) {
+      return false;
+    }
+
+    // 4. Creator Category Filter
+    if (filterState.creatorCategory) {
+      const targetCat = filterState.creatorCategory.toLowerCase();
+      const codes = [
+        influencer.instagram_view_code,
+        influencer.facebook_view_code,
+        influencer.youtube_view_code
+      ].map(c => (c || '').toLowerCase());
+
+      const platCodes = (influencer.platforms || []).map(p => 
+        (resolvePerformanceCode(influencer, p.platform, p.video_views).code || '').toLowerCase()
+      );
+
+      const allCodes = [...codes, ...platCodes];
+      if (!allCodes.some(c => c === targetCat || c.includes(targetCat))) {
+        return false;
+      }
+    }
+
+    // 5. Followers Range Filter
+    if (filterState.followerRange) {
+      const maxFollowers = Math.max(
+        0,
+        ...(influencer.platforms || []).map(p => {
+          const num = Number(String(p.followers_count || 0).replace(/[^0-9.]/g, ''));
+          return isNaN(num) ? 0 : num;
+        })
+      );
+
+      switch (filterState.followerRange) {
+        case 'below_10k':
+          if (maxFollowers >= 10000) return false;
+          break;
+        case '10k_25k':
+          if (maxFollowers < 10000 || maxFollowers > 25000) return false;
+          break;
+        case '25k_50k':
+          if (maxFollowers < 25000 || maxFollowers > 50000) return false;
+          break;
+        case '50k_100k':
+          if (maxFollowers < 50000 || maxFollowers > 100000) return false;
+          break;
+        case '100k_200k':
+          if (maxFollowers < 100000 || maxFollowers > 200000) return false;
+          break;
+        case '200k_300k':
+          if (maxFollowers < 200000 || maxFollowers > 300000) return false;
+          break;
+        case '300k_400k':
+          if (maxFollowers < 300000 || maxFollowers > 400000) return false;
+          break;
+        case '400k_500k':
+          if (maxFollowers < 400000 || maxFollowers > 500000) return false;
+          break;
+        case 'above_500k':
+          if (maxFollowers <= 500000) return false;
+          break;
+      }
+    }
+
+    // 6. Languages Filter (Multi-select)
+    if (filterState.languages && filterState.languages.length > 0) {
+      const infLangs = Array.isArray(influencer.languages) 
+        ? influencer.languages.map(l => String(l).trim().toLowerCase())
+        : (typeof influencer.languages === 'string' ? (influencer.languages as string).split(',').map(s => s.trim().toLowerCase()) : []);
+
+      const hasMatch = filterState.languages.some(lang => infLangs.includes(lang.toLowerCase()));
+      if (!hasMatch) return false;
+    }
+
+    // 7. Platform Combination Filter
     const influencerPlatforms = (influencer.platforms || []).map(p => p.platform.toLowerCase());
     const hasInstagram = influencerPlatforms.includes('instagram');
     const hasFacebook = influencerPlatforms.includes('facebook');
     const hasYoutube = influencerPlatforms.includes('youtube');
 
-    if (filterState.platformCombo !== 'all') {
+    if (filterState.platformCombo && filterState.platformCombo !== 'all') {
       switch (filterState.platformCombo) {
         case 'instagram':
           if (!(hasInstagram && !hasFacebook && !hasYoutube)) return false;
@@ -654,29 +723,40 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         case 'none':
           if (hasInstagram || hasFacebook || hasYoutube) return false;
           break;
-        default:
-          break;
       }
+    }
+
+    // 8. Product Filter
+    if (filterState.product) {
+      const targetProd = filterState.product.toLowerCase();
+      const prods = (influencer.products || []).map((p: any) => (p.product_name || p.name || '').toLowerCase());
+      if (!prods.some(p => p.includes(targetProd))) {
+        return false;
+      }
+    }
+
+    // 9. Price Filter (Min & Max Price)
+    const priceVal = Number(
+      influencer.pricing?.final_price || 
+      (influencer.pricing as any)?.commercial_quote || 
+      0
+    );
+
+    if (filterState.minPrice) {
+      const minP = Number(filterState.minPrice);
+      if (!isNaN(minP) && priceVal < minP) return false;
+    }
+
+    if (filterState.maxPrice) {
+      const maxP = Number(filterState.maxPrice);
+      if (!isNaN(maxP) && priceVal > maxP) return false;
     }
 
     return true;
   };
 
   const handleOpenFilter = () => {
-    setTempFilterState(filterState);
-    setIsFilterOpen(!isFilterOpen);
-  };
-
-  const handleApplyFilter = () => {
-    setFilterState(tempFilterState);
-    setIsFilterOpen(false);
-    logActivity('Marketing', 'Influencer Filter Updated', 'Updated the Influencer List filter options.');
-  };
-
-  const handleClearFilter = () => {
-    setFilterState(initialFilterState);
-    setTempFilterState(initialFilterState);
-    setIsFilterOpen(false);
+    setIsFilterOpen(true);
   };
 
   const activeFilterCount = useMemo(() => {
@@ -691,7 +771,15 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     if (filterState.missingUserName) count++;
     if (filterState.missingLanguage) count++;
     if (filterState.missingProfileImage) count++;
-    if (filterState.platformCombo !== 'all') count++;
+
+    if (filterState.state) count++;
+    if (filterState.city) count++;
+    if (filterState.creatorCategory) count++;
+    if (filterState.followerRange) count++;
+    if (filterState.languages.length > 0) count += filterState.languages.length;
+    if (filterState.platformCombo && filterState.platformCombo !== 'all') count++;
+    if (filterState.product) count++;
+    if (filterState.minPrice || filterState.maxPrice) count++;
     return count;
   }, [filterState]);
 
@@ -817,207 +905,82 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         </div>
       </div>
 
-      {isFilterOpen && (
-        <div className="p-5 bg-slate-900/95 border-b border-slate-700 shadow-xl animate-fade-in relative z-20">
-          <div className="max-w-4xl mx-auto">
-            {/* Header */}
-            <div className="flex justify-between items-center pb-3 border-b border-slate-800 mb-4">
-              <div className="flex items-center gap-2.5">
-                <SlidersHorizontal size={18} className="text-purple-400" />
-                <div>
-                  <h4 className="text-sm font-bold text-slate-100 uppercase tracking-wide">Filter Influencers</h4>
-                  <p className="text-[11px] text-slate-500">Refine your influencer list</p>
-                </div>
-              </div>
-              {activeFilterCount > 0 && (
-                <button
-                  onClick={handleClearFilter}
-                  className="flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 font-medium transition-colors focus:outline-none"
-                >
-                  <span>{activeFilterCount} Active</span>
-                  <span className="text-lg leading-none font-light">&times;</span>
-                </button>
-              )}
-            </div>
-
-            {/* Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Left Column: Basic Information */}
-              <div>
-                <div className="mb-3">
-                  <span className="block text-xs font-semibold text-purple-300 uppercase tracking-wider">Basic Information</span>
-                  <span className="block text-[10px] text-slate-500">Find influencers with missing details</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  {(() => {
-                    const basicInfoFields = [
-                      { key: 'missingPhone', label: 'Phone Number' },
-                      { key: 'missingAddress', label: 'Address' },
-                      { key: 'missingCity', label: 'City' },
-                      { key: 'missingState', label: 'State' },
-                      { key: 'missingUpi', label: 'UPI' },
-                      { key: 'missingLanguage', label: 'Language' },
-                      { key: 'missingInfluencerName', label: 'Influencer Name' },
-                      { key: 'missingUserName', label: 'User Name' },
-                      { key: 'missingProfileImage', label: 'Profile Image' },
-                    ] as const;
-
-                    return basicInfoFields.map((f, idx) => {
-                      const isChecked = tempFilterState[f.key];
-                      const isLast = idx === basicInfoFields.length - 1;
-                      return (
-                        <label
-                          key={f.key}
-                          className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all select-none ${isLast ? 'col-span-2' : ''} ${
-                            isChecked
-                              ? 'bg-purple-950/20 border-purple-500 text-slate-100 shadow-[0_0_12px_rgba(147,51,234,0.08)]'
-                              : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={e => setTempFilterState(prev => ({ ...prev, [f.key]: e.target.checked }))}
-                            className="rounded border-slate-700 bg-slate-950 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 w-3.5 h-3.5"
-                          />
-                          <span className="text-[11px] font-medium truncate">{f.label}</span>
-                        </label>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-
-              {/* Right Column: Platform Combination */}
-              <div>
-                <div className="mb-3">
-                  <span className="block text-xs font-semibold text-purple-300 uppercase tracking-wider">Platform Combination</span>
-                  <span className="block text-[10px] text-slate-500">Choose creator platform setup</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {(() => {
-                    const platformOptions = [
-                      { value: 'all', label: 'All Platforms', icons: [] },
-                      { value: 'instagram', label: 'Instagram Only', icons: [<svg key="ig" className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>] },
-                      { value: 'youtube', label: 'YouTube Only', icons: [<svg key="yt" className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></svg>] },
-                      { value: 'facebook', label: 'Facebook Only', icons: [<svg key="fb" className="w-3.5 h-3.5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>] },
-                      { value: 'instagram_youtube', label: 'Instagram + YouTube', icons: [<svg key="ig" className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>, <svg key="yt" className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></svg>] },
-                      { value: 'instagram_facebook', label: 'Instagram + Facebook', icons: [<svg key="ig" className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>, <svg key="fb" className="w-3.5 h-3.5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>] },
-                      { value: 'youtube_facebook', label: 'YouTube + Facebook', icons: [<svg key="yt" className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></svg>, <svg key="fb" className="w-3.5 h-3.5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>] },
-                      { value: 'instagram_youtube_facebook', label: 'Instagram + YouTube + FB', icons: [<svg key="ig" className="w-3.5 h-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>, <svg key="yt" className="w-3.5 h-3.5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon></svg>, <svg key="fb" className="w-3.5 h-3.5 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>] },
-                      { value: 'none', label: 'No Platform', icons: [] }
-                    ] as const;
-
-                    return platformOptions.map((opt, idx) => {
-                      const isSelected = tempFilterState.platformCombo === opt.value;
-                      const isLast = idx === platformOptions.length - 1;
-                      return (
-                        <label
-                          key={opt.value}
-                          className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-all select-none ${isLast ? 'sm:col-span-2' : ''} ${
-                            isSelected
-                              ? 'bg-purple-950/20 border-purple-500 text-slate-100 shadow-[0_0_12px_rgba(147,51,234,0.08)]'
-                              : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="radio"
-                              name="platformCombo"
-                              value={opt.value}
-                              checked={isSelected}
-                              onChange={() => setTempFilterState(prev => ({ ...prev, platformCombo: opt.value }))}
-                              className="border-slate-700 bg-slate-950 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 w-3.5 h-3.5"
-                            />
-                            <span className="text-[11px] font-medium">{opt.label}</span>
-                          </div>
-                          {opt.icons.length > 0 && (
-                            <div className="flex items-center gap-1.5 opacity-80 select-none">
-                              {opt.icons}
-                            </div>
-                          )}
-                        </label>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-            </div>
-
-            {/* Active Filters Summary Strip */}
-            <div className="bg-slate-900/40 border border-slate-800 rounded-lg p-3 my-4">
-              <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-2 select-none">Active Filters</span>
-              <div className="flex flex-wrap gap-1.5">
-                {(() => {
-                  const summaryChips: string[] = [];
-                  if (tempFilterState.missingPhone) summaryChips.push('Missing Phone');
-                  if (tempFilterState.missingAddress) summaryChips.push('Missing Address');
-                  if (tempFilterState.missingCity) summaryChips.push('Missing City');
-                  if (tempFilterState.missingState) summaryChips.push('Missing State');
-                  if (tempFilterState.missingUpi) summaryChips.push('Missing UPI');
-                  if (tempFilterState.missingLanguage) summaryChips.push('Missing Language');
-                  if (tempFilterState.missingInfluencerName) summaryChips.push('Missing Name');
-                  if (tempFilterState.missingUserName) summaryChips.push('Missing Username');
-                  if (tempFilterState.missingProfileImage) summaryChips.push('Missing Profile Image');
-                  
-                  if (tempFilterState.platformCombo !== 'all') {
-                    const labelMap: Record<string, string> = {
-                      instagram: 'Instagram Only',
-                      youtube: 'YouTube Only',
-                      facebook: 'Facebook Only',
-                      instagram_youtube: 'Instagram + YouTube',
-                      instagram_facebook: 'Instagram + Facebook',
-                      youtube_facebook: 'YouTube + Facebook',
-                      instagram_youtube_facebook: 'Instagram + YouTube + FB',
-                      none: 'No Platform'
-                    };
-                    summaryChips.push(labelMap[tempFilterState.platformCombo] || tempFilterState.platformCombo);
-                  }
-
-                  if (summaryChips.length === 0) {
-                    return <span className="text-xs text-slate-500 italic select-none">No filters selected</span>;
-                  }
-
-                  return summaryChips.map((chip, idx) => (
-                    <span key={idx} className="inline-flex items-center bg-purple-950/40 text-purple-300 border border-purple-800/30 px-2 py-0.5 rounded text-[10px] font-medium font-mono select-none">
-                      {chip}
-                    </span>
-                  ));
-                })()}
-              </div>
-            </div>
-
-            {/* Bottom Action Bar */}
-            <div className="flex justify-between items-center mt-6 pt-4 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={handleClearFilter}
-                className="text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors focus:outline-none"
-              >
-                Clear all
-              </button>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsFilterOpen(false)}
-                  className="px-4 py-2 border border-slate-800 hover:bg-slate-700/60 text-slate-300 text-xs font-semibold rounded-lg transition-colors focus:outline-none"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApplyFilter}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-slate-100 text-xs font-semibold rounded-lg transition-colors focus:outline-none shadow-md"
-                >
-                  Apply Filters
-                </button>
-              </div>
-            </div>
-          </div>
+      {/* Active Filters Bar */}
+      {isFilterApplied && (
+        <div className="px-4 py-2 bg-slate-900/90 border-b border-slate-700/80 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-400 font-medium">Active Filters:</span>
+          {filterState.state && (
+            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+              State: {filterState.state}
+              <button onClick={() => setFilterState(prev => ({ ...prev, state: '' }))} className="hover:text-white text-slate-400">&times;</button>
+            </span>
+          )}
+          {filterState.city && (
+            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+              City: {filterState.city}
+              <button onClick={() => setFilterState(prev => ({ ...prev, city: '' }))} className="hover:text-white text-slate-400">&times;</button>
+            </span>
+          )}
+          {filterState.creatorCategory && (
+            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+              Category: {filterState.creatorCategory}
+              <button onClick={() => setFilterState(prev => ({ ...prev, creatorCategory: '' }))} className="hover:text-white text-slate-400">&times;</button>
+            </span>
+          )}
+          {filterState.followerRange && (
+            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+              Followers: {FOLLOWER_RANGES.find(r => r.id === filterState.followerRange)?.label || filterState.followerRange}
+              <button onClick={() => setFilterState(prev => ({ ...prev, followerRange: '' }))} className="hover:text-white text-slate-400">&times;</button>
+            </span>
+          )}
+          {filterState.languages.map(lang => (
+            <span key={lang} className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+              Lang: {lang}
+              <button onClick={() => setFilterState(prev => ({ ...prev, languages: prev.languages.filter(l => l !== lang) }))} className="hover:text-white text-slate-400">&times;</button>
+            </span>
+          ))}
+          {filterState.platformCombo && filterState.platformCombo !== 'all' && (
+            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+              Platform: {filterState.platformCombo}
+              <button onClick={() => setFilterState(prev => ({ ...prev, platformCombo: 'all' }))} className="hover:text-white text-slate-400">&times;</button>
+            </span>
+          )}
+          {filterState.product && (
+            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+              Product: {filterState.product}
+              <button onClick={() => setFilterState(prev => ({ ...prev, product: '' }))} className="hover:text-white text-slate-400">&times;</button>
+            </span>
+          )}
+          {(filterState.minPrice || filterState.maxPrice) && (
+            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+              Price: ₹{filterState.minPrice || 0} - ₹{filterState.maxPrice || '∞'}
+              <button onClick={() => setFilterState(prev => ({ ...prev, minPrice: '', maxPrice: '' }))} className="hover:text-white text-slate-400">&times;</button>
+            </span>
+          )}
+          <button 
+            onClick={() => setFilterState(initialFilterState)} 
+            className="text-purple-400 hover:text-purple-300 underline font-semibold ml-2 text-xs"
+          >
+            Clear all
+          </button>
         </div>
       )}
+
+      {/* Side Filter Drawer */}
+      <InfluencerFilterDrawer
+        isOpen={isFilterOpen}
+        onClose={() => setIsFilterOpen(false)}
+        influencers={influencers}
+        filterState={filterState}
+        onApplyFilter={(newState) => {
+          setFilterState(newState);
+          setIsFilterOpen(false);
+          logActivity('Marketing', 'Influencer Filter Updated', 'Updated the Influencer List filter options.');
+        }}
+        onResetFilter={() => {
+          setFilterState(initialFilterState);
+        }}
+      />
 
       {/* List Content */}
       <div className="flex-1 overflow-y-auto p-4">

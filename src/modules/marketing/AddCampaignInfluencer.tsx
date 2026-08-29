@@ -1366,13 +1366,13 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       
                       return (
                         <div className="mt-4 flex flex-col gap-1.5 max-w-xs">
-                          <label className="block text-xs font-semibold text-slate-400">Performance Code</label>
+                          <label className="block text-xs font-semibold text-slate-400">Creator Category</label>
                           <input 
                             type="text" 
                             value={value}
                             onChange={e => onChangeHandler(e.target.value)}
                             className="bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 text-xs focus:outline-none focus:border-purple-500 font-mono"
-                            placeholder="Enter Performance Code (e.g. C4L2)"
+                            placeholder="Enter Creator Category (e.g. C4L2)"
                           />
                         </div>
                       );
