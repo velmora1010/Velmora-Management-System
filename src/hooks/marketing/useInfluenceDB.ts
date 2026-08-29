@@ -205,6 +205,7 @@ export const useInfluenceDB = () => {
             username: avail.username,
             profile_link: avail.link,
             followers_count: Number(avail.count || 0),
+            video_views: Array(15).fill(0),
             type: 'availability'
           });
         });
@@ -220,6 +221,7 @@ export const useInfluenceDB = () => {
             username: perf.username,
             profile_link: perf.link,
             followers_count: 0,
+            video_views: Array(15).fill(0),
             type: 'performance'
           });
         });
@@ -227,27 +229,6 @@ export const useInfluenceDB = () => {
 
       if (platformsToInsert.length > 0) {
         await supabase.from(SUPABASE_TABLES.influencerPlatform).insert(platformsToInsert);
-
-        let nextViewsId = await getMaxId(SUPABASE_TABLES.influencerVideoViews);
-        for (const p of platformsToInsert) {
-          nextViewsId++;
-          const normPlatform = p.platform.toLowerCase() === 'instagram' ? 'Instagram' :
-                               p.platform.toLowerCase() === 'youtube' ? 'YouTube' :
-                               p.platform.toLowerCase() === 'facebook' ? 'Facebook' : p.platform;
-          const default15Views = Array(15).fill(0);
-          await supabase
-            .from(SUPABASE_TABLES.influencerVideoViews)
-            .insert([{
-              id: nextViewsId,
-              influencer_id: newInfluencerId,
-              influencer_code: (influencer as any).influencer_code || (influencer as any).code || '',
-              username: p.username || '',
-              platform: normPlatform,
-              video_views: default15Views,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }]);
-        }
       }
 
       toast.success('Influencer saved to database');

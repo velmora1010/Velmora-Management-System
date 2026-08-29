@@ -103,7 +103,6 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       if (influencerIds.length > 0) {
         const [
           { data: platformsData },
-          { data: videoViewsData },
           { data: pricingData },
           { data: productsData },
           { data: performanceData },
@@ -111,7 +110,6 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           { data: postDatesData }
         ] = await Promise.all([
           supabase.from(SUPABASE_TABLES.influencerPlatform).select('*').in('influencer_id', influencerIds),
-          supabase.from(SUPABASE_TABLES.influencerVideoViews).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerPricing).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerProduct).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerBrandPerformance).select('*').in('influencer_id', influencerIds),
@@ -175,7 +173,6 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             : (typeof inf.languages === 'string' ? inf.languages.split(/[,/]+/).map((s: string) => s.trim()).filter(Boolean) : []);
 
           const rawPlatforms = (platformsData || []).filter(p => String(p.influencer_id) === String(inf.id));
-          const rawVideoViews = (videoViewsData || []).filter(v => String(v.influencer_id) === String(inf.id));
 
           const uniquePlatformsMap: Record<string, any> = {};
           rawPlatforms.forEach(p => {
@@ -190,19 +187,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           });
 
           const platforms = Object.values(uniquePlatformsMap).map((p: any) => {
-            let normKey = p.platform;
-            if (p.platform.toLowerCase() === 'instagram') normKey = 'Instagram';
-            else if (p.platform.toLowerCase() === 'facebook') normKey = 'Facebook';
-            else if (p.platform.toLowerCase() === 'youtube') normKey = 'YouTube';
-
-            const matchingViewsRec = rawVideoViews.find(v => 
-              v.platform && v.platform.toLowerCase() === normKey.toLowerCase()
-            );
-
-            const rawViews = (Array.isArray(p.video_views) && p.video_views.length > 0)
-              ? p.video_views
-              : (matchingViewsRec && Array.isArray(matchingViewsRec.video_views) ? matchingViewsRec.video_views : []);
-
+            const rawViews = Array.isArray(p.video_views) ? p.video_views : [];
             const video_views = Array(15).fill(0);
             if (Array.isArray(rawViews)) {
               rawViews.forEach((val: any, idx: number) => {
@@ -456,39 +441,6 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             if (platErr) {
               console.error(platErr);
               throw new Error(`Failed inserting into ${SUPABASE_TABLES.influencerPlatform}: ${platErr.message || JSON.stringify(platErr)}`);
-            }
-
-            // Also insert into public.influencer_video_views
-            let nextViewsId = await getMaxId(SUPABASE_TABLES.influencerVideoViews);
-            const infCode = influencerData.code || (influencerData as any).influencer_code || '';
-            for (const p of (influencerData.platforms as any[])) {
-              if (!p || !p.platform) continue;
-              nextViewsId++;
-              const normPlatform = p.platform.toLowerCase() === 'instagram' ? 'Instagram' :
-                                   p.platform.toLowerCase() === 'youtube' ? 'YouTube' :
-                                   p.platform.toLowerCase() === 'facebook' ? 'Facebook' : p.platform;
-              const viewsArr = Array.isArray(p.video_views) ? p.video_views : [];
-              const numeric15Views = Array.from({ length: 15 }, (_, i) => {
-                const viewVal = viewsArr[i];
-                if (viewVal !== undefined && viewVal !== null && String(viewVal).trim() !== '') {
-                  const num = parseViewCountLocal(viewVal);
-                  return isNaN(num) || num < 0 ? 0 : Math.round(num);
-                }
-                return 0;
-              });
-
-              await supabase
-                .from(SUPABASE_TABLES.influencerVideoViews)
-                .insert([{
-                  id: nextViewsId,
-                  influencer_id: newInfluencerId,
-                  influencer_code: infCode,
-                  username: p.username || '',
-                  platform: normPlatform,
-                  video_views: numeric15Views,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                }]);
             }
           }
 
@@ -764,56 +716,6 @@ export const useCampaignInfluencers = (campaignId?: string) => {
                 followers_count: Number(p.followers_count || 0),
                 video_views: numeric15Views
               }]);
-          }
-
-          // 2b. Upsert 15 video views into public.influencer_video_views
-          const infCode = influencerData.code || (influencerData as any).influencer_code || '';
-          const normPlatform = platformName.toLowerCase() === 'instagram' ? 'Instagram' :
-                               platformName.toLowerCase() === 'youtube' ? 'YouTube' :
-                               platformName.toLowerCase() === 'facebook' ? 'Facebook' : platformName;
-
-          const { data: existingViewsRec } = await supabase
-            .from(SUPABASE_TABLES.influencerVideoViews)
-            .select('id')
-            .eq('influencer_id', numericId)
-            .ilike('platform', normPlatform)
-            .maybeSingle();
-
-          if (existingViewsRec?.id) {
-            const { error: viewsUpdateErr } = await supabase
-              .from(SUPABASE_TABLES.influencerVideoViews)
-              .update({
-                influencer_code: infCode,
-                username: p.username || '',
-                video_views: numeric15Views,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', existingViewsRec.id);
-
-            if (viewsUpdateErr) {
-              console.error(`[Database Error] Failed to update video_views for ${normPlatform}:`, viewsUpdateErr);
-              throw viewsUpdateErr;
-            }
-          } else {
-            let nextViewsId = await getMaxId(SUPABASE_TABLES.influencerVideoViews);
-            nextViewsId++;
-            const { error: viewsInsertErr } = await supabase
-              .from(SUPABASE_TABLES.influencerVideoViews)
-              .insert([{
-                id: nextViewsId,
-                influencer_id: numericId,
-                influencer_code: infCode,
-                username: p.username || '',
-                platform: normPlatform,
-                video_views: numeric15Views,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              }]);
-
-            if (viewsInsertErr) {
-              console.error(`[Database Error] Failed to insert video_views for ${normPlatform}:`, viewsInsertErr);
-              throw viewsInsertErr;
-            }
           }
         }
       }
