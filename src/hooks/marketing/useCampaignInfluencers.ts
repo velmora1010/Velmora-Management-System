@@ -213,12 +213,13 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           const uniquePlatformsMap: Record<string, any> = {};
           rawPlatforms.forEach(p => {
             let normKey = p.platform;
-            if (p.platform.toLowerCase() === 'instagram') normKey = 'Instagram';
-            else if (p.platform.toLowerCase() === 'facebook') normKey = 'Facebook';
-            else if (p.platform.toLowerCase() === 'youtube') normKey = 'YouTube';
+            const pLower = (p.platform || '').toLowerCase();
+            if (pLower === 'instagram' || pLower === 'insta' || pLower === 'ig') normKey = 'Instagram';
+            else if (pLower === 'facebook' || pLower === 'fb') normKey = 'Facebook';
+            else if (pLower === 'youtube' || pLower === 'yt' || pLower === 'ytube') normKey = 'YouTube';
             
             if (!uniquePlatformsMap[normKey] || p.id > uniquePlatformsMap[normKey].id) {
-              uniquePlatformsMap[normKey] = p;
+              uniquePlatformsMap[normKey] = { ...p, platform: normKey };
             }
           });
 

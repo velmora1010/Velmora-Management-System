@@ -17,6 +17,7 @@ import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import { calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from '../../modules/marketing/AddCampaignInfluencer';
+import { notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import toast from 'react-hot-toast';
 
 interface UploadPlatformDetailsModalProps {
@@ -42,6 +43,7 @@ export interface ParsedPlatformRow {
   platform: PlatformKey;
   code: string;
   username: string;
+  profileLink: string;
   followers: number;
   category: string;
   average: number | null;
@@ -60,6 +62,15 @@ export interface SummaryStats {
   unmatchedCodes: string[];
   invalidCount: number;
 }
+
+export const normalizePlatformName = (val: string): PlatformKey => {
+  if (!val) return 'Instagram';
+  const norm = val.toString().trim().toLowerCase();
+  if (norm === 'insta' || norm === 'instagram' || norm === 'ig') return 'Instagram';
+  if (norm === 'yt' || norm === 'youtube' || norm === 'ytube') return 'YouTube';
+  if (norm === 'fb' || norm === 'facebook') return 'Facebook';
+  return 'Instagram';
+};
 
 export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProps> = ({
   campaign,
@@ -151,7 +162,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
     return 'C4L2';
   };
 
-  const parseFileForPlatform = async (file: File, platform: PlatformKey): Promise<SelectedPlatformFile> => {
+  const parseFileForPlatform = async (file: File, defaultPlatform: PlatformKey): Promise<SelectedPlatformFile> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -164,7 +175,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
           if (!rawData || rawData.length === 0) {
             resolve({
-              platform,
+              platform: defaultPlatform,
               file,
               headers: [],
               rows: [],
@@ -178,14 +189,16 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           
           // Header detection according to Excel spec
           const codeKey = findColumnKey(headers, ['influencer code', 'influencercode', 'influencer_code', 'code', 's no code']);
-          const usernameKey = findColumnKey(headers, ['user name', 'username', 'user_name', 'handle', 'profile link']);
+          const usernameKey = findColumnKey(headers, ['user name', 'username', 'user_name', 'handle', 'name']);
+          const profileLinkKey = findColumnKey(headers, ['profile link', 'profilelink', 'profile_link', 'url', 'link']);
           const followersKey = findColumnKey(headers, ['followers count', 'followers_count', 'followerscount', 'followers', 'subscribers']);
           const categoryKey = findColumnKey(headers, ['creator category', 'creator_category', 'creatorcategory', 'performance code', 'performance_code', 'category']);
           const averageKey = findColumnKey(headers, ['average views', 'average_views', 'averageviews', 'average', 'avg views', 'avg']);
+          const platformKey = findColumnKey(headers, ['platform', 'platform agreed', 'platform_agreed', 'platformagreed']);
 
           if (!codeKey) {
             resolve({
-              platform,
+              platform: defaultPlatform,
               file,
               headers,
               rows: rawData,
@@ -204,11 +217,15 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
           const parsedRecords: ParsedPlatformRow[] = rawData.map(row => {
             const rawCode = cleanStr(row[codeKey]).toUpperCase();
+            const rowPlatStr = platformKey ? cleanStr(row[platformKey]) : '';
+            const rowPlatform = rowPlatStr ? normalizePlatformName(rowPlatStr) : defaultPlatform;
+
             if (!rawCode) {
               return {
-                platform,
+                platform: rowPlatform,
                 code: '',
                 username: '',
+                profileLink: '',
                 followers: 0,
                 category: '',
                 average: null,
@@ -220,6 +237,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
             const matchedInf = influencerCodeMap.get(rawCode);
             const username = usernameKey ? cleanStr(row[usernameKey]) : (matchedInf?.name || matchedInf?.influencer_name || '');
+            const profileLink = profileLinkKey ? cleanStr(row[profileLinkKey]) : '';
             const followers = followersKey ? parseNum(row[followersKey]) : 0;
 
             // Video 1 to Video 15
@@ -240,7 +258,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
             let category = ['C1L1','C1L2','C2L1','C2L2','C3L1','C3L2','C4L1','C4L2','BELOW 10K'].includes(rawCat) ? rawCat : (rawCat || '');
             
             if (!category) {
-              category = getAutoCreatorCategory(platform, videoViews, followers);
+              category = getAutoCreatorCategory(rowPlatform, videoViews, followers);
             }
 
             // Average Views calculation if missing
@@ -260,9 +278,10 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
             }
 
             return {
-              platform,
+              platform: rowPlatform,
               code: rawCode,
               username,
+              profileLink,
               followers,
               category,
               average: averageVal,
@@ -274,7 +293,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           });
 
           resolve({
-            platform,
+            platform: defaultPlatform,
             file,
             headers,
             rows: rawData,
@@ -381,135 +400,105 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
     setIsSaving(true);
 
     try {
-      const selectedFiles = [
-        { key: 'Instagram' as PlatformKey, data: instaFile },
-        { key: 'YouTube' as PlatformKey, data: ytFile },
-        { key: 'Facebook' as PlatformKey, data: fbFile }
-      ].filter(item => item.data !== null && !item.data.validationError);
+      const allParsedFiles = [instaFile, ytFile, fbFile].filter(Boolean) as SelectedPlatformFile[];
+      const allRecordsToProcess: { record: ParsedPlatformRow; filePlatform: PlatformKey }[] = [];
 
-      const influencerUpdatesMap = new Map<string | number, {
-        influencer: CampaignInfluencer;
-        newPlatforms: Map<PlatformKey, ParsedPlatformRow>;
-      }>();
-
-      existingInfluencers.forEach(inf => {
-        const infCode = inf.code?.trim().toUpperCase();
-        if (!infCode) return;
-
-        selectedFiles.forEach(item => {
-          const rec = item.data!.parsedRecords.find(r => r.code === infCode && r.isValid && r.matchedInfluencerId !== undefined);
-          if (rec) {
-            if (!influencerUpdatesMap.has(inf.id)) {
-              influencerUpdatesMap.set(inf.id, {
-                influencer: inf,
-                newPlatforms: new Map<PlatformKey, ParsedPlatformRow>()
-              });
-            }
-            influencerUpdatesMap.get(inf.id)!.newPlatforms.set(item.key, rec);
+      allParsedFiles.forEach(pf => {
+        pf.parsedRecords.forEach(r => {
+          if (r.isValid && r.matchedInfluencerId !== undefined) {
+            allRecordsToProcess.push({ record: r, filePlatform: pf.platform });
           }
         });
       });
 
-      // Update Database per file & influencer
-      for (const item of selectedFiles) {
-        const platformName = item.key;
-        const records = item.data!.parsedRecords.filter(r => r.isValid && r.matchedInfluencerId !== undefined);
-        let recCount = 0;
+      let recCount = 0;
+      const totalRecords = allRecordsToProcess.length;
 
-        for (const rec of records) {
-          const infId = rec.matchedInfluencerId!;
-          
-          const { data: existingPlats } = await supabase
-            .from(SUPABASE_TABLES.influencerPlatform)
-            .select('*')
-            .eq('influencer_id', infId);
+      for (const item of allRecordsToProcess) {
+        const rec = item.record;
+        const infId = rec.matchedInfluencerId!;
+        const platformName = normalizePlatformName(rec.platform || item.filePlatform);
 
-          const matchedPlatRow = (existingPlats || []).find(p => p.platform.toLowerCase() === platformName.toLowerCase());
-
-          const platformPayload: Record<string, any> = {
-            influencer_id: infId,
-            platform: platformName,
-            username: rec.username || matchedPlatRow?.username || '',
-            followers_count: rec.followers || matchedPlatRow?.followers_count || 0,
-            video_views: rec.videoViews,
-            performance_code: rec.category || matchedPlatRow?.performance_code || '',
-            average: rec.average !== null ? rec.average : (matchedPlatRow?.average || null)
-          };
-
-          if (matchedPlatRow?.id) {
-            let { error } = await supabase
-              .from(SUPABASE_TABLES.influencerPlatform)
-              .update(platformPayload)
-              .eq('id', matchedPlatRow.id);
-
-            if (error && error.message?.includes('average')) {
-              const safePayload = { ...platformPayload };
-              delete safePayload.average;
-              await supabase.from(SUPABASE_TABLES.influencerPlatform).update(safePayload).eq('id', matchedPlatRow.id);
-            }
-          } else {
-            const { data: maxData } = await supabase
-              .from(SUPABASE_TABLES.influencerPlatform)
-              .select('id')
-              .order('id', { ascending: false })
-              .limit(1);
-
-            const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
-            platformPayload.id = isNaN(maxId) ? 1 : maxId + 1;
-
-            let { error } = await supabase
-              .from(SUPABASE_TABLES.influencerPlatform)
-              .insert([platformPayload]);
-
-            if (error && error.message?.includes('average')) {
-              const safePayload = { ...platformPayload };
-              delete safePayload.average;
-              await supabase.from(SUPABASE_TABLES.influencerPlatform).insert([safePayload]);
-            }
-          }
-
-          recCount++;
-          const fileProgress = Math.round((recCount / records.length) * 100);
-          setUploadProgress(prev => ({ ...prev, [platformName]: fileProgress }));
-        }
-
-        setUploadProgress(prev => ({ ...prev, [platformName]: 100 }));
-      }
-
-      // Update Platform Availability automatically for affected influencers
-      for (const [infId, entry] of Array.from(influencerUpdatesMap.entries())) {
-        const { influencer } = entry;
-        
-        const { data: allPlats } = await supabase
+        const { data: existingPlats, error: fetchErr } = await supabase
           .from(SUPABASE_TABLES.influencerPlatform)
-          .select('platform, username, followers_count, video_views')
+          .select('*')
           .eq('influencer_id', infId);
 
-        const activePlatforms = (allPlats || []).filter(p => {
-          const hasUsername = Boolean(p.username && p.username.trim());
-          const hasFollowers = Number(p.followers_count) > 0;
-          const hasViews = Array.isArray(p.video_views) && p.video_views.some((v: any) => Number(v) > 0);
-          return hasUsername || hasFollowers || hasViews;
-        }).map(p => p.platform.toLowerCase());
+        if (fetchErr) {
+          console.error(`[Platform Upload Error] Fetch failed for influencer ${infId}:`, fetchErr);
+        }
 
-        const hasInsta = activePlatforms.includes('instagram');
-        const hasYoutube = activePlatforms.includes('youtube');
-        const hasFb = activePlatforms.includes('facebook');
+        const targetPlatformNorm = normalizePlatformName(platformName);
+        const matchedPlatRow = (existingPlats || []).find(p => normalizePlatformName(p.platform) === targetPlatformNorm);
 
-        let newAvailability = 'All';
-        if (hasInsta && hasYoutube && hasFb) newAvailability = 'Instagram and Youtube and Facebook';
-        else if (hasInsta && hasYoutube) newAvailability = 'Instagram and Youtube';
-        else if (hasInsta && hasFb) newAvailability = 'Instagram and Facebook';
-        else if (hasYoutube && hasFb) newAvailability = 'Youtube and Facebook';
-        else if (hasInsta) newAvailability = 'Instagram';
-        else if (hasYoutube) newAvailability = 'Youtube';
-        else if (hasFb) newAvailability = 'Facebook';
+        const platformPayload: Record<string, any> = {
+          influencer_id: infId,
+          platform: platformName,
+          username: rec.username || matchedPlatRow?.username || '',
+          profile_link: rec.profileLink || matchedPlatRow?.profile_link || '',
+          followers_count: rec.followers > 0 ? rec.followers : (matchedPlatRow?.followers_count || 0),
+          video_views: rec.videoViews,
+          performance_code: rec.category || matchedPlatRow?.performance_code || '',
+          average: rec.average !== null ? rec.average : (matchedPlatRow?.average || null)
+        };
 
-        await supabase
-          .from(SUPABASE_TABLES.influencersInfo)
-          .update({ auto_dm: influencer.auto_dm })
-          .eq('id', infId);
+        if (matchedPlatRow?.id) {
+          let { error: updateErr } = await supabase
+            .from(SUPABASE_TABLES.influencerPlatform)
+            .update(platformPayload)
+            .eq('id', matchedPlatRow.id);
+
+          if (updateErr) {
+            console.error(`[Platform Upload Error] Update failed for platform id ${matchedPlatRow.id}:`, updateErr);
+            if (updateErr.message?.includes('average')) {
+              const safePayload = { ...platformPayload };
+              delete safePayload.average;
+              const { error: err2 } = await supabase.from(SUPABASE_TABLES.influencerPlatform).update(safePayload).eq('id', matchedPlatRow.id);
+              if (err2) console.error(`[Platform Upload Error] Fallback update failed:`, err2);
+            }
+          }
+        } else {
+          const { data: maxData } = await supabase
+            .from(SUPABASE_TABLES.influencerPlatform)
+            .select('id')
+            .order('id', { ascending: false })
+            .limit(1);
+
+          const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
+          platformPayload.id = isNaN(maxId) ? 1 : maxId + 1;
+
+          let { error: insertErr } = await supabase
+            .from(SUPABASE_TABLES.influencerPlatform)
+            .insert([platformPayload]);
+
+          if (insertErr) {
+            console.error(`[Platform Upload Error] Insert failed:`, insertErr);
+            if (insertErr.message?.includes('average')) {
+              const safePayload = { ...platformPayload };
+              delete safePayload.average;
+              const { error: err2 } = await supabase.from(SUPABASE_TABLES.influencerPlatform).insert([safePayload]);
+              if (err2) console.error(`[Platform Upload Error] Fallback insert failed:`, err2);
+            }
+          }
+        }
+
+        // Update username in influencersInfo if empty
+        if (rec.username) {
+          const matchedInf = existingInfluencers.find(i => String(i.id) === String(infId));
+          if (matchedInf && (!matchedInf.influencer_name || !matchedInf.name || matchedInf.name === matchedInf.code)) {
+            await supabase
+              .from(SUPABASE_TABLES.influencersInfo)
+              .update({ influencer_name: rec.username, name: rec.username })
+              .eq('id', infId);
+          }
+        }
+
+        recCount++;
+        const fileProgress = totalRecords > 0 ? Math.round((recCount / totalRecords) * 100) : 100;
+        setUploadProgress(prev => ({ ...prev, [platformName]: fileProgress }));
       }
+
+      notifyInfluencerChange(campaign.id);
 
       logActivity(
         'Marketing',
@@ -550,200 +539,158 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           </button>
         </div>
 
-        {/* Modal Content */}
+        {/* Modal Body */}
         <div className="p-6">
-          {/* STEP 1: UPLOAD FILES */}
+          {/* STEP 1: FILE SELECTION */}
           {step === 'upload' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* INSTAGRAM DROPZONE */}
-                <div className={`bg-slate-800/60 border rounded-xl p-4 flex flex-col justify-between transition-colors ${
-                  instaFile?.validationError ? 'border-red-500/50' : instaFile ? 'border-purple-500/60 bg-purple-950/10' : 'border-slate-700 hover:border-slate-600'
-                }`}>
+                {/* Instagram Dropzone */}
+                <div className="border border-slate-800 rounded-xl p-4 bg-slate-900/40 flex flex-col justify-between">
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <span className="font-bold text-slate-100 text-sm flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-pink-500 inline-block"></span>
+                      <span className="font-bold text-slate-200 text-sm flex items-center gap-2">
                         Instagram
                       </span>
-                      {instaFile && !instaFile.validationError ? (
-                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-bold">
-                          ✓ Ready
-                        </span>
-                      ) : (
-                        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded">
-                          — Not uploaded
+                      {instaFile && (
+                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono">
+                          Ready ({instaFile.parsedRecords.length})
                         </span>
                       )}
                     </div>
+                    <p className="text-xs text-slate-400 mb-4">Upload Instagram platform stats Excel/CSV file</p>
+                  </div>
 
-                    {!instaFile ? (
-                      <div className="text-center py-6 border-2 border-dashed border-slate-700 rounded-lg p-3 hover:border-purple-500/50 transition-colors">
-                        <FileSpreadsheet size={28} className="mx-auto text-slate-500 mb-2" />
-                        <p className="text-xs text-slate-300 font-medium mb-1">Upload Instagram File</p>
-                        <p className="text-[10px] text-slate-500 mb-3">Supported: Excel / CSV</p>
-                        <input 
-                          type="file" 
-                          ref={instaInputRef} 
-                          accept=".xlsx,.xls,.csv" 
-                          onChange={(e) => handleFileSelect(e, 'Instagram')} 
-                          className="hidden" 
-                        />
-                        <button 
-                          onClick={() => instaInputRef.current?.click()}
-                          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-colors"
-                        >
-                          Choose File
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="p-3 bg-slate-900 border border-slate-700 rounded-lg text-xs">
-                          <p className="font-semibold text-slate-200 truncate">{instaFile.file.name}</p>
-                          <p className="text-[10px] text-slate-500 mt-1">{(instaFile.file.size / 1024).toFixed(1)} KB • {instaFile.parsedRecords.length} Rows</p>
-                          {instaFile.validationError && (
-                            <p className="text-[11px] text-red-400 mt-1 flex items-center gap-1 font-medium">
-                              <AlertCircle size={12} /> {instaFile.validationError}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => handleRemoveFile('Instagram')}
-                            className="flex-1 py-1.5 bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-400 border border-slate-700 rounded text-xs transition-colors flex items-center justify-center gap-1"
-                          >
-                            <Trash2 size={12} /> Remove
+                  <div>
+                    <input 
+                      type="file" 
+                      ref={instaInputRef} 
+                      accept=".xlsx,.xls,.csv" 
+                      onChange={(e) => handleFileSelect(e, 'Instagram')} 
+                      className="hidden" 
+                    />
+                    
+                    {instaFile ? (
+                      <div className="space-y-2">
+                        <div className="p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-xs flex items-center justify-between">
+                          <span className="font-medium text-slate-200 truncate max-w-[140px]">{instaFile.file.name}</span>
+                          <button onClick={() => handleRemoveFile('Instagram')} className="text-slate-400 hover:text-red-400 ml-1">
+                            <X size={14} />
                           </button>
                         </div>
+                        {instaFile.validationError && (
+                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium">
+                            <AlertCircle size={12} /> {instaFile.validationError}
+                          </p>
+                        )}
                       </div>
+                    ) : (
+                      <button 
+                        onClick={() => instaInputRef.current?.click()}
+                        className="w-full py-2 bg-purple-600/90 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Upload size={14} /> Upload Instagram File
+                      </button>
                     )}
                   </div>
                 </div>
 
-                {/* YOUTUBE DROPZONE */}
-                <div className={`bg-slate-800/60 border rounded-xl p-4 flex flex-col justify-between transition-colors ${
-                  ytFile?.validationError ? 'border-red-500/50' : ytFile ? 'border-purple-500/60 bg-purple-950/10' : 'border-slate-700 hover:border-slate-600'
-                }`}>
+                {/* YouTube Dropzone */}
+                <div className="border border-slate-800 rounded-xl p-4 bg-slate-900/40 flex flex-col justify-between">
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <span className="font-bold text-slate-100 text-sm flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
+                      <span className="font-bold text-slate-200 text-sm flex items-center gap-2">
                         YouTube
                       </span>
-                      {ytFile && !ytFile.validationError ? (
-                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-bold">
-                          ✓ Ready
-                        </span>
-                      ) : (
-                        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded">
-                          — Not uploaded
+                      {ytFile && (
+                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono">
+                          Ready ({ytFile.parsedRecords.length})
                         </span>
                       )}
                     </div>
+                    <p className="text-xs text-slate-400 mb-4">Upload YouTube platform stats Excel/CSV file</p>
+                  </div>
 
-                    {!ytFile ? (
-                      <div className="text-center py-6 border-2 border-dashed border-slate-700 rounded-lg p-3 hover:border-purple-500/50 transition-colors">
-                        <FileSpreadsheet size={28} className="mx-auto text-slate-500 mb-2" />
-                        <p className="text-xs text-slate-300 font-medium mb-1">Upload YouTube File</p>
-                        <p className="text-[10px] text-slate-500 mb-3">Supported: Excel / CSV</p>
-                        <input 
-                          type="file" 
-                          ref={ytInputRef} 
-                          accept=".xlsx,.xls,.csv" 
-                          onChange={(e) => handleFileSelect(e, 'YouTube')} 
-                          className="hidden" 
-                        />
-                        <button 
-                          onClick={() => ytInputRef.current?.click()}
-                          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-colors"
-                        >
-                          Choose File
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="p-3 bg-slate-900 border border-slate-700 rounded-lg text-xs">
-                          <p className="font-semibold text-slate-200 truncate">{ytFile.file.name}</p>
-                          <p className="text-[10px] text-slate-500 mt-1">{(ytFile.file.size / 1024).toFixed(1)} KB • {ytFile.parsedRecords.length} Rows</p>
-                          {ytFile.validationError && (
-                            <p className="text-[11px] text-red-400 mt-1 flex items-center gap-1 font-medium">
-                              <AlertCircle size={12} /> {ytFile.validationError}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => handleRemoveFile('YouTube')}
-                            className="flex-1 py-1.5 bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-400 border border-slate-700 rounded text-xs transition-colors flex items-center justify-center gap-1"
-                          >
-                            <Trash2 size={12} /> Remove
+                  <div>
+                    <input 
+                      type="file" 
+                      ref={ytInputRef} 
+                      accept=".xlsx,.xls,.csv" 
+                      onChange={(e) => handleFileSelect(e, 'YouTube')} 
+                      className="hidden" 
+                    />
+                    
+                    {ytFile ? (
+                      <div className="space-y-2">
+                        <div className="p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-xs flex items-center justify-between">
+                          <span className="font-medium text-slate-200 truncate max-w-[140px]">{ytFile.file.name}</span>
+                          <button onClick={() => handleRemoveFile('YouTube')} className="text-slate-400 hover:text-red-400 ml-1">
+                            <X size={14} />
                           </button>
                         </div>
+                        {ytFile.validationError && (
+                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium">
+                            <AlertCircle size={12} /> {ytFile.validationError}
+                          </p>
+                        )}
                       </div>
+                    ) : (
+                      <button 
+                        onClick={() => ytInputRef.current?.click()}
+                        className="w-full py-2 bg-purple-600/90 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Upload size={14} /> Upload YouTube File
+                      </button>
                     )}
                   </div>
                 </div>
 
-                {/* FACEBOOK DROPZONE */}
-                <div className={`bg-slate-800/60 border rounded-xl p-4 flex flex-col justify-between transition-colors ${
-                  fbFile?.validationError ? 'border-red-500/50' : fbFile ? 'border-purple-500/60 bg-purple-950/10' : 'border-slate-700 hover:border-slate-600'
-                }`}>
+                {/* Facebook Dropzone */}
+                <div className="border border-slate-800 rounded-xl p-4 bg-slate-900/40 flex flex-col justify-between">
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <span className="font-bold text-slate-100 text-sm flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
+                      <span className="font-bold text-slate-200 text-sm flex items-center gap-2">
                         Facebook
                       </span>
-                      {fbFile && !fbFile.validationError ? (
-                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-bold">
-                          ✓ Ready
-                        </span>
-                      ) : (
-                        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded">
-                          — Not uploaded
+                      {fbFile && (
+                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono">
+                          Ready ({fbFile.parsedRecords.length})
                         </span>
                       )}
                     </div>
+                    <p className="text-xs text-slate-400 mb-4">Upload Facebook platform stats Excel/CSV file</p>
+                  </div>
 
-                    {!fbFile ? (
-                      <div className="text-center py-6 border-2 border-dashed border-slate-700 rounded-lg p-3 hover:border-purple-500/50 transition-colors">
-                        <FileSpreadsheet size={28} className="mx-auto text-slate-500 mb-2" />
-                        <p className="text-xs text-slate-300 font-medium mb-1">Upload Facebook File</p>
-                        <p className="text-[10px] text-slate-500 mb-3">Supported: Excel / CSV</p>
-                        <input 
-                          type="file" 
-                          ref={fbInputRef} 
-                          accept=".xlsx,.xls,.csv" 
-                          onChange={(e) => handleFileSelect(e, 'Facebook')} 
-                          className="hidden" 
-                        />
-                        <button 
-                          onClick={() => fbInputRef.current?.click()}
-                          className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-colors"
-                        >
-                          Choose File
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        <div className="p-3 bg-slate-900 border border-slate-700 rounded-lg text-xs">
-                          <p className="font-semibold text-slate-200 truncate">{fbFile.file.name}</p>
-                          <p className="text-[10px] text-slate-500 mt-1">{(fbFile.file.size / 1024).toFixed(1)} KB • {fbFile.parsedRecords.length} Rows</p>
-                          {fbFile.validationError && (
-                            <p className="text-[11px] text-red-400 mt-1 flex items-center gap-1 font-medium">
-                              <AlertCircle size={12} /> {fbFile.validationError}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => handleRemoveFile('Facebook')}
-                            className="flex-1 py-1.5 bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-400 border border-slate-700 rounded text-xs transition-colors flex items-center justify-center gap-1"
-                          >
-                            <Trash2 size={12} /> Remove
+                  <div>
+                    <input 
+                      type="file" 
+                      ref={fbInputRef} 
+                      accept=".xlsx,.xls,.csv" 
+                      onChange={(e) => handleFileSelect(e, 'Facebook')} 
+                      className="hidden" 
+                    />
+                    
+                    {fbFile ? (
+                      <div className="space-y-2">
+                        <div className="p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-xs flex items-center justify-between">
+                          <span className="font-medium text-slate-200 truncate max-w-[140px]">{fbFile.file.name}</span>
+                          <button onClick={() => handleRemoveFile('Facebook')} className="text-slate-400 hover:text-red-400 ml-1">
+                            <X size={14} />
                           </button>
                         </div>
+                        {fbFile.validationError && (
+                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium">
+                            <AlertCircle size={12} /> {fbFile.validationError}
+                          </p>
+                        )}
                       </div>
+                    ) : (
+                      <button 
+                        onClick={() => fbInputRef.current?.click()}
+                        className="w-full py-2 bg-purple-600/90 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Upload size={14} /> Upload Facebook File
+                      </button>
                     )}
                   </div>
                 </div>
@@ -805,7 +752,6 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                   </div>
                 </div>
 
-                {/* Unmatched Codes Warning */}
                 {stats.unmatchedCodes.length > 0 && (
                   <div className="mt-4 p-3 bg-amber-950/30 border border-amber-800/40 rounded-lg text-xs text-amber-300">
                     <p className="font-semibold flex items-center gap-1.5 mb-1 text-amber-200">
@@ -816,13 +762,13 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                       {stats.unmatchedCodes.length > 10 ? ` ...and ${stats.unmatchedCodes.length - 10} more` : ''}
                     </p>
                     <p className="text-[10px] text-amber-400/70">
-                      These influencer codes do not exist in the current campaign and will be skipped.
+                      These codes do not exist in the current campaign and will be skipped.
                     </p>
                   </div>
                 )}
               </div>
 
-              {/* Data Preview Table */}
+              {/* Platform Selector Tabs */}
               <div>
                 <div className="flex border-b border-slate-800 mb-3 gap-2">
                   {instaFile && (
@@ -903,13 +849,13 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                 })()}
               </div>
 
-              {/* Actions Footer */}
+              {/* Action Bar */}
               <div className="flex justify-between items-center pt-4 border-t border-slate-800">
                 <button 
                   onClick={() => setStep('upload')}
                   className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-lg text-sm transition-colors"
                 >
-                  Cancel
+                  Back
                 </button>
                 <button 
                   onClick={handleConfirmImport}
@@ -929,48 +875,12 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
               <Loader2 size={40} className="animate-spin text-purple-500 mx-auto" />
               <div>
                 <h4 className="text-base font-bold text-white mb-1">Importing Platform Details...</h4>
-                <p className="text-xs text-slate-400">Merging platform data with existing influencer records</p>
-              </div>
-
-              <div className="max-w-md mx-auto space-y-4 text-left">
-                {instaFile && (
-                  <div>
-                    <div className="flex justify-between text-xs font-semibold mb-1">
-                      <span className="text-slate-300">Instagram</span>
-                      <span className="text-purple-400">{uploadProgress.Instagram}%</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-600 transition-all duration-300" style={{ width: `${uploadProgress.Instagram}%` }}></div>
-                    </div>
-                  </div>
-                )}
-                {ytFile && (
-                  <div>
-                    <div className="flex justify-between text-xs font-semibold mb-1">
-                      <span className="text-slate-300">YouTube</span>
-                      <span className="text-purple-400">{uploadProgress.YouTube}%</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-600 transition-all duration-300" style={{ width: `${uploadProgress.YouTube}%` }}></div>
-                    </div>
-                  </div>
-                )}
-                {fbFile && (
-                  <div>
-                    <div className="flex justify-between text-xs font-semibold mb-1">
-                      <span className="text-slate-300">Facebook</span>
-                      <span className="text-purple-400">{uploadProgress.Facebook}%</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-purple-600 transition-all duration-300" style={{ width: `${uploadProgress.Facebook}%` }}></div>
-                    </div>
-                  </div>
-                )}
+                <p className="text-xs text-slate-400">Updating platform records in Supabase database</p>
               </div>
             </div>
           )}
 
-          {/* STEP 4: COMPLETED SUMMARY */}
+          {/* STEP 4: DONE */}
           {step === 'done' && (
             <div className="py-6 space-y-6 text-center">
               <div className="w-16 h-16 bg-green-950/60 border border-green-800/40 rounded-full flex items-center justify-center mx-auto text-green-400">
@@ -978,29 +888,8 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
               </div>
 
               <div>
-                <h4 className="text-lg font-bold text-white mb-1">Import Complete!</h4>
-                <p className="text-xs text-slate-400">Platform Details imported successfully across matched influencers.</p>
-              </div>
-
-              <div className="max-w-sm mx-auto bg-slate-800/60 p-4 rounded-xl border border-slate-700 text-left text-xs space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-300 font-medium">Instagram:</span>
-                  <span className={instaFile ? 'text-green-400 font-semibold' : 'text-slate-500'}>
-                    {instaFile ? `✓ ${stats.instagramCount} updated` : '— Not uploaded'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-300 font-medium">YouTube:</span>
-                  <span className={ytFile ? 'text-green-400 font-semibold' : 'text-slate-500'}>
-                    {ytFile ? `✓ ${stats.youtubeCount} updated` : '— Not uploaded'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-300 font-medium">Facebook:</span>
-                  <span className={fbFile ? 'text-green-400 font-semibold' : 'text-slate-500'}>
-                    {fbFile ? `✓ ${stats.facebookCount} updated` : '— Not uploaded'}
-                  </span>
-                </div>
+                <h4 className="text-lg font-bold text-white mb-1">Import Successful!</h4>
+                <p className="text-xs text-slate-400">{stats.matchedCount} influencer platform records updated.</p>
               </div>
 
               <button 
