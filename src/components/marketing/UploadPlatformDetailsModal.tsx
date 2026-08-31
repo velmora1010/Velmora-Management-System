@@ -838,27 +838,38 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                   if (!activeFile) return null;
 
                   return (
-                    <div className="border border-slate-800 rounded-lg overflow-x-auto max-h-56">
-                      <table className="w-full text-left text-xs text-slate-300">
-                        <thead className="bg-slate-800/80 text-slate-400 font-semibold sticky top-0">
+                    <div className="border border-slate-800 rounded-lg overflow-x-auto max-h-64">
+                      <table className="w-full text-left text-xs text-slate-300 min-w-[1400px]">
+                        <thead className="bg-slate-800/90 text-slate-400 font-semibold sticky top-0 z-20">
                           <tr>
-                            <th className="p-2.5">Code</th>
-                            <th className="p-2.5">Username</th>
+                            <th className="p-2.5 sticky left-0 bg-slate-900 z-30 shadow-md">Code</th>
+                            <th className="p-2.5 sticky left-16 bg-slate-900 z-30 shadow-md">Username</th>
                             <th className="p-2.5">Followers</th>
                             <th className="p-2.5">Creator Category</th>
                             <th className="p-2.5">Average Views</th>
-                            <th className="p-2.5">Status</th>
+                            {Array.from({ length: 15 }, (_, i) => (
+                              <th key={i} className="p-2.5 whitespace-nowrap text-center">Video {i + 1}</th>
+                            ))}
+                            <th className="p-2.5 sticky right-0 bg-slate-900 z-30 shadow-md">Status</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
                           {activeFile.parsedRecords.slice(0, 50).map((r, idx) => (
                             <tr key={idx} className="hover:bg-slate-800/40">
-                              <td className="p-2.5 font-mono font-bold text-slate-200">{r.code || '—'}</td>
-                              <td className="p-2.5 text-slate-300">{r.username || '—'}</td>
-                              <td className="p-2.5 text-slate-300">{r.followers ? r.followers.toLocaleString() : '—'}</td>
+                              <td className="p-2.5 font-mono font-bold text-slate-200 sticky left-0 bg-slate-900 z-10">{r.code || '—'}</td>
+                              <td className="p-2.5 text-slate-300 truncate max-w-[120px] sticky left-16 bg-slate-900 z-10" title={r.username}>{r.username || '—'}</td>
+                              <td className="p-2.5 text-slate-300">{r.followers ? r.followers.toLocaleString() : '0'}</td>
                               <td className="p-2.5 font-mono text-purple-300">{r.category || '—'}</td>
-                              <td className="p-2.5 text-slate-300">{r.average !== null ? r.average.toLocaleString() : '—'}</td>
-                              <td className="p-2.5">
+                              <td className="p-2.5 text-slate-300">{r.average !== null ? r.average.toLocaleString() : '0'}</td>
+                              {Array.from({ length: 15 }, (_, vIdx) => {
+                                const val = r.videoViews?.[vIdx];
+                                return (
+                                  <td key={vIdx} className="p-2.5 text-center font-mono text-slate-300 text-[11px]">
+                                    {val !== undefined && val !== null ? (val === 0 ? '0' : val.toLocaleString()) : '—'}
+                                  </td>
+                                );
+                              })}
+                              <td className="p-2.5 sticky right-0 bg-slate-900 z-10">
                                 {r.matchedInfluencerId !== undefined ? (
                                   <span className="text-[10px] bg-green-950/50 text-green-400 border border-green-800/30 px-2 py-0.5 rounded font-bold">
                                     Matched
