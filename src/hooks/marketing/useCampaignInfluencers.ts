@@ -218,10 +218,66 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             else if (pLower === 'facebook' || pLower === 'fb') normKey = 'Facebook';
             else if (pLower === 'youtube' || pLower === 'yt' || pLower === 'ytube') normKey = 'YouTube';
             
-            if (!uniquePlatformsMap[normKey] || p.id > uniquePlatformsMap[normKey].id) {
+            if (!uniquePlatformsMap[normKey]) {
               uniquePlatformsMap[normKey] = { ...p, platform: normKey };
+            } else {
+              const existing = uniquePlatformsMap[normKey];
+              const existingViews = Array.isArray(existing.video_views) ? existing.video_views : [];
+              const newViews = Array.isArray(p.video_views) ? p.video_views : [];
+              const mergedViews = Array(15).fill(0).map((_, idx) => {
+                const v1 = parseViewCountLocal(existingViews[idx]);
+                const v2 = parseViewCountLocal(newViews[idx]);
+                return v2 > 0 ? v2 : (v1 > 0 ? v1 : 0);
+              });
+
+              uniquePlatformsMap[normKey] = {
+                ...existing,
+                ...p,
+                id: Math.max(Number(existing.id) || 0, Number(p.id) || 0),
+                platform: normKey,
+                username: p.username || existing.username || '',
+                profile_link: p.profile_link || existing.profile_link || '',
+                followers_count: Number(p.followers_count) > 0 ? p.followers_count : (existing.followers_count || 0),
+                performance_code: p.performance_code || existing.performance_code || '',
+                average: (p.average !== undefined && p.average !== null && p.average !== '') ? p.average : existing.average,
+                video_views: mergedViews
+              };
             }
           });
+
+          // Merge views_data JSON from languages if present
+          if (platformViews && typeof platformViews === 'object') {
+            Object.keys(platformViews).forEach(platKey => {
+              let normKey = platKey;
+              const pLower = platKey.toLowerCase();
+              if (pLower === 'instagram' || pLower === 'insta' || pLower === 'ig') normKey = 'Instagram';
+              else if (pLower === 'facebook' || pLower === 'fb') normKey = 'Facebook';
+              else if (pLower === 'youtube' || pLower === 'yt' || pLower === 'ytube') normKey = 'YouTube';
+
+              const pData = platformViews[platKey];
+              if (pData) {
+                const existing = uniquePlatformsMap[normKey] || {};
+                const existingViews = Array.isArray(existing.video_views) ? existing.video_views : [];
+                const jsonViews = Array.isArray(pData.views) ? pData.views : [];
+                const mergedViews = Array(15).fill(0).map((_, idx) => {
+                  const v1 = parseViewCountLocal(existingViews[idx]);
+                  const v2 = parseViewCountLocal(jsonViews[idx]);
+                  return v1 > 0 ? v1 : (v2 > 0 ? v2 : 0);
+                });
+
+                uniquePlatformsMap[normKey] = {
+                  ...existing,
+                  platform: normKey,
+                  username: existing.username || pData.username || '',
+                  profile_link: existing.profile_link || pData.profile_link || '',
+                  followers_count: Number(existing.followers_count) > 0 ? existing.followers_count : (pData.followers || 0),
+                  performance_code: existing.performance_code || pData.creator_category || '',
+                  average: (existing.average !== undefined && existing.average !== null && existing.average !== '') ? existing.average : (pData.average ?? null),
+                  video_views: mergedViews
+                };
+              }
+            });
+          }
 
           const platforms = Object.values(uniquePlatformsMap).map((p: any) => {
             const rawViews = Array.isArray(p.video_views) ? p.video_views : [];

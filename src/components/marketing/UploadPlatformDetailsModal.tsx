@@ -514,15 +514,43 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           }
         }
 
-        // Update username in influencersInfo if empty
-        if (rec.username) {
-          const matchedInf = existingInfluencers.find(i => String(i.id) === String(infId));
-          if (matchedInf && (!matchedInf.influencer_name || !matchedInf.name || matchedInf.name === matchedInf.code)) {
-            await supabase
-              .from(SUPABASE_TABLES.influencersInfo)
-              .update({ influencer_name: rec.username, name: rec.username })
-              .eq('id', infId);
+        // Sync influencersInfo table & views_data JSON
+        const matchedInf = existingInfluencers.find(i => String(i.id) === String(infId));
+        if (matchedInf) {
+          const currentLangs = Array.isArray(matchedInf.languages) ? matchedInf.languages : [];
+          let viewsDataObj: any = { platform_views: {}, post_dates: [] };
+          const existingViewsData = currentLangs.find((l: any) => typeof l === 'string' && l.startsWith('views_data:'));
+          if (existingViewsData) {
+            try {
+              viewsDataObj = JSON.parse(existingViewsData.substring('views_data:'.length));
+            } catch (e) {}
           }
+          if (!viewsDataObj.platform_views) viewsDataObj.platform_views = {};
+
+          viewsDataObj.platform_views[platformName] = {
+            username: rec.username || matchedPlatRow?.username || '',
+            followers: rec.followers > 0 ? rec.followers : (matchedPlatRow?.followers_count || 0),
+            views: mergedViews,
+            profile_link: rec.profileLink || matchedPlatRow?.profile_link || '',
+            creator_category: rec.category || matchedPlatRow?.performance_code || '',
+            average: rec.average !== null ? rec.average : (matchedPlatRow?.average || null)
+          };
+
+          const updatedLangs = currentLangs.filter((l: any) => typeof l !== 'string' || !l.startsWith('views_data:'));
+          updatedLangs.push(`views_data:${JSON.stringify(viewsDataObj)}`);
+
+          const updatePayload: Record<string, any> = {
+            languages: updatedLangs
+          };
+          if (rec.username && (!matchedInf.influencer_name || !matchedInf.name || matchedInf.name === matchedInf.code)) {
+            updatePayload.influencer_name = rec.username;
+            updatePayload.name = rec.username;
+          }
+
+          await supabase
+            .from(SUPABASE_TABLES.influencersInfo)
+            .update(updatePayload)
+            .eq('id', infId);
         }
 
         recCount++;
