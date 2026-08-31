@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
@@ -68,7 +68,15 @@ const InfluencerCard = ({
   onDeletePlatformViews?: (inf: CampaignInfluencer, platformName: string) => void,
   onUploadPlatformDetails?: (code?: string) => void
 }) => {
-  const activeTab = parentActiveTab;
+  const [localActiveTab, setLocalActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>(parentActiveTab);
+
+  useEffect(() => {
+    if (parentActiveTab) {
+      setLocalActiveTab(parentActiveTab);
+    }
+  }, [parentActiveTab]);
+
+  const activeTab = localActiveTab || parentActiveTab || 'basic';
   const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
 
   const togglePlatformExpanded = (platformName: string) => {
@@ -199,6 +207,7 @@ City: ${influencer.city}`;
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                setLocalActiveTab(tab.id as any);
                 if (onTabChange) {
                   onTabChange(tab.id as any);
                 }
@@ -716,11 +725,21 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
 
   const [cardActiveTabs, setCardActiveTabs] = useState<Record<string, 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>>({});
 
-  const handleCardTabChange = (infKey: string, newTab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate') => {
-    setCardActiveTabs(prev => ({
-      ...prev,
-      [infKey]: newTab
-    }));
+  const handleCardTabChange = (
+    influencer: CampaignInfluencer, 
+    newTab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'
+  ) => {
+    const codeKey = (influencer.code || (influencer as any).influencer_code || '').trim().toUpperCase();
+    const idKey = String(influencer.id || '').trim();
+    const nameKey = (influencer.influencer_name || influencer.name || '').trim().toUpperCase();
+
+    setCardActiveTabs(prev => {
+      const next = { ...prev };
+      if (codeKey) next[codeKey] = newTab;
+      if (idKey) next[idKey] = newTab;
+      if (nameKey) next[nameKey] = newTab;
+      return next;
+    });
   };
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -1197,13 +1216,24 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredInfluencers.map(inf => {
-              const infKey = (inf.code || (inf as any).influencer_code || String(inf.id)).trim().toUpperCase();
+              const codeKey = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
+              const idKey = String(inf.id || '').trim();
+              const nameKey = (inf.influencer_name || inf.name || '').trim().toUpperCase();
+
+              const activeTabForInf = 
+                (codeKey && cardActiveTabs[codeKey]) || 
+                (idKey && cardActiveTabs[idKey]) || 
+                (nameKey && cardActiveTabs[nameKey]) || 
+                'basic';
+
+              const stableKey = codeKey ? `card-${codeKey}` : `card-${idKey}`;
+
               return (
                 <InfluencerCard 
-                  key={inf.id || infKey} 
+                  key={stableKey} 
                   influencer={inf} 
-                  activeTab={cardActiveTabs[infKey] || 'basic'}
-                  onTabChange={(newTab) => handleCardTabChange(infKey, newTab)}
+                  activeTab={activeTabForInf}
+                  onTabChange={(newTab) => handleCardTabChange(inf, newTab)}
                   onEdit={handleEditInfluencerClick} 
                   onToggleArchive={toggleArchiveStatus} 
                   onDispatch={onDispatch}
