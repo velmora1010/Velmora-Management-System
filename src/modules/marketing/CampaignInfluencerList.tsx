@@ -343,7 +343,7 @@ City: ${influencer.city}`;
                         <div>
                           <span className="text-slate-500 block text-xs">Creator Category</span>
                           <span className="inline-block bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-2 py-0.5 rounded text-xs font-mono select-all mt-0.5">
-                            {resolvePerformanceCode(influencer, p.platform, p.video_views).code || '—'}
+                            {p.performance_code || resolvePerformanceCode(influencer, p.platform, p.video_views).code || '—'}
                           </span>
                         </div>
                       )}
@@ -356,12 +356,12 @@ City: ${influencer.city}`;
                         </span>
                       </div>
                     </div>
-                    {p.video_views && p.video_views.some(v => v !== null && v !== undefined && (v as any) !== '') ? (
+                    {p.video_views && p.video_views.length > 0 ? (
                       <div>
                         <div className="flex justify-between items-center mb-2">
                            <span className="text-xs text-slate-400 font-semibold">Previous 15 Videos Views</span>
-                           {p.video_views && p.video_views.slice(3).some(v => v !== null && v !== undefined && (v as any) !== '') && (
-                             <button onClick={() => togglePlatformExpanded(p.platform)} className="text-xs text-blue-400 hover:text-blue-300">
+                           {p.video_views.length > 3 && (
+                             <button onClick={() => togglePlatformExpanded(p.platform)} className="text-xs text-blue-400 hover:text-blue-300 font-medium">
                                {expandedPlatforms[p.platform] ? 'View Less' : 'View More'}
                              </button>
                            )}
@@ -371,7 +371,9 @@ City: ${influencer.city}`;
                             <div key={idx} className="bg-slate-900 border border-slate-700 rounded p-2 text-center flex flex-col justify-between">
                               <div>
                                 <div className="text-[10px] text-slate-500">Video {idx + 1}</div>
-                                <div className="text-xs font-semibold text-slate-200">{v !== null && v !== undefined && (v as any) !== '' ? v : '—'}</div>
+                                <div className="text-xs font-semibold text-slate-200">
+                                  {v !== null && v !== undefined && (v as any) !== '' ? (isNaN(Number(v)) ? String(v) : Number(v).toLocaleString()) : '0'}
+                                </div>
                               </div>
                               {p.platform === 'Instagram' && p.video_views_dates?.[idx] && (
                                 <div className="text-[9px] text-slate-500 mt-1 select-none font-medium truncate" title={p.video_views_dates[idx]}>

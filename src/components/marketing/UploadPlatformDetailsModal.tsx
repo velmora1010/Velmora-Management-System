@@ -16,6 +16,7 @@ import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail } from '../
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
+import { calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from '../../modules/marketing/AddCampaignInfluencer';
 import toast from 'react-hot-toast';
 
 interface UploadPlatformDetailsModalProps {
@@ -128,6 +129,28 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
     return null;
   };
 
+  const getAutoCreatorCategory = (platform: PlatformKey, videoViews: number[], followers: number): string => {
+    let calcCode = 'Not Eligible';
+    if (platform === 'Instagram') calcCode = calculateInstagramViewCode(videoViews).code;
+    else if (platform === 'YouTube') calcCode = calculateYoutubeViewCode(videoViews).code;
+    else if (platform === 'Facebook') calcCode = calculateFacebookViewCode(videoViews).code;
+
+    if (calcCode && calcCode !== 'Not Eligible') {
+      return calcCode;
+    }
+
+    if (followers >= 1000000) return 'C1L1';
+    if (followers >= 500000) return 'C1L2';
+    if (followers >= 250000) return 'C2L1';
+    if (followers >= 100000) return 'C2L2';
+    if (followers >= 50000) return 'C3L1';
+    if (followers >= 25000) return 'C3L2';
+    if (followers >= 10000) return 'C4L1';
+    if (followers > 0) return 'C4L2';
+
+    return 'C4L2';
+  };
+
   const parseFileForPlatform = async (file: File, platform: PlatformKey): Promise<SelectedPlatformFile> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -198,18 +221,41 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
             const matchedInf = influencerCodeMap.get(rawCode);
             const username = usernameKey ? cleanStr(row[usernameKey]) : (matchedInf?.name || matchedInf?.influencer_name || '');
             const followers = followersKey ? parseNum(row[followersKey]) : 0;
-            const rawCat = categoryKey ? cleanStr(row[categoryKey]).toUpperCase() : '';
-            const category = ['C1L1','C1L2','C2L1','C2L2','C3L1','C3L2','C4L1','C4L2'].includes(rawCat) ? rawCat : (rawCat || '');
-            const averageVal = averageKey && row[averageKey] !== '' && row[averageKey] !== null && row[averageKey] !== undefined
-              ? parseNum(row[averageKey])
-              : null;
 
             // Video 1 to Video 15
             const videoViews: number[] = Array(15).fill(0);
             for (let v = 1; v <= 15; v++) {
-              const vKey = findColumnKey(headers, [`video ${v}`, `video_${v}`, `video${v}`, `v${v}`, `video_views_${v}`]);
+              const vKey = findColumnKey(headers, [
+                `video ${v}`, `video_${v}`, `video${v}`, `v${v}`, `video_views_${v}`,
+                `video ${v} views`, `video ${v} view`, `video_${v}_views`, `video${v}views`, `video${v}view`,
+                `video ${v} view count`, `video${v} views`
+              ]);
               if (vKey && row[vKey] !== undefined && row[vKey] !== null && row[vKey] !== '') {
                 videoViews[v - 1] = parseNum(row[vKey]);
+              }
+            }
+
+            // Case A vs Case B for Creator Category
+            const rawCat = categoryKey ? cleanStr(row[categoryKey]).toUpperCase() : '';
+            let category = ['C1L1','C1L2','C2L1','C2L2','C3L1','C3L2','C4L1','C4L2','BELOW 10K'].includes(rawCat) ? rawCat : (rawCat || '');
+            
+            if (!category) {
+              category = getAutoCreatorCategory(platform, videoViews, followers);
+            }
+
+            // Average Views calculation if missing
+            let averageVal = averageKey && row[averageKey] !== '' && row[averageKey] !== null && row[averageKey] !== undefined
+              ? parseNum(row[averageKey])
+              : null;
+
+            if (averageVal === null) {
+              const nonZeroViews = videoViews.filter(v => v > 0);
+              if (nonZeroViews.length > 0) {
+                averageVal = Math.round(nonZeroViews.reduce((a, b) => a + b, 0) / nonZeroViews.length);
+              } else if (followers > 0) {
+                averageVal = Math.round(followers * 0.1);
+              } else {
+                averageVal = 0;
               }
             }
 
