@@ -329,7 +329,7 @@ City: ${influencer.city}`;
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                       <div><span className="text-slate-500 block text-xs">Username</span><span className="text-slate-200">{p.username || influencer.influencer_name || influencer.name || '-'}</span></div>
                       <div><span className="text-slate-500 block text-xs">Followers</span><span className="text-slate-200">{p.followers_count ? Number(p.followers_count).toLocaleString() : '-'}</span></div>
-                      {(p.platform === 'Instagram' || p.platform === 'Facebook' || p.platform === 'Youtube') && (
+                      {(['instagram', 'facebook', 'youtube'].includes((p.platform || '').toLowerCase())) && (
                         <div>
                           <span className="text-slate-500 block text-xs">Creator Category</span>
                           <span className="inline-block bg-purple-950/40 text-purple-300 font-bold border border-purple-800/20 px-2 py-0.5 rounded text-xs font-mono select-all mt-0.5">
