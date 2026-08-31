@@ -271,14 +271,42 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
           const vNum = Number(vNumStr);
           if (!dateStr || isNaN(vNum)) continue;
 
+          const calculatedDraft = normalizeDateStr(dateStr) ? (() => {
+            try {
+              let dateObj: Date | null = null;
+              const str = String(dateStr).trim();
+              if (/^\d{1,2}-[A-Za-z]{3}-\d{4}$/.test(str)) {
+                const parts = str.split('-');
+                const day = parseInt(parts[0], 10);
+                const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+                const monthIdx = monthNames.indexOf(parts[1].toLowerCase());
+                const year = parseInt(parts[2], 10);
+                if (monthIdx !== -1) dateObj = new Date(year, monthIdx, day);
+              } else {
+                dateObj = new Date(str);
+              }
+              if (dateObj && !isNaN(dateObj.getTime())) {
+                const draftObj = new Date(dateObj);
+                draftObj.setDate(draftObj.getDate() - 3);
+                const day = String(draftObj.getDate()).padStart(2, '0');
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const month = monthNames[draftObj.getMonth()];
+                const year = draftObj.getFullYear();
+                return `${day}-${month}-${year}`;
+              }
+            } catch (e) {}
+            return null;
+          })() : null;
+
           const existingRow = existingMap.get(vNum);
 
           if (existingRow?.id) {
-            if (existingRow.post_date !== dateStr) {
+            if (existingRow.post_date !== dateStr || !existingRow.draft_date) {
               await supabase
                 .from(SUPABASE_TABLES.influencerPostDates)
                 .update({
                   post_date: dateStr,
+                  draft_date: calculatedDraft || existingRow.draft_date || null,
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', existingRow.id);
@@ -291,7 +319,8 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
                 influencer_id: numericId,
                 campaign_id: campaign.id,
                 video_number: vNum,
-                post_date: dateStr
+                post_date: dateStr,
+                draft_date: calculatedDraft
               }]);
 
             if (insertErr) {
@@ -311,7 +340,8 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
                   influencer_id: numericId,
                   campaign_id: campaign.id,
                   video_number: vNum,
-                  post_date: dateStr
+                  post_date: dateStr,
+                  draft_date: calculatedDraft
                 }]);
             }
             hasChanges = true;
@@ -339,11 +369,40 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
           for (const [vNumStr, dateStr] of Object.entries(rec.videoDates)) {
             const vNum = Number(vNumStr);
             if (!dateStr || isNaN(vNum)) continue;
+
+            const calculatedDraft = normalizeDateStr(dateStr) ? (() => {
+              try {
+                let dateObj: Date | null = null;
+                const str = String(dateStr).trim();
+                if (/^\d{1,2}-[A-Za-z]{3}-\d{4}$/.test(str)) {
+                  const parts = str.split('-');
+                  const day = parseInt(parts[0], 10);
+                  const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+                  const monthIdx = monthNames.indexOf(parts[1].toLowerCase());
+                  const year = parseInt(parts[2], 10);
+                  if (monthIdx !== -1) dateObj = new Date(year, monthIdx, day);
+                } else {
+                  dateObj = new Date(str);
+                }
+                if (dateObj && !isNaN(dateObj.getTime())) {
+                  const draftObj = new Date(dateObj);
+                  draftObj.setDate(draftObj.getDate() - 3);
+                  const day = String(draftObj.getDate()).padStart(2, '0');
+                  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  const month = monthNames[draftObj.getMonth()];
+                  const year = draftObj.getFullYear();
+                  return `${day}-${month}-${year}`;
+                }
+              } catch (e) {}
+              return null;
+            })() : null;
+
             const existingDateIdx = viewsDataObj.post_dates.findIndex((pd: any) => Number(pd.video_number) === vNum);
             if (existingDateIdx !== -1) {
               viewsDataObj.post_dates[existingDateIdx].post_date = dateStr;
+              if (calculatedDraft) viewsDataObj.post_dates[existingDateIdx].draft_date = calculatedDraft;
             } else {
-              viewsDataObj.post_dates.push({ video_number: vNum, post_date: dateStr });
+              viewsDataObj.post_dates.push({ video_number: vNum, post_date: dateStr, draft_date: calculatedDraft });
             }
           }
 

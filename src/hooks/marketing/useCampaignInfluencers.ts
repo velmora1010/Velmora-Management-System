@@ -202,7 +202,40 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             }));
             
           const rawPostDates = postDatesFromTable.length > 0 ? postDatesFromTable : postDatesFromJSON;
-          const postDates = rawPostDates.sort((a: any, b: any) => (a.video_number || 0) - (b.video_number || 0));
+          const postDates = rawPostDates.map((pd: any) => {
+            let draft = pd.draft_date;
+            if (!draft && pd.post_date) {
+              try {
+                let dateObj: Date | null = null;
+                const str = String(pd.post_date).trim();
+                if (/^\d{1,2}-[A-Za-z]{3}-\d{4}$/.test(str)) {
+                  const parts = str.split('-');
+                  const day = parseInt(parts[0], 10);
+                  const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+                  const monthIdx = monthNames.indexOf(parts[1].toLowerCase());
+                  const year = parseInt(parts[2], 10);
+                  if (monthIdx !== -1) {
+                    dateObj = new Date(year, monthIdx, day);
+                  }
+                } else {
+                  dateObj = new Date(str);
+                }
+                if (dateObj && !isNaN(dateObj.getTime())) {
+                  const draftObj = new Date(dateObj);
+                  draftObj.setDate(draftObj.getDate() - 3);
+                  const day = String(draftObj.getDate()).padStart(2, '0');
+                  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  const month = monthNames[draftObj.getMonth()];
+                  const year = draftObj.getFullYear();
+                  draft = `${day}-${month}-${year}`;
+                }
+              } catch (e) {}
+            }
+            return {
+              ...pd,
+              draft_date: draft || null
+            };
+          }).sort((a: any, b: any) => (a.video_number || 0) - (b.video_number || 0));
 
           const cleanLangs = Array.isArray(inf.languages)
             ? inf.languages.filter((l: string) => typeof l === 'string' && !l.startsWith('views_data:'))
