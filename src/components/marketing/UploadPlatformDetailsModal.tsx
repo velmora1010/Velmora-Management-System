@@ -65,7 +65,7 @@ export interface SummaryStats {
 
 export const normalizePlatformName = (val: string): PlatformKey => {
   if (!val) return 'Instagram';
-  const norm = val.toString().trim().toLowerCase();
+  const norm = val.toString().trim().toLowerCase().replace(/[^a-z]/g, '');
   if (norm === 'insta' || norm === 'instagram' || norm === 'ig') return 'Instagram';
   if (norm === 'yt' || norm === 'youtube' || norm === 'ytube') return 'YouTube';
   if (norm === 'fb' || norm === 'facebook') return 'Facebook';
@@ -194,9 +194,6 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           }
 
           const headers = Object.keys(rawData[0] || {});
-          
-          console.log('[DEBUG Import] Raw Headers:', headers);
-          console.log('[DEBUG Import] Normalized Headers:', headers.map(h => normalizeHeader(h)));
 
           // Header detection according to spec
           const codeKey = findColumnKey(headers, ['influencer code', 'influencercode', 'influencer_code', 'code', 's no code', 'snocode', 'code number', 'codenumber', 'influencer']);
@@ -205,9 +202,10 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           const followersKey = findColumnKey(headers, ['followers count', 'followers_count', 'followerscount', 'followers', 'follower count font', 'follower count', 'follower_count', 'subscribers', 'subs']);
           const categoryKey = findColumnKey(headers, ['creator category', 'creator_category', 'creatorcategory', 'performance code', 'performance_code', 'performancecode', 'category']);
           const averageKey = findColumnKey(headers, ['average views', 'average_views', 'averageviews', 'average', 'avg views', 'avg_views', 'avgviews', 'avg']);
-          const platformKey = findColumnKey(headers, ['platform', 'platform agreed', 'platform_agreed', 'platformagreed']);
-
-          console.log('[DEBUG Import] Mapped Keys:', { codeKey, usernameKey, profileLinkKey, followersKey, categoryKey, averageKey, platformKey });
+          
+          // Separate Platform vs Platform Agreed column detection
+          const platformKey = findColumnKey(headers, ['platform', 'platform_name', 'platformname']);
+          const platformAgreedKey = findColumnKey(headers, ['platform agreed', 'platform_agreed', 'platformagreed']);
 
           if (!codeKey) {
             resolve({
@@ -223,14 +221,15 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
           const influencerCodeMap = new Map<string, CampaignInfluencer>();
           existingInfluencers.forEach(inf => {
-            if (inf.code) {
-              influencerCodeMap.set(inf.code.trim().toUpperCase(), inf);
+            const codeVal = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
+            if (codeVal) {
+              influencerCodeMap.set(codeVal, inf);
             }
           });
 
           const parsedRecords: ParsedPlatformRow[] = rawData.map(row => {
             const rawCode = cleanStr(row[codeKey]).toUpperCase();
-            const rowPlatStr = platformKey ? cleanStr(row[platformKey]) : '';
+            const rowPlatStr = platformKey ? cleanStr(row[platformKey]) : (platformAgreedKey ? cleanStr(row[platformAgreedKey]) : '');
             const rowPlatform = rowPlatStr ? normalizePlatformName(rowPlatStr) : defaultPlatform;
 
             if (!rawCode) {
@@ -434,13 +433,13 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
       let recCount = 0;
       const totalRecords = allRecordsToProcess.length;
+      const affectedInfIds = new Set<string | number>();
 
       for (const item of allRecordsToProcess) {
         const rec = item.record;
         const infId = rec.matchedInfluencerId!;
+        affectedInfIds.add(infId);
         const platformName = normalizePlatformName(rec.platform || item.filePlatform);
-
-        console.log(`[DEBUG Save] Processing ${rec.code} for platform ${platformName}...`, rec);
 
         const { data: existingPlats, error: fetchErr } = await supabase
           .from(SUPABASE_TABLES.influencerPlatform)
@@ -469,8 +468,6 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           average: rec.average !== null ? rec.average : (matchedPlatRow?.average || null)
         };
 
-        console.log(`[DEBUG Save] Payload for ${rec.code}:`, platformPayload);
-
         if (matchedPlatRow?.id) {
           let { error: updateErr } = await supabase
             .from(SUPABASE_TABLES.influencerPlatform)
@@ -487,26 +484,32 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
             }
           }
         } else {
-          const { data: maxData } = await supabase
-            .from(SUPABASE_TABLES.influencerPlatform)
-            .select('id')
-            .order('id', { ascending: false })
-            .limit(1);
-
-          const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
-          platformPayload.id = isNaN(maxId) ? 1 : maxId + 1;
-
+          // Try inserting without explicit id first
           let { error: insertErr } = await supabase
             .from(SUPABASE_TABLES.influencerPlatform)
             .insert([platformPayload]);
 
           if (insertErr) {
-            console.error(`[Platform Upload Error] Insert failed:`, insertErr);
-            if (insertErr.message?.includes('average')) {
+            console.error(`[Platform Upload Error] Direct insert failed, trying with explicit ID:`, insertErr);
+            const { data: maxData } = await supabase
+              .from(SUPABASE_TABLES.influencerPlatform)
+              .select('id')
+              .order('id', { ascending: false })
+              .limit(1);
+
+            const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
+            platformPayload.id = isNaN(maxId) ? 1 : maxId + 1;
+
+            let { error: insertErr2 } = await supabase
+              .from(SUPABASE_TABLES.influencerPlatform)
+              .insert([platformPayload]);
+
+            if (insertErr2 && insertErr2.message?.includes('average')) {
               const safePayload = { ...platformPayload };
               delete safePayload.average;
-              const { error: err2 } = await supabase.from(SUPABASE_TABLES.influencerPlatform).insert([safePayload]);
-              if (err2) console.error(`[Platform Upload Error] Fallback insert failed:`, err2);
+              delete safePayload.id;
+              const { error: err3 } = await supabase.from(SUPABASE_TABLES.influencerPlatform).insert([safePayload]);
+              if (err3) console.error(`[Platform Upload Error] Fallback insert failed:`, err3);
             }
           }
         }
@@ -525,6 +528,39 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
         recCount++;
         const fileProgress = totalRecords > 0 ? Math.round((recCount / totalRecords) * 100) : 100;
         setUploadProgress(prev => ({ ...prev, [platformName]: fileProgress }));
+      }
+
+      // Update Platform Availability automatically for affected influencers
+      for (const infId of Array.from(affectedInfIds)) {
+        const { data: allPlats } = await supabase
+          .from(SUPABASE_TABLES.influencerPlatform)
+          .select('platform, username, followers_count, video_views')
+          .eq('influencer_id', infId);
+
+        const activePlatforms = (allPlats || []).filter(p => {
+          const hasUsername = Boolean(p.username && p.username.trim());
+          const hasFollowers = Number(p.followers_count) > 0;
+          const hasViews = Array.isArray(p.video_views) && p.video_views.some((v: any) => Number(v) > 0);
+          return hasUsername || hasFollowers || hasViews;
+        }).map(p => normalizePlatformName(p.platform).toLowerCase());
+
+        const hasInsta = activePlatforms.includes('instagram');
+        const hasYoutube = activePlatforms.includes('youtube');
+        const hasFb = activePlatforms.includes('facebook');
+
+        let newAvailability = 'All';
+        if (hasInsta && hasYoutube && hasFb) newAvailability = 'Instagram and Youtube and Facebook';
+        else if (hasInsta && hasYoutube) newAvailability = 'Instagram and Youtube';
+        else if (hasInsta && hasFb) newAvailability = 'Instagram and Facebook';
+        else if (hasYoutube && hasFb) newAvailability = 'Youtube and Facebook';
+        else if (hasInsta) newAvailability = 'Instagram';
+        else if (hasYoutube) newAvailability = 'Youtube';
+        else if (hasFb) newAvailability = 'Facebook';
+
+        await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .update({ platform_availability: newAvailability })
+          .eq('id', infId);
       }
 
       notifyInfluencerChange(campaign.id);
