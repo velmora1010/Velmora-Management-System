@@ -843,19 +843,26 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
 
       {/* Toolbar */}
       <div className="p-4 border-b border-slate-700 flex flex-col sm:flex-row gap-4 items-center justify-between">
-        <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-700">
-          <button 
-            onClick={() => setFilter('active')}
-            className={`px-4 py-1.5 text-sm rounded-md transition-colors ${filter === 'active' ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-300'}`}
-          >
-            Active
-          </button>
-          <button 
-            onClick={() => setFilter('archived')}
-            className={`px-4 py-1.5 text-sm rounded-md transition-colors ${filter === 'archived' ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-300'}`}
-          >
-            Archived
-          </button>
+        <div className="flex items-center gap-3">
+          <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-700">
+            <button 
+              onClick={() => setFilter('active')}
+              className={`px-4 py-1.5 text-sm rounded-md transition-colors ${filter === 'active' ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-300'}`}
+            >
+              Active
+            </button>
+            <button 
+              onClick={() => setFilter('archived')}
+              className={`px-4 py-1.5 text-sm rounded-md transition-colors ${filter === 'archived' ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-300'}`}
+            >
+              Archived
+            </button>
+          </div>
+          {!isFilterApplied && !searchTerm.trim() && (
+            <span className="px-3 py-1 bg-purple-950/40 border border-purple-800/30 rounded-lg text-purple-300 font-semibold text-xs shrink-0">
+              {filteredInfluencers.length === 1 ? '1 Influencer' : `${filteredInfluencers.length} Influencers`}
+            </span>
+          )}
         </div>
 
         <div className="flex gap-2 w-full sm:w-auto">
@@ -892,63 +899,84 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
       </div>
 
       {/* Active Filters Bar */}
-      {isFilterApplied && (
-        <div className="px-4 py-2 bg-slate-900/90 border-b border-slate-700/80 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-400 font-medium">Active Filters:</span>
-          {filterState.state && (
-            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-              State: {filterState.state}
-              <button onClick={() => setFilterState(prev => ({ ...prev, state: '' }))} className="hover:text-white text-slate-400">&times;</button>
-            </span>
-          )}
-          {filterState.city && (
-            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-              City: {filterState.city}
-              <button onClick={() => setFilterState(prev => ({ ...prev, city: '' }))} className="hover:text-white text-slate-400">&times;</button>
-            </span>
-          )}
-          {filterState.creatorCategory && (
-            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-              Category: {filterState.creatorCategory}
-              <button onClick={() => setFilterState(prev => ({ ...prev, creatorCategory: '' }))} className="hover:text-white text-slate-400">&times;</button>
-            </span>
-          )}
-          {filterState.followerRange && (
-            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-              Followers: {FOLLOWER_RANGES.find(r => r.id === filterState.followerRange)?.label || filterState.followerRange}
-              <button onClick={() => setFilterState(prev => ({ ...prev, followerRange: '' }))} className="hover:text-white text-slate-400">&times;</button>
-            </span>
-          )}
-          {filterState.languages.map(lang => (
-            <span key={lang} className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-              Lang: {lang}
-              <button onClick={() => setFilterState(prev => ({ ...prev, languages: prev.languages.filter(l => l !== lang) }))} className="hover:text-white text-slate-400">&times;</button>
-            </span>
-          ))}
-          {filterState.platformCombo && filterState.platformCombo !== 'all' && (
-            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-              Platform: {filterState.platformCombo}
-              <button onClick={() => setFilterState(prev => ({ ...prev, platformCombo: 'all' }))} className="hover:text-white text-slate-400">&times;</button>
-            </span>
-          )}
-          {filterState.product && (
-            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-              Product: {filterState.product}
-              <button onClick={() => setFilterState(prev => ({ ...prev, product: '' }))} className="hover:text-white text-slate-400">&times;</button>
-            </span>
-          )}
-          {(filterState.minPrice || filterState.maxPrice) && (
-            <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-              Price: ₹{filterState.minPrice || 0} - ₹{filterState.maxPrice || '∞'}
-              <button onClick={() => setFilterState(prev => ({ ...prev, minPrice: '', maxPrice: '' }))} className="hover:text-white text-slate-400">&times;</button>
-            </span>
-          )}
-          <button 
-            onClick={() => setFilterState(initialFilterState)} 
-            className="text-purple-400 hover:text-purple-300 underline font-semibold ml-2 text-xs"
-          >
-            Clear all
-          </button>
+      {(isFilterApplied || searchTerm.trim()) && (
+        <div className="px-4 py-2 bg-slate-900/90 border-b border-slate-700/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-400 font-medium">Active Filters:</span>
+            {searchTerm.trim() && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Search: "{searchTerm.trim()}"
+                <button onClick={() => setSearchTerm('')} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {filterState.state && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                State: {filterState.state}
+                <button onClick={() => setFilterState(prev => ({ ...prev, state: '' }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {filterState.city && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                City: {filterState.city}
+                <button onClick={() => setFilterState(prev => ({ ...prev, city: '' }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {filterState.creatorCategory && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Category: {filterState.creatorCategory}
+                <button onClick={() => setFilterState(prev => ({ ...prev, creatorCategory: '' }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {filterState.followerRange && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Followers: {FOLLOWER_RANGES.find(r => r.id === filterState.followerRange)?.label || filterState.followerRange}
+                <button onClick={() => setFilterState(prev => ({ ...prev, followerRange: '' }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {filterState.languages.map(lang => (
+              <span key={lang} className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Lang: {lang}
+                <button onClick={() => setFilterState(prev => ({ ...prev, languages: prev.languages.filter(l => l !== lang) }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            ))}
+            {filterState.platformCombo && filterState.platformCombo !== 'all' && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Platform: {filterState.platformCombo}
+                <button onClick={() => setFilterState(prev => ({ ...prev, platformCombo: 'all' }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {filterState.product && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Product: {filterState.product}
+                <button onClick={() => setFilterState(prev => ({ ...prev, product: '' }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {(filterState.minPrice || filterState.maxPrice) && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Price: ₹{filterState.minPrice || 0} - ₹{filterState.maxPrice || '∞'}
+                <button onClick={() => setFilterState(prev => ({ ...prev, minPrice: '', maxPrice: '' }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {(isFilterApplied || searchTerm.trim()) && (
+              <button 
+                onClick={() => {
+                  setFilterState(initialFilterState);
+                  setSearchTerm('');
+                }} 
+                className="text-purple-400 hover:text-purple-300 underline font-semibold ml-2 text-xs"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+
+          <div className="px-3 py-1 bg-purple-950/60 border border-purple-800/40 rounded-lg text-purple-300 font-semibold text-xs shrink-0 shadow-sm ml-auto">
+            {filteredInfluencers.length === 0 
+              ? 'No Influencers Found' 
+              : filteredInfluencers.length === 1 
+                ? '1 Influencer Found' 
+                : `${filteredInfluencers.length} Influencers Found`}
+          </div>
         </div>
       )}
 
