@@ -858,14 +858,6 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           >
             <Upload size={14} /> Upload Influencers
           </button>
-          {onAddInfluencer && (
-            <button 
-              onClick={onAddInfluencer}
-              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-2 shrink-0"
-            >
-              <Users size={14} /> + Add Influencer
-            </button>
-          )}
           <button 
             onClick={() => {
               setTargetUploadCode(undefined);
