@@ -4,6 +4,7 @@ import { Save, X, Plus, Upload, Trash2, AlertTriangle, Loader2 } from 'lucide-re
 import { useCampaignInfluencers, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
 
@@ -254,6 +255,8 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isRemoveImageModalOpen, setIsRemoveImageModalOpen] = useState(false);
+  const [isRemovingImage, setIsRemovingImage] = useState(false);
 
   // Form State Storage Helpers
   const getFormStorageKey = () => {
@@ -563,6 +566,44 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   }, [formState]);
 
   // Helpers
+  const handleConfirmRemoveImage = async () => {
+    setIsRemovingImage(true);
+    try {
+      const pUrl = basicInfo.profile_file_url || initialData?.profile_file_url;
+      if (pUrl && pUrl.includes('influencer-profiles/')) {
+        try {
+          const pathPart = pUrl.split('influencer-profiles/').pop();
+          if (pathPart) {
+            const cleanPath = decodeURIComponent(pathPart.split('?')[0]);
+            await supabase.storage.from('influencer-profiles').remove([cleanPath]);
+          }
+        } catch (storageErr) {
+          console.error('Storage file deletion error:', storageErr);
+        }
+      }
+
+      if (initialData?.id) {
+        await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .update({ profile_file_url: null })
+          .eq('id', initialData.id);
+      }
+
+      setFormState(prev => ({
+        ...prev,
+        basicInfo: { ...prev.basicInfo, profile_file_url: '' }
+      }));
+      setUploadedFileName('');
+      setIsRemoveImageModalOpen(false);
+      toast.success('Profile image removed successfully.');
+    } catch (err: any) {
+      console.error('Error removing profile image:', err);
+      toast.error(`Failed to remove image: ${err?.message || String(err)}`);
+    } finally {
+      setIsRemovingImage(false);
+    }
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1223,10 +1264,22 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       disabled={isUploadingImage}
                     />
                   </label>
-                  {uploadedFileName && (
-                    <span className="text-sm text-emerald-400 truncate max-w-[150px]" title={uploadedFileName}>
-                      {uploadedFileName}
-                    </span>
+                  {uploadedFileName ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-emerald-400 truncate max-w-[150px]" title={uploadedFileName}>
+                        {uploadedFileName}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsRemoveImageModalOpen(true)}
+                        className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/40 text-red-300 hover:text-red-200 rounded text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                        title="Remove profile image"
+                      >
+                        <Trash2 size={12} /> Remove Image
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-slate-500 italic">No image selected</span>
                   )}
                   {uploadError && (
                     <span className="text-sm text-red-400 truncate max-w-[150px]" title={uploadError}>
@@ -2049,6 +2102,43 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               >
                 {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                 Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isRemoveImageModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 bg-red-950/60 border border-red-800/40 rounded-full">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-100">Remove Influencer Profile Image?</h3>
+            </div>
+            
+            <p className="text-sm text-slate-300 leading-relaxed">
+              This will remove only the profile image. The influencer profile and all other information will remain unchanged.
+            </p>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsRemoveImageModalOpen(false)}
+                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-lg text-sm transition-colors"
+                disabled={isRemovingImage}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRemoveImage}
+                disabled={isRemovingImage}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+              >
+                {isRemovingImage ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                Remove Image
               </button>
             </div>
           </div>
