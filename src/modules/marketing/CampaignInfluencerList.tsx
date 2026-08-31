@@ -191,8 +191,13 @@ City: ${influencer.city}`;
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveTab(tab.id as any);
+              }}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
                 activeTab === tab.id 
                   ? 'bg-purple-600 text-white' 
                   : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'

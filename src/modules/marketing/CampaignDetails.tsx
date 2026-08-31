@@ -59,20 +59,9 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
       const match = influencers.find(inf => String(inf.id) === String(editingInfluencerId));
       if (match) {
         setEditingInfluencer(match);
-      } else {
-        console.warn(`[NAV] Saved editing influencer ID ${editingInfluencerId} not found, resetting.`);
-        setEditingInfluencer(null);
-        setEditingInfluencerId(null);
-        if (currentView === 'add-influencer') {
-          handleViewChange('influencer-list', { editingInfluencerId: undefined });
-        } else {
-          saveDepartmentNavigation('marketing', '/marketing', {
-            editingInfluencerId: undefined
-          });
-        }
       }
     }
-  }, [influencers, editingInfluencerId, currentView]);
+  }, [influencers, editingInfluencerId]);
 
   const { updateCampaign } = useCampaigns();
 
@@ -317,37 +306,43 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         </div>
         <div className="flex flex-nowrap items-center gap-2 overflow-x-auto max-w-full pb-1 scrollbar-thin scrollbar-thumb-slate-700">
           <button 
-            onClick={() => handleViewChange('overview')}
+            type="button"
+            onClick={(e) => { e.preventDefault(); handleViewChange('overview'); }}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'overview' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <LayoutDashboard size={14} /> Campaign Details
           </button>
           <button 
-            onClick={() => handleViewChange('influencer-list')}
+            type="button"
+            onClick={(e) => { e.preventDefault(); handleViewChange('influencer-list'); }}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'influencer-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Users size={14} /> Influencer List
           </button>
           <button 
-            onClick={() => handleViewChange('dispatched-list')}
+            type="button"
+            onClick={(e) => { e.preventDefault(); handleViewChange('dispatched-list'); }}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'dispatched-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Package size={14} /> Influencer Logistics
           </button>
           <button 
-            onClick={() => handleViewChange('status-tracking')}
+            type="button"
+            onClick={(e) => { e.preventDefault(); handleViewChange('status-tracking'); }}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'status-tracking' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Settings size={14} /> Status Tracking
           </button>
           <button 
-            onClick={() => handleViewChange('calendar')}
+            type="button"
+            onClick={(e) => { e.preventDefault(); handleViewChange('calendar'); }}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'calendar' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <Calendar size={14} /> Calendar
           </button>
           <button 
-            onClick={() => handleViewChange('analytics')}
+            type="button"
+            onClick={(e) => { e.preventDefault(); handleViewChange('analytics'); }}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'analytics' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
             <BarChart2 size={14} /> Analytics

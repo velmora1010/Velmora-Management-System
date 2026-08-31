@@ -31,21 +31,12 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
   const location = useLocation();
   const state = location.state as { openCampaignId?: string } | null;
 
-  // Resolve Campaign ID against campaigns data
+  // Resolve Campaign ID against campaigns data without resetting view on refetch
   useEffect(() => {
     if (selectedCampaignId && campaigns.length > 0) {
       const match = campaigns.find(c => String(c.id) === String(selectedCampaignId));
       if (match) {
         setSelectedCampaign(match);
-      } else {
-        console.warn(`[NAV] Saved campaign ID ${selectedCampaignId} not found, resetting.`);
-        setSelectedCampaign(null);
-        setView('overview');
-        setSelectedCampaignId(null);
-        saveDepartmentNavigation('marketing', '/marketing', {
-          dashboardView: 'overview',
-          selectedCampaignId: undefined
-        });
       }
     }
   }, [campaigns, selectedCampaignId]);
