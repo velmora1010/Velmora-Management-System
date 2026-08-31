@@ -51,16 +51,20 @@ export const SHORT_PRODUCT_MAP: Record<string, string> = {
 
 export const COMBINATION_PRODUCTS_MAP: Record<string, string[]> = {
   'Detergent': ['DIY Detergent Liquid'],
+  'Detergent + Dishwash': ['DIY Detergent Liquid', 'DIY Dishwash Liquid'],
   'Detergent & Dishwash': ['DIY Detergent Liquid', 'DIY Dishwash Liquid'],
+  'Detergent + Comfort': ['DIY Detergent Liquid', 'DIY Fabric Conditioner'],
   'Detergent & Comfort': ['DIY Detergent Liquid', 'DIY Fabric Conditioner'],
+  'Dishwash + Detergent + Comfort': ['DIY Dishwash Liquid', 'DIY Detergent Liquid', 'DIY Fabric Conditioner'],
   'Dishwash, Detergent & Comfort': ['DIY Dishwash Liquid', 'DIY Detergent Liquid', 'DIY Fabric Conditioner'],
+  'Kitchen Cleaner + Bamboo Towel': ['Kitchen Cleaner', 'Bamboo Towel'],
   'Kitchen Cleaner & Bamboo Towel': ['Kitchen Cleaner', 'Bamboo Towel'],
   'Bamboo Towel': ['Bamboo Towel'],
-  'Kitchen Cleaner + Dishwash + Bamboo Towel': ['Kitchen Cleaner', 'DIY Dishwash Liquid', 'Bamboo Towel'],
   'Sponge': ['Magic Sponge'],
   'Bike Wash': ['Bike Wash'],
   'Car Wash': ['Car Wash'],
   'BBC': ['BBC'],
+  'Hand Wash + Floor Cleaner': ['Hand Wash', 'Floor Cleaner'],
   'Hand Wash & Floor Cleaner': ['Hand Wash', 'Floor Cleaner'],
   'Glass Cleaner': ['Glass Cleaner'],
   'Kitchen Cleaner': ['Kitchen Cleaner'],
@@ -99,41 +103,22 @@ export const parseProductsFromCombination = (combStr: string): string[] => {
   return result.length > 0 ? result : [combStr];
 };
 
-export const generateDynamicCombinations = (): string[] => {
-  const shortKeys = Object.keys(SHORT_PRODUCT_MAP);
-  const list: string[] = [];
-
-  // 1-product items
-  shortKeys.forEach(k => list.push(k.trim()));
-
-  // 2-product PAIR combinations ONLY
-  for (let i = 0; i < shortKeys.length; i++) {
-    for (let j = i + 1; j < shortKeys.length; j++) {
-      const pair = `${shortKeys[i].trim()} + ${shortKeys[j].trim()}`;
-      if (!list.includes(pair)) {
-        list.push(pair);
-      }
-    }
-  }
-
-  // Explicit legacy extras only
-  const legacyExtras = [
-    'Detergent & Dishwash',
-    'Detergent & Comfort',
-    'Dishwash, Detergent & Comfort',
-    'Kitchen Cleaner & Bamboo Towel',
-    'Kitchen Cleaner + Dishwash + Bamboo Towel',
-    'Hand Wash & Floor Cleaner',
-    '5-6 Products'
-  ];
-  legacyExtras.forEach(e => {
-    if (!list.includes(e)) list.push(e);
-  });
-
-  return list;
-};
-
-export const COMBINATIONS = generateDynamicCombinations();
+export const COMBINATIONS = [
+  'Detergent',
+  'Detergent + Dishwash',
+  'Detergent + Comfort',
+  'Dishwash + Detergent + Comfort',
+  'Kitchen Cleaner + Bamboo Towel',
+  'Bamboo Towel',
+  'Sponge',
+  'Bike Wash',
+  'Car Wash',
+  'BBC',
+  'Hand Wash + Floor Cleaner',
+  'Glass Cleaner',
+  'Kitchen Cleaner',
+  '5-6 Products'
+];
 
 export const formatDateDMY = (date: Date): string => {
   const day = String(date.getDate()).padStart(2, '0');
