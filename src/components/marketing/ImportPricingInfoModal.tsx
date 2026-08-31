@@ -55,7 +55,7 @@ export const ImportPricingInfoModal: React.FC<ImportPricingInfoModalProps> = ({
 
   const parseNum = (val: any): number => {
     if (val === undefined || val === null || val === '') return 0;
-    let str = String(val).trim().toUpperCase().replace(/,/g, '');
+    let str = String(val).trim().toUpperCase().replace(/₹/g, '').replace(/,/g, '').trim();
     if (str.endsWith('M')) {
       const n = parseFloat(str.slice(0, -1));
       return isNaN(n) ? 0 : Math.round(n * 1000000);
@@ -95,74 +95,118 @@ export const ImportPricingInfoModal: React.FC<ImportPricingInfoModalProps> = ({
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheet = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheet];
-        const rawData: Record<string, any>[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+        const matrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
 
-        if (!rawData || rawData.length === 0) {
+        if (!matrix || matrix.length < 2) {
           setValidationError('File is empty or has no data rows');
           setParsedRecords([]);
           return;
         }
 
-        const headers = Object.keys(rawData[0] || {});
-        const codeKey = findColumnKey(headers, ['influencer code', 'influencercode', 'influencer_code', 'code', 's no code']);
-        const usernameKey = findColumnKey(headers, ['user name', 'username', 'user_name', 'name']);
-        const finalPriceKey = findColumnKey(headers, ['final price', 'final_price', 'commercial quote', 'commercial_quote', 'total price', 'amount']);
+        const headerRow: string[] = (matrix[0] || []).map(h => cleanStr(h));
+        const normHeaders = headerRow.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
 
-        if (!codeKey) {
+        // 1. Find Influencer Code column index
+        let codeColIdx = normHeaders.findIndex(h => ['influencercode', 'code', 'influencer_code', 'snocode'].includes(h));
+        if (codeColIdx === -1) {
+          codeColIdx = normHeaders.findIndex(h => h.includes('code'));
+        }
+
+        if (codeColIdx === -1) {
           setValidationError('Required column missing: Influencer Code');
           setParsedRecords([]);
           return;
         }
 
+        // 2. Find Username column index
+        let usernameColIdx = normHeaders.findIndex(h => ['username', 'user_name', 'name'].includes(h));
+        if (usernameColIdx === -1) {
+          usernameColIdx = normHeaders.findIndex(h => h.includes('user') || h.includes('name'));
+        }
+
+        // 3. Find explicit Final Price column index (if any)
+        let finalPriceColIdx = normHeaders.findIndex(h => ['finalprice', 'final_price', 'commercialquote', 'commercial_quote', 'totalprice', 'total_price'].includes(h));
+
+        // 4. Find Video + Amount column pairs by position
+        interface VideoPair {
+          videoColIdx: number;
+          amountColIdx: number;
+          videoNum: number;
+        }
+
+        const pairs: VideoPair[] = [];
+
+        for (let c = 0; c < headerRow.length; c++) {
+          const normH = normHeaders[c];
+          if (normH.startsWith('video') || (normH.startsWith('v') && /^v\d+$/.test(normH)) || normH.includes('video')) {
+            const vMatch = normH.match(/\d+/);
+            const vNum = vMatch ? parseInt(vMatch[0], 10) : (pairs.length + 1);
+
+            let amtIdx = -1;
+            if (c + 1 < headerRow.length && normHeaders[c + 1].includes('amount')) {
+              amtIdx = c + 1;
+            } else {
+              for (let lookahead = c + 1; lookahead < headerRow.length; lookahead++) {
+                if (normHeaders[lookahead].startsWith('video') || (normHeaders[lookahead].startsWith('v') && /^v\d+$/.test(normHeaders[lookahead]))) {
+                  break;
+                }
+                if (normHeaders[lookahead].includes('amount')) {
+                  amtIdx = lookahead;
+                  break;
+                }
+              }
+            }
+
+            pairs.push({
+              videoColIdx: c,
+              amountColIdx: amtIdx,
+              videoNum: vNum
+            });
+          }
+        }
+
         const influencerCodeMap = new Map<string, CampaignInfluencer>();
         existingInfluencers.forEach(inf => {
-          if (inf.code) {
-            influencerCodeMap.set(inf.code.trim().toUpperCase(), inf);
+          const c = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
+          if (c) {
+            influencerCodeMap.set(c, inf);
           }
         });
 
-        const rows: ParsedPricingRow[] = rawData.map(row => {
-          const rawCode = cleanStr(row[codeKey]).toUpperCase();
-          if (!rawCode) {
-            return {
-              code: '',
-              username: '',
-              totalVideos: 0,
-              finalPrice: 0,
-              videoPricingList: [],
-              isValid: false,
-              reason: 'Missing Influencer Code'
-            };
-          }
+        const rows: ParsedPricingRow[] = [];
+
+        for (let r = 1; r < matrix.length; r++) {
+          const rowData = matrix[r];
+          if (!rowData || rowData.length === 0) continue;
+
+          const rawCode = cleanStr(rowData[codeColIdx]).toUpperCase();
+          if (!rawCode) continue;
 
           const matchedInf = influencerCodeMap.get(rawCode);
-          const username = usernameKey ? cleanStr(row[usernameKey]) : (matchedInf?.name || matchedInf?.influencer_name || '');
-          
+          const username = usernameColIdx !== -1 ? cleanStr(rowData[usernameColIdx]) : (matchedInf?.name || matchedInf?.influencer_name || '');
+
           const videoPricingList: { combination: string; amount: number }[] = [];
           let sumAmount = 0;
 
-          // Check Video 1 to Video 15 & Amount columns
-          for (let v = 1; v <= 15; v++) {
-            const videoKey = findColumnKey(headers, [`video ${v}`, `video_${v}`, `v${v}`, `video${v}`]);
-            const amountKey = findColumnKey(headers, [
-              `amount ${v}`, `amount_${v}`, `amount${v}`,
-              v === 1 ? 'amount' : `amount ${v}`,
-              `video ${v} amount`, `video_${v}_amount`
-            ]);
-
-            const combName = videoKey ? cleanStr(row[videoKey]) : '';
-            const amtVal = amountKey ? parseNum(row[amountKey]) : 0;
+          for (const pair of pairs) {
+            const combName = cleanStr(rowData[pair.videoColIdx]);
+            const amtRaw = pair.amountColIdx !== -1 ? rowData[pair.amountColIdx] : '';
+            const amtVal = parseNum(amtRaw);
 
             if (combName || amtVal > 0) {
-              videoPricingList.push({ combination: combName || `Video ${v}`, amount: amtVal });
+              videoPricingList.push({
+                combination: combName || `Video ${pair.videoNum}`,
+                amount: amtVal
+              });
               sumAmount += amtVal;
             }
           }
 
-          const finalPrice = finalPriceKey ? parseNum(row[finalPriceKey]) : (sumAmount > 0 ? sumAmount : 0);
-          const totalVideos = videoPricingList.length > 0 ? videoPricingList.length : 1;
+          const explicitFinalPrice = finalPriceColIdx !== -1 ? parseNum(rowData[finalPriceColIdx]) : 0;
+          const finalPrice = explicitFinalPrice > 0 ? explicitFinalPrice : sumAmount;
+          const totalVideos = videoPricingList.length;
 
-          return {
+          rows.push({
             code: rawCode,
             username,
             totalVideos,
@@ -171,8 +215,8 @@ export const ImportPricingInfoModal: React.FC<ImportPricingInfoModalProps> = ({
             isValid: true,
             matchedInfluencerId: matchedInf ? matchedInf.id : undefined,
             reason: matchedInf ? undefined : 'Unmatched Influencer Code'
-          };
-        });
+          });
+        }
 
         setParsedRecords(rows);
       } catch (err: any) {
