@@ -938,14 +938,15 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               </span>
             )}
           </button>
-          <button
-            onClick={() => setIsImportModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer shrink-0"
-            title="Import Influencers from Excel / CSV / PDF"
-          >
-            <Upload size={16} />
-            <span>Import Influencers</span>
-          </button>
+          {onAddInfluencer && (
+            <button
+              onClick={onAddInfluencer}
+              className="flex items-center gap-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer shrink-0"
+            >
+              <Users size={16} />
+              <span>+ Add Influencer</span>
+            </button>
+          )}
         </div>
       </div>
 
