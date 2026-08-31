@@ -240,6 +240,7 @@ export interface InfluencerPlatformDetail {
   video_views: number[];
   video_views_dates?: string[];
   performance_code?: string;
+  average?: number | string | null;
 }
 
 export interface InfluencerPlatformView {

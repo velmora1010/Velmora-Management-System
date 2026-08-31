@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
+import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
@@ -47,13 +48,15 @@ const InfluencerCard = ({
   onEdit, 
   onToggleArchive,
   onDispatch,
-  onDelete
+  onDelete,
+  onUploadPlatformDetails
 }: { 
   influencer: CampaignInfluencer, 
   onEdit: (inf: CampaignInfluencer) => void,
   onToggleArchive: (id: string, isArchived: boolean) => void,
   onDispatch?: (inf: CampaignInfluencer) => void,
-  onDelete: (id: string, name: string) => void
+  onDelete: (id: string, name: string) => void,
+  onUploadPlatformDetails?: (code?: string) => void
 }) => {
   const [activeTab, setActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>('basic');
   const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
@@ -313,15 +316,27 @@ City: ${influencer.city}`;
                   <div key={i} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
                     <div className="flex justify-between items-center mb-3">
                       <span className="font-semibold text-purple-300">{p.platform}</span>
-                      {p.profile_link && (
-                        <a href={p.profile_link} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-200 transition-colors">
-                          View Profile <ExternalLink size={12} />
-                        </a>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {onUploadPlatformDetails && (
+                          <button
+                            type="button"
+                            onClick={() => onUploadPlatformDetails(influencer.code)}
+                            className="flex items-center gap-1 text-[11px] bg-purple-950/60 hover:bg-purple-900 border border-purple-800/40 px-2 py-1 rounded text-purple-300 transition-colors font-medium cursor-pointer"
+                            title={`Upload ${p.platform} details for ${influencer.code}`}
+                          >
+                            <Upload size={12} /> Upload Platform Details
+                          </button>
+                        )}
+                        {p.profile_link && (
+                          <a href={p.profile_link} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-200 transition-colors">
+                            View Profile <ExternalLink size={12} />
+                          </a>
+                        )}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                       <div><span className="text-slate-500 block text-xs">Username</span><span className="text-slate-200">{p.username || '-'}</span></div>
-                      <div><span className="text-slate-500 block text-xs">Followers</span><span className="text-slate-200">{p.followers_count || '-'}</span></div>
+                      <div><span className="text-slate-500 block text-xs">Followers</span><span className="text-slate-200">{p.followers_count ? Number(p.followers_count).toLocaleString() : '-'}</span></div>
                       {(p.platform === 'Instagram' || p.platform === 'Facebook' || p.platform === 'Youtube') && (
                         <div>
                           <span className="text-slate-500 block text-xs">Creator Category</span>
@@ -330,6 +345,14 @@ City: ${influencer.city}`;
                           </span>
                         </div>
                       )}
+                      <div>
+                        <span className="text-slate-500 block text-xs">Average</span>
+                        <span className="text-slate-200 font-semibold">
+                          {(p as any).average !== undefined && (p as any).average !== null && (p as any).average !== ''
+                            ? (isNaN(Number((p as any).average)) ? (p as any).average : Number((p as any).average).toLocaleString())
+                            : '—'}
+                        </span>
+                      </div>
                     </div>
                     {p.video_views && p.video_views.some(v => v !== null && v !== undefined && (v as any) !== '') ? (
                       <div>
@@ -570,6 +593,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [tempFilterState, setTempFilterState] = useState<InfluencerFilterState>(initialFilterState);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
+  const [targetUploadCode, setTargetUploadCode] = useState<string | undefined>();
   const [activeEditInfluencer, setActiveEditInfluencer] = useState<CampaignInfluencer | null>(null);
 
   const handleEditInfluencerClick = (inf: CampaignInfluencer) => {
@@ -833,6 +858,16 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
             </button>
           )}
           <button 
+            onClick={() => {
+              setTargetUploadCode(undefined);
+              setIsUploadPlatformModalOpen(true);
+            }}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-xs font-semibold flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
+            title="Upload Platform Details for Existing Influencers"
+          >
+            <Upload size={14} /> Upload Platform Details
+          </button>
+          <button 
             onClick={onBack}
             className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm"
           >
@@ -1017,6 +1052,10 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                 onToggleArchive={toggleArchiveStatus} 
                 onDispatch={onDispatch}
                 onDelete={handleDelete}
+                onUploadPlatformDetails={(code) => {
+                  setTargetUploadCode(code);
+                  setIsUploadPlatformModalOpen(true);
+                }}
               />
             ))}
           </div>
@@ -1055,6 +1094,19 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           onClose={() => setIsImportModalOpen(false)}
           onSuccess={() => {
             refresh();
+          }}
+        />
+      )}
+
+      {isUploadPlatformModalOpen && (
+        <UploadPlatformDetailsModal
+          campaign={campaign}
+          existingInfluencers={influencers}
+          initialInfluencerCode={targetUploadCode}
+          onClose={() => setIsUploadPlatformModalOpen(false)}
+          onSuccess={async () => {
+            setIsUploadPlatformModalOpen(false);
+            await refresh();
           }}
         />
       )}

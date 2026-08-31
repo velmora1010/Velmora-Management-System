@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, InfluencerPricing, InfluencerProduct, InfluencerBrandPerformance, InfluencerPostDate } from '../../types';
-import { Save, X, Plus } from 'lucide-react';
+import { Save, X, Plus, Upload } from 'lucide-react';
 import { useCampaignInfluencers, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
+import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
@@ -250,6 +251,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   };
 
   const { influencers, addInfluencer, updateInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
+  const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
 
   // Form State Storage Helpers
   const getFormStorageKey = () => {
@@ -1225,6 +1227,20 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
         <div className={activeTab === 'platform' ? '' : 'hidden'}>
           <div className="space-y-6">
+            <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-lg border border-slate-700/80 mb-4">
+              <div>
+                <h4 className="font-semibold text-slate-200 text-sm">Platform Details</h4>
+                <p className="text-xs text-slate-400">Manage platform availability & video metrics</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsUploadPlatformModalOpen(true)}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+              >
+                <Upload size={14} /> Upload Platform Details
+              </button>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Platform Availability</label>
@@ -1240,6 +1256,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                   <option value="Instagram and Youtube">Instagram and Youtube</option>
                   <option value="Instagram and Facebook">Instagram and Facebook</option>
                   <option value="Youtube and Facebook">Youtube and Facebook</option>
+                  <option value="Instagram and Youtube and Facebook">Instagram and Youtube and Facebook</option>
                 </select>
               </div>
               <div>
@@ -1256,6 +1273,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                   <option value="Instagram and Youtube">Instagram and Youtube</option>
                   <option value="Instagram and Facebook">Instagram and Facebook</option>
                   <option value="Youtube and Facebook">Youtube and Facebook</option>
+                  <option value="Instagram and Youtube and Facebook">Instagram and Youtube and Facebook</option>
                 </select>
               </div>
             </div>
@@ -1267,7 +1285,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                 return (
                   <div key={p.platform} className="bg-slate-900 p-4 rounded-xl border border-slate-700 relative">
                     <h4 className="text-md font-semibold text-purple-400 mb-4">{p.platform} Details</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                       <div>
                         <label className="block text-xs text-slate-400 mb-1">Username</label>
                         <input 
@@ -1290,6 +1308,14 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                           type="number" value={p.followers_count || ''} onChange={e => updatePlatform(idx, 'followers_count', parseInt(e.target.value) || 0)}
                           className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm" 
                           placeholder="e.g. 100000"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-400 mb-1">Average Views</label>
+                        <input 
+                          type="number" value={(p as any).average !== undefined && (p as any).average !== null ? (p as any).average : ''} onChange={e => updatePlatform(idx, 'average' as any, e.target.value === '' ? null : parseInt(e.target.value) || 0)}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm" 
+                          placeholder="e.g. 125000"
                         />
                       </div>
                     </div>
@@ -1946,6 +1972,20 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           </div>
         </div>
       </div>
+
+      {isUploadPlatformModalOpen && (
+        <UploadPlatformDetailsModal
+          campaign={campaign}
+          existingInfluencers={influencers}
+          initialInfluencerCode={initialData?.code}
+          onClose={() => setIsUploadPlatformModalOpen(false)}
+          onSuccess={async () => {
+            setIsUploadPlatformModalOpen(false);
+            notifyInfluencerChange(campaign.id);
+            toast.success('Platform details updated!');
+          }}
+        />
+      )}
     </div>
   );
 };

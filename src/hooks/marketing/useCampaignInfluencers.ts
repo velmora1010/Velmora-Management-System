@@ -752,15 +752,23 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           const existingPlat = (existingPlats || []).find(ep => ep.platform && ep.platform.toLowerCase() === platformName.toLowerCase());
 
           if (existingPlat?.id) {
-            await supabase
+            const platUpdatePayload: Record<string, any> = {
+              username: p.username || '',
+              profile_link: p.profile_link || '',
+              followers_count: Number(p.followers_count || 0),
+              video_views: numeric15Views,
+              average: (p.average !== undefined && p.average !== null) ? p.average : null
+            };
+
+            let { error: platUpdateErr } = await supabase
               .from(SUPABASE_TABLES.influencerPlatform)
-              .update({
-                username: p.username || '',
-                profile_link: p.profile_link || '',
-                followers_count: Number(p.followers_count || 0),
-                video_views: numeric15Views
-              })
+              .update(platUpdatePayload)
               .eq('id', existingPlat.id);
+
+            if (platUpdateErr && platUpdateErr.message?.includes('average')) {
+              delete platUpdatePayload.average;
+              await supabase.from(SUPABASE_TABLES.influencerPlatform).update(platUpdatePayload).eq('id', existingPlat.id);
+            }
           } else {
             let nextPlatformId = await getMaxId(SUPABASE_TABLES.influencerPlatform);
             nextPlatformId++;
