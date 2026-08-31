@@ -103,26 +103,20 @@ export const generateDynamicCombinations = (): string[] => {
   const shortKeys = Object.keys(SHORT_PRODUCT_MAP);
   const list: string[] = [];
 
-  // 1-product combinations
-  shortKeys.forEach(k => list.push(k));
+  // 1-product items
+  shortKeys.forEach(k => list.push(k.trim()));
 
-  // 2-product combinations
+  // 2-product PAIR combinations ONLY
   for (let i = 0; i < shortKeys.length; i++) {
     for (let j = i + 1; j < shortKeys.length; j++) {
-      list.push(`${shortKeys[i]} + ${shortKeys[j]}`);
-    }
-  }
-
-  // 3-product combinations
-  for (let i = 0; i < shortKeys.length; i++) {
-    for (let j = i + 1; j < shortKeys.length; j++) {
-      for (let k = j + 1; k < shortKeys.length; k++) {
-        list.push(`${shortKeys[i]} + ${shortKeys[j]} + ${shortKeys[k]}`);
+      const pair = `${shortKeys[i].trim()} + ${shortKeys[j].trim()}`;
+      if (!list.includes(pair)) {
+        list.push(pair);
       }
     }
   }
 
-  // Legacy extras
+  // Explicit legacy extras only
   const legacyExtras = [
     'Detergent & Dishwash',
     'Detergent & Comfort',
@@ -1597,6 +1591,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                           className="w-full h-10 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-xs focus:border-purple-500 focus:outline-none"
                         >
                           <option value="">Select Combination</option>
+                          {v.combination && !COMBINATIONS.includes(v.combination) && (
+                            <option value={v.combination}>{v.combination}</option>
+                          )}
                           {COMBINATIONS.map(c => (
                             <option key={c} value={c}>{c}</option>
                           ))}
