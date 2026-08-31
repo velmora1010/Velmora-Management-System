@@ -4,6 +4,7 @@ import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, Ext
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { ImportPricingInfoModal } from '../../components/marketing/ImportPricingInfoModal';
+import { ImportPostDateModal } from '../../components/marketing/ImportPostDateModal';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
@@ -596,6 +597,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
   const [isImportPricingModalOpen, setIsImportPricingModalOpen] = useState(false);
+  const [isImportPostDateModalOpen, setIsImportPostDateModalOpen] = useState(false);
   const [targetUploadCode, setTargetUploadCode] = useState<string | undefined>();
   const [activeEditInfluencer, setActiveEditInfluencer] = useState<CampaignInfluencer | null>(null);
 
@@ -876,6 +878,13 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
             <Upload size={14} /> Pricing Info
           </button>
           <button 
+            onClick={() => setIsImportPostDateModalOpen(true)}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
+            title="Import Post Date"
+          >
+            <Upload size={14} /> Post Date
+          </button>
+          <button 
             onClick={onBack}
             className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm"
           >
@@ -1127,6 +1136,18 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           onClose={() => setIsImportPricingModalOpen(false)}
           onSuccess={async () => {
             setIsImportPricingModalOpen(false);
+            await refresh();
+          }}
+        />
+      )}
+
+      {isImportPostDateModalOpen && (
+        <ImportPostDateModal
+          campaign={campaign}
+          existingInfluencers={influencers}
+          onClose={() => setIsImportPostDateModalOpen(false)}
+          onSuccess={async () => {
+            setIsImportPostDateModalOpen(false);
             await refresh();
           }}
         />
