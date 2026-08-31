@@ -23,10 +23,11 @@ export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ campaign, onEd
               <button
                 type="button"
                 onClick={onEditCampaign}
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-lg transition-colors border border-slate-700"
+                className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors border border-purple-500/50 flex items-center gap-1.5 text-xs font-semibold shadow-sm cursor-pointer"
                 title="Edit Campaign"
               >
-                <Edit size={16} />
+                <Edit size={14} />
+                Edit Campaign
               </button>
             )}
           </div>
