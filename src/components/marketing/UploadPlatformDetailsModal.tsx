@@ -126,12 +126,20 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
     return isNaN(n) ? 0 : Math.round(n);
   };
 
+  const normalizeHeader = (header: string): string => {
+    return header
+      .toString()
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]/g, '');
+  };
+
   // Flexible Header Matching
   const findColumnKey = (rowKeys: string[], possibleNames: string[]): string | null => {
     for (const key of rowKeys) {
-      const normKey = key.toString().toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      const normKey = normalizeHeader(key);
       for (const target of possibleNames) {
-        const normTarget = target.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+        const normTarget = normalizeHeader(target);
         if (normKey === normTarget) {
           return key;
         }
@@ -187,14 +195,19 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
           const headers = Object.keys(rawData[0] || {});
           
-          // Header detection according to Excel spec
-          const codeKey = findColumnKey(headers, ['influencer code', 'influencercode', 'influencer_code', 'code', 's no code']);
-          const usernameKey = findColumnKey(headers, ['user name', 'username', 'user_name', 'handle', 'name']);
+          console.log('[DEBUG Import] Raw Headers:', headers);
+          console.log('[DEBUG Import] Normalized Headers:', headers.map(h => normalizeHeader(h)));
+
+          // Header detection according to spec
+          const codeKey = findColumnKey(headers, ['influencer code', 'influencercode', 'influencer_code', 'code', 's no code', 'snocode', 'code number', 'codenumber', 'influencer']);
+          const usernameKey = findColumnKey(headers, ['user name', 'username', 'user_name', 'instagram username', 'youtube username', 'facebook username', 'handle', 'name']);
           const profileLinkKey = findColumnKey(headers, ['profile link', 'profilelink', 'profile_link', 'url', 'link']);
-          const followersKey = findColumnKey(headers, ['followers count', 'followers_count', 'followerscount', 'followers', 'subscribers']);
-          const categoryKey = findColumnKey(headers, ['creator category', 'creator_category', 'creatorcategory', 'performance code', 'performance_code', 'category']);
-          const averageKey = findColumnKey(headers, ['average views', 'average_views', 'averageviews', 'average', 'avg views', 'avg']);
+          const followersKey = findColumnKey(headers, ['followers count', 'followers_count', 'followerscount', 'followers', 'follower count font', 'follower count', 'follower_count', 'subscribers', 'subs']);
+          const categoryKey = findColumnKey(headers, ['creator category', 'creator_category', 'creatorcategory', 'performance code', 'performance_code', 'performancecode', 'category']);
+          const averageKey = findColumnKey(headers, ['average views', 'average_views', 'averageviews', 'average', 'avg views', 'avg_views', 'avgviews', 'avg']);
           const platformKey = findColumnKey(headers, ['platform', 'platform agreed', 'platform_agreed', 'platformagreed']);
+
+          console.log('[DEBUG Import] Mapped Keys:', { codeKey, usernameKey, profileLinkKey, followersKey, categoryKey, averageKey, platformKey });
 
           if (!codeKey) {
             resolve({
@@ -246,7 +259,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
               const vKey = findColumnKey(headers, [
                 `video ${v}`, `video_${v}`, `video${v}`, `v${v}`, `video_views_${v}`,
                 `video ${v} views`, `video ${v} view`, `video_${v}_views`, `video${v}views`, `video${v}view`,
-                `video ${v} view count`, `video${v} views`
+                `video ${v} view count`, `video${v} views`, `video${v} view`
               ]);
               if (vKey && row[vKey] !== undefined && row[vKey] !== null && row[vKey] !== '') {
                 videoViews[v - 1] = parseNum(row[vKey]);
@@ -255,7 +268,15 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
             // Case A vs Case B for Creator Category
             const rawCat = categoryKey ? cleanStr(row[categoryKey]).toUpperCase() : '';
-            let category = ['C1L1','C1L2','C2L1','C2L2','C3L1','C3L2','C4L1','C4L2','BELOW 10K'].includes(rawCat) ? rawCat : (rawCat || '');
+            const cleanCat = rawCat.replace(/[^A-Z0-9]/g, '');
+            let category = '';
+            if (['C1L1','C1L2','C2L1','C2L2','C3L1','C3L2','C4L1','C4L2'].includes(cleanCat)) {
+              category = cleanCat;
+            } else if (cleanCat === 'BELOW10K' || cleanCat === 'BELOW10000') {
+              category = 'C4L2';
+            } else if (rawCat) {
+              category = rawCat;
+            }
             
             if (!category) {
               category = getAutoCreatorCategory(rowPlatform, videoViews, followers);
@@ -419,6 +440,8 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
         const infId = rec.matchedInfluencerId!;
         const platformName = normalizePlatformName(rec.platform || item.filePlatform);
 
+        console.log(`[DEBUG Save] Processing ${rec.code} for platform ${platformName}...`, rec);
+
         const { data: existingPlats, error: fetchErr } = await supabase
           .from(SUPABASE_TABLES.influencerPlatform)
           .select('*')
@@ -431,16 +454,22 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
         const targetPlatformNorm = normalizePlatformName(platformName);
         const matchedPlatRow = (existingPlats || []).find(p => normalizePlatformName(p.platform) === targetPlatformNorm);
 
+        // Merge video views cleanly
+        const existingViews = Array.isArray(matchedPlatRow?.video_views) ? matchedPlatRow.video_views : [];
+        const mergedViews = rec.videoViews.map((v, i) => (v > 0 ? v : (Number(existingViews[i]) || 0)));
+
         const platformPayload: Record<string, any> = {
           influencer_id: infId,
           platform: platformName,
           username: rec.username || matchedPlatRow?.username || '',
           profile_link: rec.profileLink || matchedPlatRow?.profile_link || '',
           followers_count: rec.followers > 0 ? rec.followers : (matchedPlatRow?.followers_count || 0),
-          video_views: rec.videoViews,
+          video_views: mergedViews,
           performance_code: rec.category || matchedPlatRow?.performance_code || '',
           average: rec.average !== null ? rec.average : (matchedPlatRow?.average || null)
         };
+
+        console.log(`[DEBUG Save] Payload for ${rec.code}:`, platformPayload);
 
         if (matchedPlatRow?.id) {
           let { error: updateErr } = await supabase
