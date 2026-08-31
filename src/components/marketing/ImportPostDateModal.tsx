@@ -53,33 +53,59 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
   const normalizeDateStr = (val: any): string => {
     if (val === undefined || val === null || val === '') return '';
     
-    // Check if it's an Excel numeric date
-    if (typeof val === 'number') {
-      try {
-        const parsedObj = XLSX.SSF.parse_date_code(val);
-        if (parsedObj && parsedObj.y && parsedObj.m && parsedObj.d) {
-          const yyyy = String(parsedObj.y);
-          const mm = String(parsedObj.m).padStart(2, '0');
-          const dd = String(parsedObj.d).padStart(2, '0');
-          return `${dd}-${mm}-${yyyy}`;
-        }
-      } catch (err) {
-        // Fallback
+    // Date object
+    if (val instanceof Date) {
+      if (!isNaN(val.getTime())) {
+        const day = String(val.getDate()).padStart(2, '0');
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const month = monthNames[val.getMonth()];
+        const year = val.getFullYear();
+        return `${day}-${month}-${year}`;
       }
     }
 
+    // Number or numeric string (Excel serial date)
+    const numVal = typeof val === 'number' ? val : (typeof val === 'string' && /^\d{5}$/.test(val.trim()) ? Number(val.trim()) : NaN);
+    if (!isNaN(numVal)) {
+      try {
+        const parsedObj = XLSX.SSF.parse_date_code(numVal);
+        if (parsedObj && parsedObj.y && parsedObj.m && parsedObj.d) {
+          const day = String(parsedObj.d).padStart(2, '0');
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const month = monthNames[parsedObj.m - 1] || String(parsedObj.m).padStart(2, '0');
+          const year = String(parsedObj.y);
+          return `${day}-${month}-${year}`;
+        }
+      } catch (err) {}
+    }
+
     const str = String(val).trim();
-    if (!str) return '';
+    if (!str || str === '—' || str === '-') return '';
+
+    // Handle DD-MMM-YYYY (e.g. 22-Sep-2026 or 1-Oct-2026)
+    if (/^\d{1,2}-[A-Za-z]{3}-\d{4}$/.test(str)) {
+      const parts = str.split('-');
+      const day = parts[0].padStart(2, '0');
+      const month = parts[1].substring(0, 1).toUpperCase() + parts[1].substring(1).toLowerCase();
+      const year = parts[2];
+      return `${day}-${month}-${year}`;
+    }
 
     // Handle DD/MM/YYYY or DD-MM-YYYY or YYYY-MM-DD
     const parts = str.split(/[-/.]/);
     if (parts.length === 3) {
       if (parts[0].length === 4) {
-        // YYYY-MM-DD -> DD-MM-YYYY
-        return `${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[0]}`;
+        // YYYY-MM-DD
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const mIdx = parseInt(parts[1], 10) - 1;
+        const mStr = monthNames[mIdx] || parts[1].padStart(2, '0');
+        return `${parts[2].padStart(2, '0')}-${mStr}-${parts[0]}`;
       } else if (parts[2].length === 4) {
         // DD-MM-YYYY
-        return `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const mIdx = parseInt(parts[1], 10) - 1;
+        const mStr = isNaN(mIdx) ? parts[1] : (monthNames[mIdx] || parts[1].padStart(2, '0'));
+        return `${parts[0].padStart(2, '0')}-${mStr}-${parts[2]}`;
       }
     }
 
@@ -112,7 +138,6 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         
-        // Target 'Post Date' sheet or fallback to sheet 0
         let targetSheetName = workbook.SheetNames.find(s => s.trim().toLowerCase() === 'post date' || s.trim().toLowerCase() === 'postdate');
         if (!targetSheetName) {
           targetSheetName = workbook.SheetNames[0];
@@ -139,8 +164,9 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
 
         const influencerCodeMap = new Map<string, CampaignInfluencer>();
         existingInfluencers.forEach(inf => {
-          if (inf.code) {
-            influencerCodeMap.set(inf.code.trim().toUpperCase(), inf);
+          const c = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
+          if (c) {
+            influencerCodeMap.set(c, inf);
           }
         });
 
@@ -161,21 +187,35 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
           
           const videoDates: Record<number, string> = {};
 
-          // Look for Video 1 - Video 6 (or up to 15) Post Dates
           for (let v = 1; v <= 15; v++) {
-            const dateKey = findColumnKey(headers, [
-              v === 1 ? 'post date' : `post date ${v}`,
-              v === 1 ? 'postdate' : `postdate${v}`,
-              v === 1 ? 'post_date' : `post_date_${v}`,
+            const possibleNames = [
+              `video ${v} post date`,
+              `video_${v}_post_date`,
+              `video${v}postdate`,
+              `video ${v} postdate`,
+              `video ${v} date`,
+              `video_${v}_date`,
+              `video${v}date`,
+              `v${v} post date`,
+              `v${v}postdate`,
+              `v${v}date`,
               `post date ${v}`,
               `postdate ${v}`,
+              `postdate${v}`,
+              `post_date_${v}`,
               `pdate${v}`
-            ]);
+            ];
+            if (v === 1) {
+              possibleNames.push('post date', 'postdate', 'post_date', 'date');
+            }
+
+            const dateKey = findColumnKey(headers, possibleNames);
 
             if (dateKey && row[dateKey] !== undefined && row[dateKey] !== null && String(row[dateKey]).trim() !== '') {
               const normDate = normalizeDateStr(row[dateKey]);
               if (normDate) {
                 videoDates[v] = normDate;
+                console.log(`[Post Date Import Debug] Influencer Code: ${rawCode}, Video ${v} Col: "${dateKey}", Raw: "${row[dateKey]}", Parsed: "${normDate}"`);
               }
             }
           }
@@ -218,7 +258,6 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
         const infId = rec.matchedInfluencerId!;
         const numericId = typeof infId === 'number' ? infId : parseInt(String(infId), 10);
 
-        // Fetch existing post dates for this influencer & campaign
         const { data: existingPostDates } = await supabase
           .from(SUPABASE_TABLES.influencerPostDates)
           .select('*')
@@ -228,7 +267,6 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
         const existingMap = new Map((existingPostDates || []).map(ep => [ep.video_number, ep]));
         let hasChanges = false;
 
-        // Iterate through parsed dates (video_number -> date string)
         for (const [vNumStr, dateStr] of Object.entries(rec.videoDates)) {
           const vNum = Number(vNumStr);
           if (!dateStr || isNaN(vNum)) continue;
@@ -247,27 +285,75 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
               hasChanges = true;
             }
           } else {
-            // Get max ID
-            const { data: maxData } = await supabase
-              .from(SUPABASE_TABLES.influencerPostDates)
-              .select('id')
-              .order('id', { ascending: false })
-              .limit(1);
-
-            const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
-            const newId = isNaN(maxId) ? 1 : maxId + 1;
-
-            await supabase
+            let { error: insertErr } = await supabase
               .from(SUPABASE_TABLES.influencerPostDates)
               .insert([{
-                id: newId,
                 influencer_id: numericId,
                 campaign_id: campaign.id,
                 video_number: vNum,
                 post_date: dateStr
               }]);
+
+            if (insertErr) {
+              const { data: maxData } = await supabase
+                .from(SUPABASE_TABLES.influencerPostDates)
+                .select('id')
+                .order('id', { ascending: false })
+                .limit(1);
+
+              const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
+              const newId = isNaN(maxId) ? 1 : maxId + 1;
+
+              await supabase
+                .from(SUPABASE_TABLES.influencerPostDates)
+                .insert([{
+                  id: newId,
+                  influencer_id: numericId,
+                  campaign_id: campaign.id,
+                  video_number: vNum,
+                  post_date: dateStr
+                }]);
+            }
             hasChanges = true;
           }
+        }
+
+        // Sync influencersInfo table & views_data JSON post_dates
+        const { data: freshInf } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('languages')
+          .eq('id', numericId)
+          .maybeSingle();
+
+        if (freshInf) {
+          const currentLangs = Array.isArray(freshInf.languages) ? freshInf.languages : [];
+          let viewsDataObj: any = { platform_views: {}, post_dates: [] };
+          const existingViewsData = currentLangs.find((l: any) => typeof l === 'string' && l.startsWith('views_data:'));
+          if (existingViewsData) {
+            try {
+              viewsDataObj = JSON.parse(existingViewsData.substring('views_data:'.length));
+            } catch (e) {}
+          }
+          if (!Array.isArray(viewsDataObj.post_dates)) viewsDataObj.post_dates = [];
+
+          for (const [vNumStr, dateStr] of Object.entries(rec.videoDates)) {
+            const vNum = Number(vNumStr);
+            if (!dateStr || isNaN(vNum)) continue;
+            const existingDateIdx = viewsDataObj.post_dates.findIndex((pd: any) => Number(pd.video_number) === vNum);
+            if (existingDateIdx !== -1) {
+              viewsDataObj.post_dates[existingDateIdx].post_date = dateStr;
+            } else {
+              viewsDataObj.post_dates.push({ video_number: vNum, post_date: dateStr });
+            }
+          }
+
+          const updatedLangs = currentLangs.filter((l: any) => typeof l !== 'string' || !l.startsWith('views_data:'));
+          updatedLangs.push(`views_data:${JSON.stringify(viewsDataObj)}`);
+
+          await supabase
+            .from(SUPABASE_TABLES.influencersInfo)
+            .update({ languages: updatedLangs })
+            .eq('id', numericId);
         }
 
         if (hasChanges || Object.keys(rec.videoDates).length > 0) {
@@ -432,6 +518,8 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
                       <th className="p-2.5">Video 2 Date</th>
                       <th className="p-2.5">Video 3 Date</th>
                       <th className="p-2.5">Video 4 Date</th>
+                      <th className="p-2.5">Video 5 Date</th>
+                      <th className="p-2.5">Video 6 Date</th>
                       <th className="p-2.5">Status</th>
                     </tr>
                   </thead>
@@ -440,10 +528,12 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
                       <tr key={idx} className="hover:bg-slate-800/40">
                         <td className="p-2.5 font-mono font-bold text-slate-200">{r.code || '—'}</td>
                         <td className="p-2.5 text-slate-300">{r.username || '—'}</td>
-                        <td className="p-2.5 text-slate-300">{r.videoDates[1] || '—'}</td>
-                        <td className="p-2.5 text-slate-300">{r.videoDates[2] || '—'}</td>
-                        <td className="p-2.5 text-slate-300">{r.videoDates[3] || '—'}</td>
-                        <td className="p-2.5 text-slate-300">{r.videoDates[4] || '—'}</td>
+                        <td className="p-2.5 text-slate-300 font-mono">{r.videoDates[1] || '—'}</td>
+                        <td className="p-2.5 text-slate-300 font-mono">{r.videoDates[2] || '—'}</td>
+                        <td className="p-2.5 text-slate-300 font-mono">{r.videoDates[3] || '—'}</td>
+                        <td className="p-2.5 text-slate-300 font-mono">{r.videoDates[4] || '—'}</td>
+                        <td className="p-2.5 text-slate-300 font-mono">{r.videoDates[5] || '—'}</td>
+                        <td className="p-2.5 text-slate-300 font-mono">{r.videoDates[6] || '—'}</td>
                         <td className="p-2.5">
                           {r.matchedInfluencerId !== undefined ? (
                             <span className="text-[10px] bg-green-950/50 text-green-400 border border-green-800/30 px-2 py-0.5 rounded font-bold">
