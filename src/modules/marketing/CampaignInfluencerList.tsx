@@ -49,6 +49,8 @@ const resolvePerformanceCode = (
 
 const InfluencerCard = ({ 
   influencer, 
+  activeTab: parentActiveTab = 'basic',
+  onTabChange,
   onEdit, 
   onToggleArchive,
   onDispatch,
@@ -57,6 +59,8 @@ const InfluencerCard = ({
   onUploadPlatformDetails
 }: { 
   influencer: CampaignInfluencer, 
+  activeTab?: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate',
+  onTabChange?: (tab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate') => void,
   onEdit: (inf: CampaignInfluencer) => void,
   onToggleArchive: (id: string, isArchived: boolean) => void,
   onDispatch?: (inf: CampaignInfluencer) => void,
@@ -64,7 +68,7 @@ const InfluencerCard = ({
   onDeletePlatformViews?: (inf: CampaignInfluencer, platformName: string) => void,
   onUploadPlatformDetails?: (code?: string) => void
 }) => {
-  const [activeTab, setActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>('basic');
+  const activeTab = parentActiveTab;
   const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
 
   const togglePlatformExpanded = (platformName: string) => {
@@ -195,7 +199,9 @@ City: ${influencer.city}`;
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                setActiveTab(tab.id as any);
+                if (onTabChange) {
+                  onTabChange(tab.id as any);
+                }
               }}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
                 activeTab === tab.id 
@@ -707,6 +713,16 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
       toast.error(`Failed to delete ${platformName} views: ${err?.message || String(err)}`);
     }
   };
+
+  const [cardActiveTabs, setCardActiveTabs] = useState<Record<string, 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>>({});
+
+  const handleCardTabChange = (infKey: string, newTab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate') => {
+    setCardActiveTabs(prev => ({
+      ...prev,
+      [infKey]: newTab
+    }));
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'active' | 'archived'>('active');
   const [filterState, setFilterState] = useState<InfluencerFilterState>(initialFilterState);
@@ -1180,21 +1196,26 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredInfluencers.map(inf => (
-              <InfluencerCard 
-                key={inf.id} 
-                influencer={inf} 
-                onEdit={handleEditInfluencerClick} 
-                onToggleArchive={toggleArchiveStatus} 
-                onDispatch={onDispatch}
-                onDelete={handleDelete}
-                onDeletePlatformViews={handleDeletePlatformViews}
-                onUploadPlatformDetails={(code) => {
-                  setTargetUploadCode(code);
-                  setIsUploadPlatformModalOpen(true);
-                }}
-              />
-            ))}
+            {filteredInfluencers.map(inf => {
+              const infKey = (inf.code || (inf as any).influencer_code || String(inf.id)).trim().toUpperCase();
+              return (
+                <InfluencerCard 
+                  key={inf.id || infKey} 
+                  influencer={inf} 
+                  activeTab={cardActiveTabs[infKey] || 'basic'}
+                  onTabChange={(newTab) => handleCardTabChange(infKey, newTab)}
+                  onEdit={handleEditInfluencerClick} 
+                  onToggleArchive={toggleArchiveStatus} 
+                  onDispatch={onDispatch}
+                  onDelete={handleDelete}
+                  onDeletePlatformViews={handleDeletePlatformViews}
+                  onUploadPlatformDetails={(code) => {
+                    setTargetUploadCode(code);
+                    setIsUploadPlatformModalOpen(true);
+                  }}
+                />
+              );
+            })}
           </div>
         )}
       </div>
