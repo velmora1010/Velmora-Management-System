@@ -671,22 +671,50 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                     
                     {instaFile ? (
                       <div className="space-y-2">
-                        <div className="p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-xs flex items-center justify-between">
-                          <span className="font-medium text-slate-200 truncate max-w-[140px]">{instaFile.file.name}</span>
-                          <button onClick={() => handleRemoveFile('Instagram')} className="text-slate-400 hover:text-red-400 ml-1">
-                            <X size={14} />
-                          </button>
+                        <div className="p-3 bg-emerald-950/30 border border-emerald-800/50 rounded-xl text-xs flex items-center justify-between gap-2 shadow-sm">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="p-2 bg-emerald-900/40 rounded-lg shrink-0">
+                              <FileSpreadsheet className="text-emerald-400" size={18} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-100 truncate text-xs" title={instaFile.file.name}>
+                                {instaFile.file.name}
+                              </div>
+                              <div className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 mt-0.5">
+                                <CheckCircle2 size={10} /> {(instaFile.file.size / 1024).toFixed(1)} KB • {instaFile.parsedRecords.length} records
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button 
+                              type="button"
+                              onClick={() => instaInputRef.current?.click()} 
+                              className="p-1.5 text-slate-400 hover:text-purple-300 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Change File"
+                            >
+                              <Upload size={14} />
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => handleRemoveFile('Instagram')} 
+                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Remove File"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
                         {instaFile.validationError && (
-                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium">
+                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium bg-red-950/40 border border-red-800/40 p-2 rounded-lg">
                             <AlertCircle size={12} /> {instaFile.validationError}
                           </p>
                         )}
                       </div>
                     ) : (
                       <button 
+                        type="button"
                         onClick={() => instaInputRef.current?.click()}
-                        className="w-full py-2 bg-purple-600/90 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                        className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                       >
                         <Upload size={14} /> Upload Instagram File
                       </button>
@@ -702,8 +730,8 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                         YouTube
                       </span>
                       {ytFile && (
-                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono">
-                          Ready ({ytFile.parsedRecords.length})
+                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1">
+                          <CheckCircle2 size={10} /> Ready ({ytFile.parsedRecords.length})
                         </span>
                       )}
                     </div>
@@ -721,22 +749,50 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                     
                     {ytFile ? (
                       <div className="space-y-2">
-                        <div className="p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-xs flex items-center justify-between">
-                          <span className="font-medium text-slate-200 truncate max-w-[140px]">{ytFile.file.name}</span>
-                          <button onClick={() => handleRemoveFile('YouTube')} className="text-slate-400 hover:text-red-400 ml-1">
-                            <X size={14} />
-                          </button>
+                        <div className="p-3 bg-emerald-950/30 border border-emerald-800/50 rounded-xl text-xs flex items-center justify-between gap-2 shadow-sm">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="p-2 bg-emerald-900/40 rounded-lg shrink-0">
+                              <FileSpreadsheet className="text-emerald-400" size={18} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-100 truncate text-xs" title={ytFile.file.name}>
+                                {ytFile.file.name}
+                              </div>
+                              <div className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 mt-0.5">
+                                <CheckCircle2 size={10} /> {(ytFile.file.size / 1024).toFixed(1)} KB • {ytFile.parsedRecords.length} records
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button 
+                              type="button"
+                              onClick={() => ytInputRef.current?.click()} 
+                              className="p-1.5 text-slate-400 hover:text-purple-300 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Change File"
+                            >
+                              <Upload size={14} />
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => handleRemoveFile('YouTube')} 
+                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Remove File"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
                         {ytFile.validationError && (
-                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium">
+                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium bg-red-950/40 border border-red-800/40 p-2 rounded-lg">
                             <AlertCircle size={12} /> {ytFile.validationError}
                           </p>
                         )}
                       </div>
                     ) : (
                       <button 
+                        type="button"
                         onClick={() => ytInputRef.current?.click()}
-                        className="w-full py-2 bg-purple-600/90 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                        className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                       >
                         <Upload size={14} /> Upload YouTube File
                       </button>
@@ -752,8 +808,8 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                         Facebook
                       </span>
                       {fbFile && (
-                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono">
-                          Ready ({fbFile.parsedRecords.length})
+                        <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1">
+                          <CheckCircle2 size={10} /> Ready ({fbFile.parsedRecords.length})
                         </span>
                       )}
                     </div>
@@ -771,22 +827,50 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                     
                     {fbFile ? (
                       <div className="space-y-2">
-                        <div className="p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-xs flex items-center justify-between">
-                          <span className="font-medium text-slate-200 truncate max-w-[140px]">{fbFile.file.name}</span>
-                          <button onClick={() => handleRemoveFile('Facebook')} className="text-slate-400 hover:text-red-400 ml-1">
-                            <X size={14} />
-                          </button>
+                        <div className="p-3 bg-emerald-950/30 border border-emerald-800/50 rounded-xl text-xs flex items-center justify-between gap-2 shadow-sm">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="p-2 bg-emerald-900/40 rounded-lg shrink-0">
+                              <FileSpreadsheet className="text-emerald-400" size={18} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-100 truncate text-xs" title={fbFile.file.name}>
+                                {fbFile.file.name}
+                              </div>
+                              <div className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 mt-0.5">
+                                <CheckCircle2 size={10} /> {(fbFile.file.size / 1024).toFixed(1)} KB • {fbFile.parsedRecords.length} records
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button 
+                              type="button"
+                              onClick={() => fbInputRef.current?.click()} 
+                              className="p-1.5 text-slate-400 hover:text-purple-300 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Change File"
+                            >
+                              <Upload size={14} />
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => handleRemoveFile('Facebook')} 
+                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              title="Remove File"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </div>
                         {fbFile.validationError && (
-                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium">
+                          <p className="text-[11px] text-red-400 flex items-center gap-1 font-medium bg-red-950/40 border border-red-800/40 p-2 rounded-lg">
                             <AlertCircle size={12} /> {fbFile.validationError}
                           </p>
                         )}
                       </div>
                     ) : (
                       <button 
+                        type="button"
                         onClick={() => fbInputRef.current?.click()}
-                        className="w-full py-2 bg-purple-600/90 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                        className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                       >
                         <Upload size={14} /> Upload Facebook File
                       </button>
@@ -795,8 +879,17 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                 </div>
               </div>
 
-              <div className="flex justify-between items-center p-3 bg-slate-800/40 rounded-xl border border-slate-700/60 text-xs text-slate-400 font-medium">
-                <span>{readyFilesCount} {readyFilesCount === 1 ? 'file' : 'files'} ready • {notUploadedCount} not uploaded</span>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-slate-800/40 rounded-xl border border-slate-700/60 text-xs text-slate-400 font-medium gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>{readyFilesCount} {readyFilesCount === 1 ? 'file' : 'files'} ready • {notUploadedCount} not uploaded</span>
+                  {readyFilesCount > 0 && (
+                    <div className="flex items-center gap-1.5 ml-2 border-l border-slate-700 pl-2">
+                      {instaFile && <span className="bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 px-2 py-0.5 rounded text-[10px] font-mono">IG: {instaFile.file.name}</span>}
+                      {ytFile && <span className="bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 px-2 py-0.5 rounded text-[10px] font-mono">YT: {ytFile.file.name}</span>}
+                      {fbFile && <span className="bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 px-2 py-0.5 rounded text-[10px] font-mono">FB: {fbFile.file.name}</span>}
+                    </div>
+                  )}
+                </div>
                 <span>Influencer Code primary matching enabled</span>
               </div>
 

@@ -8,6 +8,7 @@ import {
   X, 
   Loader2,
   AlertCircle,
+  Trash2,
   Check
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
@@ -482,10 +483,27 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
                 </button>
 
                 {file && (
-                  <div className="mt-4 p-3 bg-slate-900 border border-slate-700 rounded-lg max-w-sm mx-auto text-xs text-left flex items-center justify-between">
-                    <span className="font-medium text-slate-200 truncate">{file.name}</span>
-                    <button onClick={() => { setFile(null); setParsedRecords([]); }} className="text-slate-400 hover:text-red-400 ml-2">
-                      <X size={14} />
+                  <div className="mt-4 p-3.5 bg-emerald-950/30 border border-emerald-800/50 rounded-xl max-w-md mx-auto text-xs text-left flex items-center justify-between gap-3 shadow-sm">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="p-2 bg-emerald-900/40 rounded-lg shrink-0">
+                        <FileSpreadsheet className="text-emerald-400" size={20} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-100 truncate" title={file.name}>
+                          {file.name}
+                        </div>
+                        <div className="text-[10px] text-emerald-400 font-medium flex items-center gap-1 mt-0.5">
+                          <CheckCircle2 size={10} /> {(file.size / 1024).toFixed(1)} KB • {parsedRecords.length} records ready
+                        </div>
+                      </div>
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => { setFile(null); setParsedRecords([]); }} 
+                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors shrink-0 cursor-pointer"
+                      title="Remove File"
+                    >
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 )}
