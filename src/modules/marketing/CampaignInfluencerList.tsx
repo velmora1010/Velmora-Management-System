@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users } from 'lucide-react';
-import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
+import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
+import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { ImportPricingInfoModal } from '../../components/marketing/ImportPricingInfoModal';
 import { ImportPostDateModal } from '../../components/marketing/ImportPostDateModal';
@@ -51,6 +53,7 @@ const InfluencerCard = ({
   onToggleArchive,
   onDispatch,
   onDelete,
+  onDeletePlatformViews,
   onUploadPlatformDetails
 }: { 
   influencer: CampaignInfluencer, 
@@ -58,6 +61,7 @@ const InfluencerCard = ({
   onToggleArchive: (id: string, isArchived: boolean) => void,
   onDispatch?: (inf: CampaignInfluencer) => void,
   onDelete: (id: string, name: string) => void,
+  onDeletePlatformViews?: (inf: CampaignInfluencer, platformName: string) => void,
   onUploadPlatformDetails?: (code?: string) => void
 }) => {
   const [activeTab, setActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>('basic');
@@ -323,6 +327,16 @@ City: ${influencer.city}`;
                           <a href={p.profile_link} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-200 transition-colors">
                             View Profile <ExternalLink size={12} />
                           </a>
+                        )}
+                        {onDeletePlatformViews && (
+                          <button
+                            type="button"
+                            onClick={() => onDeletePlatformViews(influencer, p.platform)}
+                            className="flex items-center gap-1 text-xs bg-red-950/60 hover:bg-red-900 border border-red-800/40 px-2.5 py-1 rounded text-red-300 hover:text-red-200 font-medium transition-colors cursor-pointer"
+                            title={`Delete ${p.platform} Views & Details`}
+                          >
+                            <Trash2 size={12} /> Delete {p.platform} Views
+                          </button>
                         )}
                       </div>
                     </div>
@@ -629,6 +643,63 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     } catch (err) {
       console.error('Failed to delete influencer:', err);
       toast.error('Failed to delete influencer.');
+    }
+  };
+
+  const handleDeletePlatformViews = async (influencer: CampaignInfluencer, platformName: string) => {
+    const confirmMsg = `Are you sure you want to delete ${platformName} video views and details for influencer "${influencer.influencer_name || influencer.name}"? This action cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      const numericId = typeof influencer.id === 'number' ? influencer.id : parseInt(String(influencer.id), 10);
+
+      if (!isNaN(numericId)) {
+        await supabase
+          .from(SUPABASE_TABLES.influencerPlatform)
+          .delete()
+          .eq('influencer_id', numericId)
+          .ilike('platform', platformName);
+
+        const { data: freshInf } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('languages')
+          .eq('id', numericId)
+          .maybeSingle();
+
+        if (freshInf) {
+          const currentLangs = Array.isArray(freshInf.languages) ? freshInf.languages : [];
+          let viewsDataObj: any = { platform_views: {}, post_dates: [] };
+          const existingViewsData = currentLangs.find((l: any) => typeof l === 'string' && l.startsWith('views_data:'));
+          if (existingViewsData) {
+            try {
+              viewsDataObj = JSON.parse(existingViewsData.substring('views_data:'.length));
+            } catch (e) {}
+          }
+          if (viewsDataObj.platform_views) {
+            const matchingKey = Object.keys(viewsDataObj.platform_views).find(
+              k => k.toLowerCase() === platformName.toLowerCase()
+            );
+            if (matchingKey) {
+              delete viewsDataObj.platform_views[matchingKey];
+            }
+          }
+
+          const updatedLangs = currentLangs.filter((l: any) => typeof l !== 'string' || !l.startsWith('views_data:'));
+          updatedLangs.push(`views_data:${JSON.stringify(viewsDataObj)}`);
+
+          await supabase
+            .from(SUPABASE_TABLES.influencersInfo)
+            .update({ languages: updatedLangs })
+            .eq('id', numericId);
+        }
+      }
+
+      toast.success(`${platformName} views deleted successfully.`);
+      notifyInfluencerChange(campaign.id);
+      refresh();
+    } catch (err: any) {
+      console.error(`Failed to delete ${platformName} views:`, err);
+      toast.error(`Failed to delete ${platformName} views: ${err?.message || String(err)}`);
     }
   };
   const [searchTerm, setSearchTerm] = useState('');
@@ -1112,6 +1183,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                 onToggleArchive={toggleArchiveStatus} 
                 onDispatch={onDispatch}
                 onDelete={handleDelete}
+                onDeletePlatformViews={handleDeletePlatformViews}
                 onUploadPlatformDetails={(code) => {
                   setTargetUploadCode(code);
                   setIsUploadPlatformModalOpen(true);
