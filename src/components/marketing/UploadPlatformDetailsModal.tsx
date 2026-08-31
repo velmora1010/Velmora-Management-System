@@ -514,44 +514,50 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           }
         }
 
-        // Sync influencersInfo table & views_data JSON
-        const matchedInf = existingInfluencers.find(i => String(i.id) === String(infId));
-        if (matchedInf) {
-          const currentLangs = Array.isArray(matchedInf.languages) ? matchedInf.languages : [];
-          let viewsDataObj: any = { platform_views: {}, post_dates: [] };
-          const existingViewsData = currentLangs.find((l: any) => typeof l === 'string' && l.startsWith('views_data:'));
-          if (existingViewsData) {
-            try {
-              viewsDataObj = JSON.parse(existingViewsData.substring('views_data:'.length));
-            } catch (e) {}
-          }
-          if (!viewsDataObj.platform_views) viewsDataObj.platform_views = {};
+        // Sync influencersInfo table & views_data JSON using fresh DB row
+        const { data: freshInf } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('languages, name, influencer_name')
+          .eq('id', infId)
+          .maybeSingle();
 
-          viewsDataObj.platform_views[platformName] = {
-            username: rec.username || matchedPlatRow?.username || '',
-            followers: rec.followers > 0 ? rec.followers : (matchedPlatRow?.followers_count || 0),
-            views: mergedViews,
-            profile_link: rec.profileLink || matchedPlatRow?.profile_link || '',
-            creator_category: rec.category || matchedPlatRow?.performance_code || '',
-            average: rec.average !== null ? rec.average : (matchedPlatRow?.average || null)
-          };
-
-          const updatedLangs = currentLangs.filter((l: any) => typeof l !== 'string' || !l.startsWith('views_data:'));
-          updatedLangs.push(`views_data:${JSON.stringify(viewsDataObj)}`);
-
-          const updatePayload: Record<string, any> = {
-            languages: updatedLangs
-          };
-          if (rec.username && (!matchedInf.influencer_name || !matchedInf.name || matchedInf.name === matchedInf.code)) {
-            updatePayload.influencer_name = rec.username;
-            updatePayload.name = rec.username;
-          }
-
-          await supabase
-            .from(SUPABASE_TABLES.influencersInfo)
-            .update(updatePayload)
-            .eq('id', infId);
+        const currentLangs = Array.isArray(freshInf?.languages) ? freshInf.languages : [];
+        let viewsDataObj: any = { platform_views: {}, post_dates: [] };
+        const existingViewsData = currentLangs.find((l: any) => typeof l === 'string' && l.startsWith('views_data:'));
+        if (existingViewsData) {
+          try {
+            viewsDataObj = JSON.parse(existingViewsData.substring('views_data:'.length));
+          } catch (e) {}
         }
+        if (!viewsDataObj.platform_views) viewsDataObj.platform_views = {};
+
+        // Merge INTO existing platform_views object (never overwrite other platforms)
+        viewsDataObj.platform_views[platformName] = {
+          ...(viewsDataObj.platform_views[platformName] || {}),
+          username: rec.username || matchedPlatRow?.username || viewsDataObj.platform_views[platformName]?.username || '',
+          followers: rec.followers > 0 ? rec.followers : (matchedPlatRow?.followers_count || viewsDataObj.platform_views[platformName]?.followers || 0),
+          views: mergedViews,
+          profile_link: rec.profileLink || matchedPlatRow?.profile_link || viewsDataObj.platform_views[platformName]?.profile_link || '',
+          creator_category: rec.category || matchedPlatRow?.performance_code || viewsDataObj.platform_views[platformName]?.creator_category || '',
+          average: rec.average !== null ? rec.average : (matchedPlatRow?.average || viewsDataObj.platform_views[platformName]?.average || null)
+        };
+
+        const updatedLangs = currentLangs.filter((l: any) => typeof l !== 'string' || !l.startsWith('views_data:'));
+        updatedLangs.push(`views_data:${JSON.stringify(viewsDataObj)}`);
+
+        const updatePayload: Record<string, any> = {
+          languages: updatedLangs
+        };
+        const curName = freshInf?.influencer_name || freshInf?.name || '';
+        if (rec.username && (!curName || curName === rec.code)) {
+          updatePayload.influencer_name = rec.username;
+          updatePayload.name = rec.username;
+        }
+
+        await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .update(updatePayload)
+          .eq('id', infId);
 
         recCount++;
         const fileProgress = totalRecords > 0 ? Math.round((recCount / totalRecords) * 100) : 100;

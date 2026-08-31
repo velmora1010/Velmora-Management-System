@@ -319,16 +319,6 @@ City: ${influencer.city}`;
                     <div className="flex justify-between items-center mb-3">
                       <span className="font-semibold text-purple-300">{p.platform}</span>
                       <div className="flex items-center gap-2">
-                        {onUploadPlatformDetails && (
-                          <button
-                            type="button"
-                            onClick={() => onUploadPlatformDetails(influencer.code)}
-                            className="flex items-center gap-1 text-[11px] bg-purple-950/60 hover:bg-purple-900 border border-purple-800/40 px-2 py-1 rounded text-purple-300 transition-colors font-medium cursor-pointer"
-                            title={`Upload ${p.platform} details for ${influencer.code}`}
-                          >
-                            <Upload size={12} /> Upload Platform Details
-                          </button>
-                        )}
                         {p.profile_link && (
                           <a href={p.profile_link} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-slate-200 transition-colors">
                             View Profile <ExternalLink size={12} />
