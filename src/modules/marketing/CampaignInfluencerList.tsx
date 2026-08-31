@@ -332,10 +332,10 @@ City: ${influencer.city}`;
                           <button
                             type="button"
                             onClick={() => onDeletePlatformViews(influencer, p.platform)}
-                            className="flex items-center gap-1 text-xs bg-red-950/60 hover:bg-red-900 border border-red-800/40 px-2.5 py-1 rounded text-red-300 hover:text-red-200 font-medium transition-colors cursor-pointer"
+                            className="p-1.5 bg-slate-800 hover:bg-red-950/40 text-slate-400 hover:text-red-400 rounded-lg transition-colors border border-slate-700 hover:border-red-800/40 cursor-pointer"
                             title={`Delete ${p.platform} Views & Details`}
                           >
-                            <Trash2 size={12} /> Delete {p.platform} Views
+                            <Trash2 size={16} />
                           </button>
                         )}
                       </div>
