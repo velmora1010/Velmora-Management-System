@@ -9,7 +9,6 @@ import {
   Loader2,
   FileCheck,
   AlertCircle,
-  Eye,
   Trash2,
   Check
 } from 'lucide-react';
@@ -154,12 +153,12 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
           const headers = Object.keys(rawData[0] || {});
           
-          // Header detection
-          const codeKey = findColumnKey(headers, ['influencer code', 'influencercode', 'influencer_code', 'code', 'id']);
-          const usernameKey = findColumnKey(headers, ['username', 'user_name', 'username', 'user name', 'profile_link', 'handle', 'name']);
-          const followersKey = findColumnKey(headers, ['followers', 'followers_count', 'followerscount', 'subscribers', 'subscriber_count', 'follower_count']);
-          const categoryKey = findColumnKey(headers, ['creator category', 'creator_category', 'creatorcategory', 'performance_code', 'performancecode', 'category']);
-          const averageKey = findColumnKey(headers, ['average', 'avg', 'average_views', 'averageviews', 'avg_views', 'average views']);
+          // Header detection according to Excel spec
+          const codeKey = findColumnKey(headers, ['influencer code', 'influencercode', 'influencer_code', 'code', 's no code']);
+          const usernameKey = findColumnKey(headers, ['user name', 'username', 'user_name', 'handle', 'profile link']);
+          const followersKey = findColumnKey(headers, ['followers count', 'followers_count', 'followerscount', 'followers', 'subscribers']);
+          const categoryKey = findColumnKey(headers, ['creator category', 'creator_category', 'creatorcategory', 'performance code', 'performance_code', 'category']);
+          const averageKey = findColumnKey(headers, ['average views', 'average_views', 'averageviews', 'average', 'avg views', 'avg']);
 
           if (!codeKey) {
             resolve({
@@ -208,7 +207,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
             // Video 1 to Video 15
             const videoViews: number[] = Array(15).fill(0);
             for (let v = 1; v <= 15; v++) {
-              const vKey = findColumnKey(headers, [`video ${v}`, `video_${v}`, `video${v}`, `v${v}`, `video_views_${v}`, `videoviews${v}`]);
+              const vKey = findColumnKey(headers, [`video ${v}`, `video_${v}`, `video${v}`, `v${v}`, `video_views_${v}`]);
               if (vKey && row[vKey] !== undefined && row[vKey] !== null && row[vKey] !== '') {
                 videoViews[v - 1] = parseNum(row[vKey]);
               }
@@ -253,7 +252,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
       if (platform === 'Instagram') setInstaFile(parsedData);
       else if (platform === 'YouTube') setYtFile(parsedData);
       else if (platform === 'Facebook') setFbFile(parsedData);
-      toast.success(`${platform} file loaded and parsed!`);
+      toast.success(`${platform} file loaded!`);
     } catch (err: any) {
       console.error(err);
       toast.error(`Error parsing ${platform} file: ${err.message || String(err)}`);
@@ -315,12 +314,14 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
     (fbFile && !fbFile.validationError)
   );
 
+  const readyFilesCount = [instaFile, ytFile, fbFile].filter(f => f && !f.validationError).length;
+  const notUploadedCount = 3 - readyFilesCount;
+
   const handleProceedToPreview = () => {
     if (!hasValidFiles) {
       toast.error('Please select at least one valid platform file');
       return;
     }
-    // Set default tab for preview
     if (instaFile) setPreviewTab('Instagram');
     else if (ytFile) setPreviewTab('YouTube');
     else if (fbFile) setPreviewTab('Facebook');
@@ -329,7 +330,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
   };
 
   // Execute Merge & Database Save
-  const handleConfirmUpload = async () => {
+  const handleConfirmImport = async () => {
     setStep('uploading');
     setIsSaving(true);
 
@@ -340,10 +341,6 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
         { key: 'Facebook' as PlatformKey, data: fbFile }
       ].filter(item => item.data !== null && !item.data.validationError);
 
-      const totalFiles = selectedFiles.length;
-      let completedFiles = 0;
-
-      // Group records by Influencer ID
       const influencerUpdatesMap = new Map<string | number, {
         influencer: CampaignInfluencer;
         newPlatforms: Map<PlatformKey, ParsedPlatformRow>;
@@ -353,7 +350,6 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
         const infCode = inf.code?.trim().toUpperCase();
         if (!infCode) return;
 
-        // Check if any selected file contains a record for this influencer
         selectedFiles.forEach(item => {
           const rec = item.data!.parsedRecords.find(r => r.code === infCode && r.isValid && r.matchedInfluencerId !== undefined);
           if (rec) {
@@ -377,7 +373,6 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
         for (const rec of records) {
           const infId = rec.matchedInfluencerId!;
           
-          // Check if platform row already exists in DB for this influencer
           const { data: existingPlats } = await supabase
             .from(SUPABASE_TABLES.influencerPlatform)
             .select('*')
@@ -396,7 +391,6 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           };
 
           if (matchedPlatRow?.id) {
-            // Update existing platform record
             let { error } = await supabase
               .from(SUPABASE_TABLES.influencerPlatform)
               .update(platformPayload)
@@ -408,8 +402,6 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
               await supabase.from(SUPABASE_TABLES.influencerPlatform).update(safePayload).eq('id', matchedPlatRow.id);
             }
           } else {
-            // Insert new platform record
-            // Get max ID
             const { data: maxData } = await supabase
               .from(SUPABASE_TABLES.influencerPlatform)
               .select('id')
@@ -435,15 +427,13 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           setUploadProgress(prev => ({ ...prev, [platformName]: fileProgress }));
         }
 
-        completedFiles++;
         setUploadProgress(prev => ({ ...prev, [platformName]: 100 }));
       }
 
-      // Update Platform Availability for all affected influencers
+      // Update Platform Availability automatically for affected influencers
       for (const [infId, entry] of Array.from(influencerUpdatesMap.entries())) {
         const { influencer } = entry;
         
-        // Fetch all updated platforms for this influencer
         const { data: allPlats } = await supabase
           .from(SUPABASE_TABLES.influencerPlatform)
           .select('platform, username, followers_count, video_views')
@@ -471,21 +461,21 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
         await supabase
           .from(SUPABASE_TABLES.influencersInfo)
-          .update({ auto_dm: influencer.auto_dm }) // touch row / ensure availability logic
+          .update({ auto_dm: influencer.auto_dm })
           .eq('id', infId);
       }
 
       logActivity(
         'Marketing',
-        'Platform Details Uploaded',
-        `Uploaded platform details for ${stats.matchedCount} influencers in ${campaign.campaign_name}.`
+        'Platform Details Imported',
+        `Imported platform details for ${stats.matchedCount} influencers in ${campaign.campaign_name}.`
       );
 
       setStep('done');
-      toast.success('Platform details uploaded successfully!');
+      toast.success('Platform Details imported successfully!');
     } catch (err: any) {
-      console.error('Upload Error:', err);
-      toast.error(`Upload failed: ${err.message || String(err)}`);
+      console.error('Import Error:', err);
+      toast.error(`Import failed: ${err.message || String(err)}`);
       setStep('preview');
     } finally {
       setIsSaving(false);
@@ -500,10 +490,10 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           <div>
             <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
               <Upload size={18} className="text-purple-400" />
-              Upload Platform Details
+              Import Platform Details
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Upload platform data for an existing influencer
+              Upload platform data for existing influencers by Influencer Code
             </p>
           </div>
           <button 
@@ -514,7 +504,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
           </button>
         </div>
 
-        {/* Modal Content Steps */}
+        {/* Modal Content */}
         <div className="p-6">
           {/* STEP 1: UPLOAD FILES */}
           {step === 'upload' && (
@@ -530,9 +520,13 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                         <span className="w-2.5 h-2.5 rounded-full bg-pink-500 inline-block"></span>
                         Instagram
                       </span>
-                      {instaFile && !instaFile.validationError && (
+                      {instaFile && !instaFile.validationError ? (
                         <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-bold">
-                          Ready
+                          ✓ Ready
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded">
+                          — Not uploaded
                         </span>
                       )}
                     </div>
@@ -541,7 +535,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                       <div className="text-center py-6 border-2 border-dashed border-slate-700 rounded-lg p-3 hover:border-purple-500/50 transition-colors">
                         <FileSpreadsheet size={28} className="mx-auto text-slate-500 mb-2" />
                         <p className="text-xs text-slate-300 font-medium mb-1">Upload Instagram File</p>
-                        <p className="text-[10px] text-slate-500 mb-3">Supported: CSV / XLSX</p>
+                        <p className="text-[10px] text-slate-500 mb-3">Supported: Excel / CSV</p>
                         <input 
                           type="file" 
                           ref={instaInputRef} 
@@ -553,7 +547,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                           onClick={() => instaInputRef.current?.click()}
                           className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-colors"
                         >
-                          Select File
+                          Choose File
                         </button>
                       </div>
                     ) : (
@@ -590,9 +584,13 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                         <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
                         YouTube
                       </span>
-                      {ytFile && !ytFile.validationError && (
+                      {ytFile && !ytFile.validationError ? (
                         <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-bold">
-                          Ready
+                          ✓ Ready
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded">
+                          — Not uploaded
                         </span>
                       )}
                     </div>
@@ -601,7 +599,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                       <div className="text-center py-6 border-2 border-dashed border-slate-700 rounded-lg p-3 hover:border-purple-500/50 transition-colors">
                         <FileSpreadsheet size={28} className="mx-auto text-slate-500 mb-2" />
                         <p className="text-xs text-slate-300 font-medium mb-1">Upload YouTube File</p>
-                        <p className="text-[10px] text-slate-500 mb-3">Supported: CSV / XLSX</p>
+                        <p className="text-[10px] text-slate-500 mb-3">Supported: Excel / CSV</p>
                         <input 
                           type="file" 
                           ref={ytInputRef} 
@@ -613,7 +611,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                           onClick={() => ytInputRef.current?.click()}
                           className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-colors"
                         >
-                          Select File
+                          Choose File
                         </button>
                       </div>
                     ) : (
@@ -650,9 +648,13 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                         <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
                         Facebook
                       </span>
-                      {fbFile && !fbFile.validationError && (
+                      {fbFile && !fbFile.validationError ? (
                         <span className="text-[10px] bg-green-950/60 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-bold">
-                          Ready
+                          ✓ Ready
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded">
+                          — Not uploaded
                         </span>
                       )}
                     </div>
@@ -661,7 +663,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                       <div className="text-center py-6 border-2 border-dashed border-slate-700 rounded-lg p-3 hover:border-purple-500/50 transition-colors">
                         <FileSpreadsheet size={28} className="mx-auto text-slate-500 mb-2" />
                         <p className="text-xs text-slate-300 font-medium mb-1">Upload Facebook File</p>
-                        <p className="text-[10px] text-slate-500 mb-3">Supported: CSV / XLSX</p>
+                        <p className="text-[10px] text-slate-500 mb-3">Supported: Excel / CSV</p>
                         <input 
                           type="file" 
                           ref={fbInputRef} 
@@ -673,7 +675,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                           onClick={() => fbInputRef.current?.click()}
                           className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-colors"
                         >
-                          Select File
+                          Choose File
                         </button>
                       </div>
                     ) : (
@@ -701,11 +703,9 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                 </div>
               </div>
 
-              <div className="p-4 bg-slate-800/40 rounded-xl border border-slate-700/60 text-xs text-slate-400">
-                <p className="font-semibold text-slate-300 mb-1">Supported File Headers:</p>
-                <p>• <span className="text-purple-300 font-mono">Influencer Code</span> (Required for matching)</p>
-                <p>• <span className="text-slate-300 font-mono">Username</span>, <span className="text-slate-300 font-mono">Followers</span>, <span className="text-slate-300 font-mono">Creator Category</span>, <span className="text-slate-300 font-mono">Average</span></p>
-                <p>• <span className="text-slate-300 font-mono">Video 1 ... Video 15</span> (Previous video views)</p>
+              <div className="flex justify-between items-center p-3 bg-slate-800/40 rounded-xl border border-slate-700/60 text-xs text-slate-400 font-medium">
+                <span>{readyFilesCount} {readyFilesCount === 1 ? 'file' : 'files'} ready • {notUploadedCount} not uploaded</span>
+                <span>Influencer Code primary matching enabled</span>
               </div>
 
               <div className="flex justify-between items-center pt-4 border-t border-slate-800">
@@ -740,22 +740,22 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                   <div className="bg-slate-900 p-3 rounded-lg border border-slate-700/80">
-                    <span className="text-slate-400 block text-[11px]">Instagram Records</span>
-                    <span className="text-base font-bold text-slate-100">{stats.instagramCount}</span>
+                    <span className="text-slate-400 block text-[11px]">Total Rows</span>
+                    <span className="text-base font-bold text-slate-100">{stats.totalRecords}</span>
                   </div>
                   <div className="bg-slate-900 p-3 rounded-lg border border-slate-700/80">
-                    <span className="text-slate-400 block text-[11px]">YouTube Records</span>
-                    <span className="text-base font-bold text-slate-100">{stats.youtubeCount}</span>
-                  </div>
-                  <div className="bg-slate-900 p-3 rounded-lg border border-slate-700/80">
-                    <span className="text-slate-400 block text-[11px]">Facebook Records</span>
-                    <span className="text-base font-bold text-slate-100">{stats.facebookCount}</span>
+                    <span className="text-slate-400 block text-[11px]">Matched Influencers</span>
+                    <span className="text-base font-bold text-green-400">{stats.matchedCount}</span>
                   </div>
                   <div className="bg-slate-900 p-3 rounded-lg border border-slate-700/80">
                     <span className="text-slate-400 block text-[11px]">Unmatched Codes</span>
                     <span className={`text-base font-bold ${stats.unmatchedCodes.length > 0 ? 'text-amber-400' : 'text-slate-100'}`}>
                       {stats.unmatchedCodes.length}
                     </span>
+                  </div>
+                  <div className="bg-slate-900 p-3 rounded-lg border border-slate-700/80">
+                    <span className="text-slate-400 block text-[11px]">Skipped/Invalid</span>
+                    <span className="text-base font-bold text-slate-400">{stats.invalidCount}</span>
                   </div>
                 </div>
 
@@ -770,7 +770,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                       {stats.unmatchedCodes.length > 10 ? ` ...and ${stats.unmatchedCodes.length - 10} more` : ''}
                     </p>
                     <p className="text-[10px] text-amber-400/70">
-                      These codes do not exist in the current campaign and will be skipped.
+                      These influencer codes do not exist in the current campaign and will be skipped.
                     </p>
                   </div>
                 )}
@@ -824,8 +824,8 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                             <th className="p-2.5">Code</th>
                             <th className="p-2.5">Username</th>
                             <th className="p-2.5">Followers</th>
-                            <th className="p-2.5">Category</th>
-                            <th className="p-2.5">Average</th>
+                            <th className="p-2.5">Creator Category</th>
+                            <th className="p-2.5">Average Views</th>
                             <th className="p-2.5">Status</th>
                           </tr>
                         </thead>
@@ -863,15 +863,15 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
                   onClick={() => setStep('upload')}
                   className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-lg text-sm transition-colors"
                 >
-                  Back
+                  Cancel
                 </button>
                 <button 
-                  onClick={handleConfirmUpload}
+                  onClick={handleConfirmImport}
                   disabled={stats.matchedCount === 0 || isSaving}
                   className="px-6 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg text-sm transition-colors flex items-center gap-2 shadow-sm"
                 >
                   {isSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                  Confirm Upload
+                  Confirm Import
                 </button>
               </div>
             </div>
@@ -882,7 +882,7 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
             <div className="py-8 space-y-6 text-center">
               <Loader2 size={40} className="animate-spin text-purple-500 mx-auto" />
               <div>
-                <h4 className="text-base font-bold text-white mb-1">Uploading Platform Details...</h4>
+                <h4 className="text-base font-bold text-white mb-1">Importing Platform Details...</h4>
                 <p className="text-xs text-slate-400">Merging platform data with existing influencer records</p>
               </div>
 
@@ -932,27 +932,27 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
               </div>
 
               <div>
-                <h4 className="text-lg font-bold text-white mb-1">Upload Complete!</h4>
-                <p className="text-xs text-slate-400">Platform details successfully updated across matched influencers.</p>
+                <h4 className="text-lg font-bold text-white mb-1">Import Complete!</h4>
+                <p className="text-xs text-slate-400">Platform Details imported successfully across matched influencers.</p>
               </div>
 
               <div className="max-w-sm mx-auto bg-slate-800/60 p-4 rounded-xl border border-slate-700 text-left text-xs space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-300 font-medium">Instagram:</span>
                   <span className={instaFile ? 'text-green-400 font-semibold' : 'text-slate-500'}>
-                    {instaFile ? '✓ Uploaded' : '— Not selected'}
+                    {instaFile ? `✓ ${stats.instagramCount} updated` : '— Not uploaded'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-300 font-medium">YouTube:</span>
                   <span className={ytFile ? 'text-green-400 font-semibold' : 'text-slate-500'}>
-                    {ytFile ? '✓ Uploaded' : '— Not selected'}
+                    {ytFile ? `✓ ${stats.youtubeCount} updated` : '— Not uploaded'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-300 font-medium">Facebook:</span>
                   <span className={fbFile ? 'text-green-400 font-semibold' : 'text-slate-500'}>
-                    {fbFile ? '✓ Uploaded' : '— Not selected'}
+                    {fbFile ? `✓ ${stats.facebookCount} updated` : '— Not uploaded'}
                   </span>
                 </div>
               </div>

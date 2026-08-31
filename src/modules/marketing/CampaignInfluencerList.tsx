@@ -3,6 +3,7 @@ import type { Campaign, CampaignInfluencer } from '../../types';
 import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
+import { ImportPricingInfoModal } from '../../components/marketing/ImportPricingInfoModal';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
@@ -594,6 +595,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
+  const [isImportPricingModalOpen, setIsImportPricingModalOpen] = useState(false);
   const [targetUploadCode, setTargetUploadCode] = useState<string | undefined>();
   const [activeEditInfluencer, setActiveEditInfluencer] = useState<CampaignInfluencer | null>(null);
 
@@ -862,10 +864,17 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               setTargetUploadCode(undefined);
               setIsUploadPlatformModalOpen(true);
             }}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-xs font-semibold flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
-            title="Upload Platform Details for Existing Influencers"
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
+            title="Import Platform Details"
           >
-            <Upload size={14} /> Upload Platform Details
+            <Upload size={14} /> Platform Details
+          </button>
+          <button 
+            onClick={() => setIsImportPricingModalOpen(true)}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
+            title="Import Pricing Info"
+          >
+            <Upload size={14} /> Pricing Info
           </button>
           <button 
             onClick={onBack}
@@ -1106,6 +1115,18 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           onClose={() => setIsUploadPlatformModalOpen(false)}
           onSuccess={async () => {
             setIsUploadPlatformModalOpen(false);
+            await refresh();
+          }}
+        />
+      )}
+
+      {isImportPricingModalOpen && (
+        <ImportPricingInfoModal
+          campaign={campaign}
+          existingInfluencers={influencers}
+          onClose={() => setIsImportPricingModalOpen(false)}
+          onSuccess={async () => {
+            setIsImportPricingModalOpen(false);
             await refresh();
           }}
         />
