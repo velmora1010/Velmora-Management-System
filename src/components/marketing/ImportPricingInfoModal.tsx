@@ -16,6 +16,7 @@ import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import toast from 'react-hot-toast';
+import { parseProductsFromCombination } from '../../modules/marketing/AddCampaignInfluencer';
 
 interface ImportPricingInfoModalProps {
   campaign: Campaign;
@@ -257,10 +258,10 @@ export const ImportPricingInfoModal: React.FC<ImportPricingInfoModalProps> = ({
         const v2c = rec.totalVideos >= 2 ? rec.totalVideos - 1 : 0;
 
         const prodPricingObj = {
-          videos: rec.videoPricingList.map((v, i) => ({
+          videos: rec.videoPricingList.map((v) => ({
             combination: v.combination,
             amount: v.amount,
-            products: []
+            products: parseProductsFromCombination(v.combination).map(pName => ({ product_name: pName, qty: 1 }))
           }))
         };
 

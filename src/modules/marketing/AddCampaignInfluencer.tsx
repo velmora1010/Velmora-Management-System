@@ -34,6 +34,21 @@ export interface VideoPricingDetail {
   products: VideoProductDetail[];
 }
 
+export const SHORT_PRODUCT_MAP: Record<string, string> = {
+  'Detergent': 'DIY Detergent Liquid',
+  'Dishwash': 'DIY Dishwash Liquid',
+  'Comfort': 'DIY Fabric Conditioner',
+  'Sponge': 'Magic Sponge',
+  'Kitchen Cleaner': 'Kitchen Cleaner',
+  'Car Wash': 'Car Wash',
+  'Bike Wash': 'Bike Wash',
+  'BBC': 'BBC',
+  'Hand Wash': 'Hand Wash',
+  'Glass Cleaner': 'Glass Cleaner',
+  'Bamboo Towel': 'Bamboo Towel',
+  'Floor Cleaner': 'Floor Cleaner'
+};
+
 export const COMBINATION_PRODUCTS_MAP: Record<string, string[]> = {
   'Detergent': ['DIY Detergent Liquid'],
   'Detergent & Dishwash': ['DIY Detergent Liquid', 'DIY Dishwash Liquid'],
@@ -52,23 +67,79 @@ export const COMBINATION_PRODUCTS_MAP: Record<string, string[]> = {
   '5-6 Products': []
 };
 
-export const COMBINATIONS = [
-  'Detergent',
-  'Detergent & Dishwash',
-  'Detergent & Comfort',
-  'Dishwash, Detergent & Comfort',
-  'Kitchen Cleaner & Bamboo Towel',
-  'Bamboo Towel',
-  'Kitchen Cleaner + Dishwash + Bamboo Towel',
-  'Sponge',
-  'Bike Wash',
-  'Car Wash',
-  'BBC',
-  'Hand Wash & Floor Cleaner',
-  'Glass Cleaner',
-  'Kitchen Cleaner',
-  '5-6 Products'
-];
+export const parseProductsFromCombination = (combStr: string): string[] => {
+  if (!combStr || combStr === '5-6 Products') return [];
+  
+  if (COMBINATION_PRODUCTS_MAP[combStr] && COMBINATION_PRODUCTS_MAP[combStr].length > 0) {
+    return COMBINATION_PRODUCTS_MAP[combStr];
+  }
+
+  const parts = combStr.split(/[\+&,]|(?:\s+and\s+)/i).map(s => s.trim()).filter(Boolean);
+  const result: string[] = [];
+
+  parts.forEach(part => {
+    let matchedFullName = SHORT_PRODUCT_MAP[part];
+    if (!matchedFullName) {
+      const found = PRODUCT_LIST.find(p => p.toLowerCase() === part.toLowerCase());
+      if (found) matchedFullName = found;
+    }
+    if (!matchedFullName) {
+      for (const [shortKey, fullVal] of Object.entries(SHORT_PRODUCT_MAP)) {
+        if (shortKey.toLowerCase() === part.toLowerCase() || fullVal.toLowerCase() === part.toLowerCase()) {
+          matchedFullName = fullVal;
+          break;
+        }
+      }
+    }
+    if (matchedFullName && !result.includes(matchedFullName)) {
+      result.push(matchedFullName);
+    }
+  });
+
+  return result.length > 0 ? result : [combStr];
+};
+
+export const generateDynamicCombinations = (): string[] => {
+  const shortKeys = Object.keys(SHORT_PRODUCT_MAP);
+  const list: string[] = [];
+
+  // 1-product combinations
+  shortKeys.forEach(k => list.push(k));
+
+  // 2-product combinations
+  for (let i = 0; i < shortKeys.length; i++) {
+    for (let j = i + 1; j < shortKeys.length; j++) {
+      list.push(`${shortKeys[i]} + ${shortKeys[j]}`);
+    }
+  }
+
+  // 3-product combinations
+  for (let i = 0; i < shortKeys.length; i++) {
+    for (let j = i + 1; j < shortKeys.length; j++) {
+      for (let k = j + 1; k < shortKeys.length; k++) {
+        list.push(`${shortKeys[i]} + ${shortKeys[j]} + ${shortKeys[k]}`);
+      }
+    }
+  }
+
+  // Legacy extras
+  const legacyExtras = [
+    'Detergent & Dishwash',
+    'Detergent & Comfort',
+    'Dishwash, Detergent & Comfort',
+    'Kitchen Cleaner & Bamboo Towel',
+    'Kitchen Cleaner + Dishwash + Bamboo Towel',
+    'Hand Wash & Floor Cleaner',
+    '5-6 Products'
+  ];
+  legacyExtras.forEach(e => {
+    if (!list.includes(e)) list.push(e);
+  });
+
+  return list;
+};
+
+export const COMBINATIONS = generateDynamicCombinations();
 
 export const formatDateDMY = (date: Date): string => {
   const day = String(date.getDate()).padStart(2, '0');
@@ -732,7 +803,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       
       let nextProds: VideoProductDetail[] = [];
       if (comb && comb !== '5-6 Products') {
-        const prodNames = COMBINATION_PRODUCTS_MAP[comb] || [];
+        const prodNames = parseProductsFromCombination(comb);
         nextProds = prodNames.map(name => ({ product_name: name, qty: 1 }));
       }
       

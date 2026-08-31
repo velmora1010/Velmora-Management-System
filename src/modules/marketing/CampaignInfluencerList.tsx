@@ -8,7 +8,7 @@ import { ImportPostDateModal } from '../../components/marketing/ImportPostDateMo
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
-import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate } from './AddCampaignInfluencer';
+import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, parseProductsFromCombination } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES } from '../../components/marketing/InfluencerFilterDrawer';
@@ -485,23 +485,37 @@ City: ${influencer.city}`;
               return (
                 <div className="space-y-4">
                   {pricingVideos.map((v: any, idx: number) => {
-                    const pName = v.combination || v.name || `Video ${idx + 1}`;
+                    const combName = v.combination || v.name || `Video ${idx + 1}`;
+                    const explicitProds = Array.isArray(v.products) && v.products.length > 0 ? v.products : [];
+                    const parsedProdNames = parseProductsFromCombination(combName);
                     const amt = v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0;
+
+                    const displayProducts = explicitProds.length > 0 
+                      ? explicitProds.map((p: any) => ({ name: p.product_name || p.name, qty: p.qty || 1 }))
+                      : parsedProdNames.map(pName => ({ name: pName, qty: 1 }));
+
                     return (
                       <div key={idx} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
-                        <h5 className="text-xs font-semibold text-purple-300 mb-2 border-b border-slate-700 pb-1">
-                          Video {idx + 1} Product
-                        </h5>
-                        <div className="flex justify-between items-center bg-slate-900 p-3 rounded border border-slate-700">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400"></div>
-                            <span className="text-xs font-semibold text-slate-200">{pName}</span>
-                          </div>
+                        <div className="flex justify-between items-center mb-2 border-b border-slate-700 pb-1">
+                          <h5 className="text-xs font-semibold text-purple-300">
+                            Video {idx + 1} ({combName})
+                          </h5>
                           {amt > 0 && (
                             <span className="text-xs font-mono font-bold text-purple-300">
                               ₹{amt.toLocaleString()}
                             </span>
                           )}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {displayProducts.map((p: any, pIdx: number) => (
+                            <div key={pIdx} className="flex justify-between items-center bg-slate-900 p-2.5 rounded border border-slate-700">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
+                                <span className="text-xs text-slate-200 font-medium">{p.name}</span>
+                              </div>
+                              <span className="text-xs text-slate-400">Qty: {p.qty}</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     );
