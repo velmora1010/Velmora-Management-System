@@ -47,7 +47,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 gap-4">
         <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
           <Package size={20} className="text-emerald-400" />
-          Dispatched List: {campaign.campaign_name}
+          Influencer Logistics: {campaign.campaign_name}
         </h3>
         <div className="flex items-center gap-2">
           <button onClick={refresh} className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors" title="Refresh Data">

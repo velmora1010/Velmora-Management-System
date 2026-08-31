@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, InfluencerPricing, InfluencerProduct, InfluencerBrandPerformance, InfluencerPostDate } from '../../types';
-import { Save, X, Plus, Upload } from 'lucide-react';
+import { Save, X, Plus, Upload, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
 import { useCampaignInfluencers, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { supabase } from '../../lib/supabase';
@@ -250,8 +250,10 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     saveDepartmentNavigation('marketing', '/marketing', { activeTab: tabId });
   };
 
-  const { influencers, addInfluencer, updateInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
+  const { influencers, addInfluencer, updateInfluencer, deleteInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
   const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Form State Storage Helpers
   const getFormStorageKey = () => {
@@ -995,16 +997,28 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
           {initialData?.id ? 'Edit Influencer in' : 'Add Influencer to'} {campaign.campaign_name}
         </h3>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {initialData?.id && (
+            <button 
+              type="button"
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="px-3.5 py-1.5 bg-red-950/60 hover:bg-red-900 border border-red-800/40 text-red-300 hover:text-red-200 rounded-lg transition-colors text-sm font-semibold flex items-center gap-1.5 cursor-pointer mr-2 shadow-sm"
+              title="Delete Influencer Profile"
+            >
+              <Trash2 size={16} /> Delete Influencer
+            </button>
+          )}
           <button 
+            type="button"
             onClick={handleCancel}
             className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm"
           >
             Cancel
           </button>
           <button 
+            type="button"
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || isDeleting}
             className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm flex items-center gap-2 disabled:opacity-50"
           >
             <Save size={16} /> {isSaving ? (initialData?.id ? 'Updating...' : 'Saving...') : (initialData?.id ? 'Update Influencer' : 'Save Influencer')}
@@ -1103,6 +1117,14 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
 
             <div className="space-y-4">
               <div>
+                <label className="block text-sm text-slate-400 mb-1">Complete Address</label>
+                <input 
+                  type="text" name="complete_address" value={basicInfo.complete_address} onChange={handleBasicChange}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
+                  placeholder="Enter address"
+                />
+              </div>
+              <div>
                 <label className="block text-sm text-slate-400 mb-1">City</label>
                 <input 
                   type="text" name="city" value={basicInfo.city} onChange={handleBasicChange}
@@ -1117,14 +1139,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
                   placeholder="Enter pincode"
                   maxLength={6}
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Complete Address</label>
-                <input 
-                  type="text" name="complete_address" value={basicInfo.complete_address} onChange={handleBasicChange}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
-                  placeholder="Enter address"
                 />
               </div>
               <div>
@@ -1985,6 +1999,60 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
             toast.success('Platform details updated!');
           }}
         />
+      )}
+
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-2.5 bg-red-950/60 border border-red-800/40 rounded-full">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-100">Delete Influencer Profile</h3>
+            </div>
+            
+            <p className="text-sm text-slate-300 leading-relaxed">
+              Are you sure you want to delete <strong className="text-white">{initialData?.influencer_name || initialData?.name || 'this influencer'}</strong> ({initialData?.code || '—'})?
+            </p>
+            <p className="text-xs text-slate-400">
+              This action will permanently delete the profile, platform details, pricing history, and campaign assignments. The Influencer Code can be re-uploaded or re-created later if needed.
+            </p>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-lg text-sm transition-colors"
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!initialData?.id) return;
+                  setIsDeleting(true);
+                  try {
+                    await deleteInfluencer(String(initialData.id));
+                    toast.success(`Influencer "${initialData.name || initialData.code}" deleted successfully.`);
+                    setIsDeleteModalOpen(false);
+                    onBack();
+                  } catch (err: any) {
+                    console.error('Delete failed:', err);
+                    toast.error(`Failed to delete influencer: ${err?.message || String(err)}`);
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+              >
+                {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

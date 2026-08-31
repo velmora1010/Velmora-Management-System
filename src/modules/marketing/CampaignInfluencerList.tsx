@@ -843,13 +843,20 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           <UserCheck size={20} className="text-purple-400" />
           Influencer List: {campaign.campaign_name}
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button 
             onClick={refresh}
             className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
             title="Refresh Data"
           >
             <RefreshCcw size={16} />
+          </button>
+          <button 
+            onClick={() => setIsImportModalOpen(true)}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-2 shrink-0 shadow-sm cursor-pointer"
+            title="Upload Influencers"
+          >
+            <Upload size={14} /> Upload Influencers
           </button>
           {onAddInfluencer && (
             <button 

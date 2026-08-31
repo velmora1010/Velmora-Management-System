@@ -382,8 +382,10 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                         <option value="ST Courier">ST Courier</option>
                         <option value="India Post">India Post</option>
                         <option value="Delhivery">Delhivery</option>
-                        <option value="Blue Dart">Blue Dart</option>
                         <option value="DTDC">DTDC</option>
+                        <option value="IThink Ekart">IThink Ekart</option>
+                        <option value="IThink Amazon">IThink Amazon</option>
+                        <option value="IThink Delhivery">IThink Delhivery</option>
                       </select>
                     </div>
                     <div>

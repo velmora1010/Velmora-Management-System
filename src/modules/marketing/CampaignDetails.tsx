@@ -332,7 +332,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             onClick={() => handleViewChange('dispatched-list')}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'dispatched-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
-            <Package size={14} /> Dispatched List
+            <Package size={14} /> Influencer Logistics
           </button>
           <button 
             onClick={() => handleViewChange('status-tracking')}
