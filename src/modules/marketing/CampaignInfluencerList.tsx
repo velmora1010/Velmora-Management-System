@@ -157,7 +157,6 @@ City: ${influencer.city}`;
             <InfluencerActionMenu
               currentSection={currentSection}
               onEdit={() => onEdit?.(influencer)}
-              onCopy={handleCopy}
               onMoveStatus={onMoveStatus}
               onDelete={currentSection === 'recycle_bin' && onDelete ? () => onDelete(influencer.id, influencer.influencer_name || influencer.name || '') : undefined}
             />

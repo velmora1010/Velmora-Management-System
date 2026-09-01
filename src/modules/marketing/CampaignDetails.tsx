@@ -27,7 +27,7 @@ interface CampaignDetailsProps {
 
 type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'calendar' | 'analytics';
 
-import { isArchived } from '../../utils/marketingUtils';
+import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
 
 export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBack, onCampaignUpdate }) => {
   const [currentView, setCurrentView] = useState<CampaignView>(() => {
@@ -97,9 +97,65 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
     }
   };
 
-  const activeInfluencers = influencers.filter(inf => !isArchived(inf.is_archived));
-  const budgetUsed = activeInfluencers.reduce((sum, inf) => sum + (inf.pricing?.final_price || 0), 0);
-  const videosLive = activeInfluencers.reduce((sum, inf) => sum + (inf.pricing?.total_videos || 0), 0);
+  const activeInfluencers = React.useMemo(() => {
+    return influencers.filter(inf => isActiveStatus(inf.is_archived));
+  }, [influencers]);
+
+  const budgetUsed = React.useMemo(() => {
+    return activeInfluencers.reduce((sum, inf) => {
+      const p = inf.pricing as any;
+      const price = Number(p?.final_price) || Number(p?.total_price) || Number(p?.price) || 0;
+      return sum + price;
+    }, 0);
+  }, [activeInfluencers]);
+
+  const videosLive = React.useMemo(() => {
+    return activeInfluencers.reduce((sum, inf) => {
+      const p = inf.pricing as any;
+      const v = Number(p?.total_videos) || Number(p?.video_count) || 0;
+      return sum + v;
+    }, 0);
+  }, [activeInfluencers]);
+
+  const activeLanguages = React.useMemo(() => {
+    const languageSet = new Set<string>();
+    
+    if (activeInfluencers.length > 0) {
+      activeInfluencers.forEach(inf => {
+        const rawLangs: any = inf.languages;
+        let list: string[] = [];
+        if (Array.isArray(rawLangs)) {
+          list = rawLangs;
+        } else if (typeof rawLangs === 'string' && (rawLangs as string).trim()) {
+          list = (rawLangs as string).split(/[,/]+/).map((s: string) => s.trim()).filter(Boolean);
+        }
+        list.forEach((lang: any) => {
+          if (typeof lang === 'string' && lang.trim() && !lang.startsWith('views_data:')) {
+            languageSet.add(lang.trim());
+          }
+        });
+      });
+    }
+
+    if (languageSet.size > 0) {
+      return Array.from(languageSet).join(', ');
+    }
+
+    let parsed: string[] = [];
+    try {
+      if (typeof campaign.target_languages === 'string') {
+        const p = JSON.parse(campaign.target_languages);
+        parsed = Array.isArray(p) ? p : [campaign.target_languages];
+      } else if (Array.isArray(campaign.target_languages)) {
+        parsed = campaign.target_languages;
+      }
+    } catch (e) {
+      if (typeof campaign.target_languages === 'string') {
+        parsed = [campaign.target_languages];
+      }
+    }
+    return parsed.length > 0 ? parsed.join(', ') : 'N/A';
+  }, [activeInfluencers, campaign.target_languages]);
 
   const handleMoveToStatus = async (record: any) => {
     const cleanBigInt = (val: any) => {
@@ -377,23 +433,8 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         </div>
         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
           <div className="text-slate-400 text-sm mb-1">Target Languages</div>
-          <div className="text-sm font-semibold text-slate-200 truncate">
-            {(() => {
-              let parsed: string[] = [];
-              try {
-                if (typeof campaign.target_languages === 'string') {
-                  const p = JSON.parse(campaign.target_languages);
-                  parsed = Array.isArray(p) ? p : [campaign.target_languages];
-                } else if (Array.isArray(campaign.target_languages)) {
-                  parsed = campaign.target_languages;
-                }
-              } catch (e) {
-                if (typeof campaign.target_languages === 'string') {
-                  parsed = [campaign.target_languages];
-                }
-              }
-              return parsed.length > 0 ? parsed.join(', ') : 'N/A';
-            })()}
+          <div className="text-sm font-semibold text-slate-200 truncate" title={activeLanguages}>
+            {activeLanguages}
           </div>
         </div>
       </div>
