@@ -1083,32 +1083,45 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     }
   };
 
-  const toggleArchiveStatus = async (id: string, isArchivedTarget: boolean): Promise<boolean> => {
+  const updateInfluencerStatus = async (id: string, newStatus: 'active' | 'other' | 'recycle_bin'): Promise<boolean> => {
     setIsSaving(true);
     setError(null);
     try {
       const numericId = parseInt(id, 10);
       const targetId = isNaN(numericId) ? id : numericId;
+      const dbValue = newStatus === 'other' ? 'other' : (newStatus === 'recycle_bin' ? 'true' : 'false');
 
       const { error } = await supabase
         .from(SUPABASE_TABLES.influencersInfo)
-        .update({ is_archived: isArchivedTarget ? 'true' : 'false' })
+        .update({ is_archived: dbValue })
         .eq('id', targetId);
+
       if (error) throw error;
-      
-      setInfluencers(prev => prev.map(inf => String(inf.id) === String(id) ? { ...inf, is_archived: isArchivedTarget } : inf));
+
+      setInfluencers(prev => prev.map(inf => String(inf.id) === String(id) ? { ...inf, is_archived: dbValue } : inf));
       notifyInfluencerChange(campaignId);
-      toast.success(isArchivedTarget ? 'Influencer archived' : 'Influencer restored to main list');
+
+      const statusLabels: Record<string, string> = {
+        active: 'Influencer moved to Active list',
+        other: 'Influencer moved to Other section',
+        recycle_bin: 'Influencer moved to Recycle Bin'
+      };
+      toast.success(statusLabels[newStatus] || 'Status updated successfully');
       return true;
     } catch (err: unknown) {
-      console.error('Error toggling archive status:', err);
+      console.error('Error updating influencer status:', err);
       setError(err instanceof Error ? err : new Error(String(err)));
-      toast.error('Failed to update archive status');
+      toast.error('Failed to update status');
       return false;
     } finally {
       setIsSaving(false);
     }
   };
+
+  const toggleArchiveStatus = async (id: string, isArchivedTarget: boolean): Promise<boolean> => {
+    return updateInfluencerStatus(id, isArchivedTarget ? 'recycle_bin' : 'active');
+  };
+
   const deleteInfluencer = async (id: string): Promise<boolean> => {
     setIsSaving(true);
     setError(null);
@@ -1118,20 +1131,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         throw new Error(`Invalid influencer ID: ${id}`);
       }
 
-      const targetInfluencer = influencers.find(inf => String(inf.id) === String(id));
-      const influencerName = targetInfluencer?.influencer_name || targetInfluencer?.name || `ID ${id}`;
+      const targetInf = influencers.find(inf => String(inf.id) === String(id));
+      const influencerName = targetInf?.influencer_name || targetInf?.name || `ID ${id}`;
 
-      // 1. Delete pricing and bargain history
-      const { data: oldPricing } = await supabase.from(SUPABASE_TABLES.influencerPricing).select('id').eq('influencer_id', numericId);
-      if (oldPricing && oldPricing.length > 0) {
-        const oldPricingIds = oldPricing.map(p => p.id).filter(Boolean);
-        if (oldPricingIds.length > 0) {
-          const { error: bargainDelErr } = await supabase.from(SUPABASE_TABLES.influencerBargainHistory).delete().in('pricing_id', oldPricingIds);
-          if (bargainDelErr) throw bargainDelErr;
-        }
-      }
-
-      // 2. Delete other relational tables safely
+      // 1. Delete relational tables safely
       const { error: platDelErr } = await supabase.from(SUPABASE_TABLES.influencerPlatform).delete().eq('influencer_id', numericId);
       if (platDelErr) throw platDelErr;
 
@@ -1147,7 +1150,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       const { error: dispatchDelErr } = await supabase.from(SUPABASE_TABLES.influencerDispatch).delete().eq('influencer_id', numericId);
       if (dispatchDelErr) throw dispatchDelErr;
 
-      // 3. Delete base influencer info row
+      // 2. Delete base influencer info row
       const { error: infoDelErr } = await supabase.from(SUPABASE_TABLES.influencersInfo).delete().eq('id', numericId);
       if (infoDelErr) throw infoDelErr;
 
@@ -1178,6 +1181,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
     error,
     addInfluencer,
     updateInfluencer,
+    updateInfluencerStatus,
     toggleArchiveStatus,
     deleteInfluencer,
     refresh: () => loadInfluencers()

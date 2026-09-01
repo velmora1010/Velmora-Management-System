@@ -325,7 +325,7 @@ export interface CampaignInfluencer {
   profile_file_url: string;
   auto_dm: boolean;
   status?: string;
-  is_archived?: boolean;
+  is_archived?: boolean | string;
   instagram_view_code?: string | null;
   facebook_view_code?: string | null;
   youtube_view_code?: string | null;

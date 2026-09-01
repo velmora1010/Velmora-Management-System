@@ -8,7 +8,7 @@ import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPla
 import { ImportPricingInfoModal } from '../../components/marketing/ImportPricingInfoModal';
 import { ImportPostDateModal } from '../../components/marketing/ImportPostDateModal';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
-import { isArchived } from '../../utils/marketingUtils';
+import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
@@ -52,8 +52,10 @@ const resolvePerformanceCode = (
 const InfluencerCard = ({ 
   influencer, 
   activeTab: parentActiveTab = 'basic',
+  currentSection = 'active',
   onTabChange,
   onEdit, 
+  onMoveStatus,
   onToggleArchive,
   onDispatch,
   onDelete,
@@ -62,11 +64,13 @@ const InfluencerCard = ({
 }: { 
   influencer: CampaignInfluencer, 
   activeTab?: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate',
+  currentSection?: 'active' | 'other' | 'recycle_bin',
   onTabChange?: (tab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate') => void,
-  onEdit: (inf: CampaignInfluencer) => void,
-  onToggleArchive: (id: string, isArchived: boolean) => void,
+  onEdit?: (inf: CampaignInfluencer) => void,
+  onMoveStatus?: (targetStatus: 'active' | 'other' | 'recycle_bin') => void,
+  onToggleArchive?: (id: string, isArchived: boolean) => void,
   onDispatch?: (inf: CampaignInfluencer) => void,
-  onDelete: (id: string, name: string) => void,
+  onDelete?: (id: string, name: string) => void,
   onDeletePlatformViews?: (inf: CampaignInfluencer, platformName: string) => void,
   onUploadPlatformDetails?: (code?: string) => void
 }) => {
@@ -94,13 +98,11 @@ City: ${influencer.city}`;
     toast.success('Influencer details copied to clipboard!');
   };
 
-
-
   const archived = isArchived(influencer.is_archived);
 
   return (
      <div className="bg-slate-900 border border-slate-700 p-4 rounded-xl hover:border-slate-600 transition-colors relative mb-6">
-        {/* Header Layout (Flex Container preventing absolute overlap) */}
+        {/* Header Layout */}
         <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800/60 min-w-0">
           {/* Left Profile Section */}
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -123,78 +125,44 @@ City: ${influencer.city}`;
                   {influencer.code}
                 </span>
               )}
-              {!archived && (
+              {currentSection === 'active' && (
                 <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0 inline-block ml-0.5" title="Active"></span>
+              )}
+              {currentSection === 'other' && (
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0 inline-block ml-0.5" title="Other"></span>
               )}
             </div>
           </div>
 
-          {/* Right Header Actions - Desktop (≥640px) */}
-          <div className="hidden sm:flex items-center gap-1.5 shrink-0 ml-auto">
+          {/* Right Header Actions */}
+          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
             {onDispatch && (
               influencer.dispatchDetails ? (
-                <button 
-                  type="button"
-                  disabled
-                  className="px-3 py-1.5 text-xs font-semibold rounded-md pointer-events-none shrink-0"
-                  style={{ backgroundColor: 'rgba(40, 167, 69, 0.1)', color: '#28a745', border: '1px solid rgba(40, 167, 69, 0.3)' }}
+                <span 
+                  className="px-2.5 py-1 text-xs font-semibold rounded-md pointer-events-none shrink-0 bg-emerald-950/50 text-emerald-400 border border-emerald-800/40"
                 >
                   Dispatched
-                </button>
+                </span>
               ) : (
                 <button 
                   type="button"
                   onClick={() => onDispatch(influencer)} 
-                  className="px-3.5 py-1.5 text-xs font-semibold rounded-md bg-purple-600 hover:bg-purple-500 text-white transition-colors shrink-0 shadow-sm cursor-pointer"
+                  className="px-3 py-1 text-xs font-semibold rounded-md bg-purple-600 hover:bg-purple-500 text-white transition-colors shrink-0 shadow-sm cursor-pointer"
                 >
                   Dispatch
                 </button>
               )
             )}
-            <button 
-              type="button"
-              onClick={() => onEdit(influencer)}
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700 shrink-0 cursor-pointer"
-              title="Edit Influencer"
-            >
-              <Edit size={15} />
-            </button>
-            <button 
-              type="button"
-              onClick={handleCopy}
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700 shrink-0 cursor-pointer"
-              title="Copy details"
-            >
-              <Copy size={15} />
-            </button>
-            <button 
-              type="button"
-              onClick={() => onToggleArchive(influencer.id, !isArchived(influencer.is_archived))}
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700 shrink-0 cursor-pointer"
-              title={isArchived(influencer.is_archived) ? "Unarchive Influencer" : "Archive Influencer"}
-            >
-              <Archive size={15} />
-            </button>
-            <button 
-              type="button"
-              onClick={() => onDelete(influencer.id, influencer.influencer_name || influencer.name)}
-              className="p-1.5 bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-400 rounded-lg transition-colors border border-slate-700 hover:border-red-800/40 shrink-0 cursor-pointer"
-              title="Delete Influencer"
-            >
-              <Trash2 size={15} />
-            </button>
-          </div>
-
-          {/* Right Header Actions - Mobile (<640px) */}
-          <div className="sm:hidden shrink-0 ml-auto">
+            
             <InfluencerActionMenu
               isDispatched={!!influencer.dispatchDetails}
-              isArchived={isArchived(influencer.is_archived)}
+              currentSection={currentSection}
               onDispatch={onDispatch ? () => onDispatch(influencer) : undefined}
-              onEdit={() => onEdit(influencer)}
+              onEdit={() => onEdit?.(influencer)}
               onCopy={handleCopy}
-              onToggleArchive={() => onToggleArchive(influencer.id, !isArchived(influencer.is_archived))}
-              onDelete={() => onDelete(influencer.id, influencer.influencer_name || influencer.name || '')}
+              onMoveStatus={onMoveStatus}
+              onToggleArchive={() => onToggleArchive?.(influencer.id, !isArchived(influencer.is_archived))}
+              onDelete={currentSection === 'recycle_bin' && onDelete ? () => onDelete(influencer.id, influencer.influencer_name || influencer.name || '') : undefined}
             />
           </div>
         </div>
@@ -708,7 +676,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   editingInfluencerId,
   onCancelEdit
 }) => {
-  const { influencers, isLoading, refresh, toggleArchiveStatus, deleteInfluencer } = useCampaignInfluencers(campaign.id);
+  const { influencers, isLoading, refresh, updateInfluencerStatus, toggleArchiveStatus, deleteInfluencer } = useCampaignInfluencers(campaign.id);
 
   const handleDelete = async (id: string, name: string) => {
     if (!window.confirm(`Are you sure you want to permanently delete influencer "${name}"? This action cannot be undone.`)) {
@@ -803,8 +771,31 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [analyticsFilterState, setAnalyticsFilterState] = useState<CampaignAnalyticsFilterState>(initialAnalyticsFilterState);
   const [isAnalyticsFilterOpen, setIsAnalyticsFilterOpen] = useState(false);
 
+  const [filter, setFilter] = useState<InfluencerStatusType>('active');
+
+  const activeCount = useMemo(() => influencers.filter(inf => isActiveStatus(inf.is_archived)).length, [influencers]);
+  const otherCount = useMemo(() => influencers.filter(inf => isOtherStatus(inf.is_archived)).length, [influencers]);
+  const recycleBinCount = useMemo(() => influencers.filter(inf => isArchived(inf.is_archived)).length, [influencers]);
+
+  const [confirmMoveModal, setConfirmMoveModal] = useState<{
+    isOpen: boolean;
+    influencer: CampaignInfluencer | null;
+    targetStatus: InfluencerStatusType;
+  }>({
+    isOpen: false,
+    influencer: null,
+    targetStatus: 'active'
+  });
+
+  const handleConfirmMoveStatus = async () => {
+    if (!confirmMoveModal.influencer) return;
+    const infId = String(confirmMoveModal.influencer.id);
+    const targetStatus = confirmMoveModal.targetStatus;
+    setConfirmMoveModal({ isOpen: false, influencer: null, targetStatus: 'active' });
+    await updateInfluencerStatus(infId, targetStatus);
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
-  const [filter, setFilter] = useState<'active' | 'archived'>('active');
   const [filterState, setFilterState] = useState<InfluencerFilterState>(initialFilterState);
   const [tempFilterState, setTempFilterState] = useState<InfluencerFilterState>(initialFilterState);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -1115,8 +1106,9 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
 
   const filteredInfluencers = useMemo(() => {
     let list = influencers.filter(inf => {
-      const matchStatus = filter === 'active' ? !isArchived(inf.is_archived) : isArchived(inf.is_archived);
-      return matchStatus;
+      if (filter === 'other') return isOtherStatus(inf.is_archived);
+      if (filter === 'recycle_bin') return isArchived(inf.is_archived);
+      return isActiveStatus(inf.is_archived);
     });
 
     if (searchTerm.trim()) {
@@ -1239,15 +1231,21 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-700">
             <button 
               onClick={() => setFilter('active')}
-              className={`px-4 py-1.5 text-sm rounded-md transition-colors ${filter === 'active' ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-300'}`}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'active' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
             >
-              Active
+              Active ({activeCount})
             </button>
             <button 
-              onClick={() => setFilter('archived')}
-              className={`px-4 py-1.5 text-sm rounded-md transition-colors ${filter === 'archived' ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-300'}`}
+              onClick={() => setFilter('other')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'other' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
             >
-              Recycle Bin
+              Other ({otherCount})
+            </button>
+            <button 
+              onClick={() => setFilter('recycle_bin')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'recycle_bin' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Recycle Bin ({recycleBinCount})
             </button>
           </div>
           {!isFilterApplied && !searchTerm.trim() && (
@@ -1420,12 +1418,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                   key={stableKey} 
                   influencer={inf} 
                   activeTab={activeTabForInf}
+                  currentSection={filter}
                   onTabChange={(newTab) => handleCardTabChange(inf, newTab)}
-                  onEdit={handleEditInfluencerClick} 
-                  onToggleArchive={toggleArchiveStatus} 
-                  onDispatch={onDispatch}
-                  onDelete={handleDelete}
-                  onDeletePlatformViews={handleDeletePlatformViews}
                   onUploadPlatformDetails={(code) => {
                     setTargetUploadCode(code);
                     setIsUploadPlatformModalOpen(true);
@@ -1469,8 +1463,9 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           campaign={campaign}
           existingInfluencers={influencers}
           onClose={() => setIsImportModalOpen(false)}
-          onSuccess={() => {
-            refresh();
+          onSuccess={async () => {
+            setIsImportModalOpen(false);
+            await refresh();
           }}
         />
       )}
@@ -1519,6 +1514,46 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         filterState={analyticsFilterState}
         onApplyFilter={(newState) => setAnalyticsFilterState(newState)}
       />
+
+      {/* Move Status Confirmation Modal */}
+      {confirmMoveModal.isOpen && confirmMoveModal.influencer && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+              <div className="p-2.5 bg-purple-950/60 border border-purple-800/40 rounded-xl text-purple-400">
+                <Users size={20} />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-slate-100">
+                  Move Influencer to {confirmMoveModal.targetStatus === 'other' ? 'Other' : (confirmMoveModal.targetStatus === 'recycle_bin' ? 'Recycle Bin' : 'Active')}?
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">Confirm status update</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to move <span className="font-bold text-slate-100">{confirmMoveModal.influencer.influencer_name || confirmMoveModal.influencer.name || 'this influencer'}</span> to <span className="font-bold text-purple-400 uppercase">{confirmMoveModal.targetStatus === 'recycle_bin' ? 'Recycle Bin' : confirmMoveModal.targetStatus}</span>?
+            </p>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setConfirmMoveModal({ isOpen: false, influencer: null, targetStatus: 'active' })}
+                className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMoveStatus}
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
+              >
+                Confirm Move
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
