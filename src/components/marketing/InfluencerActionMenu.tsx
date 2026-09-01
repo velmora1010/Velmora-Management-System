@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MoreVertical, Edit, Copy, Archive, ArchiveRestore, Trash2, Ban, ArrowLeftRight, CheckCircle2 } from 'lucide-react';
+import { MoreVertical, Edit, Copy, Trash2, Ban, ArrowLeftRight, CheckCircle2 } from 'lucide-react';
 import type { InfluencerStatusType } from '../../utils/marketingUtils';
 
 interface InfluencerActionMenuProps {
@@ -7,7 +7,6 @@ interface InfluencerActionMenuProps {
   onEdit: () => void;
   onCopy?: () => void;
   onMoveStatus?: (targetStatus: InfluencerStatusType) => void;
-  onToggleArchive?: () => void;
   onDelete?: () => void;
 }
 
@@ -16,7 +15,6 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
   onEdit,
   onCopy,
   onMoveStatus,
-  onToggleArchive,
   onDelete
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -67,6 +65,7 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
               Edit
             </button>
 
+            {/* 2. Duplicate */}
             {onCopy && (
               <button
                 type="button"
@@ -79,47 +78,31 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
             )}
 
             {/* ACTIVE SECTION ACTIONS */}
-            {currentSection === 'active' && (
+            {currentSection === 'active' && onMoveStatus && (
               <>
-                {/* 2. Move to Recycle Bin */}
-                {onMoveStatus && (
-                  <button
-                    type="button"
-                    onClick={() => handleAction(() => onMoveStatus('recycle_bin'))}
-                    className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-colors border-t border-slate-800 cursor-pointer"
-                  >
-                    <ArrowLeftRight size={15} />
-                    Move to Recycle Bin
-                  </button>
-                )}
+                {/* 3. Move to Recycle Bin */}
+                <button
+                  type="button"
+                  onClick={() => handleAction(() => onMoveStatus('recycle_bin'))}
+                  className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-colors border-t border-slate-800 cursor-pointer"
+                >
+                  <ArrowLeftRight size={15} />
+                  Move to Recycle Bin
+                </button>
 
-                {/* 3. Archive */}
-                {onToggleArchive && (
-                  <button
-                    type="button"
-                    onClick={() => handleAction(onToggleArchive)}
-                    className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white transition-colors border-t border-slate-800 cursor-pointer"
-                  >
-                    <Archive size={15} />
-                    Archive
-                  </button>
-                )}
-
-                {/* 4. Eliminate (Move to Others) */}
-                {onMoveStatus && (
-                  <button
-                    type="button"
-                    onClick={() => handleAction(() => onMoveStatus('other'))}
-                    className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-semibold text-red-400 hover:bg-red-950/40 hover:text-red-300 transition-colors border-t border-slate-800 cursor-pointer"
-                  >
-                    <Ban size={15} />
-                    Eliminate
-                  </button>
-                )}
+                {/* 4. Eliminate */}
+                <button
+                  type="button"
+                  onClick={() => handleAction(() => onMoveStatus('other'))}
+                  className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-semibold text-red-400 hover:bg-red-950/40 hover:text-red-300 transition-colors border-t border-slate-800 cursor-pointer"
+                >
+                  <Ban size={15} />
+                  Eliminate
+                </button>
               </>
             )}
 
-            {/* OTHERS SECTION ACTIONS */}
+            {/* ELIMINATE / OTHERS SECTION ACTIONS */}
             {currentSection === 'other' && onMoveStatus && (
               <>
                 <button
@@ -151,8 +134,8 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
                       onClick={() => handleAction(() => onMoveStatus('active'))}
                       className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-semibold text-emerald-400 hover:bg-emerald-950/30 hover:text-emerald-300 transition-colors border-t border-slate-800 cursor-pointer"
                     >
-                      <ArchiveRestore size={15} />
-                      Restore to Active
+                      <CheckCircle2 size={15} />
+                      Move to Active
                     </button>
                     <button
                       type="button"
@@ -160,7 +143,7 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
                       className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-semibold text-purple-300 hover:bg-purple-950/40 hover:text-purple-200 transition-colors border-t border-slate-800 cursor-pointer"
                     >
                       <Ban size={15} />
-                      Move to Others
+                      Eliminate
                     </button>
                   </>
                 )}

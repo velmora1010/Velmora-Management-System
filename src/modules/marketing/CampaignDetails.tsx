@@ -340,13 +340,6 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           >
             <Calendar size={14} /> Calendar
           </button>
-          <button 
-            type="button"
-            onClick={(e) => { e.preventDefault(); handleViewChange('analytics'); }}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'analytics' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
-          >
-            <BarChart2 size={14} /> Analytics
-          </button>
           {campaign.status?.toLowerCase() === 'archived' ? (
             <button 
               onClick={handleRestoreCampaign}
