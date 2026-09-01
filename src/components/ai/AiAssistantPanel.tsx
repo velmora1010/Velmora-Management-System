@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { aiAssistantService } from '../../services/aiAssistantService';
@@ -217,13 +218,13 @@ export const AiAssistantPanel: React.FC = () => {
     : (hasRightDrawerOpen ? { bottom: '24px', left: '24px' } : { bottom: '24px', right: '24px' });
 
   const getPanelStyle = (): React.CSSProperties => {
-    const panelW = Math.min(384, window.innerWidth - 32);
-    const panelH = Math.min(560, window.innerHeight * 0.8);
+    const panelW = Math.min(420, window.innerWidth - 32);
+    const panelH = Math.min(560, window.innerHeight - 80);
 
     if (!position) {
       return hasRightDrawerOpen 
-        ? { bottom: '88px', left: '24px' } 
-        : { bottom: '88px', right: '24px' };
+        ? { bottom: '88px', left: '24px', width: `${panelW}px`, height: `${panelH}px` } 
+        : { bottom: '88px', right: '24px', width: `${panelW}px`, height: `${panelH}px` };
     }
 
     let left = position.x;
@@ -234,16 +235,22 @@ export const AiAssistantPanel: React.FC = () => {
 
     let top = position.y - panelH - 12;
     if (top < 16) {
-      top = position.y + 58;
+      top = position.y + 68;
     }
     if (top + panelH > window.innerHeight - 16) {
       top = window.innerHeight - panelH - 16;
     }
+    if (top < 16) top = 16;
 
-    return { left: `${left}px`, top: `${top}px` };
+    return { 
+      left: `${left}px`, 
+      top: `${top}px`,
+      width: `${panelW}px`,
+      height: `${panelH}px`
+    };
   };
 
-  return (
+  return createPortal(
     <>
       {/* Draggable Floating Trigger Button - Compact Glowing Circle */}
       <div
@@ -254,7 +261,7 @@ export const AiAssistantPanel: React.FC = () => {
         aria-label="AI Assistant"
         role="button"
         tabIndex={0}
-        className="fixed z-[9999] w-14 h-14 w-[56px] h-[56px] min-w-[56px] min-h-[56px] rounded-full bg-gradient-to-tr from-violet-700 via-purple-600 to-indigo-500 text-white flex items-center justify-center cursor-grab active:cursor-grabbing select-none touch-none shadow-[0_0_20px_rgba(147,51,234,0.6)] hover:shadow-[0_0_30px_rgba(168,85,247,0.9)] hover:scale-110 active:scale-95 transition-all duration-300 group border border-purple-400/40 relative"
+        className="fixed z-[99999] w-14 h-14 w-[56px] h-[56px] min-w-[56px] min-h-[56px] rounded-full bg-gradient-to-tr from-violet-700 via-purple-600 to-indigo-500 text-white flex items-center justify-center cursor-grab active:cursor-grabbing select-none touch-none shadow-[0_0_20px_rgba(147,51,234,0.6)] hover:shadow-[0_0_30px_rgba(168,85,247,0.9)] hover:scale-110 active:scale-95 transition-all duration-300 group border border-purple-400/40 relative"
         title="Velmora AI Business Assistant (Click to open, drag to reposition)"
       >
         {/* Soft Animated Outer Glowing Pulse Ring */}
@@ -268,11 +275,11 @@ export const AiAssistantPanel: React.FC = () => {
       {isOpen && (
         <div 
           style={getPanelStyle()}
-          className="fixed z-[9999] w-96 max-w-[calc(100vw-2rem)] bg-card border border-border rounded-2xl shadow-2xl flex flex-col h-[560px] max-h-[80vh] overflow-hidden animate-in slide-in-from-bottom-5 duration-300"
+          className="fixed z-[99999] bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-300"
         >
           
           {/* Panel Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-slate-900/80 backdrop-blur-md">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-slate-900/80 backdrop-blur-md shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="p-2 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-indigo-400">
                 <Bot size={20} />
@@ -290,7 +297,7 @@ export const AiAssistantPanel: React.FC = () => {
 
             <button
               onClick={() => setIsOpen(false)}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors"
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
             >
               <X size={18} />
             </button>
@@ -338,24 +345,23 @@ export const AiAssistantPanel: React.FC = () => {
                       <p className="text-slate-300">{msg.proposedAction.description}</p>
                       
                       {!msg.proposedAction.confirmed ? (
-                        <div className="pt-2 flex gap-2">
-                          <button
-                            onClick={() => handleConfirmAction(msg.id, msg.proposedAction!)}
-                            disabled={isProcessing}
-                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg text-[11px] transition-colors flex items-center gap-1"
-                          >
-                            <Check size={12} /> Confirm Action
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => handleConfirmAction(msg.id, msg.proposedAction!)}
+                          disabled={isProcessing}
+                          className="w-full py-1.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          {isProcessing ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />}
+                          Execute Proposed Action
+                        </button>
                       ) : (
-                        <div className="text-emerald-400 font-semibold text-[11px] flex items-center gap-1">
-                          <Check size={12} /> Confirmed & Executed
+                        <div className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
+                          <Check size={12} /> Executed
                         </div>
                       )}
                     </div>
                   )}
 
-                  <div className={`text-[10px] text-right ${msg.sender === 'user' ? 'text-indigo-200' : 'text-slate-500'}`}>
+                  <div className="text-[9px] text-muted text-right pt-0.5">
                     {msg.timestamp}
                   </div>
                 </div>
@@ -369,30 +375,32 @@ export const AiAssistantPanel: React.FC = () => {
             ))}
 
             {isProcessing && (
-              <div className="flex gap-2 items-center text-xs text-muted font-mono p-2">
-                <RefreshCw size={14} className="animate-spin text-indigo-400" />
-                <span>AI Assistant processing...</span>
+              <div className="flex gap-2 text-xs text-indigo-400 items-center">
+                <Bot size={16} className="animate-bounce" />
+                <span className="animate-pulse">Analyzing & generating response...</span>
               </div>
             )}
 
             <div ref={chatEndRef} />
           </div>
 
-          {/* Route-Aware Suggested Prompts */}
-          <div className="p-2.5 bg-slate-900/60 border-t border-border overflow-x-auto flex gap-1.5 custom-scrollbar">
-            {prompts.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => handleSendQuery(p.query)}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full text-[11px] font-medium border border-slate-700 whitespace-nowrap shrink-0 transition-colors"
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
+          {/* Suggested Quick Prompts */}
+          {prompts.length > 0 && (
+            <div className="px-3 py-2 bg-slate-950/60 border-t border-border flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+              {prompts.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => handleSendQuery(p.query)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full text-[11px] font-medium border border-slate-700 whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Message Input Box */}
-          <div className="p-3 bg-slate-900 border-t border-border flex items-center gap-2">
+          <div className="p-3 bg-slate-900 border-t border-border flex items-center gap-2 shrink-0">
             <input
               type="text"
               placeholder="Ask AI or type 'Create task: ...'"
@@ -404,13 +412,14 @@ export const AiAssistantPanel: React.FC = () => {
             <button
               onClick={() => handleSendQuery()}
               disabled={!query.trim() || isProcessing}
-              className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-40 transition-colors"
+              className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl disabled:opacity-40 transition-colors cursor-pointer"
             >
               <Send size={16} />
             </button>
           </div>
         </div>
       )}
-    </>
+    </>,
+    document.body
   );
 };
