@@ -772,6 +772,52 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     return false;
   };
 
+  const getSingleVideoPrices = (influencer: CampaignInfluencer): number[] => {
+    const prices: number[] = [];
+    const p = influencer.pricing;
+    if (!p) return [];
+
+    // 1. Check videos array in product_pricing
+    if (Array.isArray(p.product_pricing?.videos) && p.product_pricing.videos.length > 0) {
+      p.product_pricing.videos.forEach((v: any) => {
+        const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
+        if (!isNaN(amt) && amt > 0) {
+          prices.push(amt);
+        }
+      });
+    }
+
+    // 2. Check legacy video1_price & video2_price & product_pricing map
+    if (prices.length === 0) {
+      if (p.video1_price) {
+        const v1 = Number(p.video1_price);
+        if (!isNaN(v1) && v1 > 0) prices.push(v1);
+      }
+      if (p.video2_price) {
+        const v2 = Number(p.video2_price);
+        if (!isNaN(v2) && v2 > 0) prices.push(v2);
+      }
+      if (p.product_pricing && typeof p.product_pricing === 'object') {
+        Object.entries(p.product_pricing).forEach(([key, val]: [string, any]) => {
+          if (key !== 'videos' && val && typeof val === 'object' && val.price) {
+            const amt = Number(val.price);
+            if (!isNaN(amt) && amt > 0) prices.push(amt);
+          }
+        });
+      }
+    }
+
+    // 3. Fallback: if no individual video breakdown exists, fallback to final_price / commercial_quote
+    if (prices.length === 0) {
+      const finalP = Number(p.final_price || (p as any)?.commercial_quote || 0);
+      if (!isNaN(finalP) && finalP > 0) {
+        prices.push(finalP);
+      }
+    }
+
+    return prices;
+  };
+
   const matchesFilters = (influencer: CampaignInfluencer): boolean => {
     // 1. Missing Detail Checklist Filters
     if (filterState.missingPhone && !isEmptyValue(influencer.phone_number)) return false;
@@ -912,60 +958,86 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         return false;
       }
     }
-
-    // 9. Price Filter (Predefined Range & Min/Max Price)
-    const priceVal = Number(
-      influencer.pricing?.final_price || 
-      (influencer.pricing as any)?.commercial_quote || 
-      0
-    );
+    // 9. Single Video Price Filter (Checks if AT LEAST ONE individual video price falls in range)
+    const singleVideoPrices = getSingleVideoPrices(influencer);
 
     if (filterState.priceRange) {
+      let rangeMin = 0;
+      let rangeMax = Infinity;
+
       switch (filterState.priceRange) {
         case 'below_1000':
-          if (priceVal >= 1000) return false;
+          rangeMin = 0;
+          rangeMax = 1000;
           break;
         case '1000_2000':
-          if (priceVal < 1000 || priceVal > 2000) return false;
+          rangeMin = 1000;
+          rangeMax = 2000;
           break;
         case '2000_3000':
-          if (priceVal < 2000 || priceVal > 3000) return false;
+          rangeMin = 2000;
+          rangeMax = 3000;
           break;
         case '3000_4000':
-          if (priceVal < 3000 || priceVal > 4000) return false;
+          rangeMin = 3000;
+          rangeMax = 4000;
           break;
         case '4000_5000':
-          if (priceVal < 4000 || priceVal > 5000) return false;
+          rangeMin = 4000;
+          rangeMax = 5000;
           break;
         case '5000_6000':
-          if (priceVal < 5000 || priceVal > 6000) return false;
+          rangeMin = 5000;
+          rangeMax = 6000;
           break;
         case '6000_7000':
-          if (priceVal < 6000 || priceVal > 7000) return false;
+          rangeMin = 6000;
+          rangeMax = 7000;
           break;
         case '7000_8000':
-          if (priceVal < 7000 || priceVal > 8000) return false;
+          rangeMin = 7000;
+          rangeMax = 8000;
           break;
         case '8000_9000':
-          if (priceVal < 8000 || priceVal > 9000) return false;
+          rangeMin = 8000;
+          rangeMax = 9000;
           break;
         case '9000_10000':
-          if (priceVal < 9000 || priceVal > 10000) return false;
+          rangeMin = 9000;
+          rangeMax = 10000;
           break;
         case 'above_10000':
-          if (priceVal <= 10000) return false;
+          rangeMin = 10000;
+          rangeMax = Infinity;
           break;
       }
+
+      if (singleVideoPrices.length === 0) return false;
+      const hasMatchingVideo = singleVideoPrices.some(price => {
+        if (filterState.priceRange === 'below_1000') return price < 1000;
+        if (filterState.priceRange === 'above_10000') return price > 10000;
+        return price >= rangeMin && price <= rangeMax;
+      });
+
+      if (!hasMatchingVideo) return false;
     }
 
     if (filterState.minPrice) {
       const minP = Number(filterState.minPrice);
-      if (!isNaN(minP) && priceVal < minP) return false;
+      if (!isNaN(minP)) {
+        if (singleVideoPrices.length === 0) return false;
+        const hasMatchingVideo = singleVideoPrices.some(price => price >= minP);
+        if (!hasMatchingVideo) return false;
+      }
     }
 
     if (filterState.maxPrice) {
       const maxP = Number(filterState.maxPrice);
-      if (!isNaN(maxP) && priceVal > maxP) return false;
+      if (!isNaN(maxP)) {
+        if (singleVideoPrices.length === 0) return false;
+        const hasMatchingVideo = singleVideoPrices.some(price => price <= maxP);
+        if (!hasMatchingVideo) return false;
+      }
     }
 
     return true;
