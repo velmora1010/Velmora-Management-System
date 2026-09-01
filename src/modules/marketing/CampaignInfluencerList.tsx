@@ -155,9 +155,7 @@ City: ${influencer.city}`;
             )}
             
             <InfluencerActionMenu
-              isDispatched={!!influencer.dispatchDetails}
               currentSection={currentSection}
-              onDispatch={onDispatch ? () => onDispatch(influencer) : undefined}
               onEdit={() => onEdit?.(influencer)}
               onCopy={handleCopy}
               onMoveStatus={onMoveStatus}
@@ -1236,16 +1234,16 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               Active ({activeCount})
             </button>
             <button 
-              onClick={() => setFilter('other')}
-              className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'other' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              Other ({otherCount})
-            </button>
-            <button 
               onClick={() => setFilter('recycle_bin')}
               className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'recycle_bin' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
             >
               Recycle Bin ({recycleBinCount})
+            </button>
+            <button 
+              onClick={() => setFilter('other')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'other' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              Others ({otherCount})
             </button>
           </div>
           {!isFilterApplied && !searchTerm.trim() && (
@@ -1420,6 +1418,12 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                   activeTab={activeTabForInf}
                   currentSection={filter}
                   onTabChange={(newTab) => handleCardTabChange(inf, newTab)}
+                  onEdit={handleEditInfluencerClick} 
+                  onMoveStatus={(targetStatus) => setConfirmMoveModal({ isOpen: true, influencer: inf, targetStatus })}
+                  onToggleArchive={toggleArchiveStatus} 
+                  onDispatch={onDispatch}
+                  onDelete={handleDelete}
+                  onDeletePlatformViews={handleDeletePlatformViews}
                   onUploadPlatformDetails={(code) => {
                     setTargetUploadCode(code);
                     setIsUploadPlatformModalOpen(true);
@@ -1525,14 +1529,22 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               </div>
               <div>
                 <h4 className="text-base font-bold text-slate-100">
-                  Move Influencer to {confirmMoveModal.targetStatus === 'other' ? 'Other' : (confirmMoveModal.targetStatus === 'recycle_bin' ? 'Recycle Bin' : 'Active')}?
+                  {confirmMoveModal.targetStatus === 'other' 
+                    ? 'Eliminate Influencer?' 
+                    : (confirmMoveModal.targetStatus === 'recycle_bin' ? 'Move to Recycle Bin?' : 'Move to Active?')}
                 </h4>
                 <p className="text-xs text-slate-400 mt-0.5">Confirm status update</p>
               </div>
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Are you sure you want to move <span className="font-bold text-slate-100">{confirmMoveModal.influencer.influencer_name || confirmMoveModal.influencer.name || 'this influencer'}</span> to <span className="font-bold text-purple-400 uppercase">{confirmMoveModal.targetStatus === 'recycle_bin' ? 'Recycle Bin' : confirmMoveModal.targetStatus}</span>?
+              {confirmMoveModal.targetStatus === 'other' ? (
+                <>Are you sure you want to move <span className="font-bold text-slate-100">{confirmMoveModal.influencer.influencer_name || confirmMoveModal.influencer.name || 'this influencer'}</span> to <span className="font-bold text-purple-400">Others</span>?</>
+              ) : confirmMoveModal.targetStatus === 'recycle_bin' ? (
+                <>Are you sure you want to move <span className="font-bold text-slate-100">{confirmMoveModal.influencer.influencer_name || confirmMoveModal.influencer.name || 'this influencer'}</span> to <span className="font-bold text-red-400">Recycle Bin</span>?</>
+              ) : (
+                <>Are you sure you want to move <span className="font-bold text-slate-100">{confirmMoveModal.influencer.influencer_name || confirmMoveModal.influencer.name || 'this influencer'}</span> to <span className="font-bold text-emerald-400">Active</span>?</>
+              )}
             </p>
 
             <div className="flex items-center justify-end gap-3 border-t border-slate-800 pt-3">
@@ -1546,9 +1558,17 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmMoveStatus}
-                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
+                className={`px-5 py-2 text-white rounded-xl text-xs font-bold shadow-lg transition-all cursor-pointer ${
+                  confirmMoveModal.targetStatus === 'other' 
+                    ? 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/30' 
+                    : confirmMoveModal.targetStatus === 'recycle_bin'
+                      ? 'bg-red-600 hover:bg-red-700 shadow-red-600/30'
+                      : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30'
+                }`}
               >
-                Confirm Move
+                {confirmMoveModal.targetStatus === 'other' 
+                  ? 'Eliminate' 
+                  : (confirmMoveModal.targetStatus === 'recycle_bin' ? 'Move to Recycle Bin' : 'Move to Active')}
               </button>
             </div>
           </div>
