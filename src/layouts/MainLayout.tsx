@@ -4,7 +4,6 @@ import { ArrowLeft, Home, CheckSquare, Archive, Settings, Menu, LogOut, Activity
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
 import { NotificationCenter } from '../components/notifications/NotificationCenter';
-import { AiAssistantPanel } from '../components/ai/AiAssistantPanel';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import { getNavigationState, saveNavigationState, saveDepartmentNavigation } from '../utils/navigationPersistence';
@@ -382,7 +381,6 @@ export const MainLayout = () => {
             <Outlet />
           </ErrorBoundary>
         </main>
-        <AiAssistantPanel />
       </div>
     </div>
   );
