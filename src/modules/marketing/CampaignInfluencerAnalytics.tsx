@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { 
   MapPin, 
@@ -10,12 +10,14 @@ import {
   Users, 
   Share2, 
   Filter, 
-  SlidersHorizontal,
-  RotateCcw
+  RotateCcw,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle
 } from 'lucide-react';
 import { AnalyticsDonutChart, DonutSliceData } from '../sales/website/components/AnalyticsDonutChart';
 import { normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
-import { formatDisplayProductName, formatDisplayCombination, parseProductsFromCombination } from './AddCampaignInfluencer';
+import { formatDisplayProductName, parseProductsFromCombination } from './AddCampaignInfluencer';
 import type { CampaignAnalyticsFilterState } from '../../components/marketing/CampaignInfluencerAnalyticsFilterDrawer';
 import { getSingleVideoPrices } from './CampaignInfluencerList';
 import { isArchived } from '../../utils/marketingUtils';
@@ -40,7 +42,7 @@ const PALETTE = [
   '#eab308', // Yellow
   '#ef4444', // Red
   '#14b8a6', // Teal
-  '#64748b'  // Slate
+  '#6366f1'  // Indigo
 ];
 
 export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsProps> = ({
@@ -51,11 +53,17 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
   activeFilterCount,
   onResetFilters
 }) => {
+  // State for expanded lists in breakdown cards (default shows top 6)
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (cardTitle: string) => {
+    setExpandedCards(prev => ({ ...prev, [cardTitle]: !prev[cardTitle] }));
+  };
 
   // 1. In-Memory Filter Evaluation (AND Logic)
   const filteredInfluencers = useMemo(() => {
     return influencers.filter(inf => {
-      // Exclude archived influencers if needed or match active status
+      // Exclude archived influencers
       if (isArchived(inf.is_archived)) return false;
 
       // Search term
@@ -96,7 +104,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
         if (!matchCat) return false;
       }
 
-      // Languages (Multi-select: influencer matching any selected language qualifies)
+      // Languages (Multi-select)
       if (filterState.languages.length > 0) {
         let infLangs: string[] = [];
         if (Array.isArray(inf.languages)) {
@@ -198,7 +206,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
 
   const totalInfluencerCount = filteredInfluencers.length;
 
-  // Helper for generating sorted slice data with colors & percentages
+  // Helper for generating sorted slice dataset
   const createSliceDataset = (countsMap: Record<string, number>): DonutSliceData[] => {
     const sorted = Object.entries(countsMap).sort((a, b) => b[1] - a[1]);
     return sorted.map(([name, count], idx) => ({
@@ -228,7 +236,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     return createSliceDataset(map);
   }, [filteredInfluencers]);
 
-  // 3. PRICE WISE (Single video price ranges as specified)
+  // 3. PRICE WISE
   const priceData = useMemo(() => {
     const map: Record<string, number> = {
       'Below ₹500': 0,
@@ -246,7 +254,6 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
       if (prices.length === 0) {
         map['Not Provided']++;
       } else {
-        // Count influencer in range of their video prices
         prices.forEach((price: number) => {
           if (price < 500) map['Below ₹500']++;
           else if (price >= 500 && price <= 749) map['₹500–₹749']++;
@@ -266,7 +273,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     return createSliceDataset(activeMap);
   }, [filteredInfluencers]);
 
-  // 4. PRODUCT WISE (Multi-valued: counts each product assigned)
+  // 4. PRODUCT WISE (Multi-valued)
   const productData = useMemo(() => {
     const map: Record<string, number> = {};
     filteredInfluencers.forEach(inf => {
@@ -311,7 +318,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     return createSliceDataset(map);
   }, [filteredInfluencers]);
 
-  // 6. LANGUAGES (Multi-valued: counts each language selected)
+  // 6. LANGUAGES (Multi-valued)
   const languageData = useMemo(() => {
     const map: Record<string, number> = {};
     filteredInfluencers.forEach(inf => {
@@ -361,7 +368,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
       else if (maxF >= 1000 && maxF < 5000) map['1K–5K']++;
       else if (maxF >= 5000 && maxF < 10000) map['5K–10K']++;
       else if (maxF >= 10000 && maxF < 25000) map['10K–25K']++;
-      else if (maxF >= 25000 && maxF < 50000) map['25K–500K']++;
+      else if (maxF >= 25000 && maxF < 50000) map['25K–50K']++;
       else if (maxF >= 50000 && maxF < 100000) map['50K–100K']++;
       else if (maxF >= 100000 && maxF < 500000) map['100K–500K']++;
       else if (maxF >= 500000) map['500K+']++;
@@ -396,7 +403,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     return createSliceDataset(map);
   }, [filteredInfluencers]);
 
-  // Render Card with Donut Chart + Right/Below Detailed Legend List
+  // Render Redesigned Spacious Breakdown Card (No nested duplicate scrollbars)
   const renderAnalyticsCard = (
     title: string,
     Icon: React.ElementType,
@@ -404,96 +411,138 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     isMultiSelect: boolean = false
   ) => {
     const totalVal = sliceData.reduce((sum, item) => sum + item.value, 0);
+    const isExpanded = !!expandedCards[title];
+    const visibleData = isExpanded ? sliceData : sliceData.slice(0, 6);
+    const hasMore = sliceData.length > 6;
 
     return (
-      <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 shadow-xl flex flex-col justify-between">
+      <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-xl flex flex-col justify-between min-h-[360px] hover:border-slate-700/80 transition-all">
         {/* Card Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-purple-950/60 border border-purple-800/40 rounded-lg text-purple-400">
-              <Icon size={18} />
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-4 mb-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-purple-950/60 border border-purple-800/40 rounded-xl text-purple-400 shadow-inner">
+              <Icon size={20} />
             </div>
-            <h4 className="text-sm font-extrabold text-slate-100 uppercase tracking-wider">{title}</h4>
+            <div>
+              <h4 className="text-base font-extrabold text-slate-100 uppercase tracking-wide">{title}</h4>
+              <p className="text-xs text-slate-400 font-medium">
+                {sliceData.length} {sliceData.length === 1 ? 'category' : 'categories'}
+              </p>
+            </div>
           </div>
           {isMultiSelect && (
-            <span className="text-[10px] bg-purple-950/40 border border-purple-800/30 text-purple-300 font-semibold px-2 py-0.5 rounded">
+            <span className="text-xs bg-purple-950/60 border border-purple-800/40 text-purple-300 font-semibold px-2.5 py-1 rounded-lg shadow-sm">
               Multi-Select
             </span>
           )}
         </div>
 
-        {/* Content Layout: Chart Left, Legend Right */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center flex-1">
-          {/* Chart Ring */}
-          <div className="md:col-span-6 flex justify-center">
-            <AnalyticsDonutChart
-              data={sliceData}
-              centerValue={totalInfluencerCount}
-              centerLabel="INFLUENCERS"
-              height={200}
-              innerRadius={55}
-              outerRadius={80}
-            />
-          </div>
+        {/* Card Content Grid: Donut Chart Left (45%), Breakdown List Right (55%) */}
+        {totalInfluencerCount > 0 && sliceData.length > 0 ? (
+          <div className="flex flex-col lg:flex-row items-center gap-6 flex-1">
+            
+            {/* Donut Chart Ring (45% Width) */}
+            <div className="w-full lg:w-[45%] flex items-center justify-center p-2">
+              <AnalyticsDonutChart
+                data={sliceData}
+                centerValue={totalInfluencerCount}
+                centerLabel="INFLUENCERS"
+                height={230}
+                innerRadius={65}
+                outerRadius={95}
+                showLegend={false}
+              />
+            </div>
 
-          {/* Legend Details List */}
-          <div className="md:col-span-6 space-y-2 max-h-52 overflow-y-auto custom-scrollbar pr-1">
-            {sliceData.length > 0 ? (
-              sliceData.map((item) => {
-                const pct = totalVal > 0 ? ((item.value / (isMultiSelect ? totalInfluencerCount : totalVal)) * 100).toFixed(1) : '0';
-                return (
-                  <div key={item.name} className="flex items-center justify-between p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs hover:border-slate-700 transition-colors">
-                    <div className="flex items-center gap-2 min-w-0 pr-2">
-                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                      <span className="text-slate-300 font-medium truncate" title={item.name}>{item.name}</span>
+            {/* Breakdown List (55% Width, Clean spacious rows) */}
+            <div className="w-full lg:w-[55%] flex flex-col justify-center space-y-2 pl-0 lg:pl-4 border-t lg:border-t-0 lg:border-l border-slate-800/80 pt-4 lg:pt-0">
+              <div className="space-y-2">
+                {visibleData.map((item) => {
+                  const pct = totalVal > 0 ? ((item.value / (isMultiSelect ? totalInfluencerCount : totalVal)) * 100).toFixed(1) : '0';
+                  return (
+                    <div 
+                      key={item.name} 
+                      className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-950/70 border border-slate-800/80 hover:border-purple-500/30 transition-colors group"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-3">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.color }} />
+                        <span className="text-xs font-semibold text-slate-200 leading-snug break-words" title={item.name}>
+                          {item.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0 text-right font-mono">
+                        <span className="text-xs font-bold text-slate-100">{item.value}</span>
+                        <span className="text-xs font-bold text-purple-400 min-w-[48px] text-right">{pct}%</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0 font-mono">
-                      <span className="text-slate-100 font-bold">{item.value}</span>
-                      <span className="text-purple-400 text-[11px] font-semibold w-12 text-right">{pct}%</span>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="text-center py-6 text-slate-500 text-xs italic">No data available</div>
-            )}
+                  );
+                })}
+              </div>
+
+              {/* Show More / Show Less Button */}
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(title)}
+                  className="mt-2 text-xs text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-purple-900/40 hover:border-purple-700/60 bg-purple-950/20 transition-all cursor-pointer w-full"
+                >
+                  {isExpanded ? (
+                    <>
+                      <span>Show Less</span> <ChevronUp size={14} />
+                    </>
+                  ) : (
+                    <>
+                      <span>Show All ({sliceData.length})</span> <ChevronDown size={14} />
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2">
+            <AlertCircle size={32} className="text-slate-600" />
+            <p className="text-xs font-medium">No data available for this category</p>
+          </div>
+        )}
       </div>
     );
   };
 
   return (
-    <div className="space-y-6 animate-fade-in pb-8">
+    <div className="space-y-8 p-4 lg:p-6 animate-fade-in text-slate-200 pb-12">
 
-      {/* Analytics Toolbar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800">
+      {/* Analytics Toolbar Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/80 p-5 rounded-2xl border border-slate-800 shadow-xl">
         <div>
-          <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+          <h3 className="text-xl font-black text-slate-100 flex items-center gap-2 tracking-tight">
             Campaign Influencer Analytics
           </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Real-time analytics computed from {totalInfluencerCount} campaign influencer records
+          <p className="text-xs text-slate-400 mt-1 font-medium">
+            Real-time analytics dynamically generated from {totalInfluencerCount} influencer records
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {activeFilterCount > 0 && (
             <button
+              type="button"
               onClick={onResetFilters}
-              className="px-3 py-1.5 border border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
             >
-              <RotateCcw size={14} /> Clear Filters
+              <RotateCcw size={14} /> Reset Filters
             </button>
           )}
           <button
+            type="button"
             onClick={onOpenFilter}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all flex items-center gap-2 cursor-pointer"
+            className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-600/30 transition-all flex items-center gap-2 cursor-pointer"
           >
-            <Filter size={14} />
+            <Filter size={15} />
             <span>Filter</span>
             {activeFilterCount > 0 && (
-              <span className="px-1.5 py-0.2 bg-white text-purple-900 rounded-full font-bold text-[10px]">
+              <span className="px-2 py-0.5 bg-white text-purple-900 rounded-full font-black text-[11px]">
                 {activeFilterCount}
               </span>
             )}
@@ -501,24 +550,46 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
         </div>
       </div>
 
-      {/* 8 Breakdown Cards Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Row 1 */}
-        {renderAnalyticsCard('State Wise', MapPin, stateData)}
-        {renderAnalyticsCard('City Wise', Building2, cityData)}
+      {/* Empty State when filters return 0 records */}
+      {totalInfluencerCount === 0 ? (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 text-center flex flex-col items-center justify-center space-y-4 shadow-xl">
+          <div className="p-4 bg-purple-950/40 border border-purple-800/30 rounded-2xl text-purple-400">
+            <AlertCircle size={40} />
+          </div>
+          <div>
+            <h4 className="text-lg font-bold text-slate-100">No Influencers Found</h4>
+            <p className="text-xs text-slate-400 mt-1 max-w-md">
+              No campaign influencers match the selected filter combination. Try clearing or relaxing some filters.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onResetFilters}
+            className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <RotateCcw size={14} /> Clear All Filters
+          </button>
+        </div>
+      ) : (
+        /* 2-Column Dashboard Grid for 8 Breakdown Cards */
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+          {/* Row 1 */}
+          {renderAnalyticsCard('State Wise', MapPin, stateData)}
+          {renderAnalyticsCard('City Wise', Building2, cityData)}
 
-        {/* Row 2 */}
-        {renderAnalyticsCard('Price Wise', CreditCard, priceData)}
-        {renderAnalyticsCard('Product Wise', Package, productData, true)}
+          {/* Row 2 */}
+          {renderAnalyticsCard('Price Wise', CreditCard, priceData)}
+          {renderAnalyticsCard('Product Wise', Package, productData, true)}
 
-        {/* Row 3 */}
-        {renderAnalyticsCard('Creator Category', Award, categoryData)}
-        {renderAnalyticsCard('Languages', Globe, languageData, true)}
+          {/* Row 3 */}
+          {renderAnalyticsCard('Creator Category', Award, categoryData)}
+          {renderAnalyticsCard('Languages', Globe, languageData, true)}
 
-        {/* Row 4 */}
-        {renderAnalyticsCard('Followers Based', Users, followerData)}
-        {renderAnalyticsCard('Platform Combination', Share2, platformData)}
-      </div>
+          {/* Row 4 */}
+          {renderAnalyticsCard('Followers Based', Users, followerData)}
+          {renderAnalyticsCard('Platform Combination', Share2, platformData)}
+        </div>
+      )}
 
     </div>
   );

@@ -40,6 +40,7 @@ export interface AnalyticsDonutChartProps {
   height?: number;
   innerRadius?: number;
   outerRadius?: number;
+  showLegend?: boolean;
 }
 
 export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
@@ -52,7 +53,8 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
   emptyMessage = 'No data available',
   height = 250,
   innerRadius = 60,
-  outerRadius = 90
+  outerRadius = 90,
+  showLegend = true
 }) => {
   const chartTotal = React.useMemo(() => {
     return data.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
@@ -103,64 +105,72 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
     return null;
   };
 
+  const chartRingContent = (
+    <div style={{ height: `${height}px` }} className="relative w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            innerRadius={innerRadius}
+            outerRadius={outerRadius}
+            paddingAngle={3}
+          >
+            {data.map((entry, index) => {
+              const sliceColor = entry.color || DEFAULT_DISTINCT_COLORS[index % DEFAULT_DISTINCT_COLORS.length];
+              const isSelected = selectedSliceName === entry.name || selectedSliceName === entry.state || selectedSliceName === entry.city;
+              return (
+                <Cell
+                  key={`cell-${index}`}
+                  fill={sliceColor}
+                  opacity={selectedSliceName ? (isSelected ? 1 : 0.4) : 1}
+                  stroke={isSelected ? '#ffffff' : 'none'}
+                  strokeWidth={isSelected ? 2 : 0}
+                  onClick={() => onSliceClick && onSliceClick(entry)}
+                  className={onSliceClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
+                />
+              );
+            })}
+          </Pie>
+          <Tooltip content={<CustomPieTooltip />} />
+        </PieChart>
+      </ResponsiveContainer>
+
+      {/* CENTER OVERLAY (TOTAL VALUE & LABEL) */}
+      {centerValue !== undefined && (() => {
+        const valStr = typeof centerValue === 'number' ? centerValue.toLocaleString() : String(centerValue);
+        const len = valStr.length;
+        let fontClass = 'text-xl sm:text-2xl font-extrabold';
+        if (len > 14) fontClass = 'text-[11px] sm:text-xs font-black';
+        else if (len > 11) fontClass = 'text-xs sm:text-sm font-extrabold';
+        else if (len > 8) fontClass = 'text-sm sm:text-base font-extrabold';
+        else if (len > 5) fontClass = 'text-base sm:text-lg font-extrabold';
+
+        return (
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-3">
+            <span className={`${fontClass} text-white tracking-tight drop-shadow-md`}>
+              {valStr}
+            </span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mt-0.5">
+              {centerLabel}
+            </span>
+          </div>
+        );
+      })()}
+    </div>
+  );
+
+  if (!showLegend) {
+    return chartRingContent;
+  }
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center w-full">
       {/* DONUT CHART RING */}
-      <div style={{ height: `${height}px` }} className="relative w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              innerRadius={innerRadius}
-              outerRadius={outerRadius}
-              paddingAngle={3}
-            >
-              {data.map((entry, index) => {
-                const sliceColor = entry.color || DEFAULT_DISTINCT_COLORS[index % DEFAULT_DISTINCT_COLORS.length];
-                const isSelected = selectedSliceName === entry.name || selectedSliceName === entry.state || selectedSliceName === entry.city;
-                return (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={sliceColor}
-                    opacity={selectedSliceName ? (isSelected ? 1 : 0.4) : 1}
-                    stroke={isSelected ? '#ffffff' : 'none'}
-                    strokeWidth={isSelected ? 2 : 0}
-                    onClick={() => onSliceClick && onSliceClick(entry)}
-                    className={onSliceClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
-                  />
-                );
-              })}
-            </Pie>
-            <Tooltip content={<CustomPieTooltip />} />
-          </PieChart>
-        </ResponsiveContainer>
-
-        {/* CENTER OVERLAY (TOTAL VALUE & LABEL) */}
-        {centerValue !== undefined && (() => {
-          const valStr = typeof centerValue === 'number' ? centerValue.toLocaleString() : String(centerValue);
-          const len = valStr.length;
-          let fontClass = 'text-xl sm:text-2xl font-extrabold';
-          if (len > 14) fontClass = 'text-[11px] sm:text-xs font-black';
-          else if (len > 11) fontClass = 'text-xs sm:text-sm font-extrabold';
-          else if (len > 8) fontClass = 'text-sm sm:text-base font-extrabold';
-          else if (len > 5) fontClass = 'text-base sm:text-lg font-extrabold';
-
-          return (
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-3">
-              <span className={`${fontClass} text-white tracking-tight drop-shadow-md`}>
-                {valStr}
-              </span>
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mt-0.5">
-                {centerLabel}
-              </span>
-            </div>
-          );
-        })()}
-      </div>
+      {chartRingContent}
 
       {/* LEGEND LIST */}
       <div className="space-y-1.5 text-xs font-mono max-h-[250px] overflow-y-auto pr-1">

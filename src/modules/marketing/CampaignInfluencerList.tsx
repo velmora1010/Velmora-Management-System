@@ -1135,7 +1135,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   }, [influencers, searchTerm, filter, filterState]);
 
   return (
-    <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col min-h-[700px]">
+    <div className={`bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col ${mainViewMode === 'analytics' ? 'h-auto min-h-0' : 'h-[700px]'}`}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 gap-4">
         <div className="flex items-center gap-3">
