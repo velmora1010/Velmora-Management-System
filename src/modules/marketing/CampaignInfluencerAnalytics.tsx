@@ -416,22 +416,22 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     const hasMore = sliceData.length > 6;
 
     return (
-      <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-6 shadow-xl flex flex-col justify-between min-h-[360px] hover:border-slate-700/80 transition-all">
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/20 rounded-2xl border border-slate-800/90 hover:border-purple-500/40 p-6 shadow-xl flex flex-col justify-between min-h-[360px] transition-all group">
         {/* Card Header */}
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-4 mb-5">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-purple-950/60 border border-purple-800/40 rounded-xl text-purple-400 shadow-inner">
+            <div className="p-2.5 bg-gradient-to-br from-purple-900/50 to-indigo-900/40 border border-purple-700/40 rounded-xl text-purple-300 shadow-inner">
               <Icon size={20} />
             </div>
             <div>
-              <h4 className="text-base font-extrabold text-slate-100 uppercase tracking-wide">{title}</h4>
+              <h4 className="text-base font-extrabold text-slate-100 uppercase tracking-wide group-hover:text-purple-200 transition-colors">{title}</h4>
               <p className="text-xs text-slate-400 font-medium">
                 {sliceData.length} {sliceData.length === 1 ? 'category' : 'categories'}
               </p>
             </div>
           </div>
           {isMultiSelect && (
-            <span className="text-xs bg-purple-950/60 border border-purple-800/40 text-purple-300 font-semibold px-2.5 py-1 rounded-lg shadow-sm">
+            <span className="text-xs bg-purple-950/80 border border-purple-700/50 text-purple-300 font-semibold px-2.5 py-1 rounded-lg shadow-xs">
               Multi-Select
             </span>
           )}
