@@ -304,8 +304,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       if (seenCodesInFile.has(lowerCode)) {
         return {
           code,
-          name: name || userId || '—',
-          userId: userId || name || '—',
+          name: name || '—',
+          userId: userId || '—',
           phone,
           altPhone,
           upi,
@@ -321,36 +321,13 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       }
       seenCodesInFile.add(lowerCode);
 
-      if (!name && !userId) {
-        return {
-          code,
-          name: '—',
-          userId: '—',
-          phone,
-          altPhone,
-          upi,
-          city,
-          state,
-          address,
-          languages,
-          autoDm,
-          profileImg,
-          status: 'Invalid',
-          reason: 'Missing required Influencer Name and User ID'
-        };
-      }
-
-      const effectiveName = name || userId;
-      const effectiveUserId = userId || name;
-      const lowerUser = effectiveUserId.toLowerCase();
-
-      const existingRecord = existingCodeMap.get(lowerCode) || existingCodeMap.get(lowerUser);
+      const existingRecord = existingCodeMap.get(lowerCode);
 
       if (existingRecord) {
         return {
           code,
-          name: effectiveName,
-          userId: effectiveUserId,
+          name,
+          userId,
           phone: phone || (existingRecord.phone_number || null),
           altPhone: altPhone || (existingRecord.alternative_number || null),
           upi: upi || (existingRecord.upi_number || null),
@@ -368,8 +345,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
       return {
         code,
-        name: effectiveName,
-        userId: effectiveUserId,
+        name,
+        userId,
         phone,
         altPhone,
         upi,
@@ -961,8 +938,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                       {parsedRows.map((row, idx) => (
                         <tr key={idx} className="hover:bg-slate-900/40 transition-colors">
                           <td className="p-3 font-semibold text-purple-300">{row.code}</td>
-                          <td className="p-3 text-white font-sans">{row.name}</td>
-                          <td className="p-3 text-slate-300">@{row.userId}</td>
+                          <td className="p-3 text-white font-sans">{row.name || '—'}</td>
+                          <td className="p-3 text-slate-300">{row.userId ? `@${row.userId}` : '—'}</td>
                           <td className="p-3 text-slate-400">{row.phone || '—'}</td>
                           <td className="p-3 text-slate-300 font-sans">{row.languages || '—'}</td>
                           <td className="p-3 text-slate-300 font-sans">{row.state || '—'}</td>
