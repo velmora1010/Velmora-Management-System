@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore } from 'lucide-react';
+import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { AddCampaignInfluencer } from './AddCampaignInfluencer';
 import { CampaignInfluencerList } from './CampaignInfluencerList';
@@ -370,61 +370,54 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   return (
     <div className="animate-fade-in text-slate-200">
       {/* Dashboard Header Menu */}
-      <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-wrap items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={onBack}
-            className="px-3 py-1.5 bg-slate-900/80 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 shadow-sm cursor-pointer mr-1"
-            title="Back to Overview"
-          >
-            &larr; Back to Overview
-          </button>
+      <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
           <h2 className="text-xl font-bold text-slate-100">{campaign.campaign_name}</h2>
-          <span className="px-2 py-1 rounded text-xs font-semibold bg-green-500/20 text-green-400 capitalize border border-green-500/30">
+          <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-green-500/20 text-green-400 capitalize border border-green-500/30">
             {campaign.status}
           </span>
         </div>
-        <div className="flex flex-nowrap items-center gap-2 overflow-x-auto max-w-full pb-1 scrollbar-thin scrollbar-thumb-slate-700">
+        <div className="flex items-center gap-2 sm:gap-2.5 overflow-x-auto max-w-full pb-1 scrollbar-none">
           <button 
             type="button"
             onClick={(e) => { e.preventDefault(); handleViewChange('overview'); }}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'overview' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'overview' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
           >
-            <LayoutDashboard size={14} /> Campaign Details
+            <LayoutDashboard size={15} /> Campaign Details
           </button>
           <button 
             type="button"
             onClick={(e) => { e.preventDefault(); handleViewChange('influencer-list'); }}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'influencer-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'influencer-list' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
           >
-            <Users size={14} /> Campaign Influencer
+            <Users size={15} /> Campaign Influencer
           </button>
           <button 
             type="button"
             onClick={(e) => { e.preventDefault(); handleViewChange('dispatched-list'); }}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'dispatched-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'dispatched-list' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
           >
-            <Package size={14} /> Influencer Logistics
+            <Package size={15} /> Influencer Logistics
           </button>
           <button 
             type="button"
             onClick={(e) => { e.preventDefault(); handleViewChange('status-tracking'); }}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'status-tracking' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'status-tracking' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
           >
-            <Settings size={14} /> Status Tracking
+            <Settings size={15} /> Status Tracking
           </button>
           <button 
             type="button"
             onClick={(e) => { e.preventDefault(); handleViewChange('calendar'); }}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'calendar' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'calendar' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
           >
-            <Calendar size={14} /> Calendar
+            <Calendar size={15} /> Calendar
           </button>
           {campaign.status?.toLowerCase() === 'archived' ? (
             <button 
               onClick={handleRestoreCampaign}
               title="Restore Campaign"
-              className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-emerald-600/80 hover:bg-emerald-600 text-white animate-fade-in shrink-0 aspect-square h-[32px] w-[32px]"
+              className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-emerald-600/80 hover:bg-emerald-600 text-white animate-fade-in shrink-0 aspect-square h-[36px] w-[36px]"
             >
               <ArchiveRestore size={16} />
             </button>
@@ -432,9 +425,9 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             <button 
               onClick={handleArchiveCampaign}
               title="Archive Campaign"
-              className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-rose-600/80 hover:bg-rose-600 text-white animate-fade-in shrink-0 aspect-square h-[32px] w-[32px]"
+              className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-rose-600 hover:bg-rose-500 text-white animate-fade-in shrink-0 aspect-square h-[36px] w-[36px]"
             >
-              <Archive size={16} />
+              <Trash2 size={16} />
             </button>
           )}
         </div>
