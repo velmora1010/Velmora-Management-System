@@ -19,6 +19,7 @@ import { logActivity } from '../../services/activityService';
 import { calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from '../../modules/marketing/AddCampaignInfluencer';
 import { notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import toast from 'react-hot-toast';
+import { isActiveStatus } from '../../utils/marketingUtils';
 
 interface UploadPlatformDetailsModalProps {
   campaign: Campaign;
@@ -221,9 +222,11 @@ export const UploadPlatformDetailsModal: React.FC<UploadPlatformDetailsModalProp
 
           const influencerCodeMap = new Map<string, CampaignInfluencer>();
           existingInfluencers.forEach(inf => {
-            const codeVal = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
-            if (codeVal) {
-              influencerCodeMap.set(codeVal, inf);
+            if (isActiveStatus(inf.is_archived)) {
+              const codeVal = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
+              if (codeVal) {
+                influencerCodeMap.set(codeVal, inf);
+              }
             }
           });
 

@@ -17,6 +17,7 @@ import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import toast from 'react-hot-toast';
+import { isActiveStatus } from '../../utils/marketingUtils';
 
 interface BulkInfluencerImportModalProps {
   campaign: Campaign;
@@ -218,8 +219,10 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
   const processRowsWithMapping = (rows: Record<string, any>[], map: ColumnMapping) => {
     const existingCodeMap = new Map<string, CampaignInfluencer>();
     existingInfluencers.forEach(i => {
-      if (i.code) existingCodeMap.set(normalize(i.code).toLowerCase(), i);
-      if (i.name) existingCodeMap.set(normalize(i.name).toLowerCase(), i);
+      if (isActiveStatus(i.is_archived)) {
+        if (i.code) existingCodeMap.set(normalize(i.code).toLowerCase(), i);
+        if (i.name) existingCodeMap.set(normalize(i.name).toLowerCase(), i);
+      }
     });
 
     const seenCodesInFile = new Set<string>();

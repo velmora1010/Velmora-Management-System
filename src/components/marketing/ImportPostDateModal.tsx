@@ -16,6 +16,7 @@ import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import toast from 'react-hot-toast';
+import { isActiveStatus } from '../../utils/marketingUtils';
 
 interface ImportPostDateModalProps {
   campaign: Campaign;
@@ -165,9 +166,11 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
 
         const influencerCodeMap = new Map<string, CampaignInfluencer>();
         existingInfluencers.forEach(inf => {
-          const c = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
-          if (c) {
-            influencerCodeMap.set(c, inf);
+          if (isActiveStatus(inf.is_archived)) {
+            const c = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
+            if (c) {
+              influencerCodeMap.set(c, inf);
+            }
           }
         });
 

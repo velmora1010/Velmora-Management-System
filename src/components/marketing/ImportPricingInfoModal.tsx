@@ -17,6 +17,7 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import toast from 'react-hot-toast';
 import { parseProductsFromCombination } from '../../modules/marketing/AddCampaignInfluencer';
+import { isActiveStatus } from '../../utils/marketingUtils';
 
 interface ImportPricingInfoModalProps {
   campaign: Campaign;
@@ -168,9 +169,11 @@ export const ImportPricingInfoModal: React.FC<ImportPricingInfoModalProps> = ({
 
         const influencerCodeMap = new Map<string, CampaignInfluencer>();
         existingInfluencers.forEach(inf => {
-          const c = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
-          if (c) {
-            influencerCodeMap.set(c, inf);
+          if (isActiveStatus(inf.is_archived)) {
+            const c = (inf.code || (inf as any).influencer_code || '').trim().toUpperCase();
+            if (c) {
+              influencerCodeMap.set(c, inf);
+            }
           }
         });
 
