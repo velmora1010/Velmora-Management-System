@@ -154,7 +154,7 @@ export const InfluenceDatabase: React.FC<InfluenceDatabaseProps> = ({ onBack }) 
             <Plus size={16} /> Add Influencer
           </button>
           <button onClick={() => setView('list')} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors flex items-center gap-2">
-            <Users size={16} /> Influencer List
+            <Users size={16} /> Campaign Influencer
           </button>
         </div>
       </div>

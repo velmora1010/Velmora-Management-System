@@ -317,7 +317,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             onClick={(e) => { e.preventDefault(); handleViewChange('influencer-list'); }}
             className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'influencer-list' ? 'bg-purple-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
           >
-            <Users size={14} /> Influencer List
+            <Users size={14} /> Campaign Influencer
           </button>
           <button 
             type="button"

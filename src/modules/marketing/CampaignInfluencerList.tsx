@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2 } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -14,6 +14,8 @@ import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookVie
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
+import { CampaignInfluencerAnalytics } from './CampaignInfluencerAnalytics';
+import { CampaignInfluencerAnalyticsFilterDrawer, CampaignAnalyticsFilterState, initialAnalyticsFilterState } from '../../components/marketing/CampaignInfluencerAnalyticsFilterDrawer';
 
 const resolvePerformanceCode = (
   influencer: CampaignInfluencer,
@@ -640,6 +642,53 @@ City: ${influencer.city}`;
   );
 };
 
+export const getSingleVideoPrices = (influencer: CampaignInfluencer): number[] => {
+  const prices: number[] = [];
+  const p = influencer.pricing;
+  if (!p) return [];
+
+  // 1. Check videos array in product_pricing
+  if (Array.isArray(p.product_pricing?.videos) && p.product_pricing.videos.length > 0) {
+    p.product_pricing.videos.forEach((v: any) => {
+      const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
+      if (!isNaN(amt) && amt > 0) {
+        prices.push(amt);
+      }
+    });
+  }
+
+  // 2. Check legacy video1_price & video2_price & product_pricing map
+  if (prices.length === 0) {
+    if (p.video1_price) {
+      const v1 = Number(p.video1_price);
+      if (!isNaN(v1) && v1 > 0) prices.push(v1);
+    }
+    if (p.video2_price) {
+      const v2 = Number(p.video2_price);
+      if (!isNaN(v2) && v2 > 0) prices.push(v2);
+    }
+    if (p.product_pricing && typeof p.product_pricing === 'object') {
+      Object.entries(p.product_pricing).forEach(([key, val]: [string, any]) => {
+        if (key !== 'videos' && val && typeof val === 'object' && val.price) {
+          const amt = Number(val.price);
+          if (!isNaN(amt) && amt > 0) prices.push(amt);
+        }
+      }
+      );
+    }
+  }
+
+  // 3. Fallback: if no individual video breakdown exists, fallback to final_price / commercial_quote
+  if (prices.length === 0) {
+    const finalP = Number(p.final_price || (p as any)?.commercial_quote || 0);
+    if (!isNaN(finalP) && finalP > 0) {
+      prices.push(finalP);
+    }
+  }
+
+  return prices;
+};
+
 interface CampaignInfluencerListProps {
   campaign: Campaign;
   onBack: () => void;
@@ -750,6 +799,10 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     });
   };
 
+  const [mainViewMode, setMainViewMode] = useState<'list' | 'analytics'>('list');
+  const [analyticsFilterState, setAnalyticsFilterState] = useState<CampaignAnalyticsFilterState>(initialAnalyticsFilterState);
+  const [isAnalyticsFilterOpen, setIsAnalyticsFilterOpen] = useState(false);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'active' | 'archived'>('active');
   const [filterState, setFilterState] = useState<InfluencerFilterState>(initialFilterState);
@@ -772,52 +825,6 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     if (typeof val === 'string') return val.trim() === '';
     if (Array.isArray(val)) return val.length === 0;
     return false;
-  };
-
-  const getSingleVideoPrices = (influencer: CampaignInfluencer): number[] => {
-    const prices: number[] = [];
-    const p = influencer.pricing;
-    if (!p) return [];
-
-    // 1. Check videos array in product_pricing
-    if (Array.isArray(p.product_pricing?.videos) && p.product_pricing.videos.length > 0) {
-      p.product_pricing.videos.forEach((v: any) => {
-        const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
-        if (!isNaN(amt) && amt > 0) {
-          prices.push(amt);
-        }
-      });
-    }
-
-    // 2. Check legacy video1_price & video2_price & product_pricing map
-    if (prices.length === 0) {
-      if (p.video1_price) {
-        const v1 = Number(p.video1_price);
-        if (!isNaN(v1) && v1 > 0) prices.push(v1);
-      }
-      if (p.video2_price) {
-        const v2 = Number(p.video2_price);
-        if (!isNaN(v2) && v2 > 0) prices.push(v2);
-      }
-      if (p.product_pricing && typeof p.product_pricing === 'object') {
-        Object.entries(p.product_pricing).forEach(([key, val]: [string, any]) => {
-          if (key !== 'videos' && val && typeof val === 'object' && val.price) {
-            const amt = Number(val.price);
-            if (!isNaN(amt) && amt > 0) prices.push(amt);
-          }
-        });
-      }
-    }
-
-    // 3. Fallback: if no individual video breakdown exists, fallback to final_price / commercial_quote
-    if (prices.length === 0) {
-      const finalP = Number(p.final_price || (p as any)?.commercial_quote || 0);
-      if (!isNaN(finalP) && finalP > 0) {
-        prices.push(finalP);
-      }
-    }
-
-    return prices;
   };
 
   const matchesFilters = (influencer: CampaignInfluencer): boolean => {
@@ -1074,6 +1081,20 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     return count;
   }, [filterState]);
 
+  const analyticsActiveFilterCount = useMemo(() => {
+    let count = 0;
+    if (analyticsFilterState.searchTerm) count++;
+    if (analyticsFilterState.states.length > 0) count += analyticsFilterState.states.length;
+    if (analyticsFilterState.cities.length > 0) count += analyticsFilterState.cities.length;
+    if (analyticsFilterState.creatorCategories.length > 0) count += analyticsFilterState.creatorCategories.length;
+    if (analyticsFilterState.languages.length > 0) count += analyticsFilterState.languages.length;
+    if (analyticsFilterState.followerRange) count++;
+    if (analyticsFilterState.platformCombo) count++;
+    if (analyticsFilterState.priceRange) count++;
+    if (analyticsFilterState.products.length > 0) count += analyticsFilterState.products.length;
+    return count;
+  }, [analyticsFilterState]);
+
   const isFilterApplied = activeFilterCount > 0;
 
   const editingInfluencer = useMemo(() => {
@@ -1114,13 +1135,33 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   }, [influencers, searchTerm, filter, filterState]);
 
   return (
-    <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col h-[700px]">
+    <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col min-h-[700px]">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 gap-4">
-        <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-          <UserCheck size={20} className="text-purple-400" />
-          Influencer List: {campaign.campaign_name}
-        </h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+            <UserCheck size={20} className="text-purple-400" />
+            Campaign Influencer: {campaign.campaign_name}
+          </h3>
+
+          {/* View Mode Toggle Switcher */}
+          <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-700 shrink-0">
+            <button 
+              type="button"
+              onClick={() => setMainViewMode('list')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${mainViewMode === 'list' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <UserCheck size={13} /> List View
+            </button>
+            <button 
+              type="button"
+              onClick={() => setMainViewMode('analytics')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${mainViewMode === 'analytics' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <BarChart2 size={13} /> Analytics
+            </button>
+          </div>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button 
             onClick={refresh}
@@ -1169,7 +1210,20 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         </div>
       </div>
 
-      {/* Toolbar */}
+      {mainViewMode === 'analytics' ? (
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+          <CampaignInfluencerAnalytics 
+            campaign={campaign}
+            influencers={influencers}
+            filterState={analyticsFilterState}
+            onOpenFilter={() => setIsAnalyticsFilterOpen(true)}
+            activeFilterCount={analyticsActiveFilterCount}
+            onResetFilters={() => setAnalyticsFilterState(initialAnalyticsFilterState)}
+          />
+        </div>
+      ) : (
+        <>
+          {/* Toolbar */}
       <div className="p-4 border-b border-slate-700 flex flex-col sm:flex-row gap-4 items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-700">
@@ -1372,6 +1426,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
 
       {(activeEditInfluencer || editingInfluencerId) && (() => {
         const targetInfluencer = activeEditInfluencer || influencers.find(inf => String(inf.id) === String(editingInfluencerId));
@@ -1445,6 +1501,14 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           }}
         />
       )}
+
+      <CampaignInfluencerAnalyticsFilterDrawer
+        isOpen={isAnalyticsFilterOpen}
+        onClose={() => setIsAnalyticsFilterOpen(false)}
+        influencers={influencers}
+        filterState={analyticsFilterState}
+        onApplyFilter={(newState) => setAnalyticsFilterState(newState)}
+      />
     </div>
   );
 };
