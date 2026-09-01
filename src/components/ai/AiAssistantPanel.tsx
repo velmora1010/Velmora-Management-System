@@ -19,6 +19,17 @@ export const AiAssistantPanel: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [prompts, setPrompts] = useState<SuggestedPrompt[]>([]);
   const [hasRightDrawerOpen, setHasRightDrawerOpen] = useState(false);
+  const clampPos = (pos: { x: number; y: number }) => {
+    const btnW = 56;
+    const btnH = 56;
+    const pad = 16;
+    const maxX = Math.max(pad, window.innerWidth - btnW - pad);
+    const maxY = Math.max(pad, window.innerHeight - btnH - pad);
+    return {
+      x: Math.max(pad, Math.min(pos.x, maxX)),
+      y: Math.max(pad, Math.min(pos.y, maxY))
+    };
+  };
 
   // Floating Position State (x: left in px, y: top in px)
   const [position, setPosition] = useState<{ x: number; y: number } | null>(() => {
@@ -27,7 +38,7 @@ export const AiAssistantPanel: React.FC = () => {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
-          return parsed;
+          return clampPos(parsed);
         }
       }
     } catch (e) {}
@@ -39,18 +50,6 @@ export const AiAssistantPanel: React.FC = () => {
   const buttonStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const hasDraggedRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-
-  const clampPos = (pos: { x: number; y: number }) => {
-    const btnW = 56;
-    const btnH = 56;
-    const pad = 12;
-    const maxX = Math.max(pad, window.innerWidth - btnW - pad);
-    const maxY = Math.max(pad, window.innerHeight - btnH - pad);
-    return {
-      x: Math.max(pad, Math.min(pos.x, maxX)),
-      y: Math.max(pad, Math.min(pos.y, maxY))
-    };
-  };
 
   // Clamp position when window is resized
   useEffect(() => {
@@ -251,7 +250,7 @@ export const AiAssistantPanel: React.FC = () => {
         aria-label="AI Assistant"
         role="button"
         tabIndex={0}
-        className="fixed z-[9999] w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-gradient-to-tr from-violet-700 via-purple-600 to-indigo-500 text-white flex items-center justify-center cursor-grab active:cursor-grabbing select-none touch-none shadow-[0_0_20px_rgba(147,51,234,0.55)] hover:shadow-[0_0_30px_rgba(168,85,247,0.85)] hover:scale-110 active:scale-95 transition-all duration-300 group border border-purple-400/40 relative"
+        className="fixed z-[9999] w-14 h-14 w-[56px] h-[56px] min-w-[56px] min-h-[56px] rounded-full bg-gradient-to-tr from-violet-700 via-purple-600 to-indigo-500 text-white flex items-center justify-center cursor-grab active:cursor-grabbing select-none touch-none shadow-[0_0_20px_rgba(147,51,234,0.6)] hover:shadow-[0_0_30px_rgba(168,85,247,0.9)] hover:scale-110 active:scale-95 transition-all duration-300 group border border-purple-400/40 relative"
         title="Velmora AI Business Assistant (Click to open, drag to reposition)"
       >
         {/* Soft Animated Outer Glowing Pulse Ring */}
