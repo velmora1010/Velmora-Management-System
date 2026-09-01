@@ -6,7 +6,7 @@ import type { AiMessage, AiContext, SuggestedPrompt, AiActionProposal } from '..
 import { Sparkles, X, Send, Bot, User, Check, ExternalLink, ArrowRight, RefreshCw, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const AI_POS_KEY = 'velmora_ai_assistant_position_v1';
+const AI_POS_KEY = 'velmora_ai_assistant_position_v2';
 
 export const AiAssistantPanel: React.FC = () => {
   const { user } = useAuth();
@@ -19,6 +19,7 @@ export const AiAssistantPanel: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [prompts, setPrompts] = useState<SuggestedPrompt[]>([]);
   const [hasRightDrawerOpen, setHasRightDrawerOpen] = useState(false);
+
   const clampPos = (pos: { x: number; y: number }) => {
     const btnW = 56;
     const btnH = 56;
@@ -38,7 +39,10 @@ export const AiAssistantPanel: React.FC = () => {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
-          return clampPos(parsed);
+          const clamped = clampPos(parsed);
+          if (!isNaN(clamped.x) && !isNaN(clamped.y)) {
+            return clamped;
+          }
         }
       }
     } catch (e) {}
