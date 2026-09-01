@@ -109,6 +109,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       "Ladakh", "Lakshadweep", "Puducherry"
     ];
     const clean = input.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (clean === 'telanagana' || clean === 'telangana') return 'Telangana';
     const found = allStates.find(s => s.toLowerCase().replace(/[^a-z0-9]/g, '') === clean);
     return found || input.trim();
   };

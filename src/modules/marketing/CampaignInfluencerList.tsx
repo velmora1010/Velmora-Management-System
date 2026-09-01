@@ -13,7 +13,7 @@ import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, parseProductsFromCombination } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
-import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES } from '../../components/marketing/InfluencerFilterDrawer';
+import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
 
 const resolvePerformanceCode = (
   influencer: CampaignInfluencer,
@@ -786,8 +786,12 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     if (filterState.missingProfileImage && !isEmptyValue(influencer.profile_file_url)) return false;
 
     // 2. State Filter
-    if (filterState.state && (influencer.state || '').trim().toLowerCase() !== filterState.state.trim().toLowerCase()) {
-      return false;
+    if (filterState.state) {
+      const infStateNorm = normalizeStateName(influencer.state);
+      const filterStateNorm = normalizeStateName(filterState.state);
+      if (infStateNorm.toLowerCase() !== filterStateNorm.toLowerCase()) {
+        return false;
+      }
     }
 
     // 3. City Filter

@@ -2,6 +2,15 @@ import React from 'react';
 import { SlidersHorizontal, X, RotateCcw, Check } from 'lucide-react';
 import type { CampaignInfluencer } from '../../types';
 
+export const normalizeStateName = (stateStr?: string | null): string => {
+  if (!stateStr) return '';
+  const trimmed = stateStr.trim();
+  const clean = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (clean === 'telanagana' || clean === 'telangana') return 'Telangana';
+  if (clean === 'tamilnadu' || clean === 'tamil nadu') return 'Tamil Nadu';
+  return trimmed;
+};
+
 export interface InfluencerFilterState {
   missingPhone: boolean;
   missingAltPhone: boolean;
@@ -110,7 +119,10 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
   const availableStates = React.useMemo(() => {
     const states = new Set<string>();
     influencers.forEach(inf => {
-      if (inf.state && inf.state.trim()) states.add(inf.state.trim());
+      if (inf.state && inf.state.trim()) {
+        const norm = normalizeStateName(inf.state);
+        if (norm) states.add(norm);
+      }
     });
     return Array.from(states).sort();
   }, [influencers]);
@@ -119,7 +131,9 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
     const cities = new Set<string>();
     influencers.forEach(inf => {
       if (draft.state) {
-        if ((inf.state || '').trim().toLowerCase() === draft.state.trim().toLowerCase()) {
+        const infStateNorm = normalizeStateName(inf.state);
+        const draftStateNorm = normalizeStateName(draft.state);
+        if (infStateNorm.toLowerCase() === draftStateNorm.toLowerCase()) {
           if (inf.city && inf.city.trim()) cities.add(inf.city.trim());
         }
       } else {
