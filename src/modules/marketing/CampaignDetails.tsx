@@ -112,17 +112,29 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const videosLive = React.useMemo(() => {
     return activeInfluencers.reduce((sum, inf) => {
       const p = inf.pricing as any;
-      let v = Number(p?.total_videos);
-      if (isNaN(v) || v <= 0) {
-        if (Array.isArray(p?.video_pricing_list) && p.video_pricing_list.length > 0) {
-          v = p.video_pricing_list.length;
-        } else if (Array.isArray(inf.postDates) && inf.postDates.length > 0) {
-          v = inf.postDates.length;
-        } else if (Array.isArray(inf.products) && inf.products.length > 0) {
-          v = inf.products.length;
-        } else {
-          v = 1;
+      let v = 0;
+      if (p) {
+        if (typeof p.total_videos === 'number' && p.total_videos > 0) v = p.total_videos;
+        else if (typeof p.total_videos === 'string' && !isNaN(Number(p.total_videos)) && Number(p.total_videos) > 0) v = Number(p.total_videos);
+        else if (typeof p.totalVideos === 'number' && p.totalVideos > 0) v = p.totalVideos;
+        else if (typeof p.video_count === 'number' && p.video_count > 0) v = p.video_count;
+        else {
+          let sumVideoX = 0;
+          Object.keys(p).forEach(key => {
+            if (/^video\d+_count$/i.test(key) && typeof p[key] === 'number' && p[key] > 0) {
+              sumVideoX += p[key];
+            }
+          });
+          if (sumVideoX > 0) v = sumVideoX;
+          else if (Array.isArray(p.video_pricing_list) && p.video_pricing_list.length > 0) v = p.video_pricing_list.length;
+          else if (p.product_pricing && typeof p.product_pricing === 'object' && Object.keys(p.product_pricing).length > 0) v = Object.keys(p.product_pricing).length;
         }
+      }
+
+      if (v <= 0) {
+        if (Array.isArray(inf.postDates) && inf.postDates.length > 0) v = inf.postDates.length;
+        else if (Array.isArray(inf.products) && inf.products.length > 0) v = inf.products.length;
+        else v = 6;
       }
       return sum + v;
     }, 0);
@@ -362,9 +374,10 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         <div className="flex items-center gap-4">
           <button 
             onClick={onBack}
-            className="text-slate-400 hover:text-slate-200 transition-colors mr-2 text-sm"
+            className="px-3 py-1.5 bg-slate-900/80 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 shadow-sm cursor-pointer mr-1"
+            title="Back to Overview"
           >
-            &larr; Back
+            &larr; Back to Overview
           </button>
           <h2 className="text-xl font-bold text-slate-100">{campaign.campaign_name}</h2>
           <span className="px-2 py-1 rounded text-xs font-semibold bg-green-500/20 text-green-400 capitalize border border-green-500/30">
