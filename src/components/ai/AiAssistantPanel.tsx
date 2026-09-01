@@ -41,8 +41,8 @@ export const AiAssistantPanel: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const clampPos = (pos: { x: number; y: number }) => {
-    const btnW = 150;
-    const btnH = 50;
+    const btnW = 56;
+    const btnH = 56;
     const pad = 12;
     const maxX = Math.max(pad, window.innerWidth - btnW - pad);
     const maxY = Math.max(pad, window.innerHeight - btnH - pad);
@@ -242,17 +242,23 @@ export const AiAssistantPanel: React.FC = () => {
 
   return (
     <>
-      {/* Draggable Floating Trigger Button */}
+      {/* Draggable Floating Trigger Button - Compact Glowing Circle */}
       <div
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         style={posStyle}
-        className="fixed z-[9999] p-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-full shadow-2xl flex items-center gap-2 group cursor-grab active:cursor-grabbing select-none touch-none transition-shadow duration-200"
+        aria-label="AI Assistant"
+        role="button"
+        tabIndex={0}
+        className="fixed z-[9999] w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-gradient-to-tr from-violet-700 via-purple-600 to-indigo-500 text-white flex items-center justify-center cursor-grab active:cursor-grabbing select-none touch-none shadow-[0_0_20px_rgba(147,51,234,0.55)] hover:shadow-[0_0_30px_rgba(168,85,247,0.85)] hover:scale-110 active:scale-95 transition-all duration-300 group border border-purple-400/40 relative"
         title="Velmora AI Business Assistant (Click to open, drag to reposition)"
       >
-        <Sparkles size={22} className="animate-spin-slow group-hover:rotate-12 transition-transform shrink-0" />
-        <span className="text-xs font-bold pr-1 hidden sm:inline whitespace-nowrap">AI Assistant</span>
+        {/* Soft Animated Outer Glowing Pulse Ring */}
+        <span className="absolute inset-0 rounded-full bg-purple-500/30 animate-ping opacity-40 pointer-events-none" />
+        
+        {/* Centered Sparkles Icon */}
+        <Sparkles size={24} className="group-hover:rotate-12 transition-transform shrink-0 drop-shadow-md text-purple-100 relative z-10" />
       </div>
 
       {/* Slide-Out AI Chat Panel */}
