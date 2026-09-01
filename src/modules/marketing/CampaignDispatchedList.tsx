@@ -9,6 +9,22 @@ interface CampaignDispatchedListProps {
   onMoveToStatus: (record: any) => void;
 }
 
+const KNOWN_COURIERS = [
+  'ST Courier',
+  'India Post',
+  'Delhivery',
+  'DTDC',
+  'IThink Ekart',
+  'IThink Amazon',
+  'IThink Delhivery'
+];
+
+const COURIER_FILTER_OPTIONS = [
+  'all',
+  ...KNOWN_COURIERS,
+  'Other'
+];
+
 export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ campaign, onBack, onMoveToStatus }) => {
   const { dispatchRecords, isLoading, refresh } = useCampaignDispatch(campaign.id);
   const [searchTerm, setSearchTerm] = useState('');
@@ -29,7 +45,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ 
       let matchCourier = true;
       if (courierFilter !== 'all') {
         if (courierFilter === 'Other') {
-          matchCourier = record.courier_partner !== 'ST Courier' && record.courier_partner !== 'India Post';
+          matchCourier = !KNOWN_COURIERS.includes(record.courier_partner);
         } else {
           matchCourier = record.courier_partner === courierFilter;
         }
@@ -81,8 +97,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ 
           </button>
           
           {isFilterOpen && (
-            <div className="absolute right-0 top-full mt-1 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-10 overflow-hidden">
-              {['all', 'ST Courier', 'India Post', 'Other'].map(opt => (
+            <div className="absolute right-0 top-full mt-1 w-52 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-10 overflow-hidden max-h-64 overflow-y-auto custom-scrollbar">
+              {COURIER_FILTER_OPTIONS.map(opt => (
                 <button
                   key={opt}
                   onClick={() => {
