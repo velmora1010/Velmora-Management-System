@@ -30,6 +30,7 @@ export interface InfluencerFilterState {
   languages: string[];
   platformCombo: string;
   product: string;
+  priceRange: string;
   minPrice: string;
   maxPrice: string;
 }
@@ -53,6 +54,7 @@ export const initialFilterState: InfluencerFilterState = {
   languages: [],
   platformCombo: 'all',
   product: '',
+  priceRange: '',
   minPrice: '',
   maxPrice: ''
 };
@@ -66,6 +68,20 @@ export const CREATOR_CATEGORIES = [
   'C3L2',
   'C4L1',
   'C4L2'
+];
+
+export const PRICE_RANGES = [
+  { id: 'below_1000', label: 'Below 1000' },
+  { id: '1000_2000', label: '1000 - 2000' },
+  { id: '2000_3000', label: '2000 - 3000' },
+  { id: '3000_4000', label: '3000 - 4000' },
+  { id: '4000_5000', label: '4000 - 5000' },
+  { id: '5000_6000', label: '5000 - 6000' },
+  { id: '6000_7000', label: '6000 - 7000' },
+  { id: '7000_8000', label: '7000 - 8000' },
+  { id: '8000_9000', label: '8000 - 9000' },
+  { id: '9000_10000', label: '9000 - 10000' },
+  { id: 'above_10000', label: 'Above 10000' }
 ];
 
 export const FOLLOWER_RANGES = [
@@ -397,44 +413,87 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
 
           <hr className="border-slate-800" />
 
-          {/* Product & Price */}
+          {/* PRODUCT SECTION */}
           <div className="space-y-3">
             <div className="text-xs font-bold uppercase tracking-wider text-purple-400">
-              Product & Pricing
+              Product
             </div>
-            <div className="grid grid-cols-1 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Product</label>
-                <select
-                  value={draft.product}
-                  onChange={(e) => setDraft(prev => ({ ...prev, product: e.target.value }))}
-                  className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
-                >
-                  <option value="">All Products</option>
-                  {availableProducts.map(p => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Select Product</label>
+              <select
+                value={draft.product}
+                onChange={(e) => setDraft(prev => ({ ...prev, product: e.target.value }))}
+                className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+              >
+                <option value="">All Products</option>
+                {availableProducts.map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+          </div>
 
+          <hr className="border-slate-800" />
+
+          {/* PRICING SECTION */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400">
+              Pricing
+            </div>
+            
+            {/* Quick Price Ranges */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, priceRange: '' }))}
+                className={`p-2 text-xs rounded-lg border text-center transition-colors ${
+                  !draft.priceRange 
+                    ? 'bg-purple-600/20 border-purple-500 text-purple-300 font-semibold' 
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                All Prices
+              </button>
+              {PRICE_RANGES.map(range => {
+                const active = draft.priceRange === range.id;
+                return (
+                  <button
+                    type="button"
+                    key={range.id}
+                    onClick={() => setDraft(prev => ({ ...prev, priceRange: active ? '' : range.id }))}
+                    className={`p-2 text-xs rounded-lg border text-center transition-colors ${
+                      active 
+                        ? 'bg-purple-600/20 border-purple-500 text-purple-300 font-semibold' 
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    {range.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom Price Range Inputs */}
+            <div className="pt-2">
+              <span className="block text-[11px] font-semibold text-slate-400 mb-1.5 uppercase">Custom Price Range</span>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Min Price (₹)</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Min Price (₹)</label>
                   <input
                     type="number"
                     placeholder="Min ₹"
                     value={draft.minPrice}
-                    onChange={(e) => setDraft(prev => ({ ...prev, minPrice: e.target.value }))}
+                    onChange={(e) => setDraft(prev => ({ ...prev, minPrice: e.target.value, priceRange: '' }))}
                     className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Max Price (₹)</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Max Price (₹)</label>
                   <input
                     type="number"
                     placeholder="Max ₹"
                     value={draft.maxPrice}
-                    onChange={(e) => setDraft(prev => ({ ...prev, maxPrice: e.target.value }))}
+                    onChange={(e) => setDraft(prev => ({ ...prev, maxPrice: e.target.value, priceRange: '' }))}
                     className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                   />
                 </div>

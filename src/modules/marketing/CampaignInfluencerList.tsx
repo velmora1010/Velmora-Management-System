@@ -913,12 +913,50 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
       }
     }
 
-    // 9. Price Filter (Min & Max Price)
+    // 9. Price Filter (Predefined Range & Min/Max Price)
     const priceVal = Number(
       influencer.pricing?.final_price || 
       (influencer.pricing as any)?.commercial_quote || 
       0
     );
+
+    if (filterState.priceRange) {
+      switch (filterState.priceRange) {
+        case 'below_1000':
+          if (priceVal >= 1000) return false;
+          break;
+        case '1000_2000':
+          if (priceVal < 1000 || priceVal > 2000) return false;
+          break;
+        case '2000_3000':
+          if (priceVal < 2000 || priceVal > 3000) return false;
+          break;
+        case '3000_4000':
+          if (priceVal < 3000 || priceVal > 4000) return false;
+          break;
+        case '4000_5000':
+          if (priceVal < 4000 || priceVal > 5000) return false;
+          break;
+        case '5000_6000':
+          if (priceVal < 5000 || priceVal > 6000) return false;
+          break;
+        case '6000_7000':
+          if (priceVal < 6000 || priceVal > 7000) return false;
+          break;
+        case '7000_8000':
+          if (priceVal < 7000 || priceVal > 8000) return false;
+          break;
+        case '8000_9000':
+          if (priceVal < 8000 || priceVal > 9000) return false;
+          break;
+        case '9000_10000':
+          if (priceVal < 9000 || priceVal > 10000) return false;
+          break;
+        case 'above_10000':
+          if (priceVal <= 10000) return false;
+          break;
+      }
+    }
 
     if (filterState.minPrice) {
       const minP = Number(filterState.minPrice);
@@ -957,6 +995,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     if (filterState.languages.length > 0) count += filterState.languages.length;
     if (filterState.platformCombo && filterState.platformCombo !== 'all') count++;
     if (filterState.product) count++;
+    if (filterState.priceRange) count++;
     if (filterState.minPrice || filterState.maxPrice) count++;
     return count;
   }, [filterState]);
