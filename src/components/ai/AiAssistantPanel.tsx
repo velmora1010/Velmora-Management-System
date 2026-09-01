@@ -6,6 +6,8 @@ import type { AiMessage, AiContext, SuggestedPrompt, AiActionProposal } from '..
 import { Sparkles, X, Send, Bot, User, Check, ExternalLink, ArrowRight, RefreshCw, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+const AI_POS_KEY = 'velmora_ai_assistant_position_v1';
+
 export const AiAssistantPanel: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
@@ -18,9 +20,105 @@ export const AiAssistantPanel: React.FC = () => {
   const [prompts, setPrompts] = useState<SuggestedPrompt[]>([]);
   const [hasRightDrawerOpen, setHasRightDrawerOpen] = useState(false);
 
+  // Floating Position State (x: left in px, y: top in px)
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(() => {
+    try {
+      const saved = localStorage.getItem(AI_POS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const buttonStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const hasDraggedRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Monitor DOM for open right-side drawers to reposition AI Assistant launcher
+  const clampPos = (pos: { x: number; y: number }) => {
+    const btnW = 150;
+    const btnH = 50;
+    const pad = 12;
+    const maxX = Math.max(pad, window.innerWidth - btnW - pad);
+    const maxY = Math.max(pad, window.innerHeight - btnH - pad);
+    return {
+      x: Math.max(pad, Math.min(pos.x, maxX)),
+      y: Math.max(pad, Math.min(pos.y, maxY))
+    };
+  };
+
+  // Clamp position when window is resized
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition(prev => {
+        if (!prev) return null;
+        return clampPos(prev);
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    isDraggingRef.current = true;
+    hasDraggedRef.current = false;
+    dragStartRef.current = { x: e.clientX, y: e.clientY };
+
+    const currentPos = position || {
+      x: Math.max(16, window.innerWidth - 170),
+      y: Math.max(16, window.innerHeight - 80)
+    };
+    buttonStartRef.current = currentPos;
+
+    if (e.currentTarget) {
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } catch (err) {}
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDraggingRef.current) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+
+    if (Math.hypot(dx, dy) > 5) {
+      hasDraggedRef.current = true;
+    }
+
+    const nextPos = clampPos({
+      x: buttonStartRef.current.x + dx,
+      y: buttonStartRef.current.y + dy
+    });
+
+    setPosition(nextPos);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (err) {}
+
+    if (position) {
+      try {
+        localStorage.setItem(AI_POS_KEY, JSON.stringify(position));
+      } catch (err) {}
+    }
+
+    if (!hasDraggedRef.current) {
+      setIsOpen(prev => !prev);
+    }
+  };
+
+  // Monitor DOM for open right-side drawers
   useEffect(() => {
     const checkRightDrawer = () => {
       const drawerEl = document.querySelector('[data-right-drawer="true"]') || document.querySelector('.fixed.inset-y-0.right-0');
@@ -111,25 +209,58 @@ export const AiAssistantPanel: React.FC = () => {
     }
   };
 
+  const posStyle: React.CSSProperties = position 
+    ? { left: `${position.x}px`, top: `${position.y}px` } 
+    : (hasRightDrawerOpen ? { bottom: '24px', left: '24px' } : { bottom: '24px', right: '24px' });
+
+  const getPanelStyle = (): React.CSSProperties => {
+    const panelW = Math.min(384, window.innerWidth - 32);
+    const panelH = Math.min(560, window.innerHeight * 0.8);
+
+    if (!position) {
+      return hasRightDrawerOpen 
+        ? { bottom: '88px', left: '24px' } 
+        : { bottom: '88px', right: '24px' };
+    }
+
+    let left = position.x;
+    if (left + panelW > window.innerWidth - 16) {
+      left = window.innerWidth - panelW - 16;
+    }
+    if (left < 16) left = 16;
+
+    let top = position.y - panelH - 12;
+    if (top < 16) {
+      top = position.y + 58;
+    }
+    if (top + panelH > window.innerHeight - 16) {
+      top = window.innerHeight - panelH - 16;
+    }
+
+    return { left: `${left}px`, top: `${top}px` };
+  };
+
   return (
     <>
-      {/* Floating Trigger Button */}
-      <button
-        onClick={() => setIsOpen(prev => !prev)}
-        className={`fixed bottom-6 z-50 p-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-full shadow-2xl transition-all duration-300 flex items-center gap-2 group hover:scale-105 ${
-          hasRightDrawerOpen ? 'left-6 right-auto' : 'right-6'
-        }`}
-        title="Velmora AI Business Assistant"
+      {/* Draggable Floating Trigger Button */}
+      <div
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        style={posStyle}
+        className="fixed z-[9999] p-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-full shadow-2xl flex items-center gap-2 group cursor-grab active:cursor-grabbing select-none touch-none transition-shadow duration-200"
+        title="Velmora AI Business Assistant (Click to open, drag to reposition)"
       >
-        <Sparkles size={22} className="animate-spin-slow group-hover:rotate-12 transition-transform" />
-        <span className="text-xs font-bold pr-1 hidden sm:inline">AI Assistant</span>
-      </button>
+        <Sparkles size={22} className="animate-spin-slow group-hover:rotate-12 transition-transform shrink-0" />
+        <span className="text-xs font-bold pr-1 hidden sm:inline whitespace-nowrap">AI Assistant</span>
+      </div>
 
       {/* Slide-Out AI Chat Panel */}
       {isOpen && (
-        <div className={`fixed bottom-20 z-50 w-96 max-w-[calc(100vw-2rem)] bg-card border border-border rounded-2xl shadow-2xl flex flex-col h-[560px] max-h-[80vh] overflow-hidden animate-in slide-in-from-bottom-5 duration-300 ${
-          hasRightDrawerOpen ? 'left-4 sm:left-6 right-auto' : 'right-4 sm:right-6'
-        }`}>
+        <div 
+          style={getPanelStyle()}
+          className="fixed z-[9999] w-96 max-w-[calc(100vw-2rem)] bg-card border border-border rounded-2xl shadow-2xl flex flex-col h-[560px] max-h-[80vh] overflow-hidden animate-in slide-in-from-bottom-5 duration-300"
+        >
           
           {/* Panel Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-slate-900/80 backdrop-blur-md">

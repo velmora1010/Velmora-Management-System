@@ -98,14 +98,43 @@ City: ${influencer.city}`;
 
   return (
      <div className="bg-slate-900 border border-slate-700 p-4 rounded-xl hover:border-slate-600 transition-colors relative mb-6">
-        {/* Header Actions - Desktop */}
-        <div className="absolute top-4 right-4 hidden md:flex gap-2">
+        {/* Header Layout (Flex Container preventing absolute overlap) */}
+        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800/60 min-w-0">
+          {/* Left Profile Section */}
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="w-11 h-11 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-base border-2 border-purple-500/30 shrink-0 shadow-sm">
+              {influencer.profile_file_url ? (
+                <img src={influencer.profile_file_url} alt={influencer.name} className="w-full h-full object-cover" />
+              ) : (
+                (influencer.influencer_name || influencer.name || 'A').charAt(0).toUpperCase()
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+              <h3 
+                className="font-bold text-slate-100 text-sm sm:text-base truncate max-w-[150px] sm:max-w-[200px] md:max-w-[240px] hover:text-purple-300 transition-colors"
+                title={`@${influencer.name || influencer.influencer_name}`}
+              >
+                @{influencer.name || influencer.influencer_name}
+              </h3>
+              {influencer.code && (
+                <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
+                  {influencer.code}
+                </span>
+              )}
+              {!archived && (
+                <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0 inline-block ml-0.5" title="Active"></span>
+              )}
+            </div>
+          </div>
+
+          {/* Right Header Actions - Desktop (≥640px) */}
+          <div className="hidden sm:flex items-center gap-1.5 shrink-0 ml-auto">
             {onDispatch && (
               influencer.dispatchDetails ? (
                 <button 
                   type="button"
                   disabled
-                  className="px-4 py-1.5 text-[13px] rounded-md pointer-events-none"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-md pointer-events-none shrink-0"
                   style={{ backgroundColor: 'rgba(40, 167, 69, 0.1)', color: '#28a745', border: '1px solid rgba(40, 167, 69, 0.3)' }}
                 >
                   Dispatched
@@ -114,7 +143,7 @@ City: ${influencer.city}`;
                 <button 
                   type="button"
                   onClick={() => onDispatch(influencer)} 
-                  className="px-4 py-1.5 text-[13px] rounded-md bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+                  className="px-3.5 py-1.5 text-xs font-semibold rounded-md bg-purple-600 hover:bg-purple-500 text-white transition-colors shrink-0 shadow-sm cursor-pointer"
                 >
                   Dispatch
                 </button>
@@ -123,39 +152,39 @@ City: ${influencer.city}`;
             <button 
               type="button"
               onClick={() => onEdit(influencer)}
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700 shrink-0 cursor-pointer"
               title="Edit Influencer"
             >
-              <Edit size={16} />
+              <Edit size={15} />
             </button>
             <button 
               type="button"
               onClick={handleCopy}
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700 shrink-0 cursor-pointer"
               title="Copy details"
             >
-              <Copy size={16} />
+              <Copy size={15} />
             </button>
             <button 
               type="button"
               onClick={() => onToggleArchive(influencer.id, !isArchived(influencer.is_archived))}
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700 shrink-0 cursor-pointer"
               title={isArchived(influencer.is_archived) ? "Unarchive Influencer" : "Archive Influencer"}
             >
-              <Archive size={16} />
+              <Archive size={15} />
             </button>
             <button 
               type="button"
               onClick={() => onDelete(influencer.id, influencer.influencer_name || influencer.name)}
-              className="p-1.5 bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-400 rounded-lg transition-colors border border-slate-700 hover:border-red-800/40"
+              className="p-1.5 bg-slate-800 hover:bg-red-950/40 text-slate-300 hover:text-red-400 rounded-lg transition-colors border border-slate-700 hover:border-red-800/40 shrink-0 cursor-pointer"
               title="Delete Influencer"
             >
-              <Trash2 size={16} />
+              <Trash2 size={15} />
             </button>
-        </div>
+          </div>
 
-        {/* Header Actions - Mobile (<768px) */}
-        <div className="absolute top-2 right-2 md:hidden">
+          {/* Right Header Actions - Mobile (<640px) */}
+          <div className="sm:hidden shrink-0 ml-auto">
             <InfluencerActionMenu
               isDispatched={!!influencer.dispatchDetails}
               isArchived={isArchived(influencer.is_archived)}
@@ -165,29 +194,6 @@ City: ${influencer.city}`;
               onToggleArchive={() => onToggleArchive(influencer.id, !isArchived(influencer.is_archived))}
               onDelete={() => onDelete(influencer.id, influencer.influencer_name || influencer.name || '')}
             />
-        </div>
-
-        {/* Profile Info Header */}
-        <div className="flex items-center mb-4">
-          <div className="w-12 h-12 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-lg border-2 border-purple-500/30">
-            {influencer.profile_file_url ? (
-              <img src={influencer.profile_file_url} alt={influencer.name} className="w-full h-full object-cover" />
-            ) : (
-              (influencer.influencer_name || influencer.name || 'A').charAt(0).toUpperCase()
-            )}
-          </div>
-          <div className="ml-3">
-            <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-white text-base">@{influencer.name || influencer.influencer_name}</h3>
-              {influencer.code && (
-                <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded">
-                  {influencer.code}
-                </span>
-              )}
-              {!archived && (
-                <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0 inline-block ml-1" title="Active"></span>
-              )}
-            </div>
           </div>
         </div>
 
