@@ -112,7 +112,18 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const videosLive = React.useMemo(() => {
     return activeInfluencers.reduce((sum, inf) => {
       const p = inf.pricing as any;
-      const v = Number(p?.total_videos) || Number(p?.video_count) || 0;
+      let v = Number(p?.total_videos);
+      if (isNaN(v) || v <= 0) {
+        if (Array.isArray(p?.video_pricing_list) && p.video_pricing_list.length > 0) {
+          v = p.video_pricing_list.length;
+        } else if (Array.isArray(inf.postDates) && inf.postDates.length > 0) {
+          v = inf.postDates.length;
+        } else if (Array.isArray(inf.products) && inf.products.length > 0) {
+          v = inf.products.length;
+        } else {
+          v = 1;
+        }
+      }
       return sum + v;
     }, 0);
   }, [activeInfluencers]);

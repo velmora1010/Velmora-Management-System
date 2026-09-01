@@ -20,7 +20,7 @@ import { normalizeStateName } from '../../components/marketing/InfluencerFilterD
 import { formatDisplayProductName, parseProductsFromCombination } from './AddCampaignInfluencer';
 import type { CampaignAnalyticsFilterState } from '../../components/marketing/CampaignInfluencerAnalyticsFilterDrawer';
 import { getSingleVideoPrices } from './CampaignInfluencerList';
-import { isArchived } from '../../utils/marketingUtils';
+import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
 
 interface CampaignInfluencerAnalyticsProps {
   campaign: Campaign;
@@ -63,8 +63,8 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
   // 1. In-Memory Filter Evaluation (AND Logic)
   const filteredInfluencers = useMemo(() => {
     return influencers.filter(inf => {
-      // Exclude archived influencers
-      if (isArchived(inf.is_archived)) return false;
+      // Exclude non-active influencers
+      if (!isActiveStatus(inf.is_archived)) return false;
 
       // Search term
       if (filterState.searchTerm.trim()) {

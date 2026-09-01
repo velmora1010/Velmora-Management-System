@@ -1131,6 +1131,34 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
             <UserCheck size={20} className="text-purple-400" />
             Campaign Influencer: {campaign.campaign_name}
           </h3>
+
+          {/* View Mode Toggle Switcher */}
+          <div className="inline-flex items-center p-1 bg-slate-950/80 rounded-xl border border-slate-800 shadow-inner backdrop-blur-md shrink-0">
+            <button 
+              type="button"
+              onClick={() => setMainViewMode('list')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 outline-none focus:outline-none border-0 cursor-pointer ${
+                mainViewMode === 'list' 
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-950/50 font-bold' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+              }`}
+            >
+              <UserCheck size={14} className={mainViewMode === 'list' ? 'text-purple-200' : 'text-slate-500'} />
+              <span>List View</span>
+            </button>
+            <button 
+              type="button"
+              onClick={() => setMainViewMode('analytics')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 outline-none focus:outline-none border-0 cursor-pointer ${
+                mainViewMode === 'analytics' 
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-950/50 font-bold' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+              }`}
+            >
+              <BarChart2 size={14} className={mainViewMode === 'analytics' ? 'text-purple-200' : 'text-slate-500'} />
+              <span>Analytics</span>
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button 
@@ -1180,6 +1208,20 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         </div>
       </div>
 
+      {mainViewMode === 'analytics' ? (
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+          <CampaignInfluencerAnalytics 
+            campaign={campaign}
+            influencers={influencers.filter(inf => isActiveStatus(inf.is_archived))}
+            filterState={analyticsFilterState}
+            onOpenFilter={() => setIsAnalyticsFilterOpen(true)}
+            activeFilterCount={analyticsActiveFilterCount}
+            onResetFilters={() => setAnalyticsFilterState(initialAnalyticsFilterState)}
+          />
+        </div>
+      ) : (
+        <>
+          {/* Toolbar */}
       <div className="p-4 border-b border-slate-700 flex flex-col sm:flex-row gap-4 items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-700">
@@ -1390,6 +1432,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
 
       {(activeEditInfluencer || editingInfluencerId) && (() => {
         const targetInfluencer = activeEditInfluencer || influencers.find(inf => String(inf.id) === String(editingInfluencerId));
