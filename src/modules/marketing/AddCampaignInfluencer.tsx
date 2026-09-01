@@ -8,18 +8,42 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
 
+export const formatDisplayProductName = (name?: string | null): string => {
+  if (!name) return '';
+  let str = String(name).trim();
+  if (str === 'Comfort' || str === 'DIY Comfort') return 'DIY Fabric Conditioner';
+  if (str === 'Bamboo Towel') return 'Bamboo Kitchen Towel';
+  if (str === 'Bike Wash') return 'Bike Shampoo';
+  if (str === 'Car Wash') return 'Car Shampoo';
+  if (str === 'BBC') return 'BBC Cleaner';
+  if (str === 'Sponge') return 'Magic Sponge';
+  return str;
+};
+
+export const formatDisplayCombination = (comb?: string | null): string => {
+  if (!comb) return '';
+  let str = String(comb);
+  str = str.replace(/\bComfort\b/g, 'Fabric Conditioner');
+  str = str.replace(/\bBamboo Towel\b/g, 'Bamboo Kitchen Towel');
+  str = str.replace(/\bBike Wash\b/g, 'Bike Shampoo');
+  str = str.replace(/\bCar Wash\b/g, 'Car Shampoo');
+  str = str.replace(/\bBBC\b/g, 'BBC Cleaner');
+  str = str.replace(/\bSponge\b/g, 'Magic Sponge');
+  return str;
+};
+
 export const PRODUCT_LIST = [
   'DIY Dishwash Liquid',
   'DIY Fabric Conditioner',
   'DIY Detergent Liquid',
   'Magic Sponge',
   'Kitchen Cleaner',
-  'Car Wash',
-  'Bike Wash',
-  'BBC',
+  'Car Shampoo',
+  'Bike Shampoo',
+  'BBC Cleaner',
   'Hand Wash',
   'Glass Cleaner',
-  'Bamboo Towel',
+  'Bamboo Kitchen Towel',
   'Floor Cleaner'
 ];
 
@@ -37,15 +61,21 @@ export interface VideoPricingDetail {
 export const SHORT_PRODUCT_MAP: Record<string, string> = {
   'Detergent': 'DIY Detergent Liquid',
   'Dishwash': 'DIY Dishwash Liquid',
+  'Fabric Conditioner': 'DIY Fabric Conditioner',
   'Comfort': 'DIY Fabric Conditioner',
+  'Magic Sponge': 'Magic Sponge',
   'Sponge': 'Magic Sponge',
   'Kitchen Cleaner': 'Kitchen Cleaner',
-  'Car Wash': 'Car Wash',
-  'Bike Wash': 'Bike Wash',
-  'BBC': 'BBC',
+  'Car Shampoo': 'Car Shampoo',
+  'Car Wash': 'Car Shampoo',
+  'Bike Shampoo': 'Bike Shampoo',
+  'Bike Wash': 'Bike Shampoo',
+  'BBC Cleaner': 'BBC Cleaner',
+  'BBC': 'BBC Cleaner',
   'Hand Wash': 'Hand Wash',
   'Glass Cleaner': 'Glass Cleaner',
-  'Bamboo Towel': 'Bamboo Towel',
+  'Bamboo Kitchen Towel': 'Bamboo Kitchen Towel',
+  'Bamboo Towel': 'Bamboo Kitchen Towel',
   'Floor Cleaner': 'Floor Cleaner'
 };
 
@@ -53,17 +83,36 @@ export const COMBINATION_PRODUCTS_MAP: Record<string, string[]> = {
   'Detergent': ['DIY Detergent Liquid'],
   'Detergent + Dishwash': ['DIY Detergent Liquid', 'DIY Dishwash Liquid'],
   'Detergent & Dishwash': ['DIY Detergent Liquid', 'DIY Dishwash Liquid'],
+
+  'Detergent + Fabric Conditioner': ['DIY Detergent Liquid', 'DIY Fabric Conditioner'],
   'Detergent + Comfort': ['DIY Detergent Liquid', 'DIY Fabric Conditioner'],
+  'Detergent & Fabric Conditioner': ['DIY Detergent Liquid', 'DIY Fabric Conditioner'],
   'Detergent & Comfort': ['DIY Detergent Liquid', 'DIY Fabric Conditioner'],
+
+  'Dishwash + Detergent + Fabric Conditioner': ['DIY Dishwash Liquid', 'DIY Detergent Liquid', 'DIY Fabric Conditioner'],
   'Dishwash + Detergent + Comfort': ['DIY Dishwash Liquid', 'DIY Detergent Liquid', 'DIY Fabric Conditioner'],
+  'Dishwash, Detergent & Fabric Conditioner': ['DIY Dishwash Liquid', 'DIY Detergent Liquid', 'DIY Fabric Conditioner'],
   'Dishwash, Detergent & Comfort': ['DIY Dishwash Liquid', 'DIY Detergent Liquid', 'DIY Fabric Conditioner'],
-  'Kitchen Cleaner + Bamboo Towel': ['Kitchen Cleaner', 'Bamboo Towel'],
-  'Kitchen Cleaner & Bamboo Towel': ['Kitchen Cleaner', 'Bamboo Towel'],
-  'Bamboo Towel': ['Bamboo Towel'],
+
+  'Kitchen Cleaner + Bamboo Kitchen Towel': ['Kitchen Cleaner', 'Bamboo Kitchen Towel'],
+  'Kitchen Cleaner + Bamboo Towel': ['Kitchen Cleaner', 'Bamboo Kitchen Towel'],
+  'Kitchen Cleaner & Bamboo Kitchen Towel': ['Kitchen Cleaner', 'Bamboo Kitchen Towel'],
+  'Kitchen Cleaner & Bamboo Towel': ['Kitchen Cleaner', 'Bamboo Kitchen Towel'],
+
+  'Kitchen Cleaner + Dishwash + Bamboo Kitchen Towel': ['Kitchen Cleaner', 'DIY Dishwash Liquid', 'Bamboo Kitchen Towel'],
+  'Kitchen Cleaner + Dishwash + Bamboo Towel': ['Kitchen Cleaner', 'DIY Dishwash Liquid', 'Bamboo Kitchen Towel'],
+
+  'Bamboo Kitchen Towel': ['Bamboo Kitchen Towel'],
+  'Bamboo Towel': ['Bamboo Kitchen Towel'],
+  'Magic Sponge': ['Magic Sponge'],
   'Sponge': ['Magic Sponge'],
-  'Bike Wash': ['Bike Wash'],
-  'Car Wash': ['Car Wash'],
-  'BBC': ['BBC'],
+  'Bike Shampoo': ['Bike Shampoo'],
+  'Bike Wash': ['Bike Shampoo'],
+  'Car Shampoo': ['Car Shampoo'],
+  'Car Wash': ['Car Shampoo'],
+  'BBC Cleaner': ['BBC Cleaner'],
+  'BBC': ['BBC Cleaner'],
+
   'Hand Wash + Floor Cleaner': ['Hand Wash', 'Floor Cleaner'],
   'Hand Wash & Floor Cleaner': ['Hand Wash', 'Floor Cleaner'],
   'Glass Cleaner': ['Glass Cleaner'],
@@ -74,8 +123,13 @@ export const COMBINATION_PRODUCTS_MAP: Record<string, string[]> = {
 export const parseProductsFromCombination = (combStr: string): string[] => {
   if (!combStr || combStr === '5-6 Products') return [];
   
+  const normComb = formatDisplayCombination(combStr);
+
   if (COMBINATION_PRODUCTS_MAP[combStr] && COMBINATION_PRODUCTS_MAP[combStr].length > 0) {
-    return COMBINATION_PRODUCTS_MAP[combStr];
+    return COMBINATION_PRODUCTS_MAP[combStr].map(p => formatDisplayProductName(p));
+  }
+  if (COMBINATION_PRODUCTS_MAP[normComb] && COMBINATION_PRODUCTS_MAP[normComb].length > 0) {
+    return COMBINATION_PRODUCTS_MAP[normComb].map(p => formatDisplayProductName(p));
   }
 
   const parts = combStr.split(/[\+&,]|(?:\s+and\s+)/i).map(s => s.trim()).filter(Boolean);
@@ -95,25 +149,29 @@ export const parseProductsFromCombination = (combStr: string): string[] => {
         }
       }
     }
+    if (!matchedFullName) {
+      matchedFullName = formatDisplayProductName(part);
+    }
     if (matchedFullName && !result.includes(matchedFullName)) {
-      result.push(matchedFullName);
+      result.push(formatDisplayProductName(matchedFullName));
     }
   });
 
-  return result.length > 0 ? result : [combStr];
+  return result.length > 0 ? result : [formatDisplayCombination(combStr)];
 };
 
 export const COMBINATIONS = [
   'Detergent',
   'Detergent + Dishwash',
-  'Detergent + Comfort',
-  'Dishwash + Detergent + Comfort',
-  'Kitchen Cleaner + Bamboo Towel',
-  'Bamboo Towel',
-  'Sponge',
-  'Bike Wash',
-  'Car Wash',
-  'BBC',
+  'Detergent + Fabric Conditioner',
+  'Dishwash + Detergent + Fabric Conditioner',
+  'Kitchen Cleaner + Bamboo Kitchen Towel',
+  'Kitchen Cleaner + Dishwash + Bamboo Kitchen Towel',
+  'Bamboo Kitchen Towel',
+  'Magic Sponge',
+  'Bike Shampoo',
+  'Car Shampoo',
+  'BBC Cleaner',
   'Hand Wash + Floor Cleaner',
   'Glass Cleaner',
   'Kitchen Cleaner',

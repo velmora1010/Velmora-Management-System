@@ -10,7 +10,7 @@ import { ImportPostDateModal } from '../../components/marketing/ImportPostDateMo
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
-import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, parseProductsFromCombination } from './AddCampaignInfluencer';
+import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
@@ -432,7 +432,8 @@ City: ${influencer.city}`;
                    <div className="grid grid-cols-2 gap-4 bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
                       {Array.isArray(influencer.pricing.product_pricing?.videos) ? (
                         influencer.pricing.product_pricing.videos.map((v: any, idx: number) => {
-                          const comb = (v && typeof v === 'object') ? v.combination : '';
+                          const rawComb = (v && typeof v === 'object') ? v.combination : '';
+                          const comb = formatDisplayCombination(rawComb);
                           const amount = (v && typeof v === 'object') ? (v.amount || 0) : (Number(v) || 0);
                           return (
                             <React.Fragment key={idx}>
@@ -509,7 +510,7 @@ City: ${influencer.city}`;
                            <div key={idx} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700">
                              <div className="flex items-center gap-2">
                                <div className={`w-2 h-2 rounded-full ${p.selected ? 'bg-emerald-400' : 'bg-slate-600'}`}></div>
-                               <span className={`text-xs ${p.selected ? 'text-slate-200' : 'text-slate-500 line-through'}`}>{p.product_name}</span>
+                               <span className={`text-xs ${p.selected ? 'text-slate-200' : 'text-slate-500 line-through'}`}>{formatDisplayProductName(p.product_name)}</span>
                              </div>
                              <span className="text-xs text-slate-400">Qty: {p.qty}</span>
                            </div>
@@ -525,14 +526,15 @@ City: ${influencer.city}`;
               return (
                 <div className="space-y-4">
                   {pricingVideos.map((v: any, idx: number) => {
-                    const combName = v.combination || v.name || `Video ${idx + 1}`;
+                    const rawCombName = v.combination || v.name || `Video ${idx + 1}`;
+                    const combName = formatDisplayCombination(rawCombName);
                     const explicitProds = Array.isArray(v.products) && v.products.length > 0 ? v.products : [];
-                    const parsedProdNames = parseProductsFromCombination(combName);
+                    const parsedProdNames = parseProductsFromCombination(rawCombName);
                     const amt = v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0;
 
                     const displayProducts = explicitProds.length > 0 
-                      ? explicitProds.map((p: any) => ({ name: p.product_name || p.name, qty: p.qty || 1 }))
-                      : parsedProdNames.map(pName => ({ name: pName, qty: 1 }));
+                      ? explicitProds.map((p: any) => ({ name: formatDisplayProductName(p.product_name || p.name), qty: p.qty || 1 }))
+                      : parsedProdNames.map(pName => ({ name: formatDisplayProductName(pName), qty: 1 }));
 
                     return (
                       <div key={idx} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
@@ -551,7 +553,7 @@ City: ${influencer.city}`;
                             <div key={pIdx} className="flex justify-between items-center bg-slate-900 p-2.5 rounded border border-slate-700">
                               <div className="flex items-center gap-2">
                                 <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
-                                <span className="text-xs text-slate-200 font-medium">{p.name}</span>
+                                <span className="text-xs text-slate-200 font-medium">{formatDisplayProductName(p.name)}</span>
                               </div>
                               <span className="text-xs text-slate-400">Qty: {p.qty}</span>
                             </div>

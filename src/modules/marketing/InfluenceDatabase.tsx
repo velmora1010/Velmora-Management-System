@@ -22,12 +22,12 @@ const JUSTMIXX_PRODUCTS = [
   "DIY Dishwash Liquid",
   "DIY Fabric Conditioner",
   "Kitchen Cleaner",
-  "Car Wash",
-  "Bike Wash",
-  "BBC",
+  "Car Shampoo",
+  "Bike Shampoo",
+  "BBC Cleaner",
   "Hand Wash",
   "Glass Cleaner",
-  "Bamboo Towel",
+  "Bamboo Kitchen Towel",
   "Floor Cleaner"
 ];
 
