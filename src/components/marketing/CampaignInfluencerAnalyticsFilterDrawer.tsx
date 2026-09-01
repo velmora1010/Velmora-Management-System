@@ -3,6 +3,7 @@ import { SlidersHorizontal, X, RotateCcw, Check, Search, MapPin, Award, Globe, U
 import type { CampaignInfluencer } from '../../types';
 import { normalizeStateName, CREATOR_CATEGORIES, FOLLOWER_RANGES, PLATFORM_COMBOS, PRICE_RANGES } from './InfluencerFilterDrawer';
 import { PRODUCT_LIST, formatDisplayProductName } from '../../modules/marketing/AddCampaignInfluencer';
+import { MultiSelectDropdown, OptionItem } from '../../modules/sales/website/components/MultiSelectDropdown';
 
 export interface CampaignAnalyticsFilterState {
   searchTerm: string;
@@ -54,17 +55,18 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
     setDraft(filterState);
   }, [filterState, isOpen]);
 
-  // Extract unique available states & cities dynamically from influencers dataset
-  const availableStates = useMemo(() => {
+  // Options for State MultiSelectDropdown
+  const stateOptions = useMemo<OptionItem[]>(() => {
     const set = new Set<string>();
     influencers.forEach(inf => {
       const st = normalizeStateName(inf.state);
       if (st) set.add(st);
     });
-    return Array.from(set).sort();
+    return Array.from(set).sort().map(st => ({ label: st, value: st }));
   }, [influencers]);
 
-  const availableCities = useMemo(() => {
+  // Options for City MultiSelectDropdown
+  const cityOptions = useMemo<OptionItem[]>(() => {
     const set = new Set<string>();
     influencers.forEach(inf => {
       if (draft.states.length > 0) {
@@ -76,19 +78,28 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
         set.add(inf.city.trim());
       }
     });
-    return Array.from(set).sort();
+    return Array.from(set).sort().map(ct => ({ label: ct, value: ct }));
   }, [influencers, draft.states]);
 
-  if (!isOpen) return null;
+  // Options for Creator Category
+  const creatorCategoryOptions = useMemo<OptionItem[]>(() => {
+    return CREATOR_CATEGORIES.map(cat => ({ label: cat, value: cat }));
+  }, []);
 
-  const toggleMultiSelect = (key: 'states' | 'cities' | 'creatorCategories' | 'languages' | 'products', item: string) => {
-    setDraft(prev => {
-      const current = prev[key] || [];
-      const exists = current.includes(item);
-      const updated = exists ? current.filter(x => x !== item) : [...current, item];
-      return { ...prev, [key]: updated };
+  // Options for Languages
+  const languageOptions = useMemo<OptionItem[]>(() => {
+    return ALL_LANGUAGES.map(lang => ({ label: lang, value: lang }));
+  }, []);
+
+  // Options for Products
+  const productOptions = useMemo<OptionItem[]>(() => {
+    return PRODUCT_LIST.map(prod => {
+      const dispName = formatDisplayProductName(prod);
+      return { label: dispName, value: dispName };
     });
-  };
+  }, []);
+
+  if (!isOpen) return null;
 
   const handleReset = () => {
     setDraft(initialAnalyticsFilterState);
@@ -116,7 +127,7 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
           </div>
           <button 
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           >
             <X size={18} />
           </button>
@@ -145,133 +156,61 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
           <hr className="border-slate-800" />
 
           {/* LOCATION */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
               <MapPin size={14} /> Location
             </div>
 
-            {/* States */}
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">State (Select Multiple)</label>
-              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar bg-slate-950 p-2 rounded-lg border border-slate-800">
-                {availableStates.length > 0 ? (
-                  availableStates.map(st => {
-                    const active = draft.states.includes(st);
-                    return (
-                      <button
-                        type="button"
-                        key={st}
-                        onClick={() => toggleMultiSelect('states', st)}
-                        className={`px-2 py-1 text-[11px] rounded border transition-colors flex items-center gap-1 ${
-                          active
-                            ? 'bg-purple-600/30 border-purple-500 text-purple-300 font-semibold'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                        }`}
-                      >
-                        {active && <Check size={10} />}
-                        {st}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <span className="text-xs text-slate-500 italic">No states found</span>
-                )}
-              </div>
-            </div>
+            {/* State Multi-Select Dropdown */}
+            <MultiSelectDropdown
+              label="State (Select Multiple)"
+              options={stateOptions}
+              selectedValues={draft.states}
+              onChange={(selected) => setDraft(prev => ({ ...prev, states: selected }))}
+              placeholder="All States"
+            />
 
-            {/* Cities */}
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">City (Select Multiple)</label>
-              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar bg-slate-950 p-2 rounded-lg border border-slate-800">
-                {availableCities.length > 0 ? (
-                  availableCities.map(ct => {
-                    const active = draft.cities.includes(ct);
-                    return (
-                      <button
-                        type="button"
-                        key={ct}
-                        onClick={() => toggleMultiSelect('cities', ct)}
-                        className={`px-2 py-1 text-[11px] rounded border transition-colors flex items-center gap-1 ${
-                          active
-                            ? 'bg-purple-600/30 border-purple-500 text-purple-300 font-semibold'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                        }`}
-                      >
-                        {active && <Check size={10} />}
-                        {ct}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <span className="text-xs text-slate-500 italic">No cities found</span>
-                )}
-              </div>
-            </div>
+            {/* City Multi-Select Dropdown */}
+            <MultiSelectDropdown
+              label="City (Select Multiple)"
+              options={cityOptions}
+              selectedValues={draft.cities}
+              onChange={(selected) => setDraft(prev => ({ ...prev, cities: selected }))}
+              placeholder={draft.states.length > 0 ? "Select Cities..." : "All Cities"}
+            />
           </div>
 
           <hr className="border-slate-800" />
 
           {/* CREATOR & LANGUAGES */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
               <Award size={14} /> Creator & Languages
             </div>
 
-            {/* Creator Category */}
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Creator Category</label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {CREATOR_CATEGORIES.map(cat => {
-                  const active = draft.creatorCategories.includes(cat);
-                  return (
-                    <button
-                      type="button"
-                      key={cat}
-                      onClick={() => toggleMultiSelect('creatorCategories', cat)}
-                      className={`p-2 text-xs rounded-lg border text-center transition-colors flex items-center justify-between ${
-                        active
-                          ? 'bg-purple-600/30 border-purple-500 text-purple-300 font-semibold'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      <span>{cat}</span>
-                      {active && <Check size={12} />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {/* Creator Category Dropdown */}
+            <MultiSelectDropdown
+              label="Creator Category (Select Multiple)"
+              options={creatorCategoryOptions}
+              selectedValues={draft.creatorCategories}
+              onChange={(selected) => setDraft(prev => ({ ...prev, creatorCategories: selected }))}
+              placeholder="All Creator Categories"
+            />
 
-            {/* Languages */}
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Languages (Multi-Select)</label>
-              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar bg-slate-950 p-2 rounded-lg border border-slate-800">
-                {ALL_LANGUAGES.map(lang => {
-                  const active = draft.languages.includes(lang);
-                  return (
-                    <button
-                      type="button"
-                      key={lang}
-                      onClick={() => toggleMultiSelect('languages', lang)}
-                      className={`px-2 py-1 text-[11px] rounded border transition-colors flex items-center gap-1 ${
-                        active
-                          ? 'bg-purple-600/30 border-purple-500 text-purple-300 font-semibold'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      {active && <Check size={10} />}
-                      {lang}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {/* Languages Multi-Select Dropdown */}
+            <MultiSelectDropdown
+              label="Languages (Select Multiple)"
+              options={languageOptions}
+              selectedValues={draft.languages}
+              onChange={(selected) => setDraft(prev => ({ ...prev, languages: selected }))}
+              placeholder="All Languages"
+            />
           </div>
 
           <hr className="border-slate-800" />
 
           {/* AUDIENCE & PLATFORM */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
               <Users size={14} /> Audience & Platform
             </div>
@@ -282,7 +221,7 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
               <select
                 value={draft.followerRange}
                 onChange={(e) => setDraft(prev => ({ ...prev, followerRange: e.target.value }))}
-                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
               >
                 <option value="">All Follower Ranges</option>
                 {FOLLOWER_RANGES.map(fr => (
@@ -297,7 +236,7 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
               <select
                 value={draft.platformCombo}
                 onChange={(e) => setDraft(prev => ({ ...prev, platformCombo: e.target.value }))}
-                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
               >
                 <option value="">All Platform Combinations</option>
                 {PLATFORM_COMBOS.map(pc => (
@@ -310,7 +249,7 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
           <hr className="border-slate-800" />
 
           {/* PRICING & PRODUCTS */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
               <CreditCard size={14} /> Pricing & Product
             </div>
@@ -321,7 +260,7 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
               <select
                 value={draft.priceRange}
                 onChange={(e) => setDraft(prev => ({ ...prev, priceRange: e.target.value }))}
-                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
               >
                 <option value="">All Price Ranges</option>
                 {PRICE_RANGES.map(pr => (
@@ -330,31 +269,14 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
               </select>
             </div>
 
-            {/* Products (Multi-select) */}
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Product (Select Multiple)</label>
-              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto custom-scrollbar bg-slate-950 p-2 rounded-lg border border-slate-800">
-                {PRODUCT_LIST.map(prod => {
-                  const dispName = formatDisplayProductName(prod);
-                  const active = draft.products.includes(dispName) || draft.products.includes(prod);
-                  return (
-                    <button
-                      type="button"
-                      key={prod}
-                      onClick={() => toggleMultiSelect('products', dispName)}
-                      className={`px-2 py-1 text-[11px] rounded border transition-colors flex items-center gap-1 ${
-                        active
-                          ? 'bg-purple-600/30 border-purple-500 text-purple-300 font-semibold'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      {active && <Check size={10} />}
-                      {dispName}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {/* Product Multi-Select Dropdown */}
+            <MultiSelectDropdown
+              label="Product (Select Multiple)"
+              options={productOptions}
+              selectedValues={draft.products}
+              onChange={(selected) => setDraft(prev => ({ ...prev, products: selected }))}
+              placeholder="All Products"
+            />
           </div>
 
         </div>
@@ -364,7 +286,7 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
           <button
             type="button"
             onClick={handleReset}
-            className="px-3 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-lg text-xs transition-colors flex items-center gap-1.5"
+            className="px-3 py-2 border border-slate-700 hover:bg-slate-800 text-slate-300 rounded-lg text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <RotateCcw size={14} /> Reset All
           </button>
@@ -372,14 +294,14 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs transition-colors"
+              className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleApply}
-              className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all flex items-center gap-1.5"
+              className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold shadow-lg shadow-purple-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Check size={14} /> Apply Filters
             </button>

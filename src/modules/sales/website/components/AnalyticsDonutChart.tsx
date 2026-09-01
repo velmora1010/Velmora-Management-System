@@ -117,18 +117,18 @@ export const AnalyticsDonutChart: React.FC<AnalyticsDonutChartProps> = ({
             cy="50%"
             innerRadius={innerRadius}
             outerRadius={outerRadius}
-            paddingAngle={3}
+            paddingAngle={0}
+            stroke="none"
+            strokeWidth={0}
           >
             {data.map((entry, index) => {
               const sliceColor = entry.color || DEFAULT_DISTINCT_COLORS[index % DEFAULT_DISTINCT_COLORS.length];
-              const isSelected = selectedSliceName === entry.name || selectedSliceName === entry.state || selectedSliceName === entry.city;
               return (
                 <Cell
                   key={`cell-${index}`}
                   fill={sliceColor}
-                  opacity={selectedSliceName ? (isSelected ? 1 : 0.4) : 1}
-                  stroke={isSelected ? '#ffffff' : 'none'}
-                  strokeWidth={isSelected ? 2 : 0}
+                  stroke="none"
+                  strokeWidth={0}
                   onClick={() => onSliceClick && onSliceClick(entry)}
                   className={onSliceClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}
                 />
