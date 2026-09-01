@@ -1199,12 +1199,6 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           >
             <Upload size={14} /> Post Date
           </button>
-          <button 
-            onClick={onBack}
-            className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm"
-          >
-            Back to Overview
-          </button>
         </div>
       </div>
 

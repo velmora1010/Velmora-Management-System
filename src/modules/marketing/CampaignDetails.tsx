@@ -104,7 +104,28 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const budgetUsed = React.useMemo(() => {
     return activeInfluencers.reduce((sum, inf) => {
       const p = inf.pricing as any;
-      const price = Number(p?.final_price) || Number(p?.total_price) || Number(p?.price) || 0;
+      if (!p) return sum;
+
+      let price = 0;
+      if (!isNaN(Number(p.final_price)) && Number(p.final_price) > 0) price = Number(p.final_price);
+      else if (!isNaN(Number(p.total_price)) && Number(p.total_price) > 0) price = Number(p.total_price);
+      else if (!isNaN(Number(p.price)) && Number(p.price) > 0) price = Number(p.price);
+      else if (!isNaN(Number(p.commercial_quote)) && Number(p.commercial_quote) > 0) price = Number(p.commercial_quote);
+
+      if (price <= 0 && Array.isArray(p.video_pricing_list) && p.video_pricing_list.length > 0) {
+        price = p.video_pricing_list.reduce((s: number, item: any) => s + (Number(item?.amount) || Number(item?.price) || 0), 0);
+      }
+
+      if (price <= 0) {
+        let sumVideoPrices = 0;
+        Object.keys(p).forEach(key => {
+          if (/^video\d+_price$/i.test(key) && !isNaN(Number(p[key])) && Number(p[key]) > 0) {
+            sumVideoPrices += Number(p[key]);
+          }
+        });
+        if (sumVideoPrices > 0) price = sumVideoPrices;
+      }
+
       return sum + price;
     }, 0);
   }, [activeInfluencers]);
