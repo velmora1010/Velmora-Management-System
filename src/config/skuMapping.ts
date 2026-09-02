@@ -43,6 +43,40 @@ export const getSKUForProduct = (productName: string): { sku: string; matchedNam
   return { sku: 'Unmapped', matchedName: productName };
 };
 
+export const naturalSortCompare = (codeA: string, codeB: string): number => {
+  const strA = (codeA || '').trim();
+  const strB = (codeB || '').trim();
+
+  // Extract numeric portion from influencer code (e.g. HIS1 -> 1, TNS39 -> 39, GJS140 -> 140, BHS214 -> 214)
+  const regex = /^([A-Za-z\s_-]*?)(\d+)(.*)$/;
+  const matchA = strA.match(regex);
+  const matchB = strB.match(regex);
+
+  if (matchA && matchB) {
+    const numA = parseInt(matchA[2], 10);
+    const numB = parseInt(matchB[2], 10);
+
+    // Primary sort: Numeric integer value (1, 2, 3... 38, 39... 214)
+    if (numA !== numB) {
+      return numA - numB;
+    }
+
+    const prefixA = matchA[1].toUpperCase();
+    const prefixB = matchB[1].toUpperCase();
+    if (prefixA !== prefixB) {
+      return prefixA.localeCompare(prefixB);
+    }
+
+    const suffixA = matchA[3].toUpperCase();
+    const suffixB = matchB[3].toUpperCase();
+    if (suffixA !== suffixB) {
+      return suffixA.localeCompare(suffixB);
+    }
+  }
+
+  return strA.localeCompare(strB, undefined, { numeric: true, sensitivity: 'base' });
+};
+
 export interface PickListProductItem {
   product_name: string;
   sku: string;
@@ -129,14 +163,14 @@ export const buildPickListRecords = (
   const defaultDateStr = `${String(now.getDate()).padStart(2, '0')} ${now.toLocaleString('default', { month: 'short' })} ${now.getFullYear()}`;
   const currentDate = downloadDateStr || defaultDateStr;
 
-  return influencers.map((inf, idx) => {
+  const rawRecords = influencers.map((inf) => {
     const products = getInfluencerProducts(inf);
     const code = (inf.code || '').trim() || (inf.influencer_name || '').trim() || String(inf.id);
     const name = (inf.name || inf.influencer_name || (inf as any).username || 'Influencer').trim();
     const username = ((inf as any).username || '').trim();
 
     return {
-      sNo: idx + 1,
+      sNo: 0,
       influencerId: inf.id,
       influencerCode: code,
       influencerName: name,
@@ -145,4 +179,13 @@ export const buildPickListRecords = (
       downloadDate: currentDate
     };
   });
+
+  // Sort primarily by numeric code index (1 to 214: HIS1... HIS38 -> TNS39... -> BHS214)
+  rawRecords.sort((a, b) => naturalSortCompare(a.influencerCode, b.influencerCode));
+
+  // Re-assign sNo sequentially from 1..N
+  return rawRecords.map((rec, idx) => ({
+    ...rec,
+    sNo: idx + 1
+  }));
 };
