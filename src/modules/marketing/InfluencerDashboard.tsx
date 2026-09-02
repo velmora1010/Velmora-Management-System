@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Plus, RefreshCcw, BarChart2, Users, Package, DollarSign, Menu, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Plus, RefreshCcw, BarChart2, Users, Package, DollarSign, Menu, X, ChevronLeft, ChevronRight, MoreVertical, Edit, Download, Archive } from 'lucide-react';
 import { useCampaigns } from '../../hooks/marketing/useCampaigns';
 import type { Campaign } from '../../types';
 import { CampaignForm } from './CampaignForm';
 import { CampaignDetails } from './CampaignDetails';
+import { EditCampaignModal } from './EditCampaignModal';
 import { useLocation } from 'react-router-dom';
 import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
+import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { isActiveStatus } from '../../utils/marketingUtils';
+import { buildPickListRecords } from '../../config/skuMapping';
+import { generatePickListPDF } from '../../utils/generatePickListPDF';
+import toast from 'react-hot-toast';
 
 interface InfluencerDashboardProps {
   onBack: () => void;
@@ -14,8 +21,11 @@ interface InfluencerDashboardProps {
 type DashboardView = 'overview' | 'create-campaign' | 'campaign-details';
 
 export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack }) => {
-  const { campaigns, isLoading, error, refreshCampaigns } = useCampaigns();
+  const { campaigns, isLoading, error, refreshCampaigns, updateCampaign } = useCampaigns();
   
+  const [activeMenuCampaignId, setActiveMenuCampaignId] = useState<string | number | null>(null);
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
+
   const [view, setView] = useState<DashboardView>(() => {
     const nav = getDepartmentNavigation('marketing');
     return nav?.dashboardView || 'overview';
@@ -61,6 +71,71 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
   const [isCollapsed, setIsCollapsed] = useState(() => {
     return localStorage.getItem('marketingSidebarCollapsed') === 'true';
   });
+
+  const handleDownloadCampaignPickList = async (targetCampaign: Campaign) => {
+    try {
+      toast.loading(`Fetching pick list data for "${targetCampaign.campaign_name}"...`, { id: 'picklist-loader' });
+      
+      const { data: infoList, error: infoErr } = await supabase
+        .from(SUPABASE_TABLES.influencersInfo)
+        .select('*')
+        .eq('campaign_id', targetCampaign.id);
+
+      if (infoErr) throw infoErr;
+
+      const activeInfos = (infoList || []).filter(inf => isActiveStatus(inf.is_archived));
+      
+      if (activeInfos.length === 0) {
+        toast.dismiss('picklist-loader');
+        toast.error('No active influencers found in this campaign.');
+        return;
+      }
+
+      const influencerIds = activeInfos.map(inf => inf.id);
+
+      const [
+        { data: pricingData },
+        { data: productsData }
+      ] = await Promise.all([
+        supabase.from(SUPABASE_TABLES.influencerPricing).select('*').in('influencer_id', influencerIds),
+        supabase.from(SUPABASE_TABLES.influencerProduct).select('*').in('influencer_id', influencerIds)
+      ]);
+
+      const fullInfluencers = activeInfos.map(inf => {
+        const infPricing = (pricingData || []).find(p => String(p.influencer_id) === String(inf.id));
+        const infProducts = (productsData || []).filter(p => String(p.influencer_id) === String(inf.id));
+        return {
+          ...inf,
+          pricing: infPricing || inf.pricing || null,
+          products: infProducts.length > 0 ? infProducts : (inf.products || [])
+        } as any;
+      });
+
+      const records = buildPickListRecords(fullInfluencers);
+      generatePickListPDF(targetCampaign.campaign_name, records);
+
+      toast.dismiss('picklist-loader');
+      toast.success(`Pick list downloaded for "${targetCampaign.campaign_name}"!`);
+    } catch (err: any) {
+      toast.dismiss('picklist-loader');
+      console.error('Error generating Pick List PDF:', err);
+      toast.error(err?.message || 'Failed to generate Pick List PDF.');
+    }
+  };
+
+  const handleArchiveCampaign = async (targetCampaign: Campaign) => {
+    if (!window.confirm(`Are you sure you want to archive "${targetCampaign.campaign_name}"? All campaign data will be preserved.`)) {
+      return;
+    }
+    try {
+      await updateCampaign(targetCampaign.id, { status: 'archived' });
+      refreshCampaigns();
+      toast.success(`Campaign "${targetCampaign.campaign_name}" archived successfully!`);
+    } catch (err: any) {
+      console.error('Error archiving campaign:', err);
+      toast.error(err?.message || 'Failed to archive campaign.');
+    }
+  };
 
   const toggleCollapse = () => {
     setIsCollapsed(prev => {
@@ -155,28 +230,83 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
           ) : (
             <ul className="space-y-2">
               {campaigns.filter(c => c.status?.toLowerCase() !== 'archived').map(campaign => {
-                // Determine a short placeholder for collapsed mode (e.g. first letter)
                 const shortName = campaign.campaign_name.charAt(0).toUpperCase();
+                const isSelected = selectedCampaign?.id === campaign.id;
+                const isMenuOpen = activeMenuCampaignId === campaign.id;
+
                 return (
-                  <li key={campaign.id}>
-                    <button
+                  <li key={campaign.id} className="relative group">
+                    <div
                       onClick={() => handleSelectCampaign(campaign)}
                       title={isCollapsed ? campaign.campaign_name : undefined}
-                      className={`w-full flex flex-col justify-center rounded-lg transition-all text-sm ${
-                        selectedCampaign?.id === campaign.id 
+                      className={`w-full flex items-center justify-between rounded-lg transition-all text-sm cursor-pointer ${
+                        isSelected 
                           ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
                           : 'text-slate-300 hover:bg-slate-700/50'
-                      } ${isCollapsed ? 'h-9 items-center px-0' : 'text-left px-3 py-2'}`}
+                      } ${isCollapsed ? 'h-9 justify-center px-0' : 'px-3 py-2'}`}
                     >
                       {isCollapsed ? (
                         <div className="font-bold">{shortName}</div>
                       ) : (
-                        <>
+                        <div className="flex-1 min-w-0 pr-2">
                           <div className="font-medium truncate w-full">{campaign.campaign_name}</div>
-                          <div className="text-xs text-slate-500 mt-1 capitalize">{campaign.status}</div>
-                        </>
+                          <div className="text-xs text-slate-500 mt-0.5 capitalize">{campaign.status}</div>
+                        </div>
                       )}
-                    </button>
+
+                      {!isCollapsed && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveMenuCampaignId(isMenuOpen ? null : campaign.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-slate-200 hover:bg-slate-700 rounded transition-colors"
+                          title="Campaign Options"
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Campaign Action Dropdown Menu */}
+                    {isMenuOpen && !isCollapsed && (
+                      <div 
+                        className="absolute right-2 top-10 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-xl z-50 py-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingCampaign(campaign);
+                            setActiveMenuCampaignId(null);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs font-medium text-slate-200 hover:bg-slate-800 flex items-center gap-2"
+                        >
+                          <Edit size={14} className="text-purple-400" /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveMenuCampaignId(null);
+                            handleDownloadCampaignPickList(campaign);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs font-medium text-slate-200 hover:bg-slate-800 flex items-center gap-2"
+                        >
+                          <Download size={14} className="text-emerald-400" /> Download Pick List
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveMenuCampaignId(null);
+                            handleArchiveCampaign(campaign);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs font-medium text-amber-400 hover:bg-slate-800 flex items-center gap-2 border-t border-slate-800 mt-1 pt-2"
+                        >
+                          <Archive size={14} /> Archive
+                        </button>
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -283,6 +413,20 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
             onCampaignUpdate={(updatedCampaign) => {
               setSelectedCampaign(updatedCampaign);
               refreshCampaigns();
+            }}
+          />
+        )}
+
+        {editingCampaign && (
+          <EditCampaignModal
+            campaign={editingCampaign}
+            onClose={() => setEditingCampaign(null)}
+            onSuccess={(updatedCampaign) => {
+              setEditingCampaign(null);
+              refreshCampaigns();
+              if (selectedCampaign && selectedCampaign.id === updatedCampaign.id) {
+                setSelectedCampaign(updatedCampaign);
+              }
             }}
           />
         )}

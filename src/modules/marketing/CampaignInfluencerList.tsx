@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2 } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -16,6 +16,9 @@ import { BulkInfluencerImportModal } from '../../components/marketing/BulkInflue
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
 import { CampaignInfluencerAnalytics } from './CampaignInfluencerAnalytics';
 import { CampaignInfluencerAnalyticsFilterDrawer, CampaignAnalyticsFilterState, initialAnalyticsFilterState } from '../../components/marketing/CampaignInfluencerAnalyticsFilterDrawer';
+import { buildPickListRecords, PickListInfluencerRecord } from '../../config/skuMapping';
+import { generatePickListPDF } from '../../utils/generatePickListPDF';
+import { SingleInfluencerPickListModal } from '../../components/marketing/SingleInfluencerPickListModal';
 
 const resolvePerformanceCode = (
   influencer: CampaignInfluencer,
@@ -60,19 +63,25 @@ const InfluencerCard = ({
   onDispatch,
   onDelete,
   onDeletePlatformViews,
-  onUploadPlatformDetails
+  onUploadPlatformDetails,
+  onPickList,
+  isSelected,
+  onToggleSelect
 }: { 
   influencer: CampaignInfluencer, 
   activeTab?: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate',
   currentSection?: 'active' | 'other' | 'recycle_bin',
   onTabChange?: (tab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate') => void,
   onEdit?: (inf: CampaignInfluencer) => void,
+  onPickList?: (inf: CampaignInfluencer) => void,
   onMoveStatus?: (targetStatus: 'active' | 'other' | 'recycle_bin') => void,
   onToggleArchive?: (id: string, isArchived: boolean) => void,
   onDispatch?: (inf: CampaignInfluencer) => void,
   onDelete?: (id: string, name: string) => void,
   onDeletePlatformViews?: (inf: CampaignInfluencer, platformName: string) => void,
-  onUploadPlatformDetails?: (code?: string) => void
+  onUploadPlatformDetails?: (code?: string) => void,
+  isSelected?: boolean,
+  onToggleSelect?: () => void
 }) => {
   const [localActiveTab, setLocalActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>(parentActiveTab);
 
@@ -106,6 +115,17 @@ City: ${influencer.city}`;
         <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800/60 min-w-0">
           {/* Left Profile Section */}
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            {onToggleSelect && (
+              <input
+                type="checkbox"
+                checked={isSelected || false}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  onToggleSelect();
+                }}
+                className="w-4 h-4 rounded bg-slate-950 border-slate-700 text-purple-600 focus:ring-purple-500 cursor-pointer shrink-0"
+              />
+            )}
             <div className="w-11 h-11 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-base border-2 border-purple-500/30 shrink-0 shadow-sm">
               {influencer.profile_file_url ? (
                 <img src={influencer.profile_file_url} alt={influencer.name} className="w-full h-full object-cover" />
@@ -157,6 +177,7 @@ City: ${influencer.city}`;
             <InfluencerActionMenu
               currentSection={currentSection}
               onEdit={() => onEdit?.(influencer)}
+              onPickList={() => onPickList?.(influencer)}
               onMoveStatus={onMoveStatus}
               onDelete={currentSection === 'recycle_bin' && onDelete ? () => onDelete(influencer.id, influencer.influencer_name || influencer.name || '') : undefined}
             />
@@ -771,6 +792,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   };
 
   const [mainViewMode, setMainViewMode] = useState<'list' | 'analytics'>('list');
+  const [isSelectionModeActive, setIsSelectionModeActive] = useState(false);
+  const [selectedPickListInfluencer, setSelectedPickListInfluencer] = useState<CampaignInfluencer | null>(null);
   const [analyticsFilterState, setAnalyticsFilterState] = useState<CampaignAnalyticsFilterState>(initialAnalyticsFilterState);
   const [isAnalyticsFilterOpen, setIsAnalyticsFilterOpen] = useState(false);
 
@@ -1129,6 +1152,80 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     return list.filter(matchesFilters).sort(compareInfluencerCodesAsc);
   }, [influencers, searchTerm, filter, filterState]);
 
+  const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set());
+  const [pickListSearch, setPickListSearch] = useState('');
+
+  const handleToggleSelect = (id: string | number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllVisible = (visibleList: CampaignInfluencer[]) => {
+    const activeVisible = visibleList.filter(inf => isActiveStatus(inf.is_archived));
+    const allSelected = activeVisible.length > 0 && activeVisible.every(inf => selectedIds.has(inf.id));
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      const next = new Set<string | number>();
+      activeVisible.forEach(inf => next.add(inf.id));
+      setSelectedIds(next);
+    }
+  };
+
+  const handleBulkDownloadPickList = () => {
+    const selectedList = influencers.filter(inf => selectedIds.has(inf.id) && isActiveStatus(inf.is_archived));
+    if (selectedList.length === 0) {
+      toast.error('Please select at least one active influencer.');
+      return;
+    }
+    const records = buildPickListRecords(selectedList);
+    generatePickListPDF(campaign.campaign_name, records);
+    toast.success(`Pick list downloaded for ${selectedList.length} selected influencer(s)!`);
+  };
+
+  const handleBulkEliminate = async () => {
+    const selectedList = influencers.filter(inf => selectedIds.has(inf.id) && isActiveStatus(inf.is_archived));
+    if (selectedList.length === 0) return;
+    if (!window.confirm(`Are you sure you want to eliminate ${selectedList.length} selected influencer(s)?`)) return;
+
+    try {
+      for (const inf of selectedList) {
+        await updateInfluencerStatus(String(inf.id), 'other');
+      }
+      setSelectedIds(new Set());
+      await refresh();
+      toast.success(`${selectedList.length} influencer(s) moved to Eliminate!`);
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Failed to update influencer status.');
+    }
+  };
+
+  const handleBulkRecycleBin = async () => {
+    const selectedList = influencers.filter(inf => selectedIds.has(inf.id) && isActiveStatus(inf.is_archived));
+    if (selectedList.length === 0) return;
+    if (!window.confirm(`Are you sure you want to move ${selectedList.length} selected influencer(s) to Recycle Bin?`)) return;
+
+    try {
+      for (const inf of selectedList) {
+        await updateInfluencerStatus(String(inf.id), 'recycle_bin');
+      }
+      setSelectedIds(new Set());
+      await refresh();
+      toast.success(`${selectedList.length} influencer(s) moved to Recycle Bin!`);
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Failed to update influencer status.');
+    }
+  };
+
   return (
     <div className={`bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col ${mainViewMode === 'analytics' ? 'h-auto min-h-0' : 'h-[700px]'}`}>
       {/* Header */}
@@ -1227,19 +1324,31 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         <div className="flex items-center gap-3">
           <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-700">
             <button 
-              onClick={() => setFilter('active')}
+              onClick={() => {
+                setFilter('active');
+                setIsSelectionModeActive(false);
+                setSelectedIds(new Set());
+              }}
               className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'active' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
             >
               Active ({activeCount})
             </button>
             <button 
-              onClick={() => setFilter('other')}
+              onClick={() => {
+                setFilter('other');
+                setIsSelectionModeActive(false);
+                setSelectedIds(new Set());
+              }}
               className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'other' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
             >
               Eliminate ({otherCount})
             </button>
             <button 
-              onClick={() => setFilter('recycle_bin')}
+              onClick={() => {
+                setFilter('recycle_bin');
+                setIsSelectionModeActive(false);
+                setSelectedIds(new Set());
+              }}
               className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${filter === 'recycle_bin' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
             >
               Recycle Bin ({recycleBinCount})
@@ -1249,6 +1358,17 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
             <span className="px-3 py-1 bg-purple-950/40 border border-purple-800/30 rounded-lg text-purple-300 font-semibold text-xs shrink-0">
               {filteredInfluencers.length === 1 ? '1 Influencer' : `${filteredInfluencers.length} Influencers`}
             </span>
+          )}
+
+          {/* Requirement 2: Select Action Button */}
+          {filter === 'active' && !isSelectionModeActive && filteredInfluencers.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsSelectionModeActive(true)}
+              className="px-3.5 py-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <CheckSquare size={13} /> Select
+            </button>
           )}
         </div>
 
@@ -1285,6 +1405,76 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           )}
         </div>
       </div>
+
+      {/* Requirement 3: Selection Mode Toolbar Bar */}
+      {filter === 'active' && isSelectionModeActive && (
+        <div className="px-4 py-2.5 bg-purple-950/40 border-b border-purple-800/50 flex flex-wrap items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-100 select-none">
+              <input
+                type="checkbox"
+                checked={filteredInfluencers.length > 0 && filteredInfluencers.every(inf => selectedIds.has(inf.id))}
+                onChange={() => handleSelectAllVisible(filteredInfluencers)}
+                className="w-4 h-4 rounded bg-slate-950 border-purple-500 text-purple-600 focus:ring-purple-500 cursor-pointer"
+              />
+              <span>Select All ({filteredInfluencers.length})</span>
+            </label>
+
+            <span className="px-2.5 py-0.5 bg-purple-900/80 border border-purple-700/60 text-purple-200 text-xs font-bold rounded-lg shadow-xs">
+              {selectedIds.size} Selected
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleBulkDownloadPickList}
+              disabled={selectedIds.size === 0}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                selectedIds.size > 0 
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-md' 
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              }`}
+            >
+              <Download size={13} /> Download Pick List
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkEliminate}
+              disabled={selectedIds.size === 0}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                selectedIds.size > 0 
+                  ? 'bg-rose-950/80 hover:bg-rose-900 border border-rose-800/60 text-rose-300' 
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              }`}
+            >
+              Eliminate
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkRecycleBin}
+              disabled={selectedIds.size === 0}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                selectedIds.size > 0 
+                  ? 'bg-amber-950/80 hover:bg-amber-900 border border-amber-800/60 text-amber-300' 
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              }`}
+            >
+              Move to Recycle Bin
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsSelectionModeActive(false);
+                setSelectedIds(new Set());
+              }}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors cursor-pointer border border-slate-700"
+            >
+              Cancel Selection
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Active Filters Bar */}
       {(isFilterApplied || searchTerm.trim()) && (
@@ -1418,6 +1608,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                   currentSection={filter}
                   onTabChange={(newTab) => handleCardTabChange(inf, newTab)}
                   onEdit={handleEditInfluencerClick} 
+                  onPickList={(targetInf) => setSelectedPickListInfluencer(targetInf)}
                   onMoveStatus={(targetStatus) => setConfirmMoveModal({ isOpen: true, influencer: inf, targetStatus })}
                   onToggleArchive={toggleArchiveStatus} 
                   onDispatch={onDispatch}
@@ -1427,6 +1618,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                     setTargetUploadCode(code);
                     setIsUploadPlatformModalOpen(true);
                   }}
+                  isSelected={isSelectionModeActive ? selectedIds.has(inf.id) : false}
+                  onToggleSelect={isSelectionModeActive && filter === 'active' ? () => handleToggleSelect(inf.id) : undefined}
                 />
               );
             })}
@@ -1460,6 +1653,14 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </div>
         );
       })()}
+
+      {selectedPickListInfluencer && (
+        <SingleInfluencerPickListModal
+          campaignName={campaign.campaign_name}
+          influencer={selectedPickListInfluencer}
+          onClose={() => setSelectedPickListInfluencer(null)}
+        />
+      )}
 
       {isImportModalOpen && (
         <BulkInfluencerImportModal

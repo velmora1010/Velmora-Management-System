@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MoreVertical, Edit, Trash2, Ban, ArrowLeftRight, CheckCircle2 } from 'lucide-react';
+import { MoreVertical, Edit, Trash2, Ban, ArrowLeftRight, CheckCircle2, Package } from 'lucide-react';
 import type { InfluencerStatusType } from '../../utils/marketingUtils';
 
 interface InfluencerActionMenuProps {
   currentSection?: InfluencerStatusType;
   onEdit: () => void;
+  onPickList?: () => void;
   onMoveStatus?: (targetStatus: InfluencerStatusType) => void;
   onDelete?: () => void;
 }
@@ -12,6 +13,7 @@ interface InfluencerActionMenuProps {
 export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
   currentSection = 'active',
   onEdit,
+  onPickList,
   onMoveStatus,
   onDelete
 }) => {
@@ -63,10 +65,22 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
               Edit
             </button>
 
+            {/* 2. Pick List */}
+            {onPickList && (
+              <button
+                type="button"
+                onClick={() => handleAction(onPickList)}
+                className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-medium text-purple-300 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer border-t border-slate-800"
+              >
+                <Package size={15} />
+                Pick List
+              </button>
+            )}
+
             {/* ACTIVE SECTION ACTIONS */}
             {currentSection === 'active' && onMoveStatus && (
               <>
-                {/* 2. Move to Recycle Bin */}
+                {/* 3. Move to Recycle Bin */}
                 <button
                   type="button"
                   onClick={() => handleAction(() => onMoveStatus('recycle_bin'))}
@@ -76,7 +90,7 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
                   Move to Recycle Bin
                 </button>
 
-                {/* 3. Eliminate */}
+                {/* 4. Eliminate */}
                 <button
                   type="button"
                   onClick={() => handleAction(() => onMoveStatus('other'))}
