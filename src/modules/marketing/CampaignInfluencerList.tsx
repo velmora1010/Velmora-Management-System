@@ -10,7 +10,7 @@ import { ImportPostDateModal } from '../../components/marketing/ImportPostDateMo
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
-import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination } from './AddCampaignInfluencer';
+import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, calculateDraftDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
@@ -565,7 +565,11 @@ City: ${influencer.city}`;
           )}
 
           {activeTab === 'postdate' && (() => {
-            const dates = (influencer.postDates || []).slice().sort((a, b) => (a.video_number || 0) - (b.video_number || 0));
+            const dates = (influencer.postDates || [])
+              .filter(d => d && d.post_date && String(d.post_date).trim() !== '')
+              .slice()
+              .sort((a, b) => (a.video_number || 0) - (b.video_number || 0));
+
             if (dates.length === 0) {
               return (
                 <div className="text-slate-400 py-3 text-sm italic">
@@ -578,25 +582,28 @@ City: ${influencer.city}`;
               <div className="space-y-3">
                 <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">POST DATE SCHEDULE</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {dates.map((d, i) => (
-                    <div key={d.id || d.video_number || i} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-[11px] font-bold rounded">
-                          VIDEO {d.video_number}
-                        </span>
-                      </div>
-                      <div className="space-y-1.5 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Post Date:</span>
-                          <span className="text-slate-200 font-medium font-mono">{formatDisplayDate(d.post_date)}</span>
+                  {dates.map((d, i) => {
+                    const draftVal = d.draft_date || calculateDraftDate(d.post_date);
+                    return (
+                      <div key={d.id || d.video_number || i} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-[11px] font-bold rounded">
+                            VIDEO {d.video_number}
+                          </span>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Draft Date:</span>
-                          <span className="text-purple-300 font-medium font-mono">{formatDisplayDate(d.draft_date)}</span>
+                        <div className="space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Post Date:</span>
+                            <span className="text-slate-200 font-medium font-mono">{formatDisplayDate(d.post_date)}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Draft Date:</span>
+                            <span className="text-purple-300 font-medium font-mono">{formatDisplayDate(draftVal)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );

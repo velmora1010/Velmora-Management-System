@@ -6,6 +6,51 @@ import { logActivity } from '../../services/activityService';
 import toast from 'react-hot-toast';
 
 // Language and Campaign code generation mapping helper
+export const calculateDraftDate = (postDateStr: string | null | undefined): string => {
+  if (!postDateStr || !postDateStr.trim()) return '';
+  try {
+    const str = postDateStr.trim();
+    let year = NaN, month = NaN, day = NaN;
+    if (str.includes('-')) {
+      const parts = str.split('-');
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          year = parseInt(parts[0], 10);
+          month = parseInt(parts[1], 10);
+          day = parseInt(parts[2], 10);
+        } else if (parts[2].length === 4) {
+          day = parseInt(parts[0], 10);
+          const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+          const mIdx = monthNames.indexOf(parts[1].toLowerCase());
+          month = mIdx !== -1 ? mIdx + 1 : parseInt(parts[1], 10);
+          year = parseInt(parts[2], 10);
+        }
+      }
+    }
+    if (isNaN(year) || isNaN(month) || isNaN(day)) {
+      const dObj = new Date(str);
+      if (!isNaN(dObj.getTime())) {
+        year = dObj.getFullYear();
+        month = dObj.getMonth() + 1;
+        day = dObj.getDate();
+      }
+    }
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return '';
+
+    const d = new Date(year, month - 1, day);
+    if (isNaN(d.getTime())) return '';
+
+    d.setDate(d.getDate() - 3);
+
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  } catch (e) {
+    return '';
+  }
+};
+
 export const LANGUAGE_MAPPING: Record<string, string> = {
   Kannada: 'KA',
   Hindi: 'HI',
@@ -185,52 +230,37 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           const facebook_view_code_mode = viewsJson?.facebook_view_code_mode || 'auto';
           const youtube_view_code_mode = viewsJson?.youtube_view_code_mode || 'auto';
 
-          const postDatesFromJSON = (viewsJson?.post_dates || []).map((pd: any) => ({
-            video_number: pd.video_number,
-            post_date: pd.post_date || null,
-            draft_date: pd.draft_date || null
-          }));
-          const postDatesFromTable = (postDatesData || [])
-            .filter(pd => String(pd.influencer_id) === String(inf.id))
-            .map(pd => ({
-              id: pd.id,
-              influencer_id: pd.influencer_id,
-              campaign_id: pd.campaign_id,
-              video_number: pd.video_number,
-              post_date: pd.post_date || null,
-              draft_date: pd.draft_date || null
-            }));
-            
-          const rawPostDates = postDatesFromTable.length > 0 ? postDatesFromTable : postDatesFromJSON;
-          const postDates = rawPostDates.map((pd: any) => {
-            let draft = pd.draft_date;
-            if (!draft && pd.post_date) {
-              try {
-                let dateObj: Date | null = null;
-                const str = String(pd.post_date).trim();
-                if (/^\d{1,2}-[A-Za-z]{3}-\d{4}$/.test(str)) {
-                  const parts = str.split('-');
-                  const day = parseInt(parts[0], 10);
-                  const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-                  const monthIdx = monthNames.indexOf(parts[1].toLowerCase());
-                  const year = parseInt(parts[2], 10);
-                  if (monthIdx !== -1) {
-                    dateObj = new Date(year, monthIdx, day);
-                  }
-                } else {
-                  dateObj = new Date(str);
-                }
-                if (dateObj && !isNaN(dateObj.getTime())) {
-                  const draftObj = new Date(dateObj);
-                  draftObj.setDate(draftObj.getDate() - 3);
-                  const day = String(draftObj.getDate()).padStart(2, '0');
-                  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                  const month = monthNames[draftObj.getMonth()];
-                  const year = draftObj.getFullYear();
-                  draft = `${day}-${month}-${year}`;
-                }
-              } catch (e) {}
+          const postDatesMap = new Map<number, any>();
+
+          (viewsJson?.post_dates || []).forEach((pd: any) => {
+            if (pd.video_number && pd.post_date && String(pd.post_date).trim() !== '') {
+              const vNum = Number(pd.video_number);
+              postDatesMap.set(vNum, {
+                video_number: vNum,
+                post_date: pd.post_date,
+                draft_date: pd.draft_date || calculateDraftDate(pd.post_date)
+              });
             }
+          });
+
+          (postDatesData || [])
+            .filter(pd => String(pd.influencer_id) === String(inf.id))
+            .forEach(pd => {
+              if (pd.video_number && pd.post_date && String(pd.post_date).trim() !== '') {
+                const vNum = Number(pd.video_number);
+                postDatesMap.set(vNum, {
+                  id: pd.id,
+                  influencer_id: pd.influencer_id,
+                  campaign_id: pd.campaign_id,
+                  video_number: vNum,
+                  post_date: pd.post_date,
+                  draft_date: pd.draft_date || calculateDraftDate(pd.post_date)
+                });
+              }
+            });
+
+          const postDates = Array.from(postDatesMap.values()).map((pd: any) => {
+            const draft = pd.draft_date || calculateDraftDate(pd.post_date);
             return {
               ...pd,
               draft_date: draft || null
@@ -770,6 +800,21 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
       const finalLanguages = (influencerData.languages || []).filter(l => typeof l === 'string' && !l.startsWith('views_data:'));
 
+      const viewsJson = buildPlatformViewsPayload(
+        influencerData.platforms || [], 
+        (influencerData as any).instagram_view_code,
+        (influencerData as any).facebook_view_code,
+        (influencerData as any).youtube_view_code,
+        (influencerData as any).instagram_view_code_mode,
+        (influencerData as any).facebook_view_code_mode,
+        (influencerData as any).youtube_view_code_mode,
+        influencerData.postDates || []
+      );
+
+      if (viewsJson) {
+        finalLanguages.push(`views_data:${JSON.stringify(viewsJson)}`);
+      }
+
       const rawUpdatePayload: Record<string, any> = {
         name: influencerData.name,
         influencer_name: influencerData.influencer_name,
@@ -992,59 +1037,66 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
       // 8. Post Dates (Sync / Upsert)
       if (influencerData.postDates !== undefined) {
-        const currentPostDates = (influencerData.postDates || []).filter(pd => pd.post_date && String(pd.post_date).trim() !== '');
-        const { data: existingPostDates } = await supabase
-          .from(SUPABASE_TABLES.influencerPostDates)
-          .select('*')
-          .eq('influencer_id', numericId)
-          .eq('campaign_id', campaignId);
+        try {
+          const currentPostDates = (influencerData.postDates || []).filter(pd => pd.post_date && String(pd.post_date).trim() !== '');
+          const { data: existingPostDates } = await supabase
+            .from(SUPABASE_TABLES.influencerPostDates)
+            .select('*')
+            .eq('influencer_id', numericId);
 
-        const existingMap = new Map((existingPostDates || []).map(ep => [ep.video_number, ep]));
-        let nextPostDateId = await getMaxId(SUPABASE_TABLES.influencerPostDates);
+          const existingMap = new Map((existingPostDates || []).map(ep => [Number(ep.video_number), ep]));
+          let nextPostDateId = await getMaxId(SUPABASE_TABLES.influencerPostDates);
 
-        const rowsToInsert: any[] = [];
-        const currentVideoNumbers = new Set<number>();
+          const rowsToInsert: any[] = [];
+          const currentVideoNumbers = new Set<number>();
 
-        for (const pd of currentPostDates) {
-          currentVideoNumbers.add(pd.video_number);
-          const existing = existingMap.get(pd.video_number);
-          if (existing) {
-            if (existing.post_date !== pd.post_date || existing.draft_date !== pd.draft_date) {
+          for (const pd of currentPostDates) {
+            const vNum = Number(pd.video_number) || 1;
+            currentVideoNumbers.add(vNum);
+            const computedDraft = pd.draft_date || calculateDraftDate(pd.post_date);
+            const existing = existingMap.get(vNum);
+            if (existing) {
               await supabase
                 .from(SUPABASE_TABLES.influencerPostDates)
                 .update({
                   post_date: pd.post_date,
-                  draft_date: pd.draft_date || null,
+                  draft_date: computedDraft || null,
+                  campaign_id: campaignId,
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', existing.id);
+            } else {
+              nextPostDateId++;
+              rowsToInsert.push({
+                id: nextPostDateId,
+                influencer_id: numericId,
+                campaign_id: campaignId,
+                video_number: vNum,
+                post_date: pd.post_date,
+                draft_date: computedDraft || null
+              });
             }
-          } else {
-            nextPostDateId++;
-            rowsToInsert.push({
-              id: nextPostDateId,
-              influencer_id: numericId,
-              campaign_id: campaignId,
-              video_number: pd.video_number,
-              post_date: pd.post_date,
-              draft_date: pd.draft_date || null
-            });
           }
-        }
 
-        if (rowsToInsert.length > 0) {
-          await supabase
-            .from(SUPABASE_TABLES.influencerPostDates)
-            .insert(rowsToInsert);
-        }
-
-        for (const existing of (existingPostDates || [])) {
-          if (!currentVideoNumbers.has(existing.video_number)) {
-            await supabase
+          if (rowsToInsert.length > 0) {
+            const { error: insertPdErr } = await supabase
               .from(SUPABASE_TABLES.influencerPostDates)
-              .delete()
-              .eq('id', existing.id);
+              .insert(rowsToInsert);
+            if (insertPdErr) {
+              console.error('Error inserting into influencerPostDates:', insertPdErr);
+            }
           }
+
+          for (const existing of (existingPostDates || [])) {
+            if (!currentVideoNumbers.has(Number(existing.video_number))) {
+              await supabase
+                .from(SUPABASE_TABLES.influencerPostDates)
+                .delete()
+                .eq('id', existing.id);
+            }
+          }
+        } catch (pdErr) {
+          console.error('Error syncing post dates table:', pdErr);
         }
       }
 
