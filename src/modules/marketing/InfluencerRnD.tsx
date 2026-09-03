@@ -2,6 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, UserSearch, Globe, Camera, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 import { rndExtensionService } from './rnd/services/rndExtensionService';
 import { ExtensionConnectionState, InstagramSessionState } from './rnd/types/extensionTypes';
+import { ResearchJob } from './rnd/types/rndTypes';
+import { RnDUploadArea } from './rnd/components/RnDUploadArea';
+import { RnDPreviewTable } from './rnd/components/RnDPreviewTable';
+import { parseInfluencerExcel } from './rnd/utils/excelParser';
 
 interface InfluencerRnDProps {
   onBack: () => void;
@@ -10,6 +14,11 @@ interface InfluencerRnDProps {
 export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
   const [extState, setExtState] = useState<ExtensionConnectionState>('checking');
   const [igState, setIgState] = useState<InstagramSessionState>('checking');
+  
+  const [currentJob, setCurrentJob] = useState<ResearchJob | null>(null);
+  const [isParsing, setIsParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [researchMessage, setResearchMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -51,6 +60,28 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
     };
   }, []);
 
+  const handleFileSelect = async (file: File) => {
+    setIsParsing(true);
+    setParseError(null);
+    setResearchMessage(null);
+    
+    try {
+      const job = await parseInfluencerExcel(file);
+      setCurrentJob(job);
+    } catch (err: any) {
+      setParseError(err.message || 'An error occurred while parsing the file.');
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleStartResearch = () => {
+    setResearchMessage("Research engine will be connected in the next phase.");
+    setTimeout(() => setResearchMessage(null), 5000);
+  };
+
+  const isEngineConnected = extState === 'connected' && igState === 'detected';
+
   return (
     <div className="p-6 text-slate-200">
       <div className="flex items-center gap-4 mb-8">
@@ -68,7 +99,8 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
         </div>
       </div>
       
-      <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 mt-12">
+      {/* Status Cards Row */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 max-w-6xl mx-auto">
         {/* Extension Status Card */}
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
@@ -141,6 +173,48 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
           </p>
         </div>
       </div>
+
+      {/* Main Workspace */}
+      <div className="max-w-6xl mx-auto">
+        <h2 className="text-xl font-bold text-slate-100 mb-6">New Research Run</h2>
+        
+        {!currentJob && (
+          <div className="bg-[#1e2536] p-8 rounded-xl border border-slate-700 shadow-sm">
+            {isParsing ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="w-12 h-12 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+                <p className="text-slate-300 font-medium">Parsing Excel file...</p>
+              </div>
+            ) : (
+              <RnDUploadArea onFileSelect={handleFileSelect} />
+            )}
+            
+            {parseError && (
+              <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm flex items-start gap-3">
+                <AlertCircle size={18} className="mt-0.5 shrink-0" />
+                <span>{parseError}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {currentJob && (
+          <div className="flex flex-col gap-4">
+            {researchMessage && (
+              <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400 text-sm flex items-center justify-center font-medium animate-fade-in">
+                {researchMessage}
+              </div>
+            )}
+            <RnDPreviewTable 
+              job={currentJob} 
+              onReplaceFile={() => setCurrentJob(null)} 
+              onStartResearch={handleStartResearch}
+              isEngineConnected={isEngineConnected}
+            />
+          </div>
+        )}
+      </div>
+
     </div>
   );
 };
