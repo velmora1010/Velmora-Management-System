@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Velmora Influencer R&D",
+  "version": "1.0.0",
+  "description": "Companion extension for Velmora Influencer Research & Development",
+  "permissions": [
+    "cookies"
+  ],
+  "host_permissions": [
+    "*://*.instagram.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*", "https://*.velmora.com/*"],
+      "js": ["src/content-app.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

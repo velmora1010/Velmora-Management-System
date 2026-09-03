@@ -1,6 +1,6 @@
 export interface DepartmentNavigation {
   route: string;
-  marketingView?: 'home' | 'influencer-dashboard' | 'influence-db';
+  marketingView?: 'home' | 'influencer-dashboard' | 'influence-db' | 'influencer-rnd';
   dashboardView?: 'overview' | 'create-campaign' | 'campaign-details';
   campaignView?: 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'calendar' | 'analytics';
   selectedCampaignId?: string;
