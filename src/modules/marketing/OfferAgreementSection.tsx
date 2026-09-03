@@ -508,6 +508,41 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     toast.success(`Offer agreement for ${code} deleted.`);
   };
 
+  const handleDeleteSelectedAgreements = async () => {
+    if (selectedIds.size === 0) return;
+
+    const count = selectedIds.size;
+    if (!window.confirm(`Are you sure you want to delete ${count} selected offer agreement(s)?`)) {
+      return;
+    }
+
+    const selectedList = activeInfluencers.filter(inf => selectedIds.has(inf.id));
+    const localKey = `velmora_offer_agreements_${campaign.id}`;
+
+    setAgreementsMap(prev => {
+      const next = { ...prev };
+      selectedList.forEach(inf => {
+        delete next[String(inf.id)];
+      });
+      try {
+        localStorage.setItem(localKey, JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+
+    try {
+      const infIds = selectedList.map(inf => inf.id);
+      await supabase
+        .from(SUPABASE_TABLES.offerAgreements)
+        .delete()
+        .eq('campaign_id', campaign.id)
+        .in('influencer_id', infIds);
+    } catch (e) {}
+
+    setSelectedIds(new Set());
+    toast.success(`Deleted ${count} selected offer agreement(s).`);
+  };
+
   return (
     <div className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
       {/* Top Header & Search Bar */}
@@ -581,6 +616,19 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
               {selectedIds.size} Selected
             </span>
           )}
+
+          <button
+            onClick={handleDeleteSelectedAgreements}
+            disabled={selectedIds.size === 0}
+            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              selectedIds.size > 0 
+                ? 'bg-rose-950/80 hover:bg-rose-900 border border-rose-800/60 text-rose-300 shadow-sm' 
+                : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-50'
+            }`}
+            title="Delete Selected Offer Agreements"
+          >
+            <Trash2 size={13} /> Delete Selected
+          </button>
         </div>
       </div>
 
