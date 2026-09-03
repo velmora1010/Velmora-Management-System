@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus, FileText, Sparkles } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -19,6 +19,7 @@ import { CampaignInfluencerAnalyticsFilterDrawer, CampaignAnalyticsFilterState, 
 import { buildPickListRecords, PickListInfluencerRecord } from '../../config/skuMapping';
 import { generatePickListPDF } from '../../utils/generatePickListPDF';
 import { SingleInfluencerPickListModal } from '../../components/marketing/SingleInfluencerPickListModal';
+import { OfferAgreementSection, buildAgreementText, StoredAgreement } from './OfferAgreementSection';
 
 const resolvePerformanceCode = (
   influencer: CampaignInfluencer,
@@ -791,7 +792,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     });
   };
 
-  const [mainViewMode, setMainViewMode] = useState<'list' | 'analytics'>('list');
+  const [mainViewMode, setMainViewMode] = useState<'list' | 'analytics' | 'offer_agreement'>('list');
   const [isSelectionModeActive, setIsSelectionModeActive] = useState(false);
   const [selectedPickListInfluencer, setSelectedPickListInfluencer] = useState<CampaignInfluencer | null>(null);
   const [analyticsFilterState, setAnalyticsFilterState] = useState<CampaignAnalyticsFilterState>(initialAnalyticsFilterState);
@@ -1202,6 +1203,77 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     toast.success(`Pick list downloaded for ${selectedList.length} selected influencer(s)!`);
   };
 
+  const handleBulkGenerateOfferAgreements = async () => {
+    const selectedList = influencers.filter(inf => selectedIds.has(inf.id) && isActiveStatus(inf.is_archived));
+    if (selectedList.length === 0) {
+      toast.error('Please select at least one active influencer.');
+      return;
+    }
+
+    const missing: string[] = [];
+    const localKey = `velmora_offer_agreements_${campaign.id}`;
+    let map: Record<string, StoredAgreement> = {};
+    try {
+      const stored = localStorage.getItem(localKey);
+      if (stored) map = JSON.parse(stored);
+    } catch (e) {}
+
+    const nowIso = new Date().toISOString();
+    let count = 0;
+
+    for (const inf of selectedList) {
+      const code = inf.code || (inf as any).influencer_code || String(inf.id);
+      const user = inf.influencer_name || (inf as any).username || inf.name;
+      const pricing = (inf.pricing as any) || {};
+
+      let videoPrice = 0;
+      if (Array.isArray(pricing.product_pricing?.videos)) {
+        for (const v of pricing.product_pricing.videos) {
+          const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
+          if (!isNaN(amt) && amt > 0) { videoPrice = amt; break; }
+        }
+      }
+      if (videoPrice === 0) videoPrice = Number(pricing.video1_price) || Number(pricing.video2_price) || 0;
+      if (videoPrice === 0 && pricing.final_price) videoPrice = Math.round(Number(pricing.final_price) / (Number(pricing.total_videos) || 6));
+
+      if (!code || !user || videoPrice <= 0) {
+        missing.push(code || `ID:${inf.id}`);
+      } else {
+        const infId = String(inf.id);
+        const text = buildAgreementText(inf, campaign.campaign_name);
+        const record: StoredAgreement = {
+          campaign_id: campaign.id,
+          influencer_id: inf.id,
+          influencer_code: code,
+          username: user,
+          price_per_video: videoPrice,
+          agreement_text: text,
+          generated_at: map[infId]?.generated_at || nowIso,
+          updated_at: nowIso
+        };
+        map[infId] = record;
+        count++;
+
+        try {
+          await supabase.from(SUPABASE_TABLES.offerAgreements).upsert([record], { onConflict: 'campaign_id,influencer_id' });
+        } catch (e) {}
+      }
+    }
+
+    try {
+      localStorage.setItem(localKey, JSON.stringify(map));
+    } catch (e) {}
+
+    if (missing.length > 0) {
+      toast.error(`Cannot generate agreement: Pricing information missing for ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '...' : ''}`);
+    }
+
+    if (count > 0) {
+      toast.success(`Generated Offer Agreement for ${count} influencer(s)!`);
+      setMainViewMode('offer_agreement');
+    }
+  };
+
   const handleBulkEliminate = async () => {
     const selectedList = influencers.filter(inf => selectedIds.has(inf.id) && isActiveStatus(inf.is_archived));
     if (selectedList.length === 0) return;
@@ -1284,6 +1356,20 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           >
             <RefreshCcw size={16} />
           </button>
+
+          <button 
+            onClick={() => setMainViewMode(prev => prev === 'offer_agreement' ? 'list' : 'offer_agreement')}
+            className={`px-3.5 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer shrink-0 border-0 ${
+              mainViewMode === 'offer_agreement'
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-950/50'
+                : 'bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 border border-purple-700/50'
+            }`}
+            title="Offer Agreement"
+          >
+            <FileText size={15} className={mainViewMode === 'offer_agreement' ? 'text-white' : 'text-purple-300'} />
+            <span>Offer Agreement</span>
+          </button>
+
           <div className="relative shrink-0" ref={uploadDropdownRef}>
             <button 
               onClick={() => setIsUploadDropdownOpen(prev => !prev)}
@@ -1347,7 +1433,13 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         </div>
       </div>
 
-      {mainViewMode === 'analytics' ? (
+      {mainViewMode === 'offer_agreement' ? (
+        <OfferAgreementSection
+          campaign={campaign}
+          influencers={influencers}
+          onBackToList={() => setMainViewMode('list')}
+        />
+      ) : mainViewMode === 'analytics' ? (
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           <CampaignInfluencerAnalytics 
             campaign={campaign}
@@ -1473,6 +1565,18 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               }`}
             >
               <Download size={13} /> Download Pick List
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkGenerateOfferAgreements}
+              disabled={selectedIds.size === 0}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                selectedIds.size > 0 
+                  ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-md' 
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              }`}
+            >
+              <Sparkles size={13} /> Generate Agreement
             </button>
             <button
               type="button"
