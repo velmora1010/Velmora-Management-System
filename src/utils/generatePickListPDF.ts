@@ -29,25 +29,25 @@ export const generatePickListPDF = (
   interface InfluencerGroup {
     sNo: number;
     code: string;
-    name: string;
     products: any[];
     rowCount: number;
   }
 
   const groups: InfluencerGroup[] = sortedRecords.map((rec) => {
     const prods = rec.products;
-    const infName = rec.influencerName || rec.username || '—';
     return {
       sNo: rec.sNo,
       code: rec.influencerCode || '—',
-      name: infName,
       products: prods,
       rowCount: prods.length > 0 ? prods.length : 1
     };
   });
 
-  // 3. Paginate by Influencer GROUPS (Strict cap of 24 body rows per page for guaranteed zero autoTable page overflow)
-  const MAX_ROWS_PER_PAGE = 24;
+  // 3. Continuous Dynamic Pagination by Influencer GROUPS
+  // Safe max printable capacity: 35 body rows per physical page.
+  // 35 rows * 4.6mm = 161mm + 15mm startY + 5.2mm header = 181.2mm total table height.
+  // This guarantees autoTable never exceeds the 202mm page boundary, preventing 1-row overflow and ghost header pages.
+  const MAX_ROWS_PER_PAGE = 35;
 
   interface PDFPage {
     groups: InfluencerGroup[];
@@ -58,15 +58,27 @@ export const generatePickListPDF = (
   let currentPageRowCount = 0;
 
   groups.forEach((group) => {
-    const fitsInPage = currentPageRowCount + group.rowCount <= MAX_ROWS_PER_PAGE;
-
-    if (fitsInPage || currentPageGroups.length === 0) {
+    // If the whole group fits in remaining space of current page, add it
+    if (currentPageRowCount + group.rowCount <= MAX_ROWS_PER_PAGE) {
       currentPageGroups.push(group);
       currentPageRowCount += group.rowCount;
-    } else {
-      pages.push({ groups: currentPageGroups });
+    } 
+    // If group exceeds page capacity but fits on a fresh page, start fresh page
+    else if (group.rowCount <= MAX_ROWS_PER_PAGE) {
+      if (currentPageGroups.length > 0) {
+        pages.push({ groups: currentPageGroups });
+      }
       currentPageGroups = [group];
       currentPageRowCount = group.rowCount;
+    } 
+    // Exceptional case: group itself is larger than 35 rows. Add what fits and spill cleanly.
+    else {
+      if (currentPageRowCount > 0) {
+        pages.push({ groups: currentPageGroups });
+        currentPageGroups = [];
+        currentPageRowCount = 0;
+      }
+      pages.push({ groups: [group] });
     }
   });
 
@@ -74,23 +86,25 @@ export const generatePickListPDF = (
     pages.push({ groups: currentPageGroups });
   }
 
-  // 4. Render Single-Table Full-Width PDF Pages
-  const tableHead = [['S.No', 'Influencer Code', 'Influencer Name', 'Product Name', 'SKU', 'Qty', 'Verify']];
+  // Filter out any accidentally empty pages
+  const validPages = pages.filter(p => p.groups.length > 0);
+
+  // 4. Render Single-Table Full-Width PDF Pages (6 Columns: S.No | Influencer Code | Product Name | SKU | Qty | Verify)
+  const tableHead = [['S.No', 'Influencer Code', 'Product Name', 'SKU', 'Qty', 'Verify']];
 
   // Printable width = 297mm (A4 Landscape) - 16mm (margins) = 281mm
   const columnStyles = {
     0: { cellWidth: 10, halign: 'center' as const },
-    1: { cellWidth: 26, halign: 'center' as const, fontStyle: 'bold' as const },
-    2: { cellWidth: 55 },
-    3: { cellWidth: 132 },
-    4: { cellWidth: 18, halign: 'center' as const, fontStyle: 'bold' as const },
-    5: { cellWidth: 12, halign: 'center' as const },
-    6: { cellWidth: 28, halign: 'center' as const }
+    1: { cellWidth: 28, halign: 'center' as const, fontStyle: 'bold' as const },
+    2: { cellWidth: 171 },
+    3: { cellWidth: 20, halign: 'center' as const, fontStyle: 'bold' as const },
+    4: { cellWidth: 14, halign: 'center' as const },
+    5: { cellWidth: 38, halign: 'center' as const }
   };
 
   const commonStyles = {
     fontSize: 8,
-    cellPadding: { top: 1.1, bottom: 1.1, left: 1.5, right: 1.5 },
+    cellPadding: { top: 0.7, bottom: 0.7, left: 1.5, right: 1.5 },
     textColor: [30, 41, 59] as [number, number, number],
     lineColor: [226, 232, 240] as [number, number, number],
     lineWidth: 0.12,
@@ -103,10 +117,10 @@ export const generatePickListPDF = (
     fontStyle: 'bold' as const,
     fontSize: 8.5,
     halign: 'center' as const,
-    cellPadding: 1.6
+    cellPadding: 1.5
   };
 
-  pages.forEach((pageObj, pIdx) => {
+  validPages.forEach((pageObj, pIdx) => {
     if (pIdx > 0) {
       doc.addPage('a4', 'landscape');
     }
@@ -118,7 +132,6 @@ export const generatePickListPDF = (
         pageRows.push([
           group.sNo,
           group.code,
-          group.name,
           'No products assigned',
           '—',
           '0',
@@ -130,7 +143,6 @@ export const generatePickListPDF = (
             pageRows.push([
               group.sNo,
               group.code,
-              group.name,
               p.product_name,
               p.sku,
               p.qty,
@@ -138,7 +150,6 @@ export const generatePickListPDF = (
             ]);
           } else {
             pageRows.push([
-              '',
               '',
               '',
               p.product_name,
@@ -160,17 +171,17 @@ export const generatePickListPDF = (
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(109, 40, 217);
-    doc.text(`Campaign: ${campaignName}`, 8, 14.5);
+    doc.text(`Campaign: ${campaignName}`, 8, 14);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
-    doc.text(`Download Date: ${formattedDate}`, 289, 14.5, { align: 'right' });
+    doc.text(`Download Date: ${formattedDate}`, 289, 14, { align: 'right' });
 
     // Render Single Full-Width Table for this Page with pageBreak: 'avoid'
     autoTable(doc, {
-      startY: 16,
-      margin: { left: 8, top: 16, right: 8, bottom: 8 },
+      startY: 15,
+      margin: { left: 8, top: 15, right: 8, bottom: 8 },
       tableWidth: 281,
       head: tableHead,
       body: pageRows,
@@ -180,18 +191,22 @@ export const generatePickListPDF = (
       columnStyles,
       styles: commonStyles
     });
+  });
 
-    // Footer Page Number
-    const totalPages = pages.length;
+  // Stamp Footer Page Numbers across all physical pages
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
     doc.text(
-      `Page ${pIdx + 1} of ${totalPages} — Pick List (${campaignName})`,
+      `Page ${i} of ${totalPages} — Pick List (${campaignName})`,
       148.5,
-      205,
+      204,
       { align: 'center' }
     );
-  });
+  }
 
   const safeFileName = `PickList_${campaignName.replace(/[^a-zA-Z0-9]/g, '_')}_${formattedDate.replace(/\s+/g, '_')}.pdf`;
   doc.save(safeFileName);

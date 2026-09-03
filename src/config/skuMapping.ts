@@ -93,61 +93,82 @@ export interface PickListInfluencerRecord {
   downloadDate: string;
 }
 
+// Helper to filter out video labels like "Video 1", "Video 4", "Video 5", "Unmapped", etc.
+const isVideoLabel = (name: string): boolean => {
+  if (!name || typeof name !== 'string') return true;
+  const clean = name.trim().toLowerCase();
+  if (!clean) return true;
+  if (/^video\s*\d+/i.test(clean)) return true;
+  if (clean === 'unmapped') return true;
+  return false;
+};
+
 export const getInfluencerProducts = (influencer: CampaignInfluencer): PickListProductItem[] => {
   const prodMap = new Map<string, { product_name: string; sku: string; qty: number }>();
 
+  const addProduct = (rawName: string, rawQty: number | string) => {
+    if (!rawName || isVideoLabel(rawName)) return;
+    const displayName = formatDisplayProductName(rawName);
+    if (!displayName || isVideoLabel(displayName)) return;
+
+    const qty = Number(rawQty) || 1;
+    const { sku } = getSKUForProduct(displayName);
+
+    const key = `${sku}_${displayName.toLowerCase()}`;
+    if (prodMap.has(key)) {
+      prodMap.get(key)!.qty += qty;
+    } else {
+      prodMap.set(key, { product_name: displayName, sku, qty });
+    }
+  };
+
+  // 1. Explicit Products from database / form
   const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
-  const pricingVideos = Array.isArray(influencer.pricing?.product_pricing?.videos) 
-    ? influencer.pricing.product_pricing.videos.filter((v: any) => v && (v.combination || v.name))
-    : [];
+  explicitProducts.forEach((p: any) => {
+    if (p && (p.selected === undefined || p.selected === true)) {
+      const rawName = p.product_name || p.name || '';
+      addProduct(rawName, p.qty);
+    }
+  });
 
-  if (explicitProducts.length > 0) {
-    explicitProducts.forEach((p: any) => {
-      if (p && (p.selected === undefined || p.selected === true)) {
-        const rawName = p.product_name || p.name || '';
-        if (!rawName) return;
-        const displayName = formatDisplayProductName(rawName);
-        const qty = Number(p.qty) || 1;
-        const { sku } = getSKUForProduct(displayName);
-        const key = `${sku}_${displayName.toLowerCase()}`;
-        if (prodMap.has(key)) {
-          prodMap.get(key)!.qty += qty;
-        } else {
-          prodMap.set(key, { product_name: displayName, sku, qty });
-        }
-      }
-    });
-  } else if (pricingVideos.length > 0) {
+  // 2. If no valid explicit products were found, check pricing videos
+  if (prodMap.size === 0) {
+    const pricingVideos = Array.isArray(influencer.pricing?.product_pricing?.videos) 
+      ? influencer.pricing.product_pricing.videos 
+      : [];
+
     pricingVideos.forEach((v: any) => {
-      const rawCombName = v.combination || v.name || '';
-      const explicitProds = Array.isArray(v.products) && v.products.length > 0 ? v.products : [];
-      const parsedProdNames = parseProductsFromCombination(rawCombName);
-
+      if (!v) return;
+      const explicitProds = Array.isArray(v.products) ? v.products : [];
       if (explicitProds.length > 0) {
         explicitProds.forEach((p: any) => {
-          const rawName = p.product_name || p.name || '';
-          if (!rawName) return;
-          const displayName = formatDisplayProductName(rawName);
-          const qty = Number(p.qty) || 1;
-          const { sku } = getSKUForProduct(displayName);
-          const key = `${sku}_${displayName.toLowerCase()}`;
-          if (prodMap.has(key)) {
-            prodMap.get(key)!.qty += qty;
-          } else {
-            prodMap.set(key, { product_name: displayName, sku, qty });
-          }
+          addProduct(p.product_name || p.name || '', p.qty);
         });
-      } else if (parsedProdNames.length > 0) {
+      } else {
+        const rawCombName = v.combination || v.name || '';
+        const parsedProdNames = parseProductsFromCombination(rawCombName);
         parsedProdNames.forEach(pName => {
-          const displayName = formatDisplayProductName(pName);
-          const { sku } = getSKUForProduct(displayName);
-          const key = `${sku}_${displayName.toLowerCase()}`;
-          if (prodMap.has(key)) {
-            prodMap.get(key)!.qty += 1;
-          } else {
-            prodMap.set(key, { product_name: displayName, sku, qty: 1 });
-          }
+          addProduct(pName, 1);
         });
+      }
+    });
+  }
+
+  // 3. If still no valid products found, check pricing.product_pricing map object
+  if (prodMap.size === 0 && influencer.pricing?.product_pricing && typeof influencer.pricing.product_pricing === 'object') {
+    Object.entries(influencer.pricing.product_pricing).forEach(([key, val]: [string, any]) => {
+      if (key !== 'videos' && !isVideoLabel(key)) {
+        const qty = (val && typeof val === 'object' && val.qty !== undefined) ? val.qty : (typeof val === 'number' ? val : 1);
+        addProduct(key, qty);
+      }
+    });
+  }
+
+  // 4. If still no valid products found, check dispatchDetails.selected_products
+  if (prodMap.size === 0 && Array.isArray((influencer as any).dispatchDetails?.selected_products)) {
+    (influencer as any).dispatchDetails.selected_products.forEach((p: any) => {
+      if (p) {
+        addProduct(p.product_name || p.name || '', p.quantity || p.qty);
       }
     });
   }
