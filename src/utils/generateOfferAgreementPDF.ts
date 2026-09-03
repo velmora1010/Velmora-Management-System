@@ -29,7 +29,7 @@ export const generateSingleOfferAgreementPDF = (
     const footerText = item.influencerCode
       ? `Page ${i} of ${totalPages} — Offer Agreement (${item.influencerCode})`
       : `Page ${i} of ${totalPages} — Offer Agreement`;
-    doc.text(footerText, 105, 287, { align: 'center' });
+    doc.text(footerText, 105, 288, { align: 'center' });
   }
 
   const safeCode = (item.influencerCode || 'Agreement').replace(/[^a-zA-Z0-9]/g, '_');
@@ -69,7 +69,7 @@ export const generateCombinedOfferAgreementPDF = (
     doc.text(
       `Page ${i} of ${totalPages} — Combined Offer Agreements`,
       105,
-      287,
+      288,
       { align: 'center' }
     );
   }
@@ -78,24 +78,45 @@ export const generateCombinedOfferAgreementPDF = (
   doc.save(`Combined_Offer_Agreements_${safeCampaign}.pdf`);
 };
 
+const drawHeaderBanner = (doc: jsPDF) => {
+  // Light Blue Header Accent Background (#D9E8F7 ~ 40% lightness of logo blue)
+  doc.setFillColor(217, 232, 247);
+  doc.rect(0, 0, 210, 22, 'F');
+
+  // Subtle Header Bottom Line (#B8D4F0)
+  doc.setDrawColor(184, 212, 240);
+  doc.setLineWidth(0.4);
+  doc.line(0, 22, 210, 22);
+
+  // Title "OFFER AGREEMENT" in Justmixx Logo Dark Blue (#0A4C95)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(10, 76, 149);
+  doc.text('OFFER AGREEMENT', 15, 14.5);
+
+  // Justmixx Rounded Logo Badge (Top Right Corner)
+  doc.setFillColor(10, 76, 149);
+  doc.roundedRect(158, 4.5, 37, 13, 3, 3, 'F');
+
+  // "Justmixx" White Logo Text
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('Justmixx', 176.5, 12.8, { align: 'center' });
+};
+
 const renderAgreementPage = (
   doc: jsPDF,
   item: OfferAgreementPDFItem
 ) => {
-  const leftMargin = 14;
-  const contentWidth = 182; // 210 - 28 = 182mm
+  const leftMargin = 15;
+  const contentWidth = 180; // 210 - 30 = 180mm
 
-  // Purple Header Banner (Contains ONLY "OFFER AGREEMENT", NO campaign name)
-  doc.setFillColor(109, 40, 217);
-  doc.rect(0, 0, 210, 18, 'F');
+  // Draw Top Blue Header Banner
+  drawHeaderBanner(doc);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.setTextColor(255, 255, 255);
-  doc.text('OFFER AGREEMENT', leftMargin, 12);
-
-  // Body start Y position (Top info bar removed completely)
-  let yPos = 28;
+  // Body start Y position
+  let yPos = 30;
 
   // Clean agreement text:
   // 1. Strip asterisks
@@ -138,10 +159,12 @@ const renderAgreementPage = (
       yPos += 2;
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
-      doc.setTextColor(109, 40, 217);
+      // Dark Blue (#0A4C95) for Section Headings
+      doc.setTextColor(10, 76, 149);
     } else {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9.5);
+      // Dark slate (#1E293B) for Body Text
       doc.setTextColor(30, 41, 59);
     }
 
@@ -152,14 +175,9 @@ const renderAgreementPage = (
         doc.addPage('a4', 'portrait');
 
         // Subpage Header
-        doc.setFillColor(109, 40, 217);
-        doc.rect(0, 0, 210, 14, 'F');
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(255, 255, 255);
-        doc.text('OFFER AGREEMENT', leftMargin, 9.5);
+        drawHeaderBanner(doc);
 
-        yPos = 22;
+        yPos = 30;
       }
 
       doc.text(wLine, leftMargin, yPos);
