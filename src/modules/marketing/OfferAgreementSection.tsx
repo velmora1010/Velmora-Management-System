@@ -707,12 +707,11 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
               <thead>
                 <tr className="bg-slate-900/90 text-slate-300 text-xs font-bold border-b border-slate-700 uppercase tracking-wider">
                   {selectedIds.size > 0 && <th className="p-3 w-10 text-center">Select</th>}
-                  <th className="p-3 w-28">Code</th>
+                  <th className="p-3 w-32">Code</th>
                   <th className="p-3">Username</th>
-                  <th className="p-3 w-32">Price / Video</th>
-                  <th className="p-3 w-44 text-center">Text Format</th>
+                  <th className="p-3 w-48 text-center">Text Format</th>
                   <th className="p-3 w-44 text-center">PDF Format</th>
-                  <th className="p-3 w-16 text-center">Delete</th>
+                  <th className="p-3 w-20 text-center">Delete</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/60 text-xs">
@@ -721,7 +720,6 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
                   const code = inf.code || (inf as any).influencer_code || '';
                   const user = inf.influencer_name || (inf as any).username || inf.name || '';
                   const cleanUser = user ? (user.startsWith('@') ? user : `@${user}`) : '';
-                  const price = getVideoPrice(inf);
                   const isChecked = selectedIds.has(inf.id);
 
                   return (
@@ -746,10 +744,6 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
                       <td className="p-3 font-semibold text-slate-200">
                         {cleanUser || <span className="text-slate-500 font-normal italic">—</span>}
-                      </td>
-
-                      <td className="p-3 font-bold text-slate-100">
-                        {price > 0 ? `₹${price.toLocaleString('en-IN')}` : <span className="text-slate-500 font-normal italic">—</span>}
                       </td>
 
                       <td className="p-3 text-center">
