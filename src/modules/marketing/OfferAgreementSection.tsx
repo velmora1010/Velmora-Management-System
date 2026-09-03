@@ -7,6 +7,7 @@ import { generateSingleOfferAgreementPDF, generateCombinedOfferAgreementPDF } fr
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { formatDisplayDate } from './AddCampaignInfluencer';
+import { isActiveStatus } from '../../utils/marketingUtils';
 
 export interface StoredAgreement {
   id?: string | number;
@@ -30,39 +31,40 @@ export const buildAgreementText = (
   influencer: CampaignInfluencer,
   campaignName: string
 ): string => {
-  const rawUser = influencer.influencer_name || (influencer as any).username || influencer.name || 'Creator';
-  const cleanUsername = rawUser.startsWith('@') ? rawUser : `@${rawUser}`;
+  const rawUser = (influencer.influencer_name || (influencer as any).username || influencer.name || '').trim();
+  const cleanUsername = rawUser ? (rawUser.startsWith('@') ? rawUser : `@${rawUser}`) : '';
 
   // Extract per-video price from pricing info
   const pricing = (influencer.pricing as any) || {};
-  const prices: number[] = [];
+  let videoPrice = 0;
 
   if (Array.isArray(pricing.product_pricing?.videos) && pricing.product_pricing.videos.length > 0) {
-    pricing.product_pricing.videos.forEach((v: any) => {
+    for (const v of pricing.product_pricing.videos) {
       const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
-      if (!isNaN(amt) && amt > 0) prices.push(amt);
-    });
+      if (!isNaN(amt) && amt > 0) {
+        videoPrice = amt;
+        break;
+      }
+    }
   }
 
-  if (prices.length === 0) {
+  if (videoPrice === 0) {
     if (pricing.video1_price) {
       const v1 = Number(pricing.video1_price);
-      if (!isNaN(v1) && v1 > 0) prices.push(v1);
-    }
-    if (pricing.video2_price) {
+      if (!isNaN(v1) && v1 > 0) videoPrice = v1;
+    } else if (pricing.video2_price) {
       const v2 = Number(pricing.video2_price);
-      if (!isNaN(v2) && v2 > 0) prices.push(v2);
+      if (!isNaN(v2) && v2 > 0) videoPrice = v2;
     }
   }
 
-  if (prices.length === 0 && pricing.final_price) {
+  if (videoPrice === 0 && pricing.final_price) {
     const totalV = Number(pricing.total_videos) || 6;
     const calc = Math.round(Number(pricing.final_price) / (totalV > 0 ? totalV : 6));
-    if (!isNaN(calc) && calc > 0) prices.push(calc);
+    if (!isNaN(calc) && calc > 0) videoPrice = calc;
   }
 
-  const videoPrice = prices[0] || 0;
-  const formattedPrice = videoPrice > 0 ? `₹${videoPrice.toLocaleString('en-IN')}` : '₹0';
+  const formattedPrice = videoPrice > 0 ? `*(₹${videoPrice.toLocaleString('en-IN')})* ` : '';
 
   // Extract assigned products per video
   const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
@@ -71,9 +73,9 @@ export const buildAgreementText = (
   let video3Prod = 'Detergent + Dishwash';
 
   if (explicitProducts.length > 0) {
-    const v1 = explicitProducts.filter((p: any) => p.video_number === 1).map((p: any) => p.product_name);
-    const v2 = explicitProducts.filter((p: any) => p.video_number === 2).map((p: any) => p.product_name);
-    const v3 = explicitProducts.filter((p: any) => p.video_number === 3).map((p: any) => p.product_name);
+    const v1 = explicitProducts.filter((p: any) => p.video_number === 1).map((p: any) => p.product_name || p.name).filter(Boolean);
+    const v2 = explicitProducts.filter((p: any) => p.video_number === 2).map((p: any) => p.product_name || p.name).filter(Boolean);
+    const v3 = explicitProducts.filter((p: any) => p.video_number === 3).map((p: any) => p.product_name || p.name).filter(Boolean);
     if (v1.length > 0) video1Prod = v1.join(' + ');
     if (v2.length > 0) video2Prod = v2.join(' + ');
     if (v3.length > 0) video3Prod = v3.join(' + ');
@@ -83,10 +85,15 @@ export const buildAgreementText = (
   const postDates = Array.isArray(influencer.postDates) ? influencer.postDates : [];
   const getDateStr = (vNum: number) => {
     const found = postDates.find((pd: any) => pd.video_number === vNum);
-    return (found && found.post_date) ? formatDisplayDate(found.post_date) : 'To be assigned';
+    if (found && found.post_date && typeof found.post_date === 'string' && found.post_date.trim()) {
+      return `*${formatDisplayDate(found.post_date)}*`;
+    }
+    return '';
   };
 
-  return `Hi *${cleanUsername}*,
+  const greetingLine = cleanUsername ? `Hi *${cleanUsername}*,` : 'Hi,';
+
+  return `${greetingLine}
 
 Greetings from Justmixx!
 
@@ -103,12 +110,12 @@ Products for Videos 1–3 will be dispatched now. Products for Videos 4–6 will
 
 YOUR ASSIGNED PUBLISHING DATES
 
-Video 1: *${getDateStr(1)}*
-Video 2: *${getDateStr(2)}*
-Video 3: *${getDateStr(3)}*
-Video 4: *${getDateStr(4)}*
-Video 5: *${getDateStr(5)}*
-Video 6: *${getDateStr(6)}*
+Video 1: ${getDateStr(1)}
+Video 2: ${getDateStr(2)}
+Video 3: ${getDateStr(3)}
+Video 4: ${getDateStr(4)}
+Video 5: ${getDateStr(5)}
+Video 6: ${getDateStr(6)}
 
 These are your assigned Publishing Dates. Please plan the content accordingly.
 
@@ -122,7 +129,7 @@ PAYMENT & COMMERCIAL TERMS
 
 • Video 1: Payment will be made in advance after product delivery.
 • Videos 2–6: Payment for each Video will be made after the respective Draft is approved.
-• The commercial amount already agreed *(${formattedPrice})* will remain the same for all 6 videos and cannot be increased during the collaboration period.
+• The commercial amount already agreed ${formattedPrice}will remain the same for all 6 videos and cannot be increased during the collaboration period.
 
 The Publishing Dates are planned in advance for our overall campaign. If there is any unavoidable issue, please inform our team in advance.
 
@@ -149,10 +156,10 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
   const [editingText, setEditingText] = useState('');
   const [isEditingMode, setIsEditingMode] = useState(false);
 
-  // Filter ONLY Active Influencers
+  // Filter ALL Active Influencers using isActiveStatus helper
   const activeInfluencers = useMemo(() => {
-    const list = influencers.filter(inf => !inf.is_archived || inf.is_archived === 'active' || (inf as any).status === 'active');
-    return list.sort((a, b) => naturalSortCompare(a.code || '', b.code || ''));
+    const list = influencers.filter(inf => isActiveStatus(inf.is_archived));
+    return list.sort((a, b) => naturalSortCompare(a.code || (a as any).influencer_code || '', b.code || (b as any).influencer_code || ''));
   }, [influencers]);
 
   // Load Persisted Agreements (Supabase + localStorage fallback)
@@ -242,7 +249,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     const pricing = (inf.pricing as any) || {};
     if (Array.isArray(pricing.product_pricing?.videos)) {
       for (const v of pricing.product_pricing.videos) {
-        const amt = Number(v?.amount);
+        const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
         if (!isNaN(amt) && amt > 0) return amt;
       }
     }
@@ -252,27 +259,10 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     return 0;
   };
 
-  // Generate Agreement for a set of influencers
+  // Generate Agreement for a set of influencers (NEVER BLOCKS ON MISSING FIELDS)
   const handleGenerateAgreements = async (targetList: CampaignInfluencer[]) => {
     if (targetList.length === 0) {
       toast.error('No active influencers selected.');
-      return;
-    }
-
-    // Validation check for missing required fields
-    const missing: string[] = [];
-    targetList.forEach(inf => {
-      const code = inf.code || (inf as any).influencer_code || String(inf.id);
-      const price = getVideoPrice(inf);
-      const user = inf.influencer_name || (inf as any).username || inf.name;
-
-      if (!code || !user || price <= 0) {
-        missing.push(code || `ID:${inf.id}`);
-      }
-    });
-
-    if (missing.length > 0) {
-      toast.error(`Cannot generate agreement: Pricing/details information missing for ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '...' : ''}`);
       return;
     }
 
@@ -281,8 +271,8 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
     for (const inf of targetList) {
       const infId = String(inf.id);
-      const code = inf.code || (inf as any).influencer_code || '—';
-      const user = inf.influencer_name || (inf as any).username || inf.name || 'Creator';
+      const code = inf.code || (inf as any).influencer_code || '';
+      const user = inf.influencer_name || (inf as any).username || inf.name || '';
       const price = getVideoPrice(inf);
       const text = buildAgreementText(inf, campaign.campaign_name);
 
@@ -309,7 +299,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     if (!searchTerm.trim()) return activeInfluencers;
     const term = searchTerm.trim().toLowerCase();
     return activeInfluencers.filter(inf => {
-      const code = (inf.code || '').toLowerCase();
+      const code = (inf.code || (inf as any).influencer_code || '').toLowerCase();
       const name = (inf.name || '').toLowerCase();
       const username = (inf.influencer_name || (inf as any).username || '').toLowerCase();
       return code.includes(term) || username.includes(term) || name.includes(term);
@@ -370,8 +360,8 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       ag = {
         campaign_id: campaign.id,
         influencer_id: inf.id,
-        influencer_code: inf.code || '—',
-        username: inf.influencer_name || (inf as any).username || inf.name || 'Creator',
+        influencer_code: inf.code || (inf as any).influencer_code || '',
+        username: inf.influencer_name || (inf as any).username || inf.name || '',
         price_per_video: price,
         agreement_text: text,
         generated_at: new Date().toISOString(),
@@ -410,8 +400,8 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       ag = {
         campaign_id: campaign.id,
         influencer_id: inf.id,
-        influencer_code: inf.code || '—',
-        username: inf.influencer_name || (inf as any).username || inf.name || 'Creator',
+        influencer_code: inf.code || (inf as any).influencer_code || '',
+        username: inf.influencer_name || (inf as any).username || inf.name || '',
         price_per_video: price,
         agreement_text: text,
         generated_at: new Date().toISOString(),
@@ -424,7 +414,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       pricePerVideo: ag.price_per_video,
       agreementText: ag.agreement_text
     });
-    toast.success(`PDF downloaded for ${ag.influencer_code}!`);
+    toast.success(`PDF downloaded for ${ag.influencer_code || ag.username || 'influencer'}!`);
   };
 
   return (
@@ -526,9 +516,9 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
               <tbody className="divide-y divide-slate-700/60 text-xs">
                 {filteredInfluencers.map((inf) => {
                   const infId = String(inf.id);
-                  const code = inf.code || (inf as any).influencer_code || '—';
-                  const user = inf.influencer_name || (inf as any).username || inf.name || 'Creator';
-                  const cleanUser = user.startsWith('@') ? user : `@${user}`;
+                  const code = inf.code || (inf as any).influencer_code || '';
+                  const user = inf.influencer_name || (inf as any).username || inf.name || '';
+                  const cleanUser = user ? (user.startsWith('@') ? user : `@${user}`) : '';
                   const price = getVideoPrice(inf);
                   const isGen = !!agreementsMap[infId];
                   const isChecked = selectedIds.has(inf.id);
@@ -548,15 +538,15 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
                       </td>
 
                       <td className="p-3 font-bold text-purple-300">
-                        {code}
+                        {code || <span className="text-slate-500 font-normal italic">—</span>}
                       </td>
 
                       <td className="p-3 font-semibold text-slate-200">
-                        {cleanUser}
+                        {cleanUser || <span className="text-slate-500 font-normal italic">—</span>}
                       </td>
 
                       <td className="p-3 font-bold text-slate-100">
-                        {price > 0 ? `₹${price.toLocaleString('en-IN')}` : <span className="text-amber-400 font-normal italic">Missing Price</span>}
+                        {price > 0 ? `₹${price.toLocaleString('en-IN')}` : <span className="text-slate-500 font-normal italic">—</span>}
                       </td>
 
                       <td className="p-3 text-center">
@@ -606,7 +596,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
               <div className="flex items-center gap-2">
                 <FileText size={18} className="text-purple-400" />
                 <h4 className="text-sm font-bold text-slate-100">
-                  Offer Agreement Text — {textModalItem.agreement.influencer_code} ({textModalItem.agreement.username})
+                  Offer Agreement Text {textModalItem.agreement.influencer_code ? `— ${textModalItem.agreement.influencer_code}` : ''} {textModalItem.agreement.username ? `(${textModalItem.agreement.username})` : ''}
                 </h4>
               </div>
               <button

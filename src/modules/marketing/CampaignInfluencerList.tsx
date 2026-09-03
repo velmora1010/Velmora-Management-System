@@ -1210,7 +1210,6 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
       return;
     }
 
-    const missing: string[] = [];
     const localKey = `velmora_offer_agreements_${campaign.id}`;
     let map: Record<string, StoredAgreement> = {};
     try {
@@ -1222,8 +1221,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     let count = 0;
 
     for (const inf of selectedList) {
-      const code = inf.code || (inf as any).influencer_code || String(inf.id);
-      const user = inf.influencer_name || (inf as any).username || inf.name;
+      const code = inf.code || (inf as any).influencer_code || '';
+      const user = inf.influencer_name || (inf as any).username || inf.name || '';
       const pricing = (inf.pricing as any) || {};
 
       let videoPrice = 0;
@@ -1236,42 +1235,32 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
       if (videoPrice === 0) videoPrice = Number(pricing.video1_price) || Number(pricing.video2_price) || 0;
       if (videoPrice === 0 && pricing.final_price) videoPrice = Math.round(Number(pricing.final_price) / (Number(pricing.total_videos) || 6));
 
-      if (!code || !user || videoPrice <= 0) {
-        missing.push(code || `ID:${inf.id}`);
-      } else {
-        const infId = String(inf.id);
-        const text = buildAgreementText(inf, campaign.campaign_name);
-        const record: StoredAgreement = {
-          campaign_id: campaign.id,
-          influencer_id: inf.id,
-          influencer_code: code,
-          username: user,
-          price_per_video: videoPrice,
-          agreement_text: text,
-          generated_at: map[infId]?.generated_at || nowIso,
-          updated_at: nowIso
-        };
-        map[infId] = record;
-        count++;
+      const infId = String(inf.id);
+      const text = buildAgreementText(inf, campaign.campaign_name);
+      const record: StoredAgreement = {
+        campaign_id: campaign.id,
+        influencer_id: inf.id,
+        influencer_code: code,
+        username: user,
+        price_per_video: videoPrice,
+        agreement_text: text,
+        generated_at: map[infId]?.generated_at || nowIso,
+        updated_at: nowIso
+      };
+      map[infId] = record;
+      count++;
 
-        try {
-          await supabase.from(SUPABASE_TABLES.offerAgreements).upsert([record], { onConflict: 'campaign_id,influencer_id' });
-        } catch (e) {}
-      }
+      try {
+        await supabase.from(SUPABASE_TABLES.offerAgreements).upsert([record], { onConflict: 'campaign_id,influencer_id' });
+      } catch (e) {}
     }
 
     try {
       localStorage.setItem(localKey, JSON.stringify(map));
     } catch (e) {}
 
-    if (missing.length > 0) {
-      toast.error(`Cannot generate agreement: Pricing information missing for ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '...' : ''}`);
-    }
-
-    if (count > 0) {
-      toast.success(`Generated Offer Agreement for ${count} influencer(s)!`);
-      setMainViewMode('offer_agreement');
-    }
+    toast.success(`Generated Offer Agreement for ${count} influencer(s)!`);
+    setMainViewMode('offer_agreement');
   };
 
   const handleBulkEliminate = async () => {
