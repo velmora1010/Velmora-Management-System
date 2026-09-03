@@ -97,10 +97,16 @@ const renderAgreementPage = (
   // Body start Y position (Top info bar removed completely)
   let yPos = 28;
 
-  // Clean agreement text (strip asterisks, sanitize currency symbol to avoid character spacing corruption)
+  // Clean agreement text:
+  // 1. Strip asterisks
+  // 2. Sanitize currency symbol to avoid character spacing corruption in jsPDF Helvetica
+  // 3. Ensure any "Video X: D MMM" date without a 4-digit year has the year included
   const cleanText = item.agreementText
     .replace(/\*/g, '')
-    .replace(/₹/g, 'Rs. ');
+    .replace(/₹/g, 'Rs. ')
+    .replace(/Video\s+(\d):\s*(\d{1,2}\s+[A-Za-z]{3,4})(?!\s+\d{4})/gi, (match, vNum, datePart) => {
+      return `Video ${vNum}: ${datePart} 2026`;
+    });
 
   const textLines = cleanText.split('\n');
 

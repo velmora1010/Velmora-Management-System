@@ -30,7 +30,7 @@ interface OfferAgreementSectionProps {
 export const formatAgreementDate = (dateStr: string | null | undefined): string => {
   if (!dateStr || !dateStr.trim()) return '';
   const trimmed = dateStr.trim();
-  if (trimmed === '—' || trimmed === '-') return '';
+  if (trimmed === '—' || trimmed === '-' || trimmed === 'null' || trimmed === 'undefined') return '';
 
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -58,13 +58,15 @@ export const formatAgreementDate = (dateStr: string | null | undefined): string 
     }
   }
 
-  // 3. Check "22 Sep" or "22 Sep 2026"
-  const mmmMatch = trimmed.match(/^(\d{1,2})\s+([A-Za-z]{3,4})(?:\s+(\d{4}))?$/);
+  // 3. Check "22 Sep" or "22 Sep 2026" or "22 September 2026"
+  const mmmMatch = trimmed.match(/^(\d{1,2})\s+([A-Za-z]+)(?:\s+(\d{4}))?$/);
   if (mmmMatch) {
     const d = parseInt(mmmMatch[1], 10);
-    const mStr = mmmMatch[2];
+    const mRaw = mmmMatch[2];
+    const mIndex = months.findIndex(m => m.toLowerCase() === mRaw.slice(0, 3).toLowerCase());
+    const mName = mIndex >= 0 ? months[mIndex] : mRaw;
     const y = mmmMatch[3] ? parseInt(mmmMatch[3], 10) : 2026;
-    return `${d} ${mStr} ${y}`;
+    return `${d} ${mName} ${y}`;
   }
 
   // 4. Fallback to JS Date object
@@ -74,6 +76,11 @@ export const formatAgreementDate = (dateStr: string | null | undefined): string 
     const mName = months[parsed.getMonth()];
     const y = parsed.getFullYear();
     return `${d} ${mName} ${y}`;
+  }
+
+  // 5. Final fallback if string is e.g. "22 Sep": if 4-digit year is missing, append 2026
+  if (/\d{1,2}\s+[A-Za-z]+/.test(trimmed) && !/\d{4}/.test(trimmed)) {
+    return `${trimmed} 2026`;
   }
 
   return trimmed;
