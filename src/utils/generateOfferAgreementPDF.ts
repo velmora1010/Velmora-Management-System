@@ -18,7 +18,7 @@ export const generateSingleOfferAgreementPDF = (
     format: 'a4'
   });
 
-  renderAgreementPage(doc, campaignName, item);
+  renderAgreementPage(doc, item);
 
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
@@ -26,17 +26,16 @@ export const generateSingleOfferAgreementPDF = (
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
-    doc.text(
-      `Page ${i} of ${totalPages} — Offer Agreement (${item.influencerCode} - ${item.username})`,
-      105,
-      287,
-      { align: 'center' }
-    );
+    const footerText = item.influencerCode
+      ? `Page ${i} of ${totalPages} — Offer Agreement (${item.influencerCode})`
+      : `Page ${i} of ${totalPages} — Offer Agreement`;
+    doc.text(footerText, 105, 287, { align: 'center' });
   }
 
-  const safeCode = item.influencerCode.replace(/[^a-zA-Z0-9]/g, '_');
-  const safeUser = item.username.replace(/[^a-zA-Z0-9]/g, '_');
-  doc.save(`Offer_Agreement_${safeCode}_${safeUser}.pdf`);
+  const safeCode = (item.influencerCode || 'Agreement').replace(/[^a-zA-Z0-9]/g, '_');
+  const safeUser = (item.username || '').replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = safeUser ? `Offer_Agreement_${safeCode}_${safeUser}.pdf` : `Offer_Agreement_${safeCode}.pdf`;
+  doc.save(filename);
 };
 
 export const generateCombinedOfferAgreementPDF = (
@@ -51,14 +50,14 @@ export const generateCombinedOfferAgreementPDF = (
     format: 'a4'
   });
 
-  // Sort items strictly by numeric suffix of Influencer Code (HIS1... HIS38 -> TNS39... -> BHS214)
+  // Sort items strictly by numeric suffix of Influencer Code
   const sortedItems = [...items].sort((a, b) => naturalSortCompare(a.influencerCode, b.influencerCode));
 
   sortedItems.forEach((item, idx) => {
     if (idx > 0) {
       doc.addPage('a4', 'portrait');
     }
-    renderAgreementPage(doc, campaignName, item);
+    renderAgreementPage(doc, item);
   });
 
   const totalPages = doc.getNumberOfPages();
@@ -68,7 +67,7 @@ export const generateCombinedOfferAgreementPDF = (
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184);
     doc.text(
-      `Page ${i} of ${totalPages} — Combined Offer Agreements (${campaignName})`,
+      `Page ${i} of ${totalPages} — Combined Offer Agreements`,
       105,
       287,
       { align: 'center' }
@@ -81,51 +80,39 @@ export const generateCombinedOfferAgreementPDF = (
 
 const renderAgreementPage = (
   doc: jsPDF,
-  campaignName: string,
   item: OfferAgreementPDFItem
 ) => {
-  // Page printable width = 210 - 24 = 186mm (margins 12mm left/right)
-  const leftMargin = 12;
-  const rightMargin = 198;
-  const contentWidth = 186;
+  const leftMargin = 14;
+  const contentWidth = 182; // 210 - 28 = 182mm
 
-  // Header Banner
-  doc.setFillColor(109, 40, 217); // Purple theme
-  doc.rect(0, 0, 210, 20, 'F');
+  // Purple Header Banner (Contains ONLY "OFFER AGREEMENT", NO campaign name)
+  doc.setFillColor(109, 40, 217);
+  doc.rect(0, 0, 210, 18, 'F');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(255, 255, 255);
   doc.text('OFFER AGREEMENT', leftMargin, 12);
 
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Campaign: ${campaignName}`, rightMargin, 12, { align: 'right' });
+  // Body start Y position (Top info bar removed completely)
+  let yPos = 28;
 
-  // Influencer Meta Badge
-  doc.setFillColor(243, 244, 246);
-  doc.roundedRect(leftMargin, 24, contentWidth, 12, 1.5, 1.5, 'F');
+  // Clean agreement text (strip asterisks, sanitize currency symbol to avoid character spacing corruption)
+  const cleanText = item.agreementText
+    .replace(/\*/g, '')
+    .replace(/₹/g, 'Rs. ');
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(30, 41, 59);
-  doc.text(`Influencer Code: ${item.influencerCode}`, leftMargin + 4, 31.5);
-  doc.text(`Username: ${item.username}`, leftMargin + 65, 31.5);
-  doc.text(`Price / Video: ${typeof item.pricePerVideo === 'number' ? `₹${item.pricePerVideo.toLocaleString('en-IN')}` : item.pricePerVideo}`, rightMargin - 4, 31.5, { align: 'right' });
-
-  // Render Agreement Body Lines
-  let yPos = 42;
-  const textLines = item.agreementText.split('\n');
+  const textLines = cleanText.split('\n');
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(9.5);
   doc.setTextColor(30, 41, 59);
 
   textLines.forEach((line) => {
     const trimmed = line.trim();
 
     if (!trimmed) {
-      yPos += 2.5;
+      yPos += 3;
       return;
     }
 
@@ -135,6 +122,7 @@ const renderAgreementPage = (
       'YOUR ASSIGNED PUBLISHING DATES',
       'DRAFT & APPROVAL',
       'PAYMENT & COMMERCIAL TERMS',
+      'Looking forward to a smooth and successful collaboration!',
       'Regards,',
       'Team Justmixx',
       'Velmora Consumer Products LLP'
@@ -143,33 +131,33 @@ const renderAgreementPage = (
     if (isHeading) {
       yPos += 2;
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
+      doc.setFontSize(10);
       doc.setTextColor(109, 40, 217);
     } else {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.5);
+      doc.setFontSize(9.5);
       doc.setTextColor(30, 41, 59);
     }
 
-    // Split text if it wraps wide
+    // Split text naturally to wrap inside A4 printable width without text clipping or horizontal overflow
     const wrapped = doc.splitTextToSize(trimmed, contentWidth);
     wrapped.forEach((wLine: string) => {
-      if (yPos > 275) {
+      if (yPos > 272) {
         doc.addPage('a4', 'portrait');
 
-        // Repeat Header Banner on subpage
+        // Subpage Header
         doc.setFillColor(109, 40, 217);
-        doc.rect(0, 0, 210, 16, 'F');
+        doc.rect(0, 0, 210, 14, 'F');
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(11);
         doc.setTextColor(255, 255, 255);
-        doc.text(`OFFER AGREEMENT — ${item.influencerCode} (${item.username})`, leftMargin, 10.5);
+        doc.text('OFFER AGREEMENT', leftMargin, 9.5);
 
         yPos = 22;
       }
 
       doc.text(wLine, leftMargin, yPos);
-      yPos += 4.2;
+      yPos += 4.5;
     });
 
     if (isHeading) {

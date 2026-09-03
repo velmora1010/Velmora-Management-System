@@ -32,7 +32,7 @@ export const buildAgreementText = (
   campaignName: string
 ): string => {
   const rawUser = (influencer.influencer_name || (influencer as any).username || influencer.name || '').trim();
-  const cleanUsername = rawUser ? (rawUser.startsWith('@') ? rawUser : `@${rawUser}`) : '';
+  const cleanUsername = rawUser ? rawUser.replace(/^@+/, '') : '';
 
   // Extract per-video price from pricing info
   const pricing = (influencer.pricing as any) || {};
@@ -64,7 +64,7 @@ export const buildAgreementText = (
     if (!isNaN(calc) && calc > 0) videoPrice = calc;
   }
 
-  const formattedPrice = videoPrice > 0 ? `*(₹${videoPrice.toLocaleString('en-IN')})* ` : '';
+  const formattedPrice = videoPrice > 0 ? `₹${videoPrice.toLocaleString('en-IN')} ` : '';
 
   // Extract assigned products per video
   const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
@@ -86,12 +86,12 @@ export const buildAgreementText = (
   const getDateStr = (vNum: number) => {
     const found = postDates.find((pd: any) => pd.video_number === vNum);
     if (found && found.post_date && typeof found.post_date === 'string' && found.post_date.trim()) {
-      return `*${formatDisplayDate(found.post_date)}*`;
+      return formatDisplayDate(found.post_date);
     }
     return '';
   };
 
-  const greetingLine = cleanUsername ? `Hi *${cleanUsername}*,` : 'Hi,';
+  const greetingLine = cleanUsername ? `Hi ${cleanUsername},` : 'Hi,';
 
   return `${greetingLine}
 
@@ -138,7 +138,9 @@ By proceeding with the collaboration and accepting the products, you confirm you
 Looking forward to a smooth and successful collaboration!
 
 Regards,
+
 Team Justmixx
+
 Velmora Consumer Products LLP`;
 };
 
