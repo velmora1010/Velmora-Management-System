@@ -27,6 +27,58 @@ interface OfferAgreementSectionProps {
   onBackToList: () => void;
 }
 
+export const formatAgreementDate = (dateStr: string | null | undefined): string => {
+  if (!dateStr || !dateStr.trim()) return '';
+  const trimmed = dateStr.trim();
+  if (trimmed === '—' || trimmed === '-') return '';
+
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  // 1. Check YYYY-MM-DD or ISO format
+  if (/^\d{4}-\d{1,2}-\d{1,2}/.test(trimmed)) {
+    const parts = trimmed.split('T')[0].split('-');
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+      const mName = months[m - 1] || '';
+      return `${d} ${mName} ${y}`;
+    }
+  }
+
+  // 2. Check DD/MM/YYYY or DD-MM-YYYY
+  const dmyMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmyMatch) {
+    const d = parseInt(dmyMatch[1], 10);
+    const m = parseInt(dmyMatch[2], 10);
+    const y = parseInt(dmyMatch[3], 10);
+    if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+      const mName = months[m - 1] || '';
+      return `${d} ${mName} ${y}`;
+    }
+  }
+
+  // 3. Check "22 Sep" or "22 Sep 2026"
+  const mmmMatch = trimmed.match(/^(\d{1,2})\s+([A-Za-z]{3,4})(?:\s+(\d{4}))?$/);
+  if (mmmMatch) {
+    const d = parseInt(mmmMatch[1], 10);
+    const mStr = mmmMatch[2];
+    const y = mmmMatch[3] ? parseInt(mmmMatch[3], 10) : 2026;
+    return `${d} ${mStr} ${y}`;
+  }
+
+  // 4. Fallback to JS Date object
+  const parsed = new Date(trimmed);
+  if (!isNaN(parsed.getTime())) {
+    const d = parsed.getDate();
+    const mName = months[parsed.getMonth()];
+    const y = parsed.getFullYear();
+    return `${d} ${mName} ${y}`;
+  }
+
+  return trimmed;
+};
+
 export const buildAgreementText = (
   influencer: CampaignInfluencer,
   campaignName: string
@@ -86,7 +138,7 @@ export const buildAgreementText = (
   const getDateStr = (vNum: number) => {
     const found = postDates.find((pd: any) => pd.video_number === vNum);
     if (found && found.post_date && typeof found.post_date === 'string' && found.post_date.trim()) {
-      return formatDisplayDate(found.post_date);
+      return formatAgreementDate(found.post_date);
     }
     return '';
   };
