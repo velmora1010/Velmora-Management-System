@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, FileText, Copy, Edit2, Download, Eye, CheckCircle2, AlertCircle, RefreshCcw, CheckSquare, Sparkles, X, Save } from 'lucide-react';
+import { Search, FileText, Copy, Edit2, Download, Eye, CheckCircle2, AlertCircle, RefreshCcw, CheckSquare, Sparkles, X, Save, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { naturalSortCompare } from '../../config/skuMapping';
 import { generateSingleOfferAgreementPDF, generateCombinedOfferAgreementPDF } from '../../utils/generateOfferAgreementPDF';
@@ -478,6 +478,36 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     toast.success(`PDF downloaded for ${ag.influencer_code || ag.username || 'influencer'}!`);
   };
 
+  const handleDeleteAgreement = async (inf: CampaignInfluencer) => {
+    const infId = String(inf.id);
+    const code = inf.code || (inf as any).influencer_code || String(inf.id);
+
+    if (!window.confirm('Delete this offer agreement?')) {
+      return;
+    }
+
+    const localKey = `velmora_offer_agreements_${campaign.id}`;
+
+    setAgreementsMap(prev => {
+      const next = { ...prev };
+      delete next[infId];
+      try {
+        localStorage.setItem(localKey, JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+
+    try {
+      await supabase
+        .from(SUPABASE_TABLES.offerAgreements)
+        .delete()
+        .eq('campaign_id', campaign.id)
+        .eq('influencer_id', inf.id);
+    } catch (e) {}
+
+    toast.success(`Offer agreement for ${code} deleted.`);
+  };
+
   return (
     <div className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
       {/* Top Header & Search Bar */}
@@ -565,13 +595,13 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-900/90 text-slate-300 text-xs font-bold border-b border-slate-700 uppercase tracking-wider">
-                  <th className="p-3 w-10 text-center">Select</th>
+                  {selectedIds.size > 0 && <th className="p-3 w-10 text-center">Select</th>}
                   <th className="p-3 w-28">Code</th>
                   <th className="p-3">Username</th>
                   <th className="p-3 w-32">Price / Video</th>
-                  <th className="p-3 w-32 text-center">Status</th>
                   <th className="p-3 w-44 text-center">Text Format</th>
                   <th className="p-3 w-44 text-center">PDF Format</th>
+                  <th className="p-3 w-16 text-center">Delete</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/60 text-xs">
@@ -581,7 +611,6 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
                   const user = inf.influencer_name || (inf as any).username || inf.name || '';
                   const cleanUser = user ? (user.startsWith('@') ? user : `@${user}`) : '';
                   const price = getVideoPrice(inf);
-                  const isGen = !!agreementsMap[infId];
                   const isChecked = selectedIds.has(inf.id);
 
                   return (
@@ -589,14 +618,16 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
                       key={inf.id}
                       className={`hover:bg-slate-700/40 transition-colors ${isChecked ? 'bg-purple-950/20' : ''}`}
                     >
-                      <td className="p-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleSelect(inf.id)}
-                          className="w-4 h-4 rounded bg-slate-950 border-purple-500 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                        />
-                      </td>
+                      {selectedIds.size > 0 && (
+                        <td className="p-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelect(inf.id)}
+                            className="w-4 h-4 rounded bg-slate-950 border-purple-500 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                          />
+                        </td>
+                      )}
 
                       <td className="p-3 font-bold text-purple-300">
                         {code || <span className="text-slate-500 font-normal italic">—</span>}
@@ -608,18 +639,6 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
                       <td className="p-3 font-bold text-slate-100">
                         {price > 0 ? `₹${price.toLocaleString('en-IN')}` : <span className="text-slate-500 font-normal italic">—</span>}
-                      </td>
-
-                      <td className="p-3 text-center">
-                        {isGen ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-950/60 border border-emerald-700/50 text-emerald-300 text-[11px] font-bold rounded-full">
-                            <CheckCircle2 size={12} /> Generated
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-700/60 text-slate-400 text-[11px] font-medium rounded-full">
-                            <AlertCircle size={12} /> Not Generated
-                          </span>
-                        )}
                       </td>
 
                       <td className="p-3 text-center">
@@ -637,6 +656,16 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
                           className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors font-semibold text-xs inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
                         >
                           <Download size={13} /> Download PDF
+                        </button>
+                      </td>
+
+                      <td className="p-3 text-center">
+                        <button
+                          onClick={() => handleDeleteAgreement(inf)}
+                          className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-200 border border-rose-800/40 rounded-lg transition-colors cursor-pointer"
+                          title="Delete Offer Agreement"
+                        >
+                          <Trash2 size={15} />
                         </button>
                       </td>
                     </tr>
