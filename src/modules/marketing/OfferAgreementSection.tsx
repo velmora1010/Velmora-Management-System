@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, FileText, Copy, Edit2, Download, Eye, CheckCircle2, AlertCircle, RefreshCcw, CheckSquare, Sparkles, X, Save, Trash2 } from 'lucide-react';
+import { Search, FileText, Copy, Edit2, Download, Eye, RefreshCcw, CheckSquare, Sparkles, X, Save, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { naturalSortCompare } from '../../config/skuMapping';
 import { generateSingleOfferAgreementPDF, generateCombinedOfferAgreementPDF } from '../../utils/generateOfferAgreementPDF';
@@ -217,60 +217,62 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
   const [editingText, setEditingText] = useState('');
   const [isEditingMode, setIsEditingMode] = useState(false);
 
-  // Filter ALL Active Influencers using isActiveStatus helper
+  // Filter ALL Active Influencers
   const activeInfluencers = useMemo(() => {
     const list = influencers.filter(inf => isActiveStatus(inf.is_archived));
     return list.sort((a, b) => naturalSortCompare(a.code || (a as any).influencer_code || '', b.code || (b as any).influencer_code || ''));
   }, [influencers]);
 
-  // Load Persisted Agreements (Supabase + localStorage fallback)
+  // Load Persisted Agreements from Supabase & localStorage
+  const loadAgreements = async () => {
+    setIsLoading(true);
+    const localKey = `velmora_offer_agreements_${campaign.id}`;
+    let map: Record<string, StoredAgreement> = {};
+
+    // 1. Try local storage
+    try {
+      const stored = localStorage.getItem(localKey);
+      if (stored) {
+        map = JSON.parse(stored);
+      }
+    } catch (err) {
+      console.error('Failed reading local storage agreements:', err);
+    }
+
+    // 2. Try Supabase fetch
+    try {
+      const { data, error } = await supabase
+        .from(SUPABASE_TABLES.offerAgreements)
+        .select('*')
+        .eq('campaign_id', campaign.id);
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const dbMap: Record<string, StoredAgreement> = {};
+        data.forEach((row: any) => {
+          const infId = String(row.influencer_id);
+          dbMap[infId] = {
+            id: row.id,
+            campaign_id: row.campaign_id,
+            influencer_id: row.influencer_id,
+            influencer_code: row.influencer_code,
+            username: row.username,
+            price_per_video: row.price_per_video,
+            agreement_text: row.agreement_text,
+            generated_at: row.generated_at,
+            updated_at: row.updated_at
+          };
+        });
+        map = { ...map, ...dbMap };
+      }
+    } catch (err) {
+      // Supabase table may not exist yet, fallback to localStorage map
+    }
+
+    setAgreementsMap(map);
+    setIsLoading(false);
+  };
+
   useEffect(() => {
-    const loadAgreements = async () => {
-      setIsLoading(true);
-      const localKey = `velmora_offer_agreements_${campaign.id}`;
-      let map: Record<string, StoredAgreement> = {};
-
-      // Try local storage first
-      try {
-        const stored = localStorage.getItem(localKey);
-        if (stored) {
-          map = JSON.parse(stored);
-        }
-      } catch (err) {
-        console.error('Failed reading local storage agreements:', err);
-      }
-
-      // Try Supabase fetch
-      try {
-        const { data, error } = await supabase
-          .from(SUPABASE_TABLES.offerAgreements)
-          .select('*')
-          .eq('campaign_id', campaign.id);
-
-        if (!error && Array.isArray(data)) {
-          data.forEach((row: any) => {
-            const infId = String(row.influencer_id);
-            map[infId] = {
-              id: row.id,
-              campaign_id: row.campaign_id,
-              influencer_id: row.influencer_id,
-              influencer_code: row.influencer_code,
-              username: row.username,
-              price_per_video: row.price_per_video,
-              agreement_text: row.agreement_text,
-              generated_at: row.generated_at,
-              updated_at: row.updated_at
-            };
-          });
-        }
-      } catch (err) {
-        // Supabase table may not exist yet, fallback to localStorage map cleanly
-      }
-
-      setAgreementsMap(map);
-      setIsLoading(false);
-    };
-
     loadAgreements();
   }, [campaign.id]);
 
@@ -320,7 +322,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     return 0;
   };
 
-  // Generate Agreement for a set of influencers (NEVER BLOCKS ON MISSING FIELDS)
+  // Generate Agreement for a set of influencers
   const handleGenerateAgreements = async (targetList: CampaignInfluencer[]) => {
     if (targetList.length === 0) {
       toast.error('No active influencers selected.');
@@ -355,17 +357,22 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     toast.success(`Offer Agreement generated for ${count} influencer(s)!`);
   };
 
-  // Filtered influencers by search term
+  // Active influencers that HAVE an Offer Agreement generated
+  const generatedInfluencers = useMemo(() => {
+    return activeInfluencers.filter(inf => !!agreementsMap[String(inf.id)]);
+  }, [activeInfluencers, agreementsMap]);
+
+  // Filtered by search term
   const filteredInfluencers = useMemo(() => {
-    if (!searchTerm.trim()) return activeInfluencers;
+    if (!searchTerm.trim()) return generatedInfluencers;
     const term = searchTerm.trim().toLowerCase();
-    return activeInfluencers.filter(inf => {
+    return generatedInfluencers.filter(inf => {
       const code = (inf.code || (inf as any).influencer_code || '').toLowerCase();
       const name = (inf.name || '').toLowerCase();
       const username = (inf.influencer_name || (inf as any).username || '').toLowerCase();
       return code.includes(term) || username.includes(term) || name.includes(term);
     });
-  }, [activeInfluencers, searchTerm]);
+  }, [generatedInfluencers, searchTerm]);
 
   // Bulk Selection Handlers
   const handleToggleSelect = (id: string | number) => {
@@ -389,7 +396,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
   // Combined PDF download
   const handleDownloadCombinedPDF = () => {
-    const selectedList = activeInfluencers.filter(inf => selectedIds.has(inf.id) || selectedIds.size === 0);
+    const selectedList = generatedInfluencers.filter(inf => selectedIds.has(inf.id) || selectedIds.size === 0);
     const pdfItems = selectedList
       .filter(inf => agreementsMap[String(inf.id)])
       .map(inf => {
@@ -403,7 +410,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       });
 
     if (pdfItems.length === 0) {
-      toast.error('No generated agreements found for the selected influencers. Click "Generate Agreement" first.');
+      toast.error('No generated agreements found to download. Generate an agreement first.');
       return;
     }
 
@@ -478,36 +485,62 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     toast.success(`PDF downloaded for ${ag.influencer_code || ag.username || 'influencer'}!`);
   };
 
+  // INDIVIDUAL AGREEMENT DELETE
   const handleDeleteAgreement = async (inf: CampaignInfluencer) => {
     const infId = String(inf.id);
     const code = inf.code || (inf as any).influencer_code || String(inf.id);
 
-    if (!window.confirm('Delete this offer agreement?')) {
+    if (!window.confirm(`Are you sure you want to delete the offer agreement for ${code}?`)) {
       return;
     }
 
     const localKey = `velmora_offer_agreements_${campaign.id}`;
 
-    setAgreementsMap(prev => {
-      const next = { ...prev };
-      delete next[infId];
-      try {
-        localStorage.setItem(localKey, JSON.stringify(next));
-      } catch (e) {}
-      return next;
-    });
-
     try {
-      await supabase
+      // 1. Supabase delete query targeting offerAgreements table ONLY
+      const { error } = await supabase
         .from(SUPABASE_TABLES.offerAgreements)
         .delete()
         .eq('campaign_id', campaign.id)
         .eq('influencer_id', inf.id);
-    } catch (e) {}
 
-    toast.success(`Offer agreement for ${code} deleted.`);
+      if (error) {
+        console.error('Supabase delete error:', error);
+      }
+
+      // 2. Remove from localStorage
+      try {
+        const stored = localStorage.getItem(localKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          delete parsed[infId];
+          localStorage.setItem(localKey, JSON.stringify(parsed));
+        }
+      } catch (e) {
+        console.error('Error updating localStorage:', e);
+      }
+
+      // 3. Update local state and selection
+      setAgreementsMap(prev => {
+        const next = { ...prev };
+        delete next[infId];
+        return next;
+      });
+
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(inf.id);
+        return next;
+      });
+
+      toast.success(`Offer agreement for ${code} deleted.`);
+    } catch (err: any) {
+      console.error('Delete agreement error:', err);
+      toast.error('Unable to delete the Offer Agreement. Please try again.');
+    }
   };
 
+  // BULK DELETE SELECTED AGREEMENTS
   const handleDeleteSelectedAgreements = async () => {
     if (selectedIds.size === 0) return;
 
@@ -516,31 +549,51 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       return;
     }
 
-    const selectedList = activeInfluencers.filter(inf => selectedIds.has(inf.id));
+    const selectedList = generatedInfluencers.filter(inf => selectedIds.has(inf.id));
+    const selectedInfIds = selectedList.map(inf => inf.id);
     const localKey = `velmora_offer_agreements_${campaign.id}`;
 
-    setAgreementsMap(prev => {
-      const next = { ...prev };
-      selectedList.forEach(inf => {
-        delete next[String(inf.id)];
-      });
-      try {
-        localStorage.setItem(localKey, JSON.stringify(next));
-      } catch (e) {}
-      return next;
-    });
-
     try {
-      const infIds = selectedList.map(inf => inf.id);
-      await supabase
+      // 1. Execute Supabase bulk delete query targeting offerAgreements table ONLY
+      const { error } = await supabase
         .from(SUPABASE_TABLES.offerAgreements)
         .delete()
         .eq('campaign_id', campaign.id)
-        .in('influencer_id', infIds);
-    } catch (e) {}
+        .in('influencer_id', selectedInfIds);
 
-    setSelectedIds(new Set());
-    toast.success(`Deleted ${count} selected offer agreement(s).`);
+      if (error) {
+        console.error('Supabase bulk delete error:', error);
+      }
+
+      // 2. Remove from localStorage
+      try {
+        const stored = localStorage.getItem(localKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          selectedInfIds.forEach(id => {
+            delete parsed[String(id)];
+          });
+          localStorage.setItem(localKey, JSON.stringify(parsed));
+        }
+      } catch (e) {
+        console.error('Error updating localStorage:', e);
+      }
+
+      // 3. Update local state and clear selections
+      setAgreementsMap(prev => {
+        const next = { ...prev };
+        selectedInfIds.forEach(id => {
+          delete next[String(id)];
+        });
+        return next;
+      });
+
+      setSelectedIds(new Set());
+      toast.success(`Deleted ${count} selected offer agreement(s).`);
+    } catch (err: any) {
+      console.error('Bulk delete error:', err);
+      toast.error('Unable to delete the Offer Agreement. Please try again.');
+    }
   };
 
   return (
@@ -559,7 +612,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
             Offer Agreement
           </h3>
           <span className="px-2.5 py-0.5 bg-purple-950/60 border border-purple-800/40 rounded-full text-purple-300 text-xs font-semibold">
-            {activeInfluencers.length} Active Influencers
+            {generatedInfluencers.length} Offer Agreements
           </span>
         </div>
 
@@ -635,8 +688,18 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       {/* Main Influencers Agreement Table */}
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
         {filteredInfluencers.length === 0 ? (
-          <div className="p-12 text-center text-slate-500 italic">
-            No active influencers found matching "{searchTerm}".
+          <div className="p-12 text-center text-slate-500 italic flex flex-col items-center justify-center gap-2">
+            <FileText size={32} className="text-slate-600 mb-1" />
+            <p className="text-sm font-semibold text-slate-400">
+              {generatedInfluencers.length === 0 
+                ? 'No generated offer agreements found.' 
+                : `No offer agreements found matching "${searchTerm}".`}
+            </p>
+            {generatedInfluencers.length === 0 && (
+              <p className="text-xs text-slate-500 max-w-md text-center">
+                Select active influencers from the Campaign Influencer List View and click <span className="text-purple-400 font-bold">Generate Agreement</span> to create offer agreements.
+              </p>
+            )}
           </div>
         ) : (
           <div className="bg-slate-800/60 rounded-xl border border-slate-700 overflow-hidden shadow-lg">
