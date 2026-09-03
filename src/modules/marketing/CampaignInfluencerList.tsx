@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -831,6 +831,18 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [isImportPostDateModalOpen, setIsImportPostDateModalOpen] = useState(false);
   const [targetUploadCode, setTargetUploadCode] = useState<string | undefined>();
   const [activeEditInfluencer, setActiveEditInfluencer] = useState<CampaignInfluencer | null>(null);
+  const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false);
+  const uploadDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (uploadDropdownRef.current && !uploadDropdownRef.current.contains(event.target as Node)) {
+        setIsUploadDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleEditInfluencerClick = (inf: CampaignInfluencer) => {
     setActiveEditInfluencer(inf);
@@ -1267,42 +1279,71 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           <button 
             onClick={refresh}
-            className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors"
+            className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors cursor-pointer"
             title="Refresh Data"
           >
             <RefreshCcw size={16} />
           </button>
-          <button 
-            onClick={() => setIsImportModalOpen(true)}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-2 shrink-0 shadow-sm cursor-pointer"
-            title="Upload Influencers"
-          >
-            <Upload size={14} /> Upload Influencers
-          </button>
-          <button 
-            onClick={() => {
-              setTargetUploadCode(undefined);
-              setIsUploadPlatformModalOpen(true);
-            }}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
-            title="Import Platform Details"
-          >
-            <Upload size={14} /> Platform Details
-          </button>
-          <button 
-            onClick={() => setIsImportPricingModalOpen(true)}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
-            title="Import Pricing Info"
-          >
-            <Upload size={14} /> Pricing Info
-          </button>
-          <button 
-            onClick={() => setIsImportPostDateModalOpen(true)}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
-            title="Import Post Date"
-          >
-            <Upload size={14} /> Post Date
-          </button>
+          <div className="relative shrink-0" ref={uploadDropdownRef}>
+            <button 
+              onClick={() => setIsUploadDropdownOpen(prev => !prev)}
+              className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer border-0 outline-none focus:outline-none"
+              title="Upload Actions"
+            >
+              <Upload size={14} />
+              <span>Upload</span>
+              <ChevronDown size={13} className={`transition-transform duration-200 ${isUploadDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isUploadDropdownOpen && (
+              <div className="absolute right-0 mt-1.5 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-50">
+                <button 
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
+                    setIsImportModalOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-purple-600 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Upload size={13} className="text-purple-400" />
+                  <span>Upload Influencers</span>
+                </button>
+
+                <button 
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
+                    setTargetUploadCode(undefined);
+                    setIsUploadPlatformModalOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-purple-600 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Upload size={13} className="text-purple-400" />
+                  <span>Platform Details</span>
+                </button>
+
+                <button 
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
+                    setIsImportPricingModalOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-purple-600 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Upload size={13} className="text-purple-400" />
+                  <span>Pricing Info</span>
+                </button>
+
+                <button 
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
+                    setIsImportPostDateModalOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-purple-600 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Upload size={13} className="text-purple-400" />
+                  <span>Post Date</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1354,13 +1395,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               Recycle Bin ({recycleBinCount})
             </button>
           </div>
-          {!isFilterApplied && !searchTerm.trim() && (
-            <span className="px-3 py-1 bg-purple-950/40 border border-purple-800/30 rounded-lg text-purple-300 font-semibold text-xs shrink-0">
-              {filteredInfluencers.length === 1 ? '1 Influencer' : `${filteredInfluencers.length} Influencers`}
-            </span>
-          )}
-
-          {/* Requirement 2: Select Action Button */}
+          {/* Select Action Button */}
           {filter === 'active' && !isSelectionModeActive && filteredInfluencers.length > 0 && (
             <button
               type="button"
@@ -1372,7 +1407,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           )}
         </div>
 
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <div className="relative w-full sm:w-64">
             <input 
               type="text" 
@@ -1385,11 +1420,12 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </div>
           <button
             onClick={handleOpenFilter}
-            className={`flex items-center gap-1.5 px-3 py-2 bg-slate-900 border ${isFilterApplied ? 'border-purple-500 text-purple-400 font-medium' : 'border-slate-700 text-slate-300'} hover:bg-slate-800 rounded-lg text-sm transition-colors focus:outline-none`}
+            className={`p-2 bg-slate-900 border ${isFilterApplied ? 'border-purple-500 text-purple-400 font-medium' : 'border-slate-700 text-slate-300'} hover:bg-slate-800 rounded-lg transition-colors focus:outline-none cursor-pointer relative shrink-0 flex items-center justify-center`}
+            title="Filter Influencers"
           >
-            <span>{isFilterApplied ? 'Filter' : '🔽 Filter'}</span>
+            <SlidersHorizontal size={16} />
             {activeFilterCount > 0 && (
-              <span className="bg-purple-600 text-slate-100 text-[10px] font-bold rounded-full px-1.5 py-0.5 flex items-center justify-center select-none font-sans">
+              <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center select-none shadow-sm">
                 {activeFilterCount}
               </span>
             )}
@@ -1397,10 +1433,10 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           {onAddInfluencer && (
             <button
               onClick={onAddInfluencer}
-              className="flex items-center gap-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm cursor-pointer shrink-0"
+              className="p-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-sm cursor-pointer shrink-0 border-0 outline-none flex items-center justify-center"
+              title="Add Influencer"
             >
-              <Users size={16} />
-              <span>+ Add Influencer</span>
+              <UserPlus size={16} />
             </button>
           )}
         </div>
