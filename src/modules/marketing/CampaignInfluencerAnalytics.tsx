@@ -72,63 +72,88 @@ export const getUniqueInfluencerPrice = (inf: CampaignInfluencer): number | null
   return null;
 };
 
-export const getUniqueInfluencerPricingAnalytics = (filteredInfluencers: CampaignInfluencer[]): { sliceData: DonutSliceData[]; countsMap: Record<string, number> } => {
+export const getUniqueInfluencerPriceRangeAnalytics = (
+  filteredInfluencers: CampaignInfluencer[]
+): { sliceData: DonutSliceData[]; countsMap: Record<string, number>; totalUniqueCount: number } => {
   const map: Record<string, number> = {
-    'Below ₹500': 0,
-    '₹500–₹749': 0,
-    '₹750–₹999': 0,
-    '₹1,000–₹1,249': 0,
-    '₹1,250–₹1,499': 0,
-    '₹1,500–₹1,999': 0,
-    '₹2,000 and above': 0,
+    'Below ₹1,000': 0,
+    '₹1,000 – ₹2,000': 0,
+    '₹2,000 – ₹3,000': 0,
+    '₹3,000 – ₹4,000': 0,
+    '₹4,000 – ₹5,000': 0,
+    '₹5,000 – ₹6,000': 0,
+    '₹6,000 – ₹7,000': 0,
+    '₹7,000 – ₹8,000': 0,
+    '₹8,000 – ₹9,000': 0,
+    '₹9,000 – ₹10,000': 0,
+    'Above ₹10,000': 0,
     'Price Not Available': 0
   };
 
+  const seenKeys = new Set<string>();
+
   filteredInfluencers.forEach(inf => {
+    const key = String(inf.id || inf.code || inf.influencer_name || inf.name).trim();
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+
     const price = getUniqueInfluencerPrice(inf);
-    if (price === null) {
+    if (price === null || isNaN(price) || price <= 0) {
       map['Price Not Available']++;
-    } else if (price < 500) {
-      map['Below ₹500']++;
-    } else if (price >= 500 && price <= 749) {
-      map['₹500–₹749']++;
-    } else if (price >= 750 && price <= 999) {
-      map['₹750–₹999']++;
-    } else if (price >= 1000 && price <= 1249) {
-      map['₹1,000–₹1,249']++;
-    } else if (price >= 1250 && price <= 1499) {
-      map['₹1,250–₹1,499']++;
-    } else if (price >= 1500 && price <= 1999) {
-      map['₹1,500–₹1,999']++;
-    } else if (price >= 2000) {
-      map['₹2,000 and above']++;
+    } else if (price < 1000) {
+      map['Below ₹1,000']++;
+    } else if (price >= 1000 && price <= 2000) {
+      map['₹1,000 – ₹2,000']++;
+    } else if (price > 2000 && price <= 3000) {
+      map['₹2,000 – ₹3,000']++;
+    } else if (price > 3000 && price <= 4000) {
+      map['₹3,000 – ₹4,000']++;
+    } else if (price > 4000 && price <= 5000) {
+      map['₹4,000 – ₹5,000']++;
+    } else if (price > 5000 && price <= 6000) {
+      map['₹5,000 – ₹6,000']++;
+    } else if (price > 6000 && price <= 7000) {
+      map['₹6,000 – ₹7,000']++;
+    } else if (price > 7000 && price <= 8000) {
+      map['₹7,000 – ₹8,000']++;
+    } else if (price > 8000 && price <= 9000) {
+      map['₹8,000 – ₹9,000']++;
+    } else if (price > 9000 && price <= 10000) {
+      map['₹9,000 – ₹10,000']++;
+    } else if (price > 10000) {
+      map['Above ₹10,000']++;
     }
   });
 
   const categoriesOrder = [
-    'Below ₹500',
-    '₹500–₹749',
-    '₹750–₹999',
-    '₹1,000–₹1,249',
-    '₹1,250–₹1,499',
-    '₹1,500–₹1,999',
-    '₹2,000 and above',
+    'Below ₹1,000',
+    '₹1,000 – ₹2,000',
+    '₹2,000 – ₹3,000',
+    '₹3,000 – ₹4,000',
+    '₹4,000 – ₹5,000',
+    '₹5,000 – ₹6,000',
+    '₹6,000 – ₹7,000',
+    '₹7,000 – ₹8,000',
+    '₹8,000 – ₹9,000',
+    '₹9,000 – ₹10,000',
+    'Above ₹10,000',
     'Price Not Available'
   ];
 
   const sliceData: DonutSliceData[] = [];
   categoriesOrder.forEach((cat, idx) => {
     const count = map[cat];
-    if (count > 0) {
-      sliceData.push({
-        name: cat,
-        value: count,
-        color: PALETTE[idx % PALETTE.length]
-      });
+    if (cat === 'Price Not Available' && count === 0) {
+      return;
     }
+    sliceData.push({
+      name: cat,
+      value: count,
+      color: PALETTE[idx % PALETTE.length]
+    });
   });
 
-  return { sliceData, countsMap: map };
+  return { sliceData, countsMap: map, totalUniqueCount: seenKeys.size };
 };
 
 export interface UniqueInfluencerOneVideoPricingRecord {
@@ -399,45 +424,82 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     return createSliceDataset(map);
   }, [filteredInfluencers]);
 
-  // 3. PRICE WISE & INFLUENCER PRICE — ONE VIDEO (Single unique price per influencer)
-  const pricingAnalytics = useMemo(() => {
-    return getUniqueInfluencerPricingAnalytics(filteredInfluencers);
+  // 3. PRICE RANGE & EXACT PRICE (Single unique price per influencer)
+  const priceRangeAnalytics = useMemo(() => {
+    return getUniqueInfluencerPriceRangeAnalytics(filteredInfluencers);
   }, [filteredInfluencers]);
-
-  const priceData = pricingAnalytics.sliceData;
 
   const oneVideoPricingAnalytics = useMemo(() => {
     return getUniqueInfluencerOneVideoPricing(filteredInfluencers);
   }, [filteredInfluencers]);
 
-  // 4. PRODUCT WISE (Multi-valued)
-  const productData = useMemo(() => {
+  // 4. PRODUCT WISE (Video/Product assignments metric)
+  const { productData, totalVideoAssignments } = useMemo(() => {
     const map: Record<string, number> = {};
+    let totalVideos = 0;
+
     filteredInfluencers.forEach(inf => {
-      const prodsSet = new Set<string>();
-      if (Array.isArray(inf.products) && inf.products.length > 0) {
-        inf.products.forEach((p: any) => {
-          if (p.product_name) prodsSet.add(formatDisplayProductName(p.product_name));
-        });
-      } else if (inf.pricing?.product_pricing?.videos) {
+      let countForInf = 0;
+
+      // 1. Check pricing.product_pricing.videos first
+      if (inf.pricing?.product_pricing?.videos && Array.isArray(inf.pricing.product_pricing.videos) && inf.pricing.product_pricing.videos.length > 0) {
         inf.pricing.product_pricing.videos.forEach((v: any) => {
-          const comb = v.combination || v.name;
-          if (comb) {
-            const parsed = parseProductsFromCombination(comb);
-            parsed.forEach(pName => prodsSet.add(formatDisplayProductName(pName)));
+          let foundProducts = false;
+          if (Array.isArray(v.products) && v.products.length > 0) {
+            v.products.forEach((p: any) => {
+              const pName = p.product_name || p.name;
+              if (pName && !pName.toLowerCase().startsWith('video')) {
+                const displayName = formatDisplayProductName(pName);
+                if (displayName) {
+                  map[displayName] = (map[displayName] || 0) + 1;
+                  countForInf++;
+                  totalVideos++;
+                  foundProducts = true;
+                }
+              }
+            });
+          }
+          if (!foundProducts) {
+            const comb = v.combination || (v.name && !v.name.toLowerCase().startsWith('video') ? v.name : null);
+            if (comb) {
+              const parsed = parseProductsFromCombination(comb);
+              parsed.forEach(pName => {
+                if (pName && !pName.toLowerCase().startsWith('video')) {
+                  const displayName = formatDisplayProductName(pName);
+                  if (displayName) {
+                    map[displayName] = (map[displayName] || 0) + 1;
+                    countForInf++;
+                    totalVideos++;
+                    foundProducts = true;
+                  }
+                }
+              });
+            }
+          }
+        });
+      }
+      // 2. Check top-level inf.products
+      else if (Array.isArray(inf.products) && inf.products.length > 0) {
+        inf.products.forEach((p: any) => {
+          const pName = p.product_name || p.name;
+          if (pName && !pName.toLowerCase().startsWith('video')) {
+            const displayName = formatDisplayProductName(pName);
+            if (displayName) {
+              map[displayName] = (map[displayName] || 0) + 1;
+              countForInf++;
+              totalVideos++;
+            }
           }
         });
       }
 
-      if (prodsSet.size === 0) {
+      if (countForInf === 0) {
         map['Not Provided'] = (map['Not Provided'] || 0) + 1;
-      } else {
-        prodsSet.forEach(pName => {
-          map[pName] = (map[pName] || 0) + 1;
-        });
+        totalVideos++;
       }
     });
-    return createSliceDataset(map);
+
+    return { productData: createSliceDataset(map), totalVideoAssignments: totalVideos };
   }, [filteredInfluencers]);
 
   // 5. CREATOR CATEGORY
@@ -546,9 +608,10 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     Icon: React.ElementType,
     sliceData: DonutSliceData[],
     isMultiSelect: boolean = false,
-    customCenterLabel: string = 'INFLUENCERS'
+    customCenterLabel: string = 'INFLUENCERS',
+    customCenterValue?: number
   ) => {
-    const totalVal = sliceData.reduce((sum, item) => sum + item.value, 0);
+    const totalVal = customCenterValue !== undefined ? customCenterValue : sliceData.reduce((sum, item) => sum + item.value, 0);
     const isExpanded = !!expandedCards[title];
     const visibleData = isExpanded ? sliceData : sliceData.slice(0, 6);
     const hasMore = sliceData.length > 6;
@@ -594,7 +657,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
 
             {/* Breakdown List (55% Width, Clean spacious rows) */}
             <div className="w-full lg:w-[55%] flex flex-col justify-center space-y-2 pl-0 lg:pl-4 border-t lg:border-t-0 lg:border-l border-slate-800/80 pt-4 lg:pt-0">
-              <div className="space-y-2">
+              <div className={`space-y-2 ${isExpanded ? 'max-h-[250px] overflow-y-auto pr-1 custom-scrollbar' : ''}`}>
                 {visibleData.map((item) => {
                   const pct = totalVal > 0 ? ((item.value / (isMultiSelect ? totalInfluencerCount : totalVal)) * 100).toFixed(1) : '0';
                   return (
@@ -648,25 +711,29 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     );
   };
 
-  const renderInfluencerPricingCard = (
-    sliceData: DonutSliceData[],
-    totalUniqueCount: number
+  const renderCombinedInfluencerPricingSection = (
+    rangeAnalytics: ReturnType<typeof getUniqueInfluencerPriceRangeAnalytics>,
+    exactAnalytics: ReturnType<typeof getUniqueInfluencerOneVideoPricing>
   ) => {
-    const title = 'Influencer Pricing';
-    const isExpanded = !!expandedCards[title];
-    const visibleData = isExpanded ? sliceData : sliceData.slice(0, 6);
-    const hasMore = sliceData.length > 6;
+    const rangeExpanded = !!expandedCards['Price Range Distribution'];
+    const exactExpanded = !!expandedCards['Exact Price Distribution'];
+
+    const rangeVisible = rangeExpanded ? rangeAnalytics.sliceData : rangeAnalytics.sliceData.slice(0, 6);
+    const rangeHasMore = rangeAnalytics.sliceData.length > 6;
+
+    const exactVisible = exactExpanded ? exactAnalytics.sliceData : exactAnalytics.sliceData.slice(0, 6);
+    const exactHasMore = exactAnalytics.sliceData.length > 6;
 
     return (
-      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/20 rounded-2xl border border-slate-800/90 hover:border-purple-500/40 p-6 shadow-xl flex flex-col justify-between min-h-[360px] transition-all group">
-        {/* Card Header */}
-        <div className="flex items-center justify-between border-b border-slate-800/80 pb-4 mb-5">
+      <div className="col-span-1 lg:col-span-2 bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/20 rounded-2xl border border-slate-800/90 hover:border-purple-500/40 p-6 shadow-xl flex flex-col justify-between transition-all group">
+        {/* Main Card Header */}
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-4 mb-6">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-gradient-to-br from-purple-900/50 to-indigo-900/40 border border-purple-700/40 rounded-xl text-purple-300 shadow-inner">
               <CreditCard size={20} />
             </div>
             <div>
-              <h4 className="text-base font-extrabold text-slate-100 uppercase tracking-wide group-hover:text-purple-200 transition-colors">
+              <h4 className="text-lg font-extrabold text-slate-100 uppercase tracking-wide group-hover:text-purple-200 transition-colors">
                 INFLUENCER PRICING
               </h4>
               <p className="text-xs text-slate-400 font-medium">
@@ -676,75 +743,144 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
           </div>
         </div>
 
-        {/* Card Content Grid: Donut Chart Left (45%), Breakdown List Right (55%) */}
-        {totalUniqueCount > 0 && sliceData.length > 0 ? (
-          <div className="flex flex-col lg:flex-row items-center gap-6 flex-1">
-            
-            {/* Donut Chart Ring (45% Width) */}
-            <div className="w-full lg:w-[45%] flex items-center justify-center p-2">
-              <AnalyticsDonutChart
-                data={sliceData}
-                centerValue={totalUniqueCount}
-                centerLabel="TOTAL UNIQUE INFLUENCERS"
-                height={230}
-                innerRadius={65}
-                outerRadius={95}
-                showLegend={false}
-              />
+        {/* Two side-by-side sub-sections */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+          
+          {/* LEFT: Price Range Distribution */}
+          <div className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between space-y-4">
+            <div>
+              <h5 className="text-sm font-bold text-slate-200">Price Range Distribution</h5>
+              <p className="text-[11px] text-slate-400">Unique influencers by price range</p>
             </div>
 
-            {/* Breakdown List (55% Width, Clean spacious rows) */}
-            <div className="w-full lg:w-[55%] flex flex-col justify-center space-y-2 pl-0 lg:pl-4 border-t lg:border-t-0 lg:border-l border-slate-800/80 pt-4 lg:pt-0">
-              <div className={`space-y-2 ${isExpanded ? 'max-h-[300px] overflow-y-auto pr-1 custom-scrollbar' : ''}`}>
-                {visibleData.map((item) => {
-                  const pct = totalUniqueCount > 0 ? ((item.value / totalUniqueCount) * 100).toFixed(1) : '0';
-                  return (
-                    <div 
-                      key={item.name} 
-                      className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-950/70 border border-slate-800/80 hover:border-purple-500/30 transition-colors group"
+            {rangeAnalytics.totalUniqueCount > 0 && rangeAnalytics.sliceData.length > 0 ? (
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                {/* Donut */}
+                <div className="w-full sm:w-[45%] flex items-center justify-center p-1">
+                  <AnalyticsDonutChart
+                    data={rangeAnalytics.sliceData}
+                    centerValue={rangeAnalytics.totalUniqueCount}
+                    centerLabel="TOTAL UNIQUE INFLUENCERS"
+                    height={210}
+                    innerRadius={55}
+                    outerRadius={80}
+                    showLegend={false}
+                  />
+                </div>
+                {/* Legend list */}
+                <div className="w-full sm:w-[55%] flex flex-col justify-center space-y-2 border-t sm:border-t-0 sm:border-l border-slate-800/80 pt-3 sm:pt-0 sm:pl-4">
+                  <div className={`space-y-1.5 ${rangeExpanded ? 'max-h-[250px] overflow-y-auto pr-1 custom-scrollbar' : ''}`}>
+                    {rangeVisible.map(item => {
+                      const pct = rangeAnalytics.totalUniqueCount > 0 
+                        ? ((item.value / rangeAnalytics.totalUniqueCount) * 100).toFixed(1) 
+                        : '0';
+                      return (
+                        <div 
+                          key={item.name} 
+                          className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-slate-900/80 border border-slate-800/60 hover:border-purple-500/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                            <span className="text-[11px] font-semibold text-slate-200 truncate" title={item.name}>
+                              {item.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 font-mono text-[11px]">
+                            <span className="font-bold text-slate-100">{item.value}</span>
+                            <span className="font-bold text-purple-400 min-w-[40px] text-right">{pct}%</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {rangeHasMore && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand('Price Range Distribution')}
+                      className="mt-1 text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1 px-2 rounded border border-purple-900/40 bg-purple-950/20 cursor-pointer w-full"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-3">
-                        <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.color }} />
-                        <span className="text-xs font-semibold text-slate-200 leading-snug break-words" title={item.name}>
-                          {item.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0 text-right font-mono">
-                        <span className="text-xs font-bold text-slate-100">{item.value}</span>
-                        <span className="text-xs font-bold text-purple-400 min-w-[48px] text-right">{pct}%</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Show All / Show Less Button */}
-              {hasMore && (
-                <button
-                  type="button"
-                  onClick={() => toggleExpand(title)}
-                  className="mt-2 text-xs text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-purple-900/40 hover:border-purple-700/60 bg-purple-950/20 transition-all cursor-pointer w-full"
-                >
-                  {isExpanded ? (
-                    <>
-                      <span>Show Less</span> <ChevronUp size={14} />
-                    </>
-                  ) : (
-                    <>
-                      <span>Show All ({sliceData.length})</span> <ChevronDown size={14} />
-                    </>
+                      {rangeExpanded ? (
+                        <><span>Show Less</span> <ChevronUp size={12} /></>
+                      ) : (
+                        <><span>Show All ({rangeAnalytics.sliceData.length})</span> <ChevronDown size={12} /></>
+                      )}
+                    </button>
                   )}
-                </button>
-              )}
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-slate-500 text-xs">No price range data available</div>
+            )}
+          </div>
+
+          {/* RIGHT: Exact Price Distribution */}
+          <div className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-5 flex flex-col justify-between space-y-4">
+            <div>
+              <h5 className="text-sm font-bold text-slate-200">Exact Price Distribution</h5>
+              <p className="text-[11px] text-slate-400">Unique influencers by exact price per video</p>
             </div>
 
+            {exactAnalytics.totalUniqueCount > 0 && exactAnalytics.sliceData.length > 0 ? (
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                {/* Donut */}
+                <div className="w-full sm:w-[45%] flex items-center justify-center p-1">
+                  <AnalyticsDonutChart
+                    data={exactAnalytics.sliceData}
+                    centerValue={exactAnalytics.totalUniqueCount}
+                    centerLabel="TOTAL UNIQUE INFLUENCERS"
+                    height={210}
+                    innerRadius={55}
+                    outerRadius={80}
+                    showLegend={false}
+                  />
+                </div>
+                {/* Legend list */}
+                <div className="w-full sm:w-[55%] flex flex-col justify-center space-y-2 border-t sm:border-t-0 sm:border-l border-slate-800/80 pt-3 sm:pt-0 sm:pl-4">
+                  <div className={`space-y-1.5 ${exactExpanded ? 'max-h-[250px] overflow-y-auto pr-1 custom-scrollbar' : ''}`}>
+                    {exactVisible.map(item => {
+                      const pct = exactAnalytics.totalUniqueCount > 0 
+                        ? ((item.value / exactAnalytics.totalUniqueCount) * 100).toFixed(1) 
+                        : '0';
+                      return (
+                        <div 
+                          key={item.name} 
+                          className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-slate-900/80 border border-slate-800/60 hover:border-purple-500/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                            <span className="text-[11px] font-semibold text-slate-200 truncate" title={item.name}>
+                              {item.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 font-mono text-[11px]">
+                            <span className="font-bold text-slate-100">{item.value}</span>
+                            <span className="font-bold text-purple-400 min-w-[40px] text-right">{pct}%</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {exactHasMore && (
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand('Exact Price Distribution')}
+                      className="mt-1 text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1 px-2 rounded border border-purple-900/40 bg-purple-950/20 cursor-pointer w-full"
+                    >
+                      {exactExpanded ? (
+                        <><span>Show Less</span> <ChevronUp size={12} /></>
+                      ) : (
+                        <><span>Show All ({exactAnalytics.sliceData.length})</span> <ChevronDown size={12} /></>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-slate-500 text-xs">No exact price data available</div>
+            )}
           </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2">
-            <AlertCircle size={32} className="text-slate-600" />
-            <p className="text-xs font-medium">No pricing data available</p>
-          </div>
-        )}
+
+        </div>
       </div>
     );
   };
@@ -816,16 +952,15 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
           {renderAnalyticsCard('State Wise', MapPin, stateData)}
           {renderAnalyticsCard('City Wise', Building2, cityData)}
 
-          {/* Row 2 */}
-          {renderAnalyticsCard('Price Wise', CreditCard, priceData, false, 'TOTAL UNIQUE INFLUENCERS')}
-          {renderInfluencerPricingCard(oneVideoPricingAnalytics.sliceData, oneVideoPricingAnalytics.totalUniqueCount)}
+          {/* Combined Influencer Pricing Section (Spans 2 columns) */}
+          {renderCombinedInfluencerPricingSection(priceRangeAnalytics, oneVideoPricingAnalytics)}
 
           {/* Row 3 */}
-          {renderAnalyticsCard('Product Wise', Package, productData, true)}
+          {renderAnalyticsCard('Product Wise', Package, productData, true, 'TOTAL VIDEOS', totalVideoAssignments)}
           {renderAnalyticsCard('Creator Category', Award, categoryData)}
 
           {/* Row 4 */}
-          {renderAnalyticsCard('Languages', Globe, languageData, true)}
+          {renderAnalyticsCard('Languages', Globe, languageData, true, 'INFLUENCERS', totalInfluencerCount)}
           {renderAnalyticsCard('Followers Based', Users, followerData)}
 
           {/* Row 5 */}
