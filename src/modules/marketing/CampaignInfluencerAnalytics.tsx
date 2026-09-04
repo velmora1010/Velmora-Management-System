@@ -131,6 +131,83 @@ export const getUniqueInfluencerPricingAnalytics = (filteredInfluencers: Campaig
   return { sliceData, countsMap: map };
 };
 
+export interface UniqueInfluencerOneVideoPricingRecord {
+  influencerId: string;
+  influencerCode: string;
+  username: string;
+  pricePerVideo: number | null;
+}
+
+export const getUniqueInfluencerOneVideoPricing = (
+  filteredInfluencers: CampaignInfluencer[]
+): {
+  uniqueRecords: UniqueInfluencerOneVideoPricingRecord[];
+  sliceData: DonutSliceData[];
+  totalUniqueCount: number;
+} => {
+  const uniqueRecords: UniqueInfluencerOneVideoPricingRecord[] = [];
+  const seenKeys = new Set<string>();
+
+  filteredInfluencers.forEach(inf => {
+    const key = String(inf.id || inf.code || inf.influencer_name || inf.name).trim();
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+
+    const price = getUniqueInfluencerPrice(inf);
+    uniqueRecords.push({
+      influencerId: String(inf.id || ''),
+      influencerCode: inf.code || '',
+      username: inf.influencer_name || inf.name || '',
+      pricePerVideo: price
+    });
+  });
+
+  const map: Map<number | 'missing', number> = new Map();
+
+  uniqueRecords.forEach(rec => {
+    if (rec.pricePerVideo === null || isNaN(rec.pricePerVideo) || rec.pricePerVideo <= 0) {
+      map.set('missing', (map.get('missing') || 0) + 1);
+    } else {
+      const roundedPrice = Math.round(rec.pricePerVideo);
+      map.set(roundedPrice, (map.get(roundedPrice) || 0) + 1);
+    }
+  });
+
+  const numericEntries = Array.from(map.entries())
+    .filter(([k]) => k !== 'missing')
+    .sort((a, b) => (a[0] as number) - (b[0] as number));
+
+  const sliceData: DonutSliceData[] = [];
+  let colorIdx = 0;
+
+  numericEntries.forEach(([priceVal, count]) => {
+    const formattedPrice = `₹${(priceVal as number).toLocaleString('en-IN')}`;
+    sliceData.push({
+      name: formattedPrice,
+      value: count as number,
+      priceNum: priceVal as number,
+      color: PALETTE[colorIdx % PALETTE.length]
+    });
+    colorIdx++;
+  });
+
+  const missingCount = map.get('missing') || 0;
+  if (missingCount > 0) {
+    sliceData.push({
+      name: 'Price Not Available',
+      value: missingCount,
+      priceNum: -1,
+      color: '#64748b'
+    });
+  }
+
+  return {
+    uniqueRecords,
+    sliceData,
+    totalUniqueCount: uniqueRecords.length
+  };
+};
+
 export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsProps> = ({
   campaign,
   influencers,
@@ -322,12 +399,16 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     return createSliceDataset(map);
   }, [filteredInfluencers]);
 
-  // 3. PRICE WISE & PRICE DISTRIBUTION (Single unique price per influencer)
+  // 3. PRICE WISE & INFLUENCER PRICE — ONE VIDEO (Single unique price per influencer)
   const pricingAnalytics = useMemo(() => {
     return getUniqueInfluencerPricingAnalytics(filteredInfluencers);
   }, [filteredInfluencers]);
 
   const priceData = pricingAnalytics.sliceData;
+
+  const oneVideoPricingAnalytics = useMemo(() => {
+    return getUniqueInfluencerOneVideoPricing(filteredInfluencers);
+  }, [filteredInfluencers]);
 
   // 4. PRODUCT WISE (Multi-valued)
   const productData = useMemo(() => {
@@ -567,10 +648,13 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     );
   };
 
-  const renderPriceDistributionCard = (
+  const renderOneVideoPriceDistributionCard = (
     sliceData: DonutSliceData[],
     totalUniqueCount: number
   ) => {
+    const isExpanded = !!expandedCards['OneVideoPrice'];
+    const visibleData = isExpanded ? sliceData : sliceData.slice(0, 7);
+    const hasMore = sliceData.length > 7;
     const maxVal = Math.max(...sliceData.map(d => d.value), 1);
 
     return (
@@ -583,10 +667,10 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
             </div>
             <div>
               <h4 className="text-base font-extrabold text-slate-100 uppercase tracking-wide group-hover:text-purple-200 transition-colors">
-                Price Distribution
+                INFLUENCER PRICE — ONE VIDEO
               </h4>
               <p className="text-xs text-slate-400 font-medium">
-                Influencer distribution by price per video
+                Unique influencers by agreed price per video
               </p>
             </div>
           </div>
@@ -598,17 +682,17 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
         {/* Bar Chart Content */}
         {totalUniqueCount > 0 && sliceData.length > 0 ? (
           <div className="flex-1 flex flex-col justify-center space-y-3">
-            {sliceData.map((item) => {
+            {visibleData.map((item) => {
               const pct = totalUniqueCount > 0 ? ((item.value / totalUniqueCount) * 100).toFixed(1) : '0';
               const widthPct = Math.max((item.value / maxVal) * 100, 2);
 
               return (
                 <div key={item.name} className="space-y-1">
                   <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="text-slate-200 truncate pr-2">{item.name}</span>
+                    <span className="text-slate-200 font-sans">{item.name}</span>
                     <div className="flex items-center gap-3 font-mono shrink-0">
-                      <span className="text-slate-100 font-bold">{item.value}</span>
-                      <span className="text-purple-400 min-w-[50px] text-right font-bold">{pct}%</span>
+                      <span className="text-slate-100 font-bold">{item.value} {item.value === 1 ? 'influencer' : 'influencers'}</span>
+                      <span className="text-purple-400 min-w-[48px] text-right font-bold">{pct}%</span>
                     </div>
                   </div>
                   <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800/80 p-0.5">
@@ -623,6 +707,24 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
                 </div>
               );
             })}
+
+            {hasMore && (
+              <button
+                type="button"
+                onClick={() => toggleExpand('OneVideoPrice')}
+                className="mt-2 text-xs text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-purple-900/40 hover:border-purple-700/60 bg-purple-950/20 transition-all cursor-pointer w-full"
+              >
+                {isExpanded ? (
+                  <>
+                    <span>Show Less</span> <ChevronUp size={14} />
+                  </>
+                ) : (
+                  <>
+                    <span>Show All ({sliceData.length} price points)</span> <ChevronDown size={14} />
+                  </>
+                )}
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2">
@@ -703,7 +805,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
 
           {/* Row 2 */}
           {renderAnalyticsCard('Price Wise', CreditCard, priceData, false, 'TOTAL UNIQUE INFLUENCERS')}
-          {renderPriceDistributionCard(priceData, totalInfluencerCount)}
+          {renderOneVideoPriceDistributionCard(oneVideoPricingAnalytics.sliceData, oneVideoPricingAnalytics.totalUniqueCount)}
 
           {/* Row 3 */}
           {renderAnalyticsCard('Product Wise', Package, productData, true)}
