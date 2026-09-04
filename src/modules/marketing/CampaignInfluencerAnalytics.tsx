@@ -45,6 +45,92 @@ const PALETTE = [
   '#6366f1'  // Indigo
 ];
 
+export const getUniqueInfluencerPrice = (inf: CampaignInfluencer): number | null => {
+  if (inf.pricing?.product_pricing?.videos && Array.isArray(inf.pricing.product_pricing.videos)) {
+    for (const v of inf.pricing.product_pricing.videos) {
+      const p = Number(v.amount);
+      if (!isNaN(p) && p > 0) return p;
+    }
+  }
+  if (inf.pricing) {
+    const v1 = Number(inf.pricing.video1_price);
+    if (!isNaN(v1) && v1 > 0) return v1;
+    const v2 = Number(inf.pricing.video2_price);
+    if (!isNaN(v2) && v2 > 0) return v2;
+  }
+  const topV1 = Number((inf as any).video1_price);
+  if (!isNaN(topV1) && topV1 > 0) return topV1;
+  const topV2 = Number((inf as any).video2_price);
+  if (!isNaN(topV2) && topV2 > 0) return topV2;
+  if (inf.pricing?.final_price) {
+    const fp = Number(inf.pricing.final_price);
+    const count = Number(inf.pricing.total_videos) || Number((inf.pricing as any).video_count) || (inf.pricing.product_pricing?.videos?.length) || 1;
+    if (!isNaN(fp) && fp > 0 && count > 0) {
+      return fp / count;
+    }
+  }
+  return null;
+};
+
+export const getUniqueInfluencerPricingAnalytics = (filteredInfluencers: CampaignInfluencer[]): { sliceData: DonutSliceData[]; countsMap: Record<string, number> } => {
+  const map: Record<string, number> = {
+    'Below ₹500': 0,
+    '₹500–₹749': 0,
+    '₹750–₹999': 0,
+    '₹1,000–₹1,249': 0,
+    '₹1,250–₹1,499': 0,
+    '₹1,500–₹1,999': 0,
+    '₹2,000 and above': 0,
+    'Price Not Available': 0
+  };
+
+  filteredInfluencers.forEach(inf => {
+    const price = getUniqueInfluencerPrice(inf);
+    if (price === null) {
+      map['Price Not Available']++;
+    } else if (price < 500) {
+      map['Below ₹500']++;
+    } else if (price >= 500 && price <= 749) {
+      map['₹500–₹749']++;
+    } else if (price >= 750 && price <= 999) {
+      map['₹750–₹999']++;
+    } else if (price >= 1000 && price <= 1249) {
+      map['₹1,000–₹1,249']++;
+    } else if (price >= 1250 && price <= 1499) {
+      map['₹1,250–₹1,499']++;
+    } else if (price >= 1500 && price <= 1999) {
+      map['₹1,500–₹1,999']++;
+    } else if (price >= 2000) {
+      map['₹2,000 and above']++;
+    }
+  });
+
+  const categoriesOrder = [
+    'Below ₹500',
+    '₹500–₹749',
+    '₹750–₹999',
+    '₹1,000–₹1,249',
+    '₹1,250–₹1,499',
+    '₹1,500–₹1,999',
+    '₹2,000 and above',
+    'Price Not Available'
+  ];
+
+  const sliceData: DonutSliceData[] = [];
+  categoriesOrder.forEach((cat, idx) => {
+    const count = map[cat];
+    if (count > 0) {
+      sliceData.push({
+        name: cat,
+        value: count,
+        color: PALETTE[idx % PALETTE.length]
+      });
+    }
+  });
+
+  return { sliceData, countsMap: map };
+};
+
 export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsProps> = ({
   campaign,
   influencers,
@@ -236,42 +322,12 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     return createSliceDataset(map);
   }, [filteredInfluencers]);
 
-  // 3. PRICE WISE
-  const priceData = useMemo(() => {
-    const map: Record<string, number> = {
-      'Below ₹500': 0,
-      '₹500–₹749': 0,
-      '₹750–₹999': 0,
-      '₹1,000–₹1,249': 0,
-      '₹1,250–₹1,499': 0,
-      '₹1,500–₹1,999': 0,
-      '₹2,000 and above': 0,
-      'Not Provided': 0
-    };
-
-    filteredInfluencers.forEach(inf => {
-      const prices = getSingleVideoPrices(inf);
-      if (prices.length === 0) {
-        map['Not Provided']++;
-      } else {
-        prices.forEach((price: number) => {
-          if (price < 500) map['Below ₹500']++;
-          else if (price >= 500 && price <= 749) map['₹500–₹749']++;
-          else if (price >= 750 && price <= 999) map['₹750–₹999']++;
-          else if (price >= 1000 && price <= 1249) map['₹1,000–₹1,249']++;
-          else if (price >= 1250 && price <= 1499) map['₹1,250–₹1,499']++;
-          else if (price >= 1500 && price <= 1999) map['₹1,500–₹1,999']++;
-          else if (price >= 2000) map['₹2,000 and above']++;
-        });
-      }
-    });
-
-    const activeMap: Record<string, number> = {};
-    Object.entries(map).forEach(([key, count]) => {
-      if (count > 0) activeMap[key] = count;
-    });
-    return createSliceDataset(activeMap);
+  // 3. PRICE WISE & PRICE DISTRIBUTION (Single unique price per influencer)
+  const pricingAnalytics = useMemo(() => {
+    return getUniqueInfluencerPricingAnalytics(filteredInfluencers);
   }, [filteredInfluencers]);
+
+  const priceData = pricingAnalytics.sliceData;
 
   // 4. PRODUCT WISE (Multi-valued)
   const productData = useMemo(() => {
@@ -408,7 +464,8 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     title: string,
     Icon: React.ElementType,
     sliceData: DonutSliceData[],
-    isMultiSelect: boolean = false
+    isMultiSelect: boolean = false,
+    customCenterLabel: string = 'INFLUENCERS'
   ) => {
     const totalVal = sliceData.reduce((sum, item) => sum + item.value, 0);
     const isExpanded = !!expandedCards[title];
@@ -445,8 +502,8 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
             <div className="w-full lg:w-[45%] flex items-center justify-center p-2">
               <AnalyticsDonutChart
                 data={sliceData}
-                centerValue={totalInfluencerCount}
-                centerLabel="INFLUENCERS"
+                centerValue={totalVal}
+                centerLabel={customCenterLabel}
                 height={230}
                 innerRadius={65}
                 outerRadius={95}
@@ -504,6 +561,92 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
           <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2">
             <AlertCircle size={32} className="text-slate-600" />
             <p className="text-xs font-medium">No data available for this category</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderPriceDistributionCard = (
+    sliceData: DonutSliceData[],
+    totalUniqueCount: number
+  ) => {
+    const isExpanded = !!expandedCards['Price Distribution'];
+    const visibleData = isExpanded ? sliceData : sliceData.slice(0, 6);
+    const hasMore = sliceData.length > 6;
+    const maxVal = Math.max(...sliceData.map(d => d.value), 1);
+
+    return (
+      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/20 rounded-2xl border border-slate-800/90 hover:border-purple-500/40 p-6 shadow-xl flex flex-col justify-between min-h-[360px] transition-all group">
+        {/* Card Header */}
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-4 mb-5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-gradient-to-br from-purple-900/50 to-indigo-900/40 border border-purple-700/40 rounded-xl text-purple-300 shadow-inner">
+              <CreditCard size={20} />
+            </div>
+            <div>
+              <h4 className="text-base font-extrabold text-slate-100 uppercase tracking-wide group-hover:text-purple-200 transition-colors">
+                Price Distribution
+              </h4>
+              <p className="text-xs text-slate-400 font-medium">
+                Horizontal distribution across {sliceData.length} {sliceData.length === 1 ? 'tier' : 'tiers'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Bar Chart Content */}
+        {totalUniqueCount > 0 && sliceData.length > 0 ? (
+          <div className="flex-1 flex flex-col justify-center space-y-3">
+            {visibleData.map((item) => {
+              const pct = totalUniqueCount > 0 ? ((item.value / totalUniqueCount) * 100).toFixed(1) : '0';
+              const widthPct = Math.max((item.value / maxVal) * 100, 2);
+
+              return (
+                <div key={item.name} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-slate-200">{item.name}</span>
+                    <div className="flex items-center gap-2 font-mono">
+                      <span className="text-slate-100 font-bold">{item.value}</span>
+                      <span className="text-purple-400 min-w-[45px] text-right">{pct}%</span>
+                    </div>
+                  </div>
+                  <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800/80 p-0.5">
+                    <div
+                      className="h-full rounded-full transition-all duration-500 ease-out"
+                      style={{
+                        width: `${widthPct}%`,
+                        backgroundColor: item.color || '#9333ea'
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Expand / Collapse Button */}
+            {hasMore && (
+              <button
+                type="button"
+                onClick={() => toggleExpand('Price Distribution')}
+                className="mt-2 text-xs text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-purple-900/40 hover:border-purple-700/60 bg-purple-950/20 transition-all cursor-pointer w-full"
+              >
+                {isExpanded ? (
+                  <>
+                    <span>Show Less</span> <ChevronUp size={14} />
+                  </>
+                ) : (
+                  <>
+                    <span>Show All ({sliceData.length})</span> <ChevronDown size={14} />
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2">
+            <AlertCircle size={32} className="text-slate-600" />
+            <p className="text-xs font-medium">No pricing data available</p>
           </div>
         )}
       </div>
@@ -571,22 +714,25 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
           </button>
         </div>
       ) : (
-        /* 2-Column Dashboard Grid for 8 Breakdown Cards */
+        /* 2-Column Dashboard Grid for Breakdown Cards */
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
           {/* Row 1 */}
           {renderAnalyticsCard('State Wise', MapPin, stateData)}
           {renderAnalyticsCard('City Wise', Building2, cityData)}
 
           {/* Row 2 */}
-          {renderAnalyticsCard('Price Wise', CreditCard, priceData)}
-          {renderAnalyticsCard('Product Wise', Package, productData, true)}
+          {renderAnalyticsCard('Price Wise', CreditCard, priceData, false, 'TOTAL UNIQUE INFLUENCERS')}
+          {renderPriceDistributionCard(priceData, totalInfluencerCount)}
 
           {/* Row 3 */}
+          {renderAnalyticsCard('Product Wise', Package, productData, true)}
           {renderAnalyticsCard('Creator Category', Award, categoryData)}
-          {renderAnalyticsCard('Languages', Globe, languageData, true)}
 
           {/* Row 4 */}
+          {renderAnalyticsCard('Languages', Globe, languageData, true)}
           {renderAnalyticsCard('Followers Based', Users, followerData)}
+
+          {/* Row 5 */}
           {renderAnalyticsCard('Platform Combination', Share2, platformData)}
         </div>
       )}
