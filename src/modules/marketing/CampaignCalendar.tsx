@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
-import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
+import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
@@ -87,11 +87,8 @@ const isFakeUrl = (url: string | undefined | null) => {
          clean.includes('instagram.com/p/default2');
 };
 
-const parseDateOnly = (val: any): string => {
-  if (!val) return '';
-  const str = String(val).trim();
-  const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : '';
+const parseDateOnly = (val: any, defaultYear = 2026): string => {
+  return parseToYMD(val, defaultYear);
 };
 
 const getWorkflowStepLabel = (record: StatusTrackingRecord) => {
@@ -645,57 +642,53 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       for (const pd of postDates) {
         const vNum = pd.video_number || 1;
 
-        // 1. Draft Date Event
-        if (pd.draft_date && String(pd.draft_date).trim() !== '') {
-          const drDate = parseDateOnly(pd.draft_date);
-          if (drDate) {
-            const exists = list.some(e => e.dateStr === drDate && e.type === 'Draft' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
-            if (!exists) {
-              list.push({
-                id: `inf-${inf.id}-v${vNum}-draft`,
-                recordId: String(inf.id),
-                type: 'Draft',
-                label: `Video ${vNum} Draft`,
-                icon: '🎬',
-                colorClass: 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
-                dateStr: drDate,
-                influencerName,
-                influencerUsername,
-                campaignName,
-                avatarUrl,
-                record: matchingRecord,
-                videoNumber: vNum,
-                postDateStr: pd.post_date,
-                draftDateStr: pd.draft_date
-              });
-            }
+        // 1. Draft Date Event (calculate if not stored)
+        const drDate = pd.draft_date ? parseDateOnly(pd.draft_date, 2026) : (pd.post_date ? calculateDraftDate(pd.post_date, 2026) : '');
+        if (drDate) {
+          const exists = list.some(e => e.dateStr === drDate && e.type === 'Draft' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
+          if (!exists) {
+            list.push({
+              id: `inf-${inf.id}-v${vNum}-draft`,
+              recordId: String(inf.id),
+              type: 'Draft',
+              label: `Video ${vNum} Draft`,
+              icon: '🎬',
+              colorClass: 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
+              dateStr: drDate,
+              influencerName,
+              influencerUsername,
+              campaignName,
+              avatarUrl,
+              record: matchingRecord,
+              videoNumber: vNum,
+              postDateStr: pd.post_date,
+              draftDateStr: drDate
+            });
           }
         }
 
         // 2. Final Post Event
-        if (pd.post_date && String(pd.post_date).trim() !== '') {
-          const fpDate = parseDateOnly(pd.post_date);
-          if (fpDate) {
-            const exists = list.some(e => e.dateStr === fpDate && e.type === 'Final Post' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
-            if (!exists) {
-              list.push({
-                id: `inf-${inf.id}-v${vNum}-finalpost`,
-                recordId: String(inf.id),
-                type: 'Final Post',
-                label: `Video ${vNum} Final Post`,
-                icon: '🚀',
-                colorClass: 'bg-blue-500/10 border border-blue-500/30 text-blue-400',
-                dateStr: fpDate,
-                influencerName,
-                influencerUsername,
-                campaignName,
-                avatarUrl,
-                record: matchingRecord,
-                videoNumber: vNum,
-                postDateStr: pd.post_date,
-                draftDateStr: pd.draft_date
-              });
-            }
+        const fpDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
+        if (fpDate) {
+          const exists = list.some(e => e.dateStr === fpDate && e.type === 'Final Post' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
+          if (!exists) {
+            list.push({
+              id: `inf-${inf.id}-v${vNum}-finalpost`,
+              recordId: String(inf.id),
+              type: 'Final Post',
+              label: `Video ${vNum} Final Post`,
+              icon: '🚀',
+              colorClass: 'bg-blue-500/10 border border-blue-500/30 text-blue-400',
+              dateStr: fpDate,
+              influencerName,
+              influencerUsername,
+              campaignName,
+              avatarUrl,
+              record: matchingRecord,
+              videoNumber: vNum,
+              postDateStr: pd.post_date,
+              draftDateStr: drDate
+            });
           }
         }
       }
@@ -1645,13 +1638,13 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                       }
                     }}
                     title={tooltipText}
-                    className={`p-2.5 flex flex-col justify-between min-h-[90px] transition-all relative select-none ${
+                    className={`p-1.5 flex flex-col justify-start min-h-[110px] max-h-[140px] overflow-hidden transition-all relative select-none ${
                       day.isCurrentMonth ? 'bg-transparent text-slate-200' : 'bg-slate-900/20 text-slate-600'
                     } ${dayEvents.length > 0 ? 'cursor-pointer hover:bg-slate-800/20' : ''}`}
                   >
                     
-                    {/* Top Row: Date value */}
-                    <div className="flex justify-between items-start">
+                    {/* Top Row: Date value & Event Count */}
+                    <div className="flex justify-between items-start mb-1 shrink-0">
                       <span className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded ${
                         isToday 
                           ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20 font-black' 
@@ -1659,43 +1652,42 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                       }`}>
                         {day.date.getDate()}
                       </span>
+                      {dayEvents.length > 0 && (
+                        <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0">
+                          {dayEvents.length}
+                        </span>
+                      )}
                     </div>
 
-                    {/* Milestone indicators (Apple Calendar dots style) */}
-                    <div className="flex flex-col items-center justify-end flex-grow pb-1 space-y-1">
-                      {dayEvents.length > 0 && (
-                        <div className="flex items-center gap-1.5 justify-center py-1 px-1.5 bg-slate-900/30 rounded-lg border border-slate-800/50">
-                          {hasDelivered && (
-                            <span 
-                              className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" 
-                              title="Delivered"
-                            />
-                          )}
-                          {hasDraft && (
-                            <span 
-                              className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_6px_rgba(168,85,247,0.6)]" 
-                              title="Draft Submission"
-                            />
-                          )}
-                          {hasFinal && (
-                            <span 
-                              className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.6)]" 
-                              title="Final Post"
-                            />
-                          )}
-                        </div>
-                      )}
-                      
-                      {/* Event Count Badges */}
-                      {dayEvents.length > 3 ? (
-                        <span className="text-[9px] font-black text-slate-500 font-mono mt-0.5">
-                          +{dayEvents.length - 3}
-                        </span>
-                      ) : dayEvents.length > 0 ? (
-                        <span className="text-[9px] font-black text-slate-600 font-mono mt-0.5">
-                          {dayEvents.length} Event{dayEvents.length > 1 ? 's' : ''}
-                        </span>
-                      ) : null}
+                    {/* Events List inside Cell */}
+                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1 pr-0.5">
+                      {dayEvents.map((ev) => {
+                        const infCode = ev.influencerUsername || ev.influencerName || 'Inf';
+                        const typeText = ev.type === 'Draft' ? 'Draft' : (ev.type === 'Final Post' ? 'Final Post' : ev.type);
+                        const vidText = ev.videoNumber ? `Video ${ev.videoNumber}` : (ev.label.match(/Video \d+/) ? ev.label.match(/Video \d+/)?.[0] : '');
+                        
+                        // Format: HIS1 — Draft — Video 1 or HIS1 — Final Post — Video 1
+                        const badgeText = `${infCode} — ${typeText}${vidText ? ` — ${vidText}` : ''}`;
+
+                        let badgeStyle = 'bg-purple-500/20 text-purple-300 border-purple-500/40 hover:bg-purple-500/30';
+                        if (ev.type === 'Final Post') {
+                          badgeStyle = 'bg-blue-500/20 text-blue-300 border-blue-500/40 hover:bg-blue-500/30';
+                        } else if (ev.type === 'Delivered') {
+                          badgeStyle = 'bg-green-500/20 text-green-300 border-green-500/40 hover:bg-green-500/30';
+                        } else if (ev.type === 'Payment') {
+                          badgeStyle = 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40 hover:bg-yellow-500/30';
+                        }
+
+                        return (
+                          <div
+                            key={ev.id}
+                            className={`px-1.5 py-0.5 rounded text-[9.5px] font-semibold border truncate leading-tight select-none cursor-pointer transition-all ${badgeStyle}`}
+                            title={`${ev.influencerName} (@${ev.influencerUsername}): ${ev.label} (${ev.dateStr})`}
+                          >
+                            {badgeText}
+                          </div>
+                        );
+                      })}
                     </div>
 
                   </div>

@@ -5,50 +5,83 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import toast from 'react-hot-toast';
 
-// Language and Campaign code generation mapping helper
-export const calculateDraftDate = (postDateStr: string | null | undefined): string => {
-  if (!postDateStr || !postDateStr.trim()) return '';
-  try {
-    const str = postDateStr.trim();
-    let year = NaN, month = NaN, day = NaN;
-    if (str.includes('-')) {
-      const parts = str.split('-');
-      if (parts.length === 3) {
-        if (parts[0].length === 4) {
-          year = parseInt(parts[0], 10);
-          month = parseInt(parts[1], 10);
-          day = parseInt(parts[2], 10);
-        } else if (parts[2].length === 4) {
-          day = parseInt(parts[0], 10);
-          const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-          const mIdx = monthNames.indexOf(parts[1].toLowerCase());
-          month = mIdx !== -1 ? mIdx + 1 : parseInt(parts[1], 10);
-          year = parseInt(parts[2], 10);
-        }
-      }
-    }
-    if (isNaN(year) || isNaN(month) || isNaN(day)) {
-      const dObj = new Date(str);
-      if (!isNaN(dObj.getTime())) {
-        year = dObj.getFullYear();
-        month = dObj.getMonth() + 1;
-        day = dObj.getDate();
-      }
-    }
-    if (isNaN(year) || isNaN(month) || isNaN(day)) return '';
+const MONTH_NAME_MAP: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  january: 1, february: 2, march: 3, april: 4, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12
+};
 
-    const d = new Date(year, month - 1, day);
-    if (isNaN(d.getTime())) return '';
+export const parseToYMD = (val: any, defaultYear = 2026): string => {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (!str) return '';
 
-    d.setDate(d.getDate() - 3);
-
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  } catch (e) {
-    return '';
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    let y = parseInt(isoMatch[1], 10);
+    if (isNaN(y) || y <= 2010) y = defaultYear;
+    return `${y}-${isoMatch[2]}-${isoMatch[3]}`;
   }
+
+  const dmMatch = str.match(/^(\d{1,2})[\s\-\/]+([a-zA-Z]+)(?:[\s\-\/]+(\d{2,4}))?$/);
+  if (dmMatch) {
+    const day = parseInt(dmMatch[1], 10);
+    const mStr = dmMatch[2].toLowerCase();
+    const month = MONTH_NAME_MAP[mStr];
+    let year = dmMatch[3] ? (dmMatch[3].length === 2 ? 2000 + parseInt(dmMatch[3], 10) : parseInt(dmMatch[3], 10)) : defaultYear;
+    if (isNaN(year) || year <= 2010) year = defaultYear;
+    if (month && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  const mdMatch = str.match(/^([a-zA-Z]+)[\s\-\/]+(\d{1,2})(?:[\s\-\/]+(\d{2,4}))?$/);
+  if (mdMatch) {
+    const mStr = mdMatch[1].toLowerCase();
+    const month = MONTH_NAME_MAP[mStr];
+    const day = parseInt(mdMatch[2], 10);
+    let year = mdMatch[3] ? (mdMatch[3].length === 2 ? 2000 + parseInt(mdMatch[3], 10) : parseInt(mdMatch[3], 10)) : defaultYear;
+    if (isNaN(year) || year <= 2010) year = defaultYear;
+    if (month && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10);
+    let year = dmyMatch[3].length === 2 ? 2000 + parseInt(dmyMatch[3], 10) : parseInt(dmyMatch[3], 10);
+    if (isNaN(year) || year <= 2010) year = defaultYear;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  const dObj = new Date(str);
+  if (!isNaN(dObj.getTime())) {
+    let y = dObj.getFullYear();
+    if (y <= 2010) y = defaultYear;
+    const m = String(dObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  return '';
+};
+
+export const calculateDraftDate = (postDateStr: string | null | undefined, defaultYear = 2026): string => {
+  const ymd = parseToYMD(postDateStr, defaultYear);
+  if (!ymd) return '';
+  const parts = ymd.split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 3);
+  const resY = dt.getUTCFullYear();
+  const resM = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const resD = String(dt.getUTCDate()).padStart(2, '0');
+  return `${resY}-${resM}-${resD}`;
 };
 
 export const LANGUAGE_MAPPING: Record<string, string> = {
@@ -235,10 +268,12 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           (viewsJson?.post_dates || []).forEach((pd: any) => {
             if (pd.video_number && pd.post_date && String(pd.post_date).trim() !== '') {
               const vNum = Number(pd.video_number);
+              const postYmd = parseToYMD(pd.post_date, 2026);
+              const draftYmd = pd.draft_date ? parseToYMD(pd.draft_date, 2026) : calculateDraftDate(pd.post_date, 2026);
               postDatesMap.set(vNum, {
                 video_number: vNum,
-                post_date: pd.post_date,
-                draft_date: pd.draft_date || calculateDraftDate(pd.post_date)
+                post_date: postYmd || pd.post_date,
+                draft_date: draftYmd || (postYmd ? calculateDraftDate(postYmd, 2026) : '')
               });
             }
           });
@@ -248,22 +283,26 @@ export const useCampaignInfluencers = (campaignId?: string) => {
             .forEach(pd => {
               if (pd.video_number && pd.post_date && String(pd.post_date).trim() !== '') {
                 const vNum = Number(pd.video_number);
+                const postYmd = parseToYMD(pd.post_date, 2026);
+                const draftYmd = pd.draft_date ? parseToYMD(pd.draft_date, 2026) : calculateDraftDate(pd.post_date, 2026);
                 postDatesMap.set(vNum, {
                   id: pd.id,
                   influencer_id: pd.influencer_id,
                   campaign_id: pd.campaign_id,
                   video_number: vNum,
-                  post_date: pd.post_date,
-                  draft_date: pd.draft_date || calculateDraftDate(pd.post_date)
+                  post_date: postYmd || pd.post_date,
+                  draft_date: draftYmd || (postYmd ? calculateDraftDate(postYmd, 2026) : '')
                 });
               }
             });
 
           const postDates = Array.from(postDatesMap.values()).map((pd: any) => {
-            const draft = pd.draft_date || calculateDraftDate(pd.post_date);
+            const postYmd = parseToYMD(pd.post_date, 2026);
+            const draftYmd = pd.draft_date ? parseToYMD(pd.draft_date, 2026) : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
             return {
               ...pd,
-              draft_date: draft || null
+              post_date: postYmd || pd.post_date,
+              draft_date: draftYmd || null
             };
           }).sort((a: any, b: any) => (a.video_number || 0) - (b.video_number || 0));
 
