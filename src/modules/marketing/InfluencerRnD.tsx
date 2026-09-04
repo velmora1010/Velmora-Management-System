@@ -92,9 +92,100 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
     }
   };
 
-  const handleStartResearch = () => {
-    setResearchMessage("Research engine is not available yet.");
-    setTimeout(() => setResearchMessage(null), 5000);
+  const [researchState, setResearchState] = useState<{
+    profileCode: string;
+    username: string;
+    statusText: string;
+    followerDisplay: string | null;
+    isComplete: boolean;
+    error: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    // Listen for live extension events
+    const unsubscribe = rndExtensionService.onEvent((event) => {
+      if (event.type === 'PROFILE_OPENING') {
+        setResearchState(prev => prev ? { ...prev, statusText: 'Opening profile...', error: null } : null);
+      } else if (event.type === 'PROFILE_VERIFYING') {
+        setResearchState(prev => prev ? { ...prev, statusText: 'Verifying profile...', error: null } : null);
+      } else if (event.type === 'PROFILE_DATA_FOUND') {
+        setResearchState(prev => prev ? { ...prev, statusText: 'Reading followers...', error: null } : null);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleStartResearch = async () => {
+    if (!currentJob) return;
+    
+    // Find the first valid profile
+    const validProfile = currentJob.profiles.find(p => p.validationStatus !== 'invalid');
+    if (!validProfile) {
+      setResearchMessage("No valid profiles to research.");
+      return;
+    }
+
+    setResearchMessage(null);
+    setResearchState({
+      profileCode: validProfile.influencerCode,
+      username: validProfile.username,
+      statusText: 'Starting...',
+      followerDisplay: null,
+      isComplete: false,
+      error: null
+    });
+
+    // Mark running
+    setCurrentJob(prev => {
+      if (!prev) return prev;
+      const profiles = prev.profiles.map(p => 
+        p.influencerCode === validProfile.influencerCode ? { ...p, researchStatus: 'running' as const } : p
+      );
+      return { ...prev, profiles };
+    });
+
+    try {
+      const result = await rndExtensionService.startProfileResearch(
+        currentJob.jobId,
+        validProfile.influencerCode,
+        validProfile.username
+      );
+      
+      setResearchState({
+        profileCode: result.influencerCode,
+        username: result.requestedUsername,
+        statusText: 'Completed',
+        followerDisplay: result.followerDisplay,
+        isComplete: true,
+        error: null
+      });
+
+      // Mark completed
+      setCurrentJob(prev => {
+        if (!prev) return prev;
+        const profiles = prev.profiles.map(p => 
+          p.influencerCode === validProfile.influencerCode ? { ...p, researchStatus: 'completed' as const } : p
+        );
+        return { ...prev, profiles };
+      });
+
+    } catch (err: any) {
+      setResearchState(prev => prev ? {
+        ...prev,
+        statusText: 'Failed',
+        isComplete: true,
+        error: err.message || 'An unknown error occurred.'
+      } : null);
+
+      // Mark failed
+      setCurrentJob(prev => {
+        if (!prev) return prev;
+        const profiles = prev.profiles.map(p => 
+          p.influencerCode === validProfile.influencerCode ? { ...p, researchStatus: 'failed' as const } : p
+        );
+        return { ...prev, profiles };
+      });
+    }
   };
 
   const isEngineConnected = extState === 'CONNECTED' && igState === 'SESSION_DETECTED';
@@ -253,6 +344,58 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                 {researchMessage}
               </div>
             )}
+
+            {researchState && (
+              <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700 shadow-sm flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-100">
+                      {researchState.isComplete ? 'Research Complete' : 'Research in Progress'}
+                    </h3>
+                    <p className="text-sm text-slate-400 mt-1 flex items-center gap-2">
+                      <span className="font-medium text-slate-300">{researchState.profileCode}</span>
+                      <span>•</span>
+                      <span>@{researchState.username}</span>
+                    </p>
+                  </div>
+                  {researchState.isComplete ? (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700">
+                      {researchState.error ? (
+                        <>
+                          <XCircle size={16} className="text-red-400" />
+                          <span className="text-sm font-medium text-red-400">Failed</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 size={16} className="text-emerald-400" />
+                          <span className="text-sm font-medium text-emerald-400">Completed</span>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="w-5 h-5 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin"></div>
+                      <span className="text-sm font-medium text-slate-300">{researchState.statusText}</span>
+                    </div>
+                  )}
+                </div>
+                
+                {researchState.isComplete && !researchState.error && (
+                  <div className="flex items-center justify-between bg-slate-800/50 p-4 rounded-lg">
+                    <span className="text-sm text-slate-400">Followers:</span>
+                    <span className="text-lg font-bold text-slate-200">{researchState.followerDisplay}</span>
+                  </div>
+                )}
+                
+                {researchState.error && (
+                  <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-lg flex flex-col gap-1">
+                    <span className="text-xs font-bold text-red-400 uppercase tracking-wider">Reason</span>
+                    <span className="text-sm text-red-300">{researchState.error}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <RnDPreviewTable 
               job={currentJob} 
               onReplaceFile={() => setCurrentJob(null)} 

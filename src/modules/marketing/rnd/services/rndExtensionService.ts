@@ -8,6 +8,7 @@ import {
 
 class RndExtensionService {
   private pendingRequests: Map<string, { resolve: (val: any) => void, reject: (err: any) => void }> = new Map();
+  private eventListeners: Array<(event: ExtensionResponse) => void> = [];
 
   constructor() {
     window.addEventListener('message', this.handleMessage.bind(this));
@@ -23,11 +24,14 @@ class RndExtensionService {
         const promiseControls = this.pendingRequests.get(data.id)!;
         this.pendingRequests.delete(data.id);
         
-        if (data.error) {
+        if (data.error && data.type.endsWith('_FAILED')) {
           promiseControls.reject(new Error(data.error));
         } else {
           promiseControls.resolve(data);
         }
+      } else {
+        // Dispatch to event listeners
+        this.eventListeners.forEach(cb => cb(data));
       }
     }
   }
@@ -94,6 +98,27 @@ class RndExtensionService {
   public async checkInstagramLogin(): Promise<{ loggedIn: boolean; error?: string }> {
     const res = await this.checkInstagramSession();
     return { loggedIn: res.session === 'detected', error: res.error };
+  }
+
+  // Phase 4 - Real Research Engine
+  public onEvent(callback: (event: ExtensionResponse) => void) {
+    this.eventListeners.push(callback);
+    return () => {
+      this.eventListeners = this.eventListeners.filter(cb => cb !== callback);
+    };
+  }
+
+  public async startProfileResearch(jobId: string, influencerCode: string, username: string): Promise<any> {
+    try {
+      // 20-second timeout for a full profile extraction
+      const response = await this.sendMessage('START_PROFILE_RESEARCH', { jobId, influencerCode, username }, 20000);
+      if (response.type === 'PROFILE_COMPLETED') {
+        return response.payload;
+      }
+      throw new Error(response.error || 'Unknown error occurred during research');
+    } catch (err: any) {
+      throw err;
+    }
   }
 }
 

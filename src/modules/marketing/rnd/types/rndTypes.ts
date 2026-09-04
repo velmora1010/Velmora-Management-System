@@ -18,6 +18,7 @@ export interface ResearchInputProfile {
   rowNumber: number;
   validationStatus: ValidationStatus;
   validationMessages: string[];
+  researchStatus?: ProfileResearchStatus;
 }
 
 export type JobStatus = 'draft' | 'ready' | 'invalid';
@@ -33,4 +34,19 @@ export interface ResearchJob {
   duplicateProfiles: number;
   profiles: ResearchInputProfile[];
   status: JobStatus;
+}
+
+export type ProfileResearchStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface ProfileResearchResult {
+  jobId: string;
+  influencerCode: string;
+  requestedUsername: string;
+  verifiedUsername: string;
+  followerDisplay: string | null;
+  followerCount: number;
+  status: ProfileResearchStatus;
+  error?: string;
+  startedAt: number;
+  completedAt: number;
 }
