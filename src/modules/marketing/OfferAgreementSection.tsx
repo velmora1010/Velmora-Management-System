@@ -399,7 +399,6 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
     const nowIso = new Date().toISOString();
     let count = 0;
-
     for (const inf of targetList) {
       const infId = String(inf.id);
       const code = inf.code || (inf as any).influencer_code || '';
@@ -407,12 +406,26 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       const price = getVideoPrice(inf);
       const text = buildAgreementText(inf, campaign.campaign_name);
 
+      const postDates = Array.isArray(inf.postDates) ? inf.postDates : [];
+      const pubDatesList: any[] = [];
+      const draftDatesList: any[] = [];
+
+      for (let v = 1; v <= 6; v++) {
+        const found = postDates.find((pd: any) => pd.video_number === v);
+        const pDate = (found && found.post_date && typeof found.post_date === 'string') ? formatAgreementDate(found.post_date) : '';
+        const dDate = pDate ? calculateDraftDate(pDate) : '';
+        if (pDate) pubDatesList.push({ video_number: v, post_date: pDate });
+        if (dDate) draftDatesList.push({ video_number: v, draft_date: dDate });
+      }
+
       const record: StoredAgreement = {
         campaign_id: campaign.id,
         influencer_id: inf.id,
         influencer_code: code,
         username: user,
         price_per_video: price,
+        publishing_dates: pubDatesList,
+        draft_dates: draftDatesList,
         agreement_text: text,
         generated_at: agreementsMap[infId]?.generated_at || nowIso,
         updated_at: nowIso
