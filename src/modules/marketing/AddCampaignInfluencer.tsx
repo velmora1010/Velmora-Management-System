@@ -22,14 +22,17 @@ export const formatDisplayProductName = (name?: string | null): string => {
 
 export const formatDisplayCombination = (comb?: string | null): string => {
   if (!comb) return '';
-  let str = String(comb);
-  str = str.replace(/\bComfort\b/g, 'Fabric Conditioner');
-  str = str.replace(/\bBamboo Towel\b/g, 'Bamboo Kitchen Towel');
-  str = str.replace(/\bBike Wash\b/g, 'Bike Shampoo');
-  str = str.replace(/\bCar Wash\b/g, 'Car Shampoo');
-  str = str.replace(/\bBBC\b/g, 'BBC Cleaner');
-  str = str.replace(/\bSponge\b/g, 'Magic Sponge');
-  return str;
+  let str = String(comb).trim();
+  if (!str) return '';
+  str = str.replace(/\s*&\s*/g, ' + ');
+  str = str.replace(/\bComfort\b/gi, 'Fabric Conditioner');
+  str = str.replace(/\bBamboo\s+Towel\b/gi, 'Bamboo Kitchen Towel');
+  str = str.replace(/\bBike\s+Wash\b/gi, 'Bike Shampoo');
+  str = str.replace(/\bCar\s+Wash\b/gi, 'Car Shampoo');
+  str = str.replace(/\bBBC\b(?!\s+Cleaner)/gi, 'BBC Cleaner');
+  str = str.replace(/(?<!Magic\s+)\bSponge\b/gi, 'Magic Sponge');
+  str = str.replace(/\bHandwash\b/gi, 'Hand Wash');
+  return str.trim();
 };
 
 export const PRODUCT_LIST = [

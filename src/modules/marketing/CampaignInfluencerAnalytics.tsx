@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { AnalyticsDonutChart, DonutSliceData } from '../sales/website/components/AnalyticsDonutChart';
 import { normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
-import { formatDisplayProductName, parseProductsFromCombination } from './AddCampaignInfluencer';
+import { formatDisplayProductName, formatDisplayCombination, parseProductsFromCombination } from './AddCampaignInfluencer';
 import type { CampaignAnalyticsFilterState } from '../../components/marketing/CampaignInfluencerAnalyticsFilterDrawer';
 import { getSingleVideoPrices } from './CampaignInfluencerList';
 import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
@@ -444,53 +444,50 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
       // 1. Check pricing.product_pricing.videos first
       if (inf.pricing?.product_pricing?.videos && Array.isArray(inf.pricing.product_pricing.videos) && inf.pricing.product_pricing.videos.length > 0) {
         inf.pricing.product_pricing.videos.forEach((v: any) => {
-          let foundProducts = false;
-          if (Array.isArray(v.products) && v.products.length > 0) {
-            v.products.forEach((p: any) => {
-              const pName = p.product_name || p.name;
-              if (pName && !pName.toLowerCase().startsWith('video')) {
-                const displayName = formatDisplayProductName(pName);
-                if (displayName) {
-                  map[displayName] = (map[displayName] || 0) + 1;
-                  countForInf++;
-                  totalVideos++;
-                  foundProducts = true;
-                }
-              }
-            });
-          }
-          if (!foundProducts) {
-            const comb = v.combination || (v.name && !v.name.toLowerCase().startsWith('video') ? v.name : null);
-            if (comb) {
-              const parsed = parseProductsFromCombination(comb);
-              parsed.forEach(pName => {
-                if (pName && !pName.toLowerCase().startsWith('video')) {
-                  const displayName = formatDisplayProductName(pName);
-                  if (displayName) {
-                    map[displayName] = (map[displayName] || 0) + 1;
-                    countForInf++;
-                    totalVideos++;
-                    foundProducts = true;
-                  }
-                }
-              });
+          const rawComb = v.combination || (v.name && !v.name.toLowerCase().startsWith('video') ? v.name : null);
+          let nameToUse: string | null = null;
+
+          if (rawComb && !rawComb.toLowerCase().startsWith('video') && rawComb !== '5-6 Products') {
+            nameToUse = formatDisplayCombination(rawComb);
+          } else if (Array.isArray(v.products) && v.products.length > 0) {
+            const validProds = v.products
+              .map((p: any) => p.product_name || p.name)
+              .filter((n: string) => n && typeof n === 'string' && !n.toLowerCase().startsWith('video'));
+            if (validProds.length > 0) {
+              nameToUse = formatDisplayCombination(validProds.join(' + '));
             }
+          }
+
+          if (nameToUse) {
+            map[nameToUse] = (map[nameToUse] || 0) + 1;
+            countForInf++;
+            totalVideos++;
           }
         });
       }
-      // 2. Check top-level inf.products
+      // 2. Check top-level inf.products (grouped by video_number if present)
       else if (Array.isArray(inf.products) && inf.products.length > 0) {
+        const videoMap = new Map<number, string[]>();
         inf.products.forEach((p: any) => {
           const pName = p.product_name || p.name;
-          if (pName && !pName.toLowerCase().startsWith('video')) {
-            const displayName = formatDisplayProductName(pName);
-            if (displayName) {
-              map[displayName] = (map[displayName] || 0) + 1;
+          if (pName && typeof pName === 'string' && !pName.toLowerCase().startsWith('video')) {
+            const vNum = Number(p.video_number) || 1;
+            const existing = videoMap.get(vNum) || [];
+            existing.push(pName);
+            videoMap.set(vNum, existing);
+          }
+        });
+
+        if (videoMap.size > 0) {
+          videoMap.forEach(prodNames => {
+            const combName = formatDisplayCombination(prodNames.join(' + '));
+            if (combName) {
+              map[combName] = (map[combName] || 0) + 1;
               countForInf++;
               totalVideos++;
             }
-          }
-        });
+          });
+        }
       }
 
       if (countForInf === 0) {
