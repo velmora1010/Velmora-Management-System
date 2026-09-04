@@ -571,9 +571,6 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     sliceData: DonutSliceData[],
     totalUniqueCount: number
   ) => {
-    const isExpanded = !!expandedCards['Price Distribution'];
-    const visibleData = isExpanded ? sliceData : sliceData.slice(0, 6);
-    const hasMore = sliceData.length > 6;
     const maxVal = Math.max(...sliceData.map(d => d.value), 1);
 
     return (
@@ -589,26 +586,29 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
                 Price Distribution
               </h4>
               <p className="text-xs text-slate-400 font-medium">
-                Horizontal distribution across {sliceData.length} {sliceData.length === 1 ? 'tier' : 'tiers'}
+                Influencer distribution by price per video
               </p>
             </div>
           </div>
+          <span className="text-xs bg-purple-950/80 border border-purple-700/50 text-purple-300 font-semibold px-2.5 py-1 rounded-lg shadow-xs">
+            Bar Chart
+          </span>
         </div>
 
         {/* Bar Chart Content */}
         {totalUniqueCount > 0 && sliceData.length > 0 ? (
           <div className="flex-1 flex flex-col justify-center space-y-3">
-            {visibleData.map((item) => {
+            {sliceData.map((item) => {
               const pct = totalUniqueCount > 0 ? ((item.value / totalUniqueCount) * 100).toFixed(1) : '0';
               const widthPct = Math.max((item.value / maxVal) * 100, 2);
 
               return (
                 <div key={item.name} className="space-y-1">
                   <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="text-slate-200">{item.name}</span>
-                    <div className="flex items-center gap-2 font-mono">
+                    <span className="text-slate-200 truncate pr-2">{item.name}</span>
+                    <div className="flex items-center gap-3 font-mono shrink-0">
                       <span className="text-slate-100 font-bold">{item.value}</span>
-                      <span className="text-purple-400 min-w-[45px] text-right">{pct}%</span>
+                      <span className="text-purple-400 min-w-[50px] text-right font-bold">{pct}%</span>
                     </div>
                   </div>
                   <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800/80 p-0.5">
@@ -623,25 +623,6 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
                 </div>
               );
             })}
-
-            {/* Expand / Collapse Button */}
-            {hasMore && (
-              <button
-                type="button"
-                onClick={() => toggleExpand('Price Distribution')}
-                className="mt-2 text-xs text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-purple-900/40 hover:border-purple-700/60 bg-purple-950/20 transition-all cursor-pointer w-full"
-              >
-                {isExpanded ? (
-                  <>
-                    <span>Show Less</span> <ChevronUp size={14} />
-                  </>
-                ) : (
-                  <>
-                    <span>Show All ({sliceData.length})</span> <ChevronDown size={14} />
-                  </>
-                )}
-              </button>
-            )}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2">
