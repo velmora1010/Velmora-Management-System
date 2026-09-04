@@ -1616,10 +1616,10 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                 const dayEvents = eventsByDate[day.dateStr] || [];
                 const isToday = day.dateStr === todayStr;
                 
-                // Group milestones for indicators
-                const hasDelivered = dayEvents.some(ev => ev.type === 'Delivered');
-                const hasDraft = dayEvents.some(ev => ev.type === 'Draft');
-                const hasFinal = dayEvents.some(ev => ev.type === 'Final Post');
+                const MAX_VISIBLE_EVENTS = 3;
+                const hasMoreEvents = dayEvents.length > MAX_VISIBLE_EVENTS;
+                const visibleEvents = hasMoreEvents ? dayEvents.slice(0, MAX_VISIBLE_EVENTS) : dayEvents;
+                const overflowCount = dayEvents.length - MAX_VISIBLE_EVENTS;
 
                 // Construct tooltip details
                 const tooltipText = (() => {
@@ -1638,57 +1638,77 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                       }
                     }}
                     title={tooltipText}
-                    className={`p-1.5 flex flex-col justify-start min-h-[110px] max-h-[140px] overflow-hidden transition-all relative select-none ${
-                      day.isCurrentMonth ? 'bg-transparent text-slate-200' : 'bg-slate-900/20 text-slate-600'
-                    } ${dayEvents.length > 0 ? 'cursor-pointer hover:bg-slate-800/20' : ''}`}
+                    className={`p-2 flex flex-col justify-between min-h-[125px] h-full overflow-hidden transition-all relative select-none ${
+                      day.isCurrentMonth ? 'bg-transparent text-slate-200' : 'bg-slate-900/30 text-slate-600'
+                    } ${dayEvents.length > 0 ? 'cursor-pointer hover:bg-slate-800/30' : ''}`}
                   >
                     
-                    {/* Top Row: Date value & Event Count */}
-                    <div className="flex justify-between items-start mb-1 shrink-0">
-                      <span className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded ${
+                    {/* Top Row: Date value & Event Count Badge */}
+                    <div className="flex justify-between items-center mb-1.5 shrink-0">
+                      <span className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-md ${
                         isToday 
-                          ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20 font-black' 
-                          : 'text-slate-400'
+                          ? 'bg-blue-600 text-white shadow-sm font-black' 
+                          : day.isCurrentMonth ? 'text-slate-300' : 'text-slate-600'
                       }`}>
                         {day.date.getDate()}
                       </span>
                       {dayEvents.length > 0 && (
-                        <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-800 shrink-0">
+                        <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-900/90 px-1.5 py-0.5 rounded-md border border-slate-800 shrink-0 shadow-sm">
                           {dayEvents.length}
                         </span>
                       )}
                     </div>
 
-                    {/* Events List inside Cell */}
-                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1 pr-0.5">
-                      {dayEvents.map((ev) => {
-                        const infCode = ev.influencerUsername || ev.influencerName || 'Inf';
+                    {/* Events List inside Cell (No Inner Scrollbars) */}
+                    <div className="flex-1 space-y-1.5 overflow-hidden">
+                      {visibleEvents.map((ev) => {
+                        const rawUsername = ev.influencerUsername || ev.influencerName || 'Inf';
+                        const formattedUsername = rawUsername.startsWith('@') ? rawUsername : `@${rawUsername}`;
                         const typeText = ev.type === 'Draft' ? 'Draft' : (ev.type === 'Final Post' ? 'Final Post' : ev.type);
-                        const vidText = ev.videoNumber ? `Video ${ev.videoNumber}` : (ev.label.match(/Video \d+/) ? ev.label.match(/Video \d+/)?.[0] : '');
                         
-                        // Format: HIS1 — Draft — Video 1 or HIS1 — Final Post — Video 1
-                        const badgeText = `${infCode} — ${typeText}${vidText ? ` — ${vidText}` : ''}`;
+                        // Format: @username · Draft or @username · Final Post
+                        const badgeText = `${formattedUsername} · ${typeText}`;
 
-                        let badgeStyle = 'bg-purple-500/20 text-purple-300 border-purple-500/40 hover:bg-purple-500/30';
+                        let badgeStyle = 'bg-purple-500/15 text-purple-300 border-purple-500/30 hover:bg-purple-500/25';
+                        let dotStyle = 'bg-purple-400';
                         if (ev.type === 'Final Post') {
-                          badgeStyle = 'bg-blue-500/20 text-blue-300 border-blue-500/40 hover:bg-blue-500/30';
+                          badgeStyle = 'bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25';
+                          dotStyle = 'bg-blue-400';
                         } else if (ev.type === 'Delivered') {
-                          badgeStyle = 'bg-green-500/20 text-green-300 border-green-500/40 hover:bg-green-500/30';
+                          badgeStyle = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25';
+                          dotStyle = 'bg-emerald-400';
                         } else if (ev.type === 'Payment') {
-                          badgeStyle = 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40 hover:bg-yellow-500/30';
+                          badgeStyle = 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25';
+                          dotStyle = 'bg-amber-400';
                         }
 
                         return (
                           <div
                             key={ev.id}
-                            className={`px-1.5 py-0.5 rounded text-[9.5px] font-semibold border truncate leading-tight select-none cursor-pointer transition-all ${badgeStyle}`}
+                            className={`px-2 py-0.5 rounded-md text-[9.5px] font-medium border truncate leading-tight select-none cursor-pointer transition-all flex items-center gap-1.5 ${badgeStyle}`}
                             title={`${ev.influencerName} (@${ev.influencerUsername}): ${ev.label} (${ev.dateStr})`}
                           >
-                            {badgeText}
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotStyle}`} />
+                            <span className="truncate">{badgeText}</span>
                           </div>
                         );
                       })}
                     </div>
+
+                    {/* Overflow link (+N more) */}
+                    {hasMoreEvents && (
+                      <div className="mt-1 shrink-0 pt-1 border-t border-slate-800/40 flex items-center justify-between">
+                        <span 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedDateStr(day.dateStr);
+                          }}
+                          className="text-[9.5px] font-bold text-indigo-400 hover:text-indigo-300 hover:underline font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          +{overflowCount} more
+                        </span>
+                      </div>
+                    )}
 
                   </div>
                 );
