@@ -36,7 +36,13 @@ export interface ResearchJob {
   status: JobStatus;
 }
 
-export type ProfileResearchStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type ProfileResearchStatus = 'pending' | 'running' | 'completed' | 'failed' | 'reels_not_enough' | 'reels_not_found';
+
+export interface DiscoveredReel {
+  reelUrl: string;
+  isPinned: boolean;
+  discoveryIndex: number;
+}
 
 export interface ProfileResearchResult {
   jobId: string;
@@ -45,6 +51,13 @@ export interface ProfileResearchResult {
   verifiedUsername: string;
   followerDisplay: string | null;
   followerCount: number;
+  
+  // Milestone 2 additions
+  reelsDiscovered?: number;
+  pinnedReelsExcluded?: number;
+  selectedReelCount?: number;
+  selectedReels?: DiscoveredReel[];
+
   status: ProfileResearchStatus;
   error?: string;
   startedAt: number;

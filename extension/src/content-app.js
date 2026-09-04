@@ -45,3 +45,11 @@ window.addEventListener('message', (event) => {
     }, '*');
   }
 });
+
+// Forward messages from the background script (like live progress events) back to the web app
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.source === VELMORA_RND_EXTENSION) {
+    window.postMessage(message, '*');
+  }
+  return false;
+});

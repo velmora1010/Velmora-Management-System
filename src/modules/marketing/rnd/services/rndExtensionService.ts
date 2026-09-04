@@ -110,8 +110,8 @@ class RndExtensionService {
 
   public async startProfileResearch(jobId: string, influencerCode: string, username: string): Promise<any> {
     try {
-      // 20-second timeout for a full profile extraction
-      const response = await this.sendMessage('START_PROFILE_RESEARCH', { jobId, influencerCode, username }, 20000);
+      // 120-second timeout for a full profile extraction including adaptive reel scrolling
+      const response = await this.sendMessage('START_PROFILE_RESEARCH', { jobId, influencerCode, username }, 120000);
       if (response.type === 'PROFILE_COMPLETED') {
         return response.payload;
       }

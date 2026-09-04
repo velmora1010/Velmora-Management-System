@@ -97,6 +97,9 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
     username: string;
     statusText: string;
     followerDisplay: string | null;
+    reelsDiscovered: number | null;
+    pinnedReelsExcluded: number | null;
+    selectedReelCount: number | null;
     isComplete: boolean;
     error: string | null;
   } | null>(null);
@@ -104,12 +107,22 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
   useEffect(() => {
     // Listen for live extension events
     const unsubscribe = rndExtensionService.onEvent((event) => {
-      if (event.type === 'PROFILE_OPENING') {
-        setResearchState(prev => prev ? { ...prev, statusText: 'Opening profile...', error: null } : null);
-      } else if (event.type === 'PROFILE_VERIFYING') {
-        setResearchState(prev => prev ? { ...prev, statusText: 'Verifying profile...', error: null } : null);
-      } else if (event.type === 'PROFILE_DATA_FOUND') {
-        setResearchState(prev => prev ? { ...prev, statusText: 'Reading followers...', error: null } : null);
+      const type = event.type;
+      const textMap: Record<string, string> = {
+        'PROFILE_OPENING': 'Opening profile...',
+        'PROFILE_VERIFYING': 'Verifying profile...',
+        'PROFILE_DATA_FOUND': 'Reading followers...',
+        'REELS_PAGE_OPENING': 'Opening Reels...',
+        'REELS_LOADING': 'Loading Reels...',
+        'REELS_SCROLLING': 'Discovering reels...',
+        'REELS_DISCOVERED': `Discovering reels (${event.payload?.discovered || 0} found)...`,
+        'PINNED_REELS_FILTERED': `Filtering pinned reels (${event.payload?.excluded || 0} excluded)...`,
+        'REELS_SELECTION_COMPLETE': `Selecting up to 15 reels...`,
+        'RESEARCH_RETRYING': 'Not enough reels, retrying...',
+      };
+
+      if (textMap[type]) {
+        setResearchState(prev => prev ? { ...prev, statusText: textMap[type], error: null } : null);
       }
     });
     return unsubscribe;
@@ -131,6 +144,9 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
       username: validProfile.username,
       statusText: 'Starting...',
       followerDisplay: null,
+      reelsDiscovered: null,
+      pinnedReelsExcluded: null,
+      selectedReelCount: null,
       isComplete: false,
       error: null
     });
@@ -154,17 +170,22 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
       setResearchState({
         profileCode: result.influencerCode,
         username: result.requestedUsername,
-        statusText: 'Completed',
+        statusText: result.status === 'reels_not_found' ? 'Failed (No Reels)' : result.status === 'reels_not_enough' ? 'Completed (Partial Reels)' : 'Completed',
         followerDisplay: result.followerDisplay,
+        reelsDiscovered: result.reelsDiscovered || 0,
+        pinnedReelsExcluded: result.pinnedReelsExcluded || 0,
+        selectedReelCount: result.selectedReelCount || 0,
         isComplete: true,
-        error: null
+        error: result.status === 'reels_not_found' ? 'Zero reels were discovered' : null
       });
 
       // Mark completed
       setCurrentJob(prev => {
         if (!prev) return prev;
         const profiles = prev.profiles.map(p => 
-          p.influencerCode === validProfile.influencerCode ? { ...p, researchStatus: 'completed' as const } : p
+          p.influencerCode === validProfile.influencerCode 
+            ? { ...p, researchStatus: (result.status === 'reels_not_found' ? 'failed' : 'completed') as any } 
+            : p
         );
         return { ...prev, profiles };
       });
@@ -381,9 +402,35 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                 </div>
                 
                 {researchState.isComplete && !researchState.error && (
-                  <div className="flex items-center justify-between bg-slate-800/50 p-4 rounded-lg">
-                    <span className="text-sm text-slate-400">Followers:</span>
-                    <span className="text-lg font-bold text-slate-200">{researchState.followerDisplay}</span>
+                  <div className="flex flex-col gap-3 bg-slate-800/50 p-4 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-400">Followers:</span>
+                      <span className="text-lg font-bold text-slate-200">{researchState.followerDisplay}</span>
+                    </div>
+                    {researchState.reelsDiscovered !== null && (
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-700/50">
+                        <span className="text-sm text-slate-400">Reels discovered:</span>
+                        <span className="text-md font-medium text-slate-200">{researchState.reelsDiscovered}</span>
+                      </div>
+                    )}
+                    {researchState.pinnedReelsExcluded !== null && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-400">Pinned excluded:</span>
+                        <span className="text-md font-medium text-slate-200">{researchState.pinnedReelsExcluded}</span>
+                      </div>
+                    )}
+                    {researchState.selectedReelCount !== null && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-400">Non-pinned selected:</span>
+                        <span className="text-md font-medium text-slate-200">{researchState.selectedReelCount} / 15</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-700/50">
+                      <span className="text-sm text-slate-400">Status:</span>
+                      <span className="text-sm font-medium text-emerald-400 flex items-center gap-1">
+                        <CheckCircle2 size={14} /> Reel discovery complete
+                      </span>
+                    </div>
                   </div>
                 )}
                 
