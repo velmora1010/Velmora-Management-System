@@ -1616,7 +1616,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                 const dayEvents = eventsByDate[day.dateStr] || [];
                 const isToday = day.dateStr === todayStr;
                 
-                const MAX_VISIBLE_EVENTS = 3;
+                const MAX_VISIBLE_EVENTS = 2;
                 const hasMoreEvents = dayEvents.length > MAX_VISIBLE_EVENTS;
                 const visibleEvents = hasMoreEvents ? dayEvents.slice(0, MAX_VISIBLE_EVENTS) : dayEvents;
                 const overflowCount = dayEvents.length - MAX_VISIBLE_EVENTS;
@@ -1638,23 +1638,22 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                       }
                     }}
                     title={tooltipText}
-                    className={`p-2 flex flex-col justify-between min-h-[125px] h-full overflow-hidden transition-all relative select-none ${
+                    className={`p-2.5 flex flex-col justify-between min-h-[118px] h-full overflow-hidden transition-all relative select-none ${
                       day.isCurrentMonth ? 'bg-transparent text-slate-200' : 'bg-slate-900/30 text-slate-600'
                     } ${dayEvents.length > 0 ? 'cursor-pointer hover:bg-slate-800/30' : ''}`}
                   >
                     
-                    {/* Top Row: Date value & Event Count Badge */}
+                    {/* Top Row: Date Value */}
                     <div className="flex justify-between items-center mb-1.5 shrink-0">
-                      <span className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-md ${
-                        isToday 
-                          ? 'bg-blue-600 text-white shadow-sm font-black' 
-                          : day.isCurrentMonth ? 'text-slate-300' : 'text-slate-600'
-                      }`}>
-                        {day.date.getDate()}
-                      </span>
-                      {dayEvents.length > 0 && (
-                        <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-900/90 px-1.5 py-0.5 rounded-md border border-slate-800 shrink-0 shadow-sm">
-                          {dayEvents.length}
+                      {isToday ? (
+                        <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-md">
+                          {day.date.getDate()}
+                        </span>
+                      ) : (
+                        <span className={`text-xs font-bold ${
+                          day.isCurrentMonth ? 'text-slate-100' : 'text-slate-600 font-medium'
+                        }`}>
+                          {day.date.getDate()}
                         </span>
                       )}
                     </div>
@@ -1664,32 +1663,28 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                       {visibleEvents.map((ev) => {
                         const rawUsername = ev.influencerUsername || ev.influencerName || 'Inf';
                         const formattedUsername = rawUsername.startsWith('@') ? rawUsername : `@${rawUsername}`;
-                        const typeText = ev.type === 'Draft' ? 'Draft' : (ev.type === 'Final Post' ? 'Final Post' : ev.type);
-                        
-                        // Format: @username · Draft or @username · Final Post
-                        const badgeText = `${formattedUsername} · ${typeText}`;
 
-                        let badgeStyle = 'bg-purple-500/15 text-purple-300 border-purple-500/30 hover:bg-purple-500/25';
+                        let badgeStyle = 'bg-[#3b154c]/70 text-purple-200 border-purple-500/30 hover:bg-[#3b154c]';
                         let dotStyle = 'bg-purple-400';
                         if (ev.type === 'Final Post') {
-                          badgeStyle = 'bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25';
+                          badgeStyle = 'bg-[#152e54]/70 text-blue-200 border-blue-500/30 hover:bg-[#152e54]';
                           dotStyle = 'bg-blue-400';
                         } else if (ev.type === 'Delivered') {
-                          badgeStyle = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25';
+                          badgeStyle = 'bg-emerald-950/60 text-emerald-200 border-emerald-500/30 hover:bg-emerald-900/70';
                           dotStyle = 'bg-emerald-400';
                         } else if (ev.type === 'Payment') {
-                          badgeStyle = 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25';
+                          badgeStyle = 'bg-amber-950/60 text-amber-200 border-amber-500/30 hover:bg-amber-900/70';
                           dotStyle = 'bg-amber-400';
                         }
 
                         return (
                           <div
                             key={ev.id}
-                            className={`px-2 py-0.5 rounded-md text-[9.5px] font-medium border truncate leading-tight select-none cursor-pointer transition-all flex items-center gap-1.5 ${badgeStyle}`}
+                            className={`px-2.5 py-1 rounded-xl text-[11px] font-medium border truncate leading-tight select-none cursor-pointer transition-all flex items-center gap-1.5 shadow-sm ${badgeStyle}`}
                             title={`${ev.influencerName} (@${ev.influencerUsername}): ${ev.label} (${ev.dateStr})`}
                           >
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotStyle}`} />
-                            <span className="truncate">{badgeText}</span>
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${dotStyle}`} />
+                            <span className="truncate">{formattedUsername}</span>
                           </div>
                         );
                       })}
@@ -1697,13 +1692,13 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
                     {/* Overflow link (+N more) */}
                     {hasMoreEvents && (
-                      <div className="mt-1 shrink-0 pt-1 border-t border-slate-800/40 flex items-center justify-between">
+                      <div className="mt-1 shrink-0 pt-0.5">
                         <span 
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedDateStr(day.dateStr);
                           }}
-                          className="text-[9.5px] font-bold text-indigo-400 hover:text-indigo-300 hover:underline font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                          className="text-[11px] font-bold text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-1 cursor-pointer transition-colors"
                         >
                           +{overflowCount} more
                         </span>
@@ -1713,6 +1708,31 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                   </div>
                 );
               })}
+            </div>
+
+            {/* Legend & Footer Bar */}
+            <div className="p-3.5 bg-slate-900/80 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 select-none shrink-0">
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
+                  <span className="font-medium text-slate-300">Draft</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                  <span className="font-medium text-slate-300">Final Post</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                  <span className="font-medium text-slate-300">Delivered</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                  <span className="font-medium text-slate-300">Payment</span>
+                </div>
+              </div>
+              <div className="text-slate-500 text-[11px]">
+                Showing all influencer activities for {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][month]} {year}
+              </div>
             </div>
 
           </div>
