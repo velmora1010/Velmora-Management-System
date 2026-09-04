@@ -16,6 +16,8 @@ export interface StoredAgreement {
   influencer_code: string;
   username: string;
   price_per_video: number;
+  publishing_dates?: any;
+  draft_dates?: any;
   agreement_text: string;
   generated_at: string;
   updated_at: string;
@@ -280,12 +282,24 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       console.error('Failed reading local storage agreements:', err);
     }
 
-    // 2. Try Supabase fetch
+    // 2. Try Supabase fetch (offer_agreements table, fallback to SUPABASE_TABLES.offerAgreements)
     try {
-      const { data, error } = await supabase
-        .from(SUPABASE_TABLES.offerAgreements)
+      let { data, error } = await supabase
+        .from('offer_agreements')
         .select('*')
         .eq('campaign_id', campaign.id);
+
+      if (error || !Array.isArray(data) || data.length === 0) {
+        const res = await supabase
+          .from(SUPABASE_TABLES.offerAgreements)
+          .select('*')
+          .eq('campaign_id', campaign.id);
+
+        if (!res.error && Array.isArray(res.data) && res.data.length > 0) {
+          data = res.data;
+          error = null;
+        }
+      }
 
       if (!error && Array.isArray(data) && data.length > 0) {
         const dbMap: Record<string, StoredAgreement> = {};
@@ -295,18 +309,20 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
             id: row.id,
             campaign_id: row.campaign_id,
             influencer_id: row.influencer_id,
-            influencer_code: row.influencer_code,
+            influencer_code: row.influencer_code || row.code,
             username: row.username,
-            price_per_video: row.price_per_video,
+            price_per_video: Number(row.price_per_video || row.agreement_price) || 0,
+            publishing_dates: row.publishing_dates || null,
+            draft_dates: row.draft_dates || null,
             agreement_text: row.agreement_text,
-            generated_at: row.generated_at,
+            generated_at: row.generated_at || row.created_at,
             updated_at: row.updated_at
           };
         });
         map = { ...map, ...dbMap };
       }
     } catch (err) {
-      // Supabase table may not exist yet, fallback to localStorage map
+      // Supabase table fallback
     }
 
     setAgreementsMap(map);
@@ -331,20 +347,31 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       return next;
     });
 
-    // Try Supabase upsert
+    const payload = {
+      campaign_id: agreement.campaign_id,
+      influencer_id: agreement.influencer_id,
+      influencer_code: agreement.influencer_code,
+      username: agreement.username,
+      price_per_video: agreement.price_per_video,
+      agreement_price: agreement.price_per_video,
+      publishing_dates: agreement.publishing_dates || null,
+      draft_dates: agreement.draft_dates || null,
+      agreement_text: agreement.agreement_text,
+      generated_at: agreement.generated_at,
+      updated_at: agreement.updated_at
+    };
+
+    // Upsert to offer_agreements table, with fallback to SUPABASE_TABLES.offerAgreements
     try {
-      await supabase
-        .from(SUPABASE_TABLES.offerAgreements)
-        .upsert([{
-          campaign_id: agreement.campaign_id,
-          influencer_id: agreement.influencer_id,
-          influencer_code: agreement.influencer_code,
-          username: agreement.username,
-          price_per_video: agreement.price_per_video,
-          agreement_text: agreement.agreement_text,
-          generated_at: agreement.generated_at,
-          updated_at: agreement.updated_at
-        }], { onConflict: 'campaign_id,influencer_id' });
+      const { error } = await supabase
+        .from('offer_agreements')
+        .upsert([payload], { onConflict: 'campaign_id,influencer_id' });
+
+      if (error) {
+        await supabase
+          .from(SUPABASE_TABLES.offerAgreements)
+          .upsert([payload], { onConflict: 'campaign_id,influencer_id' });
+      }
     } catch (e) {}
   };
 

@@ -82,28 +82,28 @@ export const generateCombinedOfferAgreementPDF = (
 const drawHeaderBanner = (doc: jsPDF) => {
   // Light Blue Header Accent Background (#D9E8F7 ~ 40% lightness of logo blue)
   doc.setFillColor(217, 232, 247);
-  doc.rect(0, 0, 210, 22, 'F');
+  doc.rect(0, 0, 210, 21, 'F');
 
   // Subtle Header Bottom Line (#B8D4F0)
   doc.setDrawColor(184, 212, 240);
   doc.setLineWidth(0.4);
-  doc.line(0, 22, 210, 22);
+  doc.line(0, 21, 210, 21);
 
   // Title "OFFER AGREEMENT" in Justmixx Logo Dark Blue (#0A4C95)
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
+  doc.setFontSize(15);
   doc.setTextColor(10, 76, 149);
-  doc.text('OFFER AGREEMENT', 15, 14.5);
+  doc.text('OFFER AGREEMENT', 15, 14);
 
   // Justmixx Rounded Logo Badge (Top Right Corner)
   doc.setFillColor(10, 76, 149);
-  doc.roundedRect(158, 4.5, 37, 13, 3, 3, 'F');
+  doc.roundedRect(158, 4, 37, 13, 3, 3, 'F');
 
   // "Justmixx" White Logo Text
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13.5);
+  doc.setFontSize(13);
   doc.setTextColor(255, 255, 255);
-  doc.text('Justmixx', 176.5, 12.8, { align: 'center' });
+  doc.text('Justmixx', 176.5, 12.3, { align: 'center' });
 };
 
 const renderAgreementPage = (
@@ -117,7 +117,7 @@ const renderAgreementPage = (
   drawHeaderBanner(doc);
 
   // Body start Y position
-  let yPos = 30;
+  let yPos = 27;
 
   // Clean agreement text:
   // 1. Strip asterisks
@@ -163,17 +163,21 @@ const renderAgreementPage = (
     }
   }
 
-  const textLines = cleanText.split('\n');
+  // Trim trailing empty lines so they don't trigger an unnecessary addPage()
+  const rawLines = cleanText.split('\n');
+  while (rawLines.length > 0 && !rawLines[rawLines.length - 1].trim()) {
+    rawLines.pop();
+  }
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
+  doc.setFontSize(9);
   doc.setTextColor(30, 41, 59);
 
-  textLines.forEach((line) => {
+  rawLines.forEach((line) => {
     const trimmed = line.trim();
 
     if (!trimmed) {
-      yPos += 2.8;
+      yPos += 2.2;
       return;
     }
 
@@ -191,36 +195,33 @@ const renderAgreementPage = (
     ].includes(trimmed);
 
     if (isHeading) {
-      yPos += 1.8;
+      yPos += 1.5;
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
+      doc.setFontSize(9.5);
       // Dark Blue (#0A4C95) for Section Headings
       doc.setTextColor(10, 76, 149);
     } else {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9.5);
+      doc.setFontSize(9);
       // Dark slate (#1E293B) for Body Text
       doc.setTextColor(30, 41, 59);
     }
 
-    // Split text naturally to wrap inside A4 printable width without text clipping or horizontal overflow
+    // Split text naturally to wrap inside A4 printable width
     const wrapped = doc.splitTextToSize(trimmed, contentWidth);
     wrapped.forEach((wLine: string) => {
-      if (yPos > 274) {
+      if (yPos > 275) {
         doc.addPage('a4', 'portrait');
-
-        // Subpage Header
         drawHeaderBanner(doc);
-
-        yPos = 30;
+        yPos = 27;
       }
 
       doc.text(wLine, leftMargin, yPos);
-      yPos += 4.2;
+      yPos += 3.8;
     });
 
     if (isHeading) {
-      yPos += 0.8;
+      yPos += 0.5;
     }
   });
 };
