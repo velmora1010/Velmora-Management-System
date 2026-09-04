@@ -648,14 +648,14 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
     );
   };
 
-  const renderOneVideoPriceDistributionCard = (
+  const renderInfluencerPricingCard = (
     sliceData: DonutSliceData[],
     totalUniqueCount: number
   ) => {
-    const isExpanded = !!expandedCards['OneVideoPrice'];
-    const visibleData = isExpanded ? sliceData : sliceData.slice(0, 7);
-    const hasMore = sliceData.length > 7;
-    const maxVal = Math.max(...sliceData.map(d => d.value), 1);
+    const title = 'Influencer Pricing';
+    const isExpanded = !!expandedCards[title];
+    const visibleData = isExpanded ? sliceData : sliceData.slice(0, 6);
+    const hasMore = sliceData.length > 6;
 
     return (
       <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/20 rounded-2xl border border-slate-800/90 hover:border-purple-500/40 p-6 shadow-xl flex flex-col justify-between min-h-[360px] transition-all group">
@@ -667,64 +667,77 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
             </div>
             <div>
               <h4 className="text-base font-extrabold text-slate-100 uppercase tracking-wide group-hover:text-purple-200 transition-colors">
-                INFLUENCER PRICE — ONE VIDEO
+                INFLUENCER PRICING
               </h4>
               <p className="text-xs text-slate-400 font-medium">
                 Unique influencers by agreed price per video
               </p>
             </div>
           </div>
-          <span className="text-xs bg-purple-950/80 border border-purple-700/50 text-purple-300 font-semibold px-2.5 py-1 rounded-lg shadow-xs">
-            Bar Chart
-          </span>
         </div>
 
-        {/* Bar Chart Content */}
+        {/* Card Content Grid: Donut Chart Left (45%), Breakdown List Right (55%) */}
         {totalUniqueCount > 0 && sliceData.length > 0 ? (
-          <div className="flex-1 flex flex-col justify-center space-y-3">
-            {visibleData.map((item) => {
-              const pct = totalUniqueCount > 0 ? ((item.value / totalUniqueCount) * 100).toFixed(1) : '0';
-              const widthPct = Math.max((item.value / maxVal) * 100, 2);
+          <div className="flex flex-col lg:flex-row items-center gap-6 flex-1">
+            
+            {/* Donut Chart Ring (45% Width) */}
+            <div className="w-full lg:w-[45%] flex items-center justify-center p-2">
+              <AnalyticsDonutChart
+                data={sliceData}
+                centerValue={totalUniqueCount}
+                centerLabel="TOTAL UNIQUE INFLUENCERS"
+                height={230}
+                innerRadius={65}
+                outerRadius={95}
+                showLegend={false}
+              />
+            </div>
 
-              return (
-                <div key={item.name} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="text-slate-200 font-sans">{item.name}</span>
-                    <div className="flex items-center gap-3 font-mono shrink-0">
-                      <span className="text-slate-100 font-bold">{item.value} {item.value === 1 ? 'influencer' : 'influencers'}</span>
-                      <span className="text-purple-400 min-w-[48px] text-right font-bold">{pct}%</span>
+            {/* Breakdown List (55% Width, Clean spacious rows) */}
+            <div className="w-full lg:w-[55%] flex flex-col justify-center space-y-2 pl-0 lg:pl-4 border-t lg:border-t-0 lg:border-l border-slate-800/80 pt-4 lg:pt-0">
+              <div className={`space-y-2 ${isExpanded ? 'max-h-[300px] overflow-y-auto pr-1 custom-scrollbar' : ''}`}>
+                {visibleData.map((item) => {
+                  const pct = totalUniqueCount > 0 ? ((item.value / totalUniqueCount) * 100).toFixed(1) : '0';
+                  return (
+                    <div 
+                      key={item.name} 
+                      className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-950/70 border border-slate-800/80 hover:border-purple-500/30 transition-colors group"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-3">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.color }} />
+                        <span className="text-xs font-semibold text-slate-200 leading-snug break-words" title={item.name}>
+                          {item.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0 text-right font-mono">
+                        <span className="text-xs font-bold text-slate-100">{item.value}</span>
+                        <span className="text-xs font-bold text-purple-400 min-w-[48px] text-right">{pct}%</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800/80 p-0.5">
-                    <div
-                      className="h-full rounded-full transition-all duration-500 ease-out"
-                      style={{
-                        width: `${widthPct}%`,
-                        backgroundColor: item.color || '#9333ea'
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
 
-            {hasMore && (
-              <button
-                type="button"
-                onClick={() => toggleExpand('OneVideoPrice')}
-                className="mt-2 text-xs text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-purple-900/40 hover:border-purple-700/60 bg-purple-950/20 transition-all cursor-pointer w-full"
-              >
-                {isExpanded ? (
-                  <>
-                    <span>Show Less</span> <ChevronUp size={14} />
-                  </>
-                ) : (
-                  <>
-                    <span>Show All ({sliceData.length} price points)</span> <ChevronDown size={14} />
-                  </>
-                )}
-              </button>
-            )}
+              {/* Show All / Show Less Button */}
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(title)}
+                  className="mt-2 text-xs text-purple-400 hover:text-purple-300 font-semibold flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-purple-900/40 hover:border-purple-700/60 bg-purple-950/20 transition-all cursor-pointer w-full"
+                >
+                  {isExpanded ? (
+                    <>
+                      <span>Show Less</span> <ChevronUp size={14} />
+                    </>
+                  ) : (
+                    <>
+                      <span>Show All ({sliceData.length})</span> <ChevronDown size={14} />
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2">
@@ -805,7 +818,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
 
           {/* Row 2 */}
           {renderAnalyticsCard('Price Wise', CreditCard, priceData, false, 'TOTAL UNIQUE INFLUENCERS')}
-          {renderOneVideoPriceDistributionCard(oneVideoPricingAnalytics.sliceData, oneVideoPricingAnalytics.totalUniqueCount)}
+          {renderInfluencerPricingCard(oneVideoPricingAnalytics.sliceData, oneVideoPricingAnalytics.totalUniqueCount)}
 
           {/* Row 3 */}
           {renderAnalyticsCard('Product Wise', Package, productData, true)}
