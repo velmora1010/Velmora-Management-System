@@ -723,21 +723,17 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
 
     return (
       <div className="col-span-1 lg:col-span-2 bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/20 rounded-2xl border border-slate-800/90 hover:border-purple-500/40 p-6 shadow-xl flex flex-col justify-between transition-all group">
-        {/* Main Card Header */}
-        <div className="flex items-center justify-between border-b border-slate-800/80 pb-4 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-gradient-to-br from-purple-900/50 to-indigo-900/40 border border-purple-700/40 rounded-xl text-purple-300 shadow-inner">
-              <CreditCard size={20} />
-            </div>
-            <div>
-              <h4 className="text-lg font-extrabold text-slate-100 uppercase tracking-wide group-hover:text-purple-200 transition-colors">
-                INFLUENCER PRICING
-              </h4>
-              <p className="text-xs text-slate-400 font-medium">
-                Unique influencers by agreed price per video
-              </p>
-            </div>
+        {/* Main Card Header (Centered) */}
+        <div className="flex flex-col items-center justify-center text-center border-b border-slate-800/80 pb-5 mb-6">
+          <div className="p-2.5 bg-gradient-to-br from-purple-900/50 to-indigo-900/40 border border-purple-700/40 rounded-xl text-purple-300 shadow-inner mb-2.5">
+            <CreditCard size={20} />
           </div>
+          <h4 className="text-lg font-extrabold text-slate-100 uppercase tracking-wide group-hover:text-purple-200 transition-colors">
+            INFLUENCER PRICING
+          </h4>
+          <p className="text-xs text-slate-400 font-medium mt-0.5">
+            Unique influencers by agreed price per video
+          </p>
         </div>
 
         {/* Two side-by-side sub-sections */}
