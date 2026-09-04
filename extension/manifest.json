@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "description": "Companion extension for Velmora Influencer Research & Development",
   "permissions": [
-    "cookies"
+    "cookies",
+    "tabs"
   ],
   "host_permissions": [
     "*://*.instagram.com/*"
