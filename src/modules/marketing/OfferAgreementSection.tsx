@@ -85,6 +85,32 @@ export const formatAgreementDate = (dateStr: string | null | undefined): string 
 
   return trimmed;
 };
+export const calculateDraftDate = (dateStr: string | null | undefined): string => {
+  if (!dateStr || !dateStr.trim()) return '';
+  const formatted = formatAgreementDate(dateStr);
+  if (!formatted) return '';
+
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  const match = formatted.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if (!match) return '';
+
+  const day = parseInt(match[1], 10);
+  const mStr = match[2];
+  const year = parseInt(match[3], 10);
+
+  const monthIndex = months.findIndex(m => m.toLowerCase() === mStr.slice(0, 3).toLowerCase());
+  if (monthIndex === -1) return '';
+
+  const dateObj = new Date(Date.UTC(year, monthIndex, day));
+  dateObj.setUTCDate(dateObj.getUTCDate() - 3);
+
+  const d = dateObj.getUTCDate();
+  const mName = months[dateObj.getUTCMonth()];
+  const y = dateObj.getUTCFullYear();
+
+  return `${d} ${mName} ${y}`;
+};
 
 export const buildAgreementText = (
   influencer: CampaignInfluencer,
@@ -140,7 +166,7 @@ export const buildAgreementText = (
     if (v3.length > 0) video3Prod = v3.join(' + ');
   }
 
-  // Extract assigned post dates
+  // Extract assigned post dates and calculate draft dates (Pub Date - 3 days)
   const postDates = Array.isArray(influencer.postDates) ? influencer.postDates : [];
   const getDateStr = (vNum: number) => {
     const found = postDates.find((pd: any) => pd.video_number === vNum);
@@ -148,6 +174,12 @@ export const buildAgreementText = (
       return formatAgreementDate(found.post_date);
     }
     return '';
+  };
+
+  const getDraftDateStr = (vNum: number) => {
+    const pubDate = getDateStr(vNum);
+    if (!pubDate) return '';
+    return calculateDraftDate(pubDate);
   };
 
   const greetingLine = cleanUsername ? `Hi ${cleanUsername},` : 'Hi,';
@@ -166,6 +198,15 @@ Video 3: ${video3Prod}
 Videos 4–6: Products will be updated later.
 
 Products for Videos 1–3 will be dispatched now. Products for Videos 4–6 will be confirmed and dispatched separately.
+
+YOUR ASSIGNED DRAFT DATES
+
+Video 1: ${getDraftDateStr(1)}
+Video 2: ${getDraftDateStr(2)}
+Video 3: ${getDraftDateStr(3)}
+Video 4: ${getDraftDateStr(4)}
+Video 5: ${getDraftDateStr(5)}
+Video 6: ${getDraftDateStr(6)}
 
 YOUR ASSIGNED PUBLISHING DATES
 

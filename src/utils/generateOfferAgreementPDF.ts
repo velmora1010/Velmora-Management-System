@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import { naturalSortCompare } from '../config/skuMapping';
+import { calculateDraftDate } from '../modules/marketing/OfferAgreementSection';
 
 export interface OfferAgreementPDFItem {
   influencerCode: string;
@@ -122,12 +123,31 @@ const renderAgreementPage = (
   // 1. Strip asterisks
   // 2. Sanitize currency symbol to avoid character spacing corruption in jsPDF Helvetica
   // 3. Ensure any "Video X: D MMM" date without a 4-digit year has the year included
-  const cleanText = item.agreementText
+  let cleanText = item.agreementText
     .replace(/\*/g, '')
     .replace(/₹/g, 'Rs. ')
     .replace(/Video\s+(\d):\s*(\d{1,2}\s+[A-Za-z]{3,4})(?!\s+\d{4})/gi, (match, vNum, datePart) => {
       return `Video ${vNum}: ${datePart} 2026`;
     });
+
+  // Dynamically inject YOUR ASSIGNED DRAFT DATES if missing in stored agreement text
+  if (!cleanText.includes('YOUR ASSIGNED DRAFT DATES') && cleanText.includes('YOUR ASSIGNED PUBLISHING DATES')) {
+    const draftLines: string[] = [];
+    for (let v = 1; v <= 6; v++) {
+      const regex = new RegExp(`Video\\s+${v}:\\s*([^\\n]+)`);
+      const match = cleanText.match(regex);
+      if (match && match[1] && match[1].trim()) {
+        const pubDate = match[1].trim();
+        const draftDate = calculateDraftDate(pubDate);
+        draftLines.push(`Video ${v}: ${draftDate}`);
+      } else {
+        draftLines.push(`Video ${v}:`);
+      }
+    }
+
+    const draftBlock = `YOUR ASSIGNED DRAFT DATES\n\n${draftLines.join('\n')}\n\n`;
+    cleanText = cleanText.replace('YOUR ASSIGNED PUBLISHING DATES', `${draftBlock}YOUR ASSIGNED PUBLISHING DATES`);
+  }
 
   const textLines = cleanText.split('\n');
 
@@ -139,13 +159,14 @@ const renderAgreementPage = (
     const trimmed = line.trim();
 
     if (!trimmed) {
-      yPos += 3;
+      yPos += 2.8;
       return;
     }
 
     // Check headings
     const isHeading = [
       'PRODUCT PLAN',
+      'YOUR ASSIGNED DRAFT DATES',
       'YOUR ASSIGNED PUBLISHING DATES',
       'DRAFT & APPROVAL',
       'PAYMENT & COMMERCIAL TERMS',
@@ -156,7 +177,7 @@ const renderAgreementPage = (
     ].includes(trimmed);
 
     if (isHeading) {
-      yPos += 2;
+      yPos += 1.8;
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
       // Dark Blue (#0A4C95) for Section Headings
@@ -171,7 +192,7 @@ const renderAgreementPage = (
     // Split text naturally to wrap inside A4 printable width without text clipping or horizontal overflow
     const wrapped = doc.splitTextToSize(trimmed, contentWidth);
     wrapped.forEach((wLine: string) => {
-      if (yPos > 272) {
+      if (yPos > 274) {
         doc.addPage('a4', 'portrait');
 
         // Subpage Header
@@ -181,11 +202,11 @@ const renderAgreementPage = (
       }
 
       doc.text(wLine, leftMargin, yPos);
-      yPos += 4.5;
+      yPos += 4.2;
     });
 
     if (isHeading) {
-      yPos += 1;
+      yPos += 0.8;
     }
   });
 };
