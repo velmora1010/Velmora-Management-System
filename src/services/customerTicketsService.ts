@@ -29,6 +29,7 @@ const mapToDb = (ticket: Partial<CustomerTicket>) => {
   if (ticket.resolvedAt !== undefined) dbObj.resolved_at = normalizeDate(ticket.resolvedAt);
   if (ticket.resolutionNotes !== undefined) dbObj.resolution_notes = ticket.resolutionNotes;
   if (ticket.internalNotes !== undefined) dbObj.internal_notes = ticket.internalNotes;
+  if (ticket.qrImageUrl !== undefined) dbObj.qr_image_url = ticket.qrImageUrl || null;
   return dbObj;
 };
 
@@ -53,7 +54,8 @@ const mapFromDb = (dbObj: any): CustomerTicket => {
     updatedAt: dbObj.updated_at || '',
     resolvedAt: dbObj.resolved_at || undefined,
     resolutionNotes: dbObj.resolution_notes,
-    internalNotes: dbObj.internal_notes
+    internalNotes: dbObj.internal_notes,
+    qrImageUrl: dbObj.qr_image_url || null
   };
 };
 
@@ -455,5 +457,54 @@ export const customerTicketsService = {
     }
 
     return data;
+  },
+
+  async uploadTicketQrImage(file: File) {
+    if (!file) throw new Error('No file selected');
+
+    // 1. File Type Validation
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const validExts = ['jpg', 'jpeg', 'png', 'webp'];
+
+    if (!validTypes.includes(file.type.toLowerCase()) && !validExts.includes(ext)) {
+      throw new Error('Invalid file format. Only JPG, JPEG, PNG, and WEBP images are allowed.');
+    }
+
+    // 2. File Size Validation (Max 5MB)
+    const MAX_SIZE = 5 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      throw new Error('File size exceeds 5MB limit. Please upload a smaller image.');
+    }
+
+    // 3. Generate Safe Unique Filename
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}_${sanitizedName}`;
+
+    // 4. Upload to ticket-qr-codes bucket (with fallback to influencer-profiles)
+    let bucketName = 'ticket-qr-codes';
+    let { error: uploadErr } = await supabase.storage
+      .from(bucketName)
+      .upload(fileName, file, { cacheControl: '3600', upsert: false });
+
+    if (uploadErr && (uploadErr.message?.includes('bucket') || uploadErr.message?.includes('not found'))) {
+      bucketName = 'influencer-profiles';
+      const res = await supabase.storage
+        .from(bucketName)
+        .upload(fileName, file, { cacheControl: '3600', upsert: false });
+      uploadErr = res.error;
+    }
+
+    if (uploadErr) throw new Error(`Image upload failed: ${uploadErr.message}`);
+
+    const { data: publicData } = supabase.storage
+      .from(bucketName)
+      .getPublicUrl(fileName);
+
+    return {
+      publicUrl: publicData.publicUrl,
+      filePath: fileName,
+      bucket: bucketName
+    };
   }
 };

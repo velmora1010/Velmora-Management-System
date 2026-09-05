@@ -91,9 +91,15 @@ export const CustomerTicketsLayout = () => {
           </div>
 
           <button
-            onClick={() => navigate('/')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-background border border-border/70 text-muted hover:text-white hover:border-border transition-colors text-sm font-medium"
-            title="Go Back Home"
+            onClick={() => {
+              if (location.pathname.startsWith('/tickets/open') || location.pathname.startsWith('/tickets/dashboard') || location.pathname.startsWith('/tickets/resolved')) {
+                navigate('/');
+              } else {
+                navigate('/tickets/open');
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-background border border-border/70 text-muted hover:text-white hover:border-border transition-colors text-sm font-medium cursor-pointer"
+            title="Go Back"
           >
             <ChevronLeft size={18} />
             <span className="hidden sm:inline">Back</span>

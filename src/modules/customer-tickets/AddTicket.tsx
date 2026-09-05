@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, X, AlertTriangle } from 'lucide-react';
+import { Save, X, AlertTriangle, Image as ImageIcon, Trash2, RefreshCw } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
 import type { CustomerTicket, IssueType, TicketPriority, CustomIssueTypeRecord } from '../../types/customer-tickets';
@@ -12,6 +12,11 @@ export const AddTicket = () => {
   const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<CustomerTicket | null>(null);
+
+  // QR Image State
+  const [qrFile, setQrFile] = useState<File | null>(null);
+  const [qrPreviewUrl, setQrPreviewUrl] = useState<string | null>(null);
+  const [enlargedImageUrl, setEnlargedImageUrl] = useState<string | null>(null);
 
   // Category State
   const [customIssueTypes, setCustomIssueTypes] = useState<CustomIssueTypeRecord[]>([]);
@@ -143,6 +148,36 @@ export const AddTicket = () => {
     }
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const validExts = ['jpg', 'jpeg', 'png', 'webp'];
+
+    if (!validTypes.includes(file.type.toLowerCase()) && !validExts.includes(ext)) {
+      toast.error('Invalid file format. Only JPG, JPEG, PNG, and WEBP images are allowed.');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File size exceeds 5MB limit. Please upload a smaller image.');
+      return;
+    }
+
+    setQrFile(file);
+    setQrPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const handleRemoveFile = () => {
+    if (qrPreviewUrl) {
+      URL.revokeObjectURL(qrPreviewUrl);
+    }
+    setQrFile(null);
+    setQrPreviewUrl(null);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (hasSubOptions(formData.issueType, customSubIssuesMap) && !formData.subIssue.trim()) {
@@ -152,16 +187,25 @@ export const AddTicket = () => {
 
     try {
       setIsSubmitting(true);
-      
+      let uploadedQrUrl: string | null = null;
+
+      if (qrFile) {
+        toast.loading('Uploading QR Image...', { id: 'qr-upload-toast' });
+        const uploadRes = await customerTicketsService.uploadTicketQrImage(qrFile);
+        uploadedQrUrl = uploadRes.publicUrl;
+        toast.success('QR Image uploaded successfully', { id: 'qr-upload-toast' });
+      }
+
       const { ticketId } = await customerTicketsService.createTicket({
         ...formData,
+        qrImageUrl: uploadedQrUrl,
         status: 'Open'
       });
-      
+
       toast.success(`Ticket ${ticketId} created successfully`);
       navigate('/tickets/open');
     } catch (err: any) {
-      toast.error('Failed to create ticket: ' + err.message);
+      toast.error('Failed to create ticket: ' + err.message, { id: 'qr-upload-toast' });
     } finally {
       setIsSubmitting(false);
     }
@@ -301,6 +345,69 @@ export const AddTicket = () => {
                   />
                 </div>
               </div>
+
+              {/* QR Image Upload Field */}
+              <div>
+                <label className="block text-sm font-medium text-muted mb-1 flex items-center justify-between">
+                  <span>QR Image</span>
+                  <span className="text-[11px] text-muted/70 font-normal">JPG, PNG, WEBP (Max 5MB)</span>
+                </label>
+
+                {!qrFile ? (
+                  <div>
+                    <input
+                      type="file"
+                      id="qr-file-input"
+                      accept="image/jpeg,image/png,image/webp,image/jpg"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="qr-file-input"
+                      className="flex items-center justify-center gap-2.5 w-full border border-dashed border-border hover:border-primary/60 bg-background/50 hover:bg-white/5 rounded-xl py-3 px-4 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-all"
+                    >
+                      <ImageIcon size={18} className="text-primary" />
+                      <span>Upload QR Code Image</span>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4 bg-background/60 p-3 rounded-xl border border-border">
+                    <div 
+                      className="w-14 h-14 rounded-lg overflow-hidden border border-border bg-black shrink-0 cursor-pointer group relative"
+                      onClick={() => setEnlargedImageUrl(qrPreviewUrl)}
+                      title="Click to enlarge"
+                    >
+                      <img src={qrPreviewUrl!} alt="QR Code Preview" className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-white truncate">{qrFile.name}</p>
+                      <p className="text-[11px] text-muted mt-0.5">{(qrFile.size / 1024).toFixed(1)} KB</p>
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <label
+                          htmlFor="qr-file-input-change"
+                          className="text-[11px] font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                          <RefreshCw size={12} /> Change Image
+                        </label>
+                        <input
+                          type="file"
+                          id="qr-file-input-change"
+                          accept="image/jpeg,image/png,image/webp,image/jpg"
+                          onChange={handleFileSelect}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleRemoveFile}
+                          className="text-[11px] font-semibold text-rose-400 hover:underline flex items-center gap-1"
+                        >
+                          <Trash2 size={12} /> Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -426,6 +533,35 @@ export const AddTicket = () => {
           onClose={() => setShowAddCategoryModal(false)}
           onSuccess={handleCategoryAdded}
         />
+      )}
+
+      {/* Enlarged QR Image Modal */}
+      {enlargedImageUrl && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+          onClick={() => setEnlargedImageUrl(null)}
+        >
+          <div 
+            className="relative max-w-xl max-h-[85vh] bg-card border border-border rounded-2xl p-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border pb-3 mb-3">
+              <h4 className="text-sm font-bold text-white">Customer QR Image</h4>
+              <button
+                type="button"
+                onClick={() => setEnlargedImageUrl(null)}
+                className="p-1 rounded-lg text-muted hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <img 
+              src={enlargedImageUrl} 
+              alt="Customer QR Code" 
+              className="max-w-full max-h-[70vh] rounded-xl object-contain mx-auto border border-border bg-black" 
+            />
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, ArrowLeft, Trash2 } from 'lucide-react';
+import { Save, ArrowLeft, Trash2, Image as ImageIcon, RefreshCw, X } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
 import type { CustomerTicket, TicketStatus, IssueType, TicketPriority, CustomIssueTypeRecord } from '../../types/customer-tickets';
@@ -19,6 +19,12 @@ export const TicketDetails = () => {
   const [internalNotes, setInternalNotes] = useState('');
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // QR Image State
+  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
+  const [qrFile, setQrFile] = useState<File | null>(null);
+  const [qrPreviewUrl, setQrPreviewUrl] = useState<string | null>(null);
+  const [enlargedImageUrl, setEnlargedImageUrl] = useState<string | null>(null);
 
   // Custom Categories State
   const [customIssueTypes, setCustomIssueTypes] = useState<CustomIssueTypeRecord[]>([]);
@@ -96,7 +102,39 @@ export const TicketDetails = () => {
       setPriority(data.priority || 'Low');
       setInternalNotes(data.internalNotes || '');
       setResolutionNotes(data.resolutionNotes || '');
+      setQrImageUrl(data.qrImageUrl || null);
     }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const validExts = ['jpg', 'jpeg', 'png', 'webp'];
+
+    if (!validTypes.includes(file.type.toLowerCase()) && !validExts.includes(ext)) {
+      toast.error('Invalid file format. Only JPG, JPEG, PNG, and WEBP images are allowed.');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File size exceeds 5MB limit. Please upload a smaller image.');
+      return;
+    }
+
+    setQrFile(file);
+    setQrPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const handleRemoveFile = () => {
+    if (qrPreviewUrl) {
+      URL.revokeObjectURL(qrPreviewUrl);
+    }
+    setQrFile(null);
+    setQrPreviewUrl(null);
+    setQrImageUrl(null);
   };
 
   const handleIssueTypeSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -153,6 +191,15 @@ export const TicketDetails = () => {
 
     try {
       setIsSubmitting(true);
+      let finalQrUrl = qrImageUrl;
+
+      if (qrFile) {
+        toast.loading('Uploading new QR Image...', { id: 'qr-update-toast' });
+        const uploadRes = await customerTicketsService.uploadTicketQrImage(qrFile);
+        finalQrUrl = uploadRes.publicUrl;
+        toast.success('QR Image uploaded successfully', { id: 'qr-update-toast' });
+      }
+
       await customerTicketsService.updateTicket(ticket.id!, {
         status,
         issueType,
@@ -160,12 +207,13 @@ export const TicketDetails = () => {
         priority,
         internalNotes,
         resolutionNotes,
+        qrImageUrl: finalQrUrl,
         resolvedAt: status === 'Resolved' && ticket.status !== 'Resolved' ? new Date().toISOString() : ticket.resolvedAt
       });
       toast.success('Ticket updated successfully');
       navigate(status === 'Resolved' ? '/tickets/resolved' : '/tickets/open');
     } catch (err: any) {
-      toast.error('Failed to update ticket: ' + err.message);
+      toast.error('Failed to update ticket: ' + err.message, { id: 'qr-update-toast' });
     } finally {
       setIsSubmitting(false);
     }
@@ -179,8 +227,9 @@ export const TicketDetails = () => {
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-4 mb-6">
         <button 
-          onClick={() => navigate(-1)}
-          className="p-2 text-muted hover:text-white bg-card border border-border rounded-xl transition-colors"
+          onClick={() => navigate('/tickets/open')}
+          className="p-2 text-muted hover:text-white bg-card border border-border rounded-xl transition-colors cursor-pointer"
+          title="Back to Open Tickets"
         >
           <ArrowLeft size={20} />
         </button>
@@ -248,6 +297,34 @@ export const TicketDetails = () => {
                 </p>
               </div>
             </div>
+          </Card>
+
+          {/* Customer QR Image View Card */}
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold text-white border-b border-border pb-2 mb-4">Customer QR Image</h3>
+            {(qrPreviewUrl || qrImageUrl) ? (
+              <div className="flex flex-col items-start gap-3">
+                <div 
+                  className="w-36 h-36 rounded-xl overflow-hidden border border-border bg-black cursor-pointer group relative shadow-md hover:border-primary/60 transition-all"
+                  onClick={() => setEnlargedImageUrl(qrPreviewUrl || qrImageUrl)}
+                  title="Click to enlarge"
+                >
+                  <img 
+                    src={(qrPreviewUrl || qrImageUrl)!} 
+                    alt="Customer QR Code" 
+                    className="w-full h-full object-contain p-1" 
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs font-semibold text-white">
+                    Enlarge
+                  </div>
+                </div>
+                <p className="text-xs text-muted">Click QR image to view full size</p>
+              </div>
+            ) : (
+              <div className="bg-background/40 p-4 rounded-xl border border-border/40 text-muted text-xs italic">
+                No QR image uploaded
+              </div>
+            )}
           </Card>
         </div>
 
@@ -335,6 +412,69 @@ export const TicketDetails = () => {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-muted mb-1 flex items-center justify-between">
+                  <span>QR Image</span>
+                  <span className="text-[11px] text-muted/70 font-normal">JPG, PNG, WEBP (Max 5MB)</span>
+                </label>
+
+                {!(qrPreviewUrl || qrImageUrl) ? (
+                  <div>
+                    <input
+                      type="file"
+                      id="qr-file-edit-input"
+                      accept="image/jpeg,image/png,image/webp,image/jpg"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="qr-file-edit-input"
+                      className="flex items-center justify-center gap-2 w-full border border-dashed border-border hover:border-primary/60 bg-background/50 hover:bg-white/5 rounded-xl py-2.5 px-3 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-all"
+                    >
+                      <ImageIcon size={16} className="text-primary" />
+                      <span>Upload QR Image</span>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 bg-background/60 p-2.5 rounded-xl border border-border">
+                    <div 
+                      className="w-12 h-12 rounded-lg overflow-hidden border border-border bg-black shrink-0 cursor-pointer"
+                      onClick={() => setEnlargedImageUrl(qrPreviewUrl || qrImageUrl)}
+                      title="Click to enlarge"
+                    >
+                      <img src={(qrPreviewUrl || qrImageUrl)!} alt="QR Code Preview" className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-white truncate">
+                        {qrFile ? qrFile.name : 'Uploaded QR Image'}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <label
+                          htmlFor="qr-file-edit-input-change"
+                          className="text-[11px] font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                          <RefreshCw size={11} /> Change
+                        </label>
+                        <input
+                          type="file"
+                          id="qr-file-edit-input-change"
+                          accept="image/jpeg,image/png,image/webp,image/jpg"
+                          onChange={handleFileSelect}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleRemoveFile}
+                          className="text-[11px] font-semibold text-rose-400 hover:underline flex items-center gap-1 ml-2"
+                        >
+                          <Trash2 size={11} /> Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {status === 'Resolved' && (
                 <div>
                   <label className="block text-sm font-medium text-amber-400 mb-1">Resolution Notes *</label>
@@ -384,6 +524,35 @@ export const TicketDetails = () => {
           onClose={() => setShowAddCategoryModal(false)}
           onSuccess={handleCategoryAdded}
         />
+      )}
+
+      {/* Enlarged QR Image Lightbox Modal */}
+      {enlargedImageUrl && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+          onClick={() => setEnlargedImageUrl(null)}
+        >
+          <div 
+            className="relative max-w-xl max-h-[85vh] bg-card border border-border rounded-2xl p-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border pb-3 mb-3">
+              <h4 className="text-sm font-bold text-white">Customer QR Image</h4>
+              <button
+                type="button"
+                onClick={() => setEnlargedImageUrl(null)}
+                className="p-1 rounded-lg text-muted hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <img 
+              src={enlargedImageUrl} 
+              alt="Customer QR Code" 
+              className="max-w-full max-h-[70vh] rounded-xl object-contain mx-auto border border-border bg-black" 
+            />
+          </div>
+        </div>
       )}
     </div>
   );

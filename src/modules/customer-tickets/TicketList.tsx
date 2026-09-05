@@ -36,6 +36,7 @@ export const TicketList: React.FC<TicketListProps> = ({
   // Modal States
   const [viewingTicket, setViewingTicket] = useState<CustomerTicket | null>(null);
   const [resolvingTicket, setResolvingTicket] = useState<CustomerTicket | null>(null);
+  const [enlargedImageUrl, setEnlargedImageUrl] = useState<string | null>(null);
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [validationError, setValidationError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -440,6 +441,34 @@ export const TicketList: React.FC<TicketListProps> = ({
                 </div>
               </div>
 
+              {/* Customer QR Image Section */}
+              <div className="space-y-3 pt-3 border-t border-border/50">
+                <h4 className="text-xs font-bold uppercase text-primary tracking-wider">Customer QR Image</h4>
+                {viewingTicket.qrImageUrl ? (
+                  <div className="flex items-center gap-3">
+                    <div 
+                      className="w-24 h-24 rounded-xl overflow-hidden border border-border bg-black cursor-pointer group relative shadow-md hover:border-primary/60 transition-all shrink-0"
+                      onClick={() => setEnlargedImageUrl(viewingTicket.qrImageUrl!)}
+                      title="Click to enlarge"
+                    >
+                      <img 
+                        src={viewingTicket.qrImageUrl} 
+                        alt="Customer QR Code" 
+                        className="w-full h-full object-contain p-1" 
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[10px] font-semibold text-white">
+                        Enlarge
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted">Click thumbnail to view full size QR code</p>
+                  </div>
+                ) : (
+                  <div className="bg-background/40 p-3 rounded-xl border border-border/40 text-muted text-xs italic">
+                    No QR image uploaded
+                  </div>
+                )}
+              </div>
+
               {(viewingTicket.internalNotes || viewingTicket.resolutionNotes) && (
                 <div className="space-y-3 pt-3 border-t border-border/50">
                   <h4 className="text-xs font-bold uppercase text-primary tracking-wider">Notes History</h4>
@@ -561,6 +590,32 @@ export const TicketList: React.FC<TicketListProps> = ({
             setShowDatePicker(false);
           }}
         />
+      )}
+
+      {/* ENLARGED QR IMAGE LIGHTBOX MODAL */}
+      {enlargedImageUrl && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-4"
+          onClick={() => setEnlargedImageUrl(null)}
+        >
+          <div 
+            className="relative max-w-3xl max-h-[90vh] bg-card border border-border rounded-2xl p-2 shadow-2xl flex flex-col items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setEnlargedImageUrl(null)}
+              className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-slate-800 border border-slate-600 text-white flex items-center justify-center hover:bg-rose-600 transition-colors shadow-lg z-10"
+              title="Close"
+            >
+              <X size={18} />
+            </button>
+            <img 
+              src={enlargedImageUrl} 
+              alt="Customer QR Code Full Size" 
+              className="max-w-full max-h-[80vh] object-contain rounded-xl"
+            />
+          </div>
+        </div>
       )}
     </div>
   );
