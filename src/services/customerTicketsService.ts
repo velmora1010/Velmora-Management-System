@@ -15,6 +15,7 @@ const mapToDb = (ticket: Partial<CustomerTicket>) => {
   if (ticket.state !== undefined) dbObj.state = ticket.state;
   if (ticket.city !== undefined) dbObj.city = ticket.city;
   if (ticket.issueType !== undefined) dbObj.issue_type = ticket.issueType;
+  if (ticket.subIssue !== undefined) dbObj.sub_issue = ticket.subIssue;
   if (ticket.issueDescription !== undefined) dbObj.issue_description = ticket.issueDescription;
   if (ticket.priority !== undefined) dbObj.priority = ticket.priority;
   if (ticket.status !== undefined) dbObj.status = ticket.status;
@@ -39,6 +40,7 @@ const mapFromDb = (dbObj: any): CustomerTicket => {
     state: dbObj.state,
     city: dbObj.city,
     issueType: dbObj.issue_type,
+    subIssue: dbObj.sub_issue || undefined,
     issueDescription: dbObj.issue_description,
     priority: dbObj.priority,
     status: dbObj.status,
@@ -109,25 +111,38 @@ export const customerTicketsService = {
     const newTicketId = `CT-${String((count || 0) + 1).padStart(4, '0')}`;
     const now = new Date().toISOString();
 
-    const dbPayload = mapToDb({
+    let dbPayload = mapToDb({
       ...ticket,
       ticketId: newTicketId,
       createdAt: now,
       updatedAt: now
     });
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('customer_tickets')
       .insert([dbPayload])
       .select()
       .single();
+
+    // Fallback if sub_issue column does not exist on remote schema yet
+    if (error && error.message && error.message.includes('sub_issue')) {
+      delete dbPayload.sub_issue;
+      const res = await supabase
+        .from('customer_tickets')
+        .insert([dbPayload])
+        .select()
+        .single();
+      data = res.data;
+      error = res.error;
+    }
+
     if (error) throw error;
 
     // Non-blocking activity logging
     logActivity(
       'Customer Tickets',
       'Ticket Created',
-      `Ticket ${newTicketId} was created for customer "${ticket.customerName || 'Unknown'}" (Issue: ${ticket.issueType || 'N/A'}).`
+      `Ticket ${newTicketId} was created for customer "${ticket.customerName || 'Unknown'}" (Issue: ${ticket.issueType || 'N/A'}${ticket.subIssue ? ` - ${ticket.subIssue}` : ''}).`
     );
 
     return { id: data.id, ticketId: newTicketId };
@@ -135,15 +150,26 @@ export const customerTicketsService = {
 
   async updateTicket(id: number, updates: Partial<Omit<CustomerTicket, 'id' | 'ticketId' | 'createdAt'>>) {
     const now = new Date().toISOString();
-    const dbPayload = mapToDb({
+    let dbPayload = mapToDb({
       ...updates,
       updatedAt: now
     });
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from('customer_tickets')
       .update(dbPayload)
       .eq('id', id);
+
+    // Fallback if sub_issue column does not exist on remote schema yet
+    if (error && error.message && error.message.includes('sub_issue')) {
+      delete dbPayload.sub_issue;
+      const res = await supabase
+        .from('customer_tickets')
+        .update(dbPayload)
+        .eq('id', id);
+      error = res.error;
+    }
+
     if (error) throw error;
 
     // Non-blocking activity logging

@@ -1,13 +1,24 @@
 export type IssueType = 
   | 'Transport Issue'
   | 'Delivery Delay'
+  | 'Delivery Attempt Failed'
+  | 'Customer Not Available'
+  | 'Customer Not Responding'
+  | 'Wrong / Incomplete Address'
+  | 'Delivery Rescheduled'
+  | 'RTO Issue'
+  | 'Shipment Lost'
+  | 'Shipment Damaged in Transit'
   | 'Damaged Product'
+  | 'Missing Product'
+  | 'Wrong Product'
+  | 'Wrong Quantity'
+  | 'Leaked / Spilled Product'
+  | 'Expired / Near Expiry Product'
   | 'Replacement'
   | 'Refund'
-  | 'Wrong Product'
-  | 'Missing Product'
-  | 'RTO Issue'
-  | 'Customer Not Responding'
+  | 'Order Cancellation'
+  | 'Payment Issue'
   | 'Other';
 
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
@@ -33,6 +44,7 @@ export interface CustomerTicket {
   state: string;
   city: string;
   issueType: IssueType;
+  subIssue?: string;
   issueDescription: string;
   priority: TicketPriority;
   status: TicketStatus;

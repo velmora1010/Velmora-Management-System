@@ -4,6 +4,7 @@ import { Search, AlertCircle, Clock, Eye, CheckCircle2, X, Edit, FileText } from
 import { Card } from '../../components/ui/Card';
 import type { CustomerTicket } from '../../types/customer-tickets';
 import { customerTicketsService } from '../../services/customerTicketsService';
+import { ALL_ISSUE_TYPES, getSubIssueLabel } from '../../config/ticketConfig';
 import toast from 'react-hot-toast';
 
 interface TicketListProps {
@@ -38,7 +39,8 @@ export const TicketList: React.FC<TicketListProps> = ({
       ticket.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       ticket.orderId.toLowerCase().includes(searchTerm.toLowerCase()) ||
       ticket.awbNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ticket.phoneNumber.includes(searchTerm);
+      ticket.phoneNumber.includes(searchTerm) ||
+      (ticket.subIssue && ticket.subIssue.toLowerCase().includes(searchTerm.toLowerCase()));
       
     const matchesStatus = statusFilter ? ticket.status === statusFilter : true;
     const matchesIssue = issueFilter ? ticket.issueType === issueFilter : true;
@@ -162,16 +164,9 @@ export const TicketList: React.FC<TicketListProps> = ({
             className="bg-background border border-border rounded-xl px-4 py-2 text-white focus:border-primary outline-none"
           >
             <option value="">All Issues</option>
-            <option value="Transport Issue">Transport Issue</option>
-            <option value="Delivery Delay">Delivery Delay</option>
-            <option value="Damaged Product">Damaged Product</option>
-            <option value="Replacement">Replacement</option>
-            <option value="Refund">Refund</option>
-            <option value="Wrong Product">Wrong Product</option>
-            <option value="Missing Product">Missing Product</option>
-            <option value="RTO Issue">RTO Issue</option>
-            <option value="Customer Not Responding">Customer Not Responding</option>
-            <option value="Other">Other</option>
+            {ALL_ISSUE_TYPES.map((issue) => (
+              <option key={issue} value={issue}>{issue}</option>
+            ))}
           </select>
         </div>
       </Card>
@@ -217,6 +212,9 @@ export const TicketList: React.FC<TicketListProps> = ({
                     <div>
                       <p className="text-muted mb-1">Issue</p>
                       <p className="text-white font-medium">{ticket.issueType}</p>
+                      {ticket.subIssue && (
+                        <p className="text-xs text-primary font-medium mt-0.5">{ticket.subIssue}</p>
+                      )}
                     </div>
                     <div>
                       <p className="text-muted mb-1">Days Open</p>
@@ -350,8 +348,20 @@ export const TicketList: React.FC<TicketListProps> = ({
 
               <div className="space-y-3 pt-3 border-t border-border/50">
                 <h4 className="text-xs font-bold uppercase text-primary tracking-wider">Issue Description</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2 bg-background/40 p-3 rounded-xl border border-border/40">
+                  <div>
+                    <p className="text-xs text-muted mb-0.5">Issue Type</p>
+                    <p className="text-white font-semibold">{viewingTicket.issueType}</p>
+                  </div>
+                  {viewingTicket.subIssue && (
+                    <div>
+                      <p className="text-xs text-muted mb-0.5">{getSubIssueLabel(viewingTicket.issueType)}</p>
+                      <p className="text-primary font-semibold">{viewingTicket.subIssue}</p>
+                    </div>
+                  )}
+                </div>
                 <div>
-                  <p className="text-xs text-muted mb-1">Issue Type: <span className="text-white font-semibold">{viewingTicket.issueType}</span></p>
+                  <p className="text-xs text-muted mb-1">Description</p>
                   <div className="bg-background p-3.5 rounded-xl border border-border text-white whitespace-pre-wrap leading-relaxed">
                     {viewingTicket.issueDescription}
                   </div>

@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Save, ArrowLeft, Trash2 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
-import type { CustomerTicket, TicketStatus } from '../../types/customer-tickets';
+import type { CustomerTicket, TicketStatus, IssueType, TicketPriority } from '../../types/customer-tickets';
+import { ALL_ISSUE_TYPES, getSubOptionsForIssueType, hasSubOptions, getSubIssueLabel } from '../../config/ticketConfig';
 import toast from 'react-hot-toast';
 
 export const TicketDetails = () => {
@@ -11,6 +12,9 @@ export const TicketDetails = () => {
   const navigate = useNavigate();
   const [ticket, setTicket] = useState<CustomerTicket | null>(null);
   const [status, setStatus] = useState<TicketStatus>('Open');
+  const [issueType, setIssueType] = useState<IssueType>('Transport Issue');
+  const [subIssue, setSubIssue] = useState<string>('');
+  const [priority, setPriority] = useState<TicketPriority>('Low');
   const [internalNotes, setInternalNotes] = useState('');
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,8 +44,19 @@ export const TicketDetails = () => {
     if (data) {
       setTicket(data);
       setStatus(data.status);
+      setIssueType(data.issueType || 'Other');
+      setSubIssue(data.subIssue || '');
+      setPriority(data.priority || 'Low');
       setInternalNotes(data.internalNotes || '');
       setResolutionNotes(data.resolutionNotes || '');
+    }
+  };
+
+  const handleIssueTypeChange = (newType: IssueType) => {
+    setIssueType(newType);
+    const validOptions = getSubOptionsForIssueType(newType);
+    if (!validOptions.includes(subIssue)) {
+      setSubIssue('');
     }
   };
 
@@ -53,10 +68,18 @@ export const TicketDetails = () => {
       return;
     }
 
+    if (hasSubOptions(issueType) && !subIssue.trim()) {
+      toast.error(`Please select a ${getSubIssueLabel(issueType).replace('*', '').trim()} option.`);
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       await customerTicketsService.updateTicket(ticket.id!, {
         status,
+        issueType,
+        subIssue,
+        priority,
         internalNotes,
         resolutionNotes,
         resolvedAt: status === 'Resolved' && ticket.status !== 'Resolved' ? new Date().toISOString() : ticket.resolvedAt
@@ -122,19 +145,26 @@ export const TicketDetails = () => {
           </Card>
 
           <Card className="p-6">
-            <h3 className="text-lg font-semibold text-white border-b border-border pb-2 mb-4">Issue Description</h3>
+            <h3 className="text-lg font-semibold text-white border-b border-border pb-2 mb-4">Issue Details</h3>
             <div className="space-y-4">
-              <div className="flex gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <div>
-                  <p className="text-muted text-sm">Type</p>
+                  <p className="text-muted text-sm">Issue Type</p>
                   <p className="text-white font-medium">{ticket.issueType}</p>
                 </div>
+                {ticket.subIssue && (
+                  <div>
+                    <p className="text-muted text-sm">Resolution / Sub-Issue</p>
+                    <p className="text-emerald-400 font-semibold">{ticket.subIssue}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-muted text-sm">Priority</p>
                   <p className="text-white font-medium">{ticket.priority}</p>
                 </div>
               </div>
               <div>
+                <p className="text-muted text-sm mb-1">Description</p>
                 <p className="text-white whitespace-pre-wrap bg-background p-4 rounded-xl border border-border">
                   {ticket.issueDescription}
                 </p>
@@ -145,7 +175,7 @@ export const TicketDetails = () => {
 
         <div className="space-y-6">
           <Card className="p-6">
-            <h3 className="text-lg font-semibold text-white border-b border-border pb-2 mb-4">Update Status</h3>
+            <h3 className="text-lg font-semibold text-white border-b border-border pb-2 mb-4">Update Details & Status</h3>
             
             <div className="space-y-4">
               <div>
@@ -162,6 +192,49 @@ export const TicketDetails = () => {
                   <option value="Replacement Processing">Replacement Processing</option>
                   <option value="Refund Processing">Refund Processing</option>
                   <option value="Resolved">Resolved</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted mb-1">Issue Type</label>
+                <select 
+                  value={issueType}
+                  onChange={(e) => handleIssueTypeChange(e.target.value as IssueType)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary outline-none"
+                >
+                  {ALL_ISSUE_TYPES.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+
+              {hasSubOptions(issueType) && (
+                <div>
+                  <label className="block text-sm font-medium text-muted mb-1">{getSubIssueLabel(issueType)}</label>
+                  <select 
+                    value={subIssue}
+                    onChange={(e) => setSubIssue(e.target.value)}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary outline-none"
+                  >
+                    <option value="">-- Select Sub-Option --</option>
+                    {getSubOptionsForIssueType(issueType).map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-muted mb-1">Priority</label>
+                <select 
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value as TicketPriority)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary outline-none"
+                >
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                  <option value="Urgent">Urgent</option>
                 </select>
               </div>
 

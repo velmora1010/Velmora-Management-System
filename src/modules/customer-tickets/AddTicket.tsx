@@ -4,6 +4,7 @@ import { Save, X, AlertTriangle } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
 import type { CustomerTicket, IssueType, TicketPriority } from '../../types/customer-tickets';
+import { ALL_ISSUE_TYPES, getSubOptionsForIssueType, hasSubOptions, getSubIssueLabel } from '../../config/ticketConfig';
 import toast from 'react-hot-toast';
 
 export const AddTicket = () => {
@@ -20,7 +21,8 @@ export const AddTicket = () => {
     courierPartner: '',
     state: '',
     city: '',
-    issueType: 'Other' as IssueType,
+    issueType: 'Transport Issue' as IssueType,
+    subIssue: '',
     issueDescription: '',
     priority: 'Low' as TicketPriority,
     internalNotes: ''
@@ -34,6 +36,19 @@ export const AddTicket = () => {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+
+    if (name === 'issueType') {
+      const newIssueType = value as IssueType;
+      const validSubOptions = getSubOptionsForIssueType(newIssueType);
+      const isCurrentSubValid = validSubOptions.includes(formData.subIssue);
+      setFormData(prev => ({
+        ...prev,
+        issueType: newIssueType,
+        subIssue: isCurrentSubValid ? prev.subIssue : ''
+      }));
+      return;
+    }
+
     setFormData(prev => ({ ...prev, [name]: value }));
 
     if (name === 'orderId' || name === 'awbNumber') {
@@ -45,6 +60,11 @@ export const AddTicket = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (hasSubOptions(formData.issueType) && !formData.subIssue.trim()) {
+      toast.error(`Please select a ${getSubIssueLabel(formData.issueType).replace('*', '').trim()} option.`);
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       
@@ -213,18 +233,29 @@ export const AddTicket = () => {
                   onChange={handleChange}
                   className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                 >
-                  <option value="Transport Issue">Transport Issue</option>
-                  <option value="Delivery Delay">Delivery Delay</option>
-                  <option value="Damaged Product">Damaged Product</option>
-                  <option value="Replacement">Replacement</option>
-                  <option value="Refund">Refund</option>
-                  <option value="Wrong Product">Wrong Product</option>
-                  <option value="Missing Product">Missing Product</option>
-                  <option value="RTO Issue">RTO Issue</option>
-                  <option value="Customer Not Responding">Customer Not Responding</option>
-                  <option value="Other">Other</option>
+                  {ALL_ISSUE_TYPES.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
                 </select>
               </div>
+
+              {hasSubOptions(formData.issueType) && (
+                <div>
+                  <label className="block text-sm font-medium text-muted mb-1">{getSubIssueLabel(formData.issueType)}</label>
+                  <select 
+                    required
+                    name="subIssue"
+                    value={formData.subIssue}
+                    onChange={handleChange}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                  >
+                    <option value="">-- Select Sub-Option --</option>
+                    {getSubOptionsForIssueType(formData.issueType).map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-muted mb-1">Priority *</label>
