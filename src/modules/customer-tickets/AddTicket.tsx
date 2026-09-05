@@ -43,6 +43,10 @@ export const AddTicket = () => {
     internalNotes: ''
   });
 
+  // Order ID Validation States
+  const [orderIdError, setOrderIdError] = useState<string | null>(null);
+  const [isCheckingOrderId, setIsCheckingOrderId] = useState(false);
+
   const loadCategories = async () => {
     const { customIssueTypes: cTypes, customSubIssues: cSub } = await customerTicketsService.getCustomCategories();
     setCustomIssueTypes(cTypes);
@@ -82,6 +86,34 @@ export const AddTicket = () => {
 
   // Compute sub-options for currently selected issue type
   const availableSubOptions = getSubOptionsForIssueType(formData.issueType, customSubIssuesMap);
+
+  // Real-time debounced Order ID validation
+  useEffect(() => {
+    const trimmed = formData.orderId ? formData.orderId.trim() : '';
+    if (!trimmed) {
+      setOrderIdError(null);
+      setIsCheckingOrderId(false);
+      return;
+    }
+
+    setIsCheckingOrderId(true);
+    const timer = setTimeout(async () => {
+      try {
+        const { exists } = await customerTicketsService.checkOrderIdExists(trimmed);
+        if (exists) {
+          setOrderIdError(`Order ID ${trimmed} already has a ticket.`);
+        } else {
+          setOrderIdError(null);
+        }
+      } catch (err) {
+        console.error('Error during real-time order id check:', err);
+      } finally {
+        setIsCheckingOrderId(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [formData.orderId]);
 
   const checkDuplicate = async (orderId: string, awbNumber: string) => {
     if (!orderId && !awbNumber) return;
@@ -180,9 +212,35 @@ export const AddTicket = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const trimmedOrderId = formData.orderId.trim();
+
+    if (orderIdError) {
+      toast.error(orderIdError);
+      return;
+    }
+
+    if (!trimmedOrderId) {
+      toast.error('Order ID is required.');
+      return;
+    }
+
     if (hasSubOptions(formData.issueType, customSubIssuesMap) && !formData.subIssue.trim()) {
       toast.error(`Please select a ${getSubIssueLabel(formData.issueType).replace('*', '').trim()} option.`);
       return;
+    }
+
+    // Final pre-submission duplicate check
+    try {
+      const { exists } = await customerTicketsService.checkOrderIdExists(trimmedOrderId);
+      if (exists) {
+        const errMsg = `Order ID ${trimmedOrderId} already has a ticket.`;
+        setOrderIdError(errMsg);
+        toast.error(errMsg);
+        return;
+      }
+    } catch (err: any) {
+      console.error('Pre-submit duplicate check error:', err);
     }
 
     try {
@@ -198,6 +256,7 @@ export const AddTicket = () => {
 
       const { ticketId } = await customerTicketsService.createTicket({
         ...formData,
+        orderId: trimmedOrderId,
         qrImageUrl: uploadedQrUrl,
         status: 'Open'
       });
@@ -205,7 +264,13 @@ export const AddTicket = () => {
       toast.success(`Ticket ${ticketId} created successfully`);
       navigate('/tickets/open');
     } catch (err: any) {
-      toast.error('Failed to create ticket: ' + err.message, { id: 'qr-upload-toast' });
+      const msg = err?.message || 'Failed to create ticket';
+      if (msg.toLowerCase().includes('already has a ticket') || msg.toLowerCase().includes('order id')) {
+        setOrderIdError(msg);
+        toast.error(msg, { id: 'qr-upload-toast' });
+      } else {
+        toast.error('Failed to create ticket: ' + msg, { id: 'qr-upload-toast' });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -297,16 +362,25 @@ export const AddTicket = () => {
               <h3 className="text-lg font-semibold text-white border-b border-border pb-2">Order Information</h3>
               
               <div>
-                <label className="block text-sm font-medium text-muted mb-1">Order ID *</label>
+                <label className="block text-sm font-medium text-muted mb-1 flex items-center justify-between">
+                  <span>Order ID *</span>
+                  {isCheckingOrderId && <span className="text-xs text-primary animate-pulse font-normal">Checking...</span>}
+                </label>
                 <input 
                   required
                   type="text" 
                   name="orderId"
                   value={formData.orderId}
                   onChange={handleChange}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
+                  className={`w-full bg-background border ${orderIdError ? 'border-rose-500 text-rose-200 focus:border-rose-500 focus:ring-rose-500' : 'border-border focus:border-primary focus:ring-primary'} rounded-xl px-4 py-2.5 text-white focus:ring-1 outline-none transition-all text-sm`}
                   placeholder="e.g. ORD-12345"
                 />
+                {orderIdError && (
+                  <p className="text-rose-400 text-xs mt-1.5 font-medium flex items-center gap-1.5">
+                    <AlertTriangle size={14} className="shrink-0 text-rose-400" />
+                    <span>{orderIdError}</span>
+                  </p>
+                )}
               </div>
 
               <div>
@@ -510,8 +584,8 @@ export const AddTicket = () => {
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="px-6 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 disabled:opacity-50 text-sm"
+              disabled={isSubmitting || !!orderIdError || isCheckingOrderId}
+              className="px-6 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               <Save size={18} /> {isSubmitting ? 'Saving...' : 'Create Ticket'}
             </button>

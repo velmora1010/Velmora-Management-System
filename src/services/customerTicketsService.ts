@@ -109,7 +109,49 @@ export const customerTicketsService = {
     return data ? mapFromDb(data) : null;
   },
 
+  async checkOrderIdExists(orderId: string, excludeTicketDbId?: number): Promise<{ exists: boolean; existingTicket: CustomerTicket | null }> {
+    const trimmed = orderId ? orderId.trim() : '';
+    if (!trimmed) return { exists: false, existingTicket: null };
+
+    const normInput = trimmed.toLowerCase();
+
+    // Query candidates matching order_id case-insensitively using ilike
+    let query = supabase
+      .from('customer_tickets')
+      .select('*')
+      .ilike('order_id', trimmed);
+
+    if (excludeTicketDbId !== undefined && excludeTicketDbId !== null) {
+      query = query.neq('id', excludeTicketDbId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error checking order_id existence:', error);
+      return { exists: false, existingTicket: null };
+    }
+
+    if (data && data.length > 0) {
+      const match = data.find(t => String(t.order_id || '').trim().toLowerCase() === normInput);
+      if (match) {
+        return { exists: true, existingTicket: mapFromDb(match) };
+      }
+    }
+
+    return { exists: false, existingTicket: null };
+  },
+
   async createTicket(ticket: Omit<CustomerTicket, 'id' | 'ticketId' | 'createdAt' | 'updatedAt'>) {
+    const normalizedOrderId = ticket.orderId ? ticket.orderId.trim() : '';
+    
+    // Check duplicate order ID prior to insertion
+    if (normalizedOrderId) {
+      const { exists } = await this.checkOrderIdExists(normalizedOrderId);
+      if (exists) {
+        throw new Error(`Order ID ${normalizedOrderId} already has a ticket.`);
+      }
+    }
+
     const { count, error: countError } = await supabase
       .from('customer_tickets')
       .select('*', { count: 'exact', head: true });
@@ -120,6 +162,7 @@ export const customerTicketsService = {
 
     let dbPayload = mapToDb({
       ...ticket,
+      orderId: normalizedOrderId,
       ticketId: newTicketId,
       createdAt: now,
       updatedAt: now
@@ -143,7 +186,13 @@ export const customerTicketsService = {
       error = res.error;
     }
 
-    if (error) throw error;
+    if (error) {
+      const errStr = (error.message || '') + (error.details || '') + (error.code || '');
+      if (error.code === '23505' || errStr.toLowerCase().includes('unique') || errStr.toLowerCase().includes('order_id') || errStr.toLowerCase().includes('duplicate')) {
+        throw new Error(`Order ID ${normalizedOrderId} already has a ticket.`);
+      }
+      throw error;
+    }
 
     // Non-blocking activity logging
     logActivity(
@@ -156,6 +205,17 @@ export const customerTicketsService = {
   },
 
   async updateTicket(id: number, updates: Partial<Omit<CustomerTicket, 'id' | 'ticketId' | 'createdAt'>>) {
+    if (updates.orderId !== undefined) {
+      const normalizedOrderId = updates.orderId.trim();
+      if (normalizedOrderId) {
+        const { exists } = await this.checkOrderIdExists(normalizedOrderId, id);
+        if (exists) {
+          throw new Error(`Order ID ${normalizedOrderId} already has a ticket.`);
+        }
+      }
+      updates.orderId = normalizedOrderId;
+    }
+
     const now = new Date().toISOString();
     let dbPayload = mapToDb({
       ...updates,
@@ -177,7 +237,13 @@ export const customerTicketsService = {
       error = res.error;
     }
 
-    if (error) throw error;
+    if (error) {
+      const errStr = (error.message || '') + (error.details || '') + (error.code || '');
+      if (error.code === '23505' || errStr.toLowerCase().includes('unique') || errStr.toLowerCase().includes('order_id') || errStr.toLowerCase().includes('duplicate')) {
+        throw new Error(`Order ID ${updates.orderId} already has a ticket.`);
+      }
+      throw error;
+    }
 
     // Non-blocking activity logging
     const action = updates.status === 'Resolved' ? 'Ticket Resolved' : 'Ticket Updated';
@@ -201,15 +267,14 @@ export const customerTicketsService = {
 
     let query = supabase
       .from('customer_tickets')
-      .select('*')
-      .neq('status', 'Resolved');
+      .select('*');
 
     if (orderId && awbNumber) {
-      query = query.or(`order_id.eq."${orderId}",awb_number.eq."${awbNumber}"`);
+      query = query.or(`order_id.ilike."${orderId.trim()}",awb_number.ilike."${awbNumber.trim()}"`);
     } else if (orderId) {
-      query = query.eq('order_id', orderId);
+      query = query.ilike('order_id', orderId.trim());
     } else {
-      query = query.eq('awb_number', awbNumber);
+      query = query.ilike('awb_number', awbNumber.trim());
     }
 
     const { data, error } = await query.limit(1).maybeSingle();
