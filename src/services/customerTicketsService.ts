@@ -2,6 +2,11 @@ import { supabase } from '../lib/supabase';
 import type { CustomerTicket } from '../types/customer-tickets';
 import { logActivity } from './activityService';
 
+const normalizeDate = (val?: string | null): string | null => {
+  if (!val || typeof val !== 'string' || !val.trim()) return null;
+  return val.trim();
+};
+
 const mapToDb = (ticket: Partial<CustomerTicket>) => {
   const dbObj: any = {};
   if (ticket.id !== undefined) dbObj.id = ticket.id;
@@ -9,7 +14,7 @@ const mapToDb = (ticket: Partial<CustomerTicket>) => {
   if (ticket.customerName !== undefined) dbObj.customer_name = ticket.customerName;
   if (ticket.phoneNumber !== undefined) dbObj.phone_number = ticket.phoneNumber;
   if (ticket.orderId !== undefined) dbObj.order_id = ticket.orderId;
-  if (ticket.orderDate !== undefined) dbObj.order_date = ticket.orderDate;
+  if (ticket.orderDate !== undefined) dbObj.order_date = normalizeDate(ticket.orderDate);
   if (ticket.awbNumber !== undefined) dbObj.awb_number = ticket.awbNumber;
   if (ticket.courierPartner !== undefined) dbObj.courier_partner = ticket.courierPartner;
   if (ticket.state !== undefined) dbObj.state = ticket.state;
@@ -19,9 +24,9 @@ const mapToDb = (ticket: Partial<CustomerTicket>) => {
   if (ticket.issueDescription !== undefined) dbObj.issue_description = ticket.issueDescription;
   if (ticket.priority !== undefined) dbObj.priority = ticket.priority;
   if (ticket.status !== undefined) dbObj.status = ticket.status;
-  if (ticket.createdAt !== undefined) dbObj.created_at = ticket.createdAt;
-  if (ticket.updatedAt !== undefined) dbObj.updated_at = ticket.updatedAt;
-  if (ticket.resolvedAt !== undefined) dbObj.resolved_at = ticket.resolvedAt;
+  if (ticket.createdAt !== undefined) dbObj.created_at = normalizeDate(ticket.createdAt);
+  if (ticket.updatedAt !== undefined) dbObj.updated_at = normalizeDate(ticket.updatedAt);
+  if (ticket.resolvedAt !== undefined) dbObj.resolved_at = normalizeDate(ticket.resolvedAt);
   if (ticket.resolutionNotes !== undefined) dbObj.resolution_notes = ticket.resolutionNotes;
   if (ticket.internalNotes !== undefined) dbObj.internal_notes = ticket.internalNotes;
   return dbObj;
@@ -34,7 +39,7 @@ const mapFromDb = (dbObj: any): CustomerTicket => {
     customerName: dbObj.customer_name,
     phoneNumber: dbObj.phone_number,
     orderId: dbObj.order_id,
-    orderDate: dbObj.order_date,
+    orderDate: dbObj.order_date || '',
     awbNumber: dbObj.awb_number,
     courierPartner: dbObj.courier_partner,
     state: dbObj.state,
@@ -44,9 +49,9 @@ const mapFromDb = (dbObj: any): CustomerTicket => {
     issueDescription: dbObj.issue_description,
     priority: dbObj.priority,
     status: dbObj.status,
-    createdAt: dbObj.created_at,
-    updatedAt: dbObj.updated_at,
-    resolvedAt: dbObj.resolved_at,
+    createdAt: dbObj.created_at || '',
+    updatedAt: dbObj.updated_at || '',
+    resolvedAt: dbObj.resolved_at || undefined,
     resolutionNotes: dbObj.resolution_notes,
     internalNotes: dbObj.internal_notes
   };
