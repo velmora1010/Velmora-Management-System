@@ -3,8 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Save, ArrowLeft, Trash2 } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
-import type { CustomerTicket, TicketStatus, IssueType, TicketPriority } from '../../types/customer-tickets';
-import { ALL_ISSUE_TYPES, getSubOptionsForIssueType, hasSubOptions, getSubIssueLabel } from '../../config/ticketConfig';
+import type { CustomerTicket, TicketStatus, IssueType, TicketPriority, CustomIssueTypeRecord } from '../../types/customer-tickets';
+import { DEFAULT_ISSUE_TYPES, getSubOptionsForIssueType, hasSubOptions, getSubIssueLabel } from '../../config/ticketConfig';
+import { AddCategoryModal } from './AddCategoryModal';
 import toast from 'react-hot-toast';
 
 export const TicketDetails = () => {
@@ -19,9 +20,55 @@ export const TicketDetails = () => {
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Custom Categories State
+  const [customIssueTypes, setCustomIssueTypes] = useState<CustomIssueTypeRecord[]>([]);
+  const [customSubIssuesMap, setCustomSubIssuesMap] = useState<Record<string, string[]>>({});
+  const [customIssueTypeIdMap, setCustomIssueTypeIdMap] = useState<Record<string, number>>({});
+
+  // Add Category Modal State
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [modalCategoryType, setModalCategoryType] = useState<'issueType' | 'subIssue'>('issueType');
+
+  const loadCategories = async () => {
+    const { customIssueTypes: cTypes, customSubIssues: cSub } = await customerTicketsService.getCustomCategories();
+    setCustomIssueTypes(cTypes);
+
+    const subMap: Record<string, string[]> = {};
+    const idMap: Record<string, number> = {};
+
+    cTypes.forEach(ct => {
+      idMap[ct.name.toLowerCase()] = ct.id;
+    });
+
+    cSub.forEach(cs => {
+      if (cs.issueTypeName) {
+        const key = cs.issueTypeName;
+        if (!subMap[key]) subMap[key] = [];
+        if (!subMap[key].some(n => n.toLowerCase() === cs.name.toLowerCase())) {
+          subMap[key].push(cs.name);
+        }
+      }
+    });
+
+    setCustomSubIssuesMap(subMap);
+    setCustomIssueTypeIdMap(idMap);
+  };
+
   useEffect(() => {
+    loadCategories();
     if (id) loadTicket(Number(id));
   }, [id]);
+
+  // Compute available Issue Types (Defaults + Custom)
+  const availableIssueTypes: string[] = [...DEFAULT_ISSUE_TYPES];
+  customIssueTypes.forEach(c => {
+    if (!availableIssueTypes.some(d => d.toLowerCase() === c.name.toLowerCase())) {
+      availableIssueTypes.push(c.name);
+    }
+  });
+
+  // Compute available sub-options for current issue type
+  const availableSubOptions = getSubOptionsForIssueType(issueType, customSubIssuesMap);
 
   const handleDelete = async () => {
     if (!ticket) return;
@@ -44,7 +91,7 @@ export const TicketDetails = () => {
     if (data) {
       setTicket(data);
       setStatus(data.status);
-      setIssueType(data.issueType || 'Other');
+      setIssueType(data.issueType || DEFAULT_ISSUE_TYPES[0]);
       setSubIssue(data.subIssue || '');
       setPriority(data.priority || 'Low');
       setInternalNotes(data.internalNotes || '');
@@ -52,11 +99,42 @@ export const TicketDetails = () => {
     }
   };
 
-  const handleIssueTypeChange = (newType: IssueType) => {
+  const handleIssueTypeSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === '__ADD_ISSUE_TYPE__') {
+      setModalCategoryType('issueType');
+      setShowAddCategoryModal(true);
+      return;
+    }
+
+    const newType = value as IssueType;
     setIssueType(newType);
-    const validOptions = getSubOptionsForIssueType(newType);
-    if (!validOptions.includes(subIssue)) {
+    const validOptions = getSubOptionsForIssueType(newType, customSubIssuesMap);
+    const isValidSub = validOptions.some(opt => opt.toLowerCase() === subIssue.toLowerCase());
+    if (!isValidSub) {
       setSubIssue('');
+    }
+  };
+
+  const handleSubIssueSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === '__ADD_SUB_ISSUE__') {
+      setModalCategoryType('subIssue');
+      setShowAddCategoryModal(true);
+      return;
+    }
+    setSubIssue(value);
+  };
+
+  const handleCategoryAdded = async (addedName: string) => {
+    await loadCategories();
+    setShowAddCategoryModal(false);
+
+    if (modalCategoryType === 'issueType') {
+      setIssueType(addedName);
+      setSubIssue('');
+    } else {
+      setSubIssue(addedName);
     }
   };
 
@@ -68,7 +146,7 @@ export const TicketDetails = () => {
       return;
     }
 
-    if (hasSubOptions(issueType) && !subIssue.trim()) {
+    if (hasSubOptions(issueType, customSubIssuesMap) && !subIssue.trim()) {
       toast.error(`Please select a ${getSubIssueLabel(issueType).replace('*', '').trim()} option.`);
       return;
     }
@@ -165,7 +243,7 @@ export const TicketDetails = () => {
               </div>
               <div>
                 <p className="text-muted text-sm mb-1">Description</p>
-                <p className="text-white whitespace-pre-wrap bg-background p-4 rounded-xl border border-border">
+                <p className="text-white whitespace-pre-wrap bg-background p-4 rounded-xl border border-border text-sm">
                   {ticket.issueDescription}
                 </p>
               </div>
@@ -177,7 +255,7 @@ export const TicketDetails = () => {
           <Card className="p-6">
             <h3 className="text-lg font-semibold text-white border-b border-border pb-2 mb-4">Update Details & Status</h3>
             
-            <div className="space-y-4">
+            <div className="space-y-4 text-sm">
               <div>
                 <label className="block text-sm font-medium text-muted mb-1">Status</label>
                 <select 
@@ -199,27 +277,35 @@ export const TicketDetails = () => {
                 <label className="block text-sm font-medium text-muted mb-1">Issue Type</label>
                 <select 
                   value={issueType}
-                  onChange={(e) => handleIssueTypeChange(e.target.value as IssueType)}
+                  onChange={handleIssueTypeSelect}
                   className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary outline-none"
                 >
-                  {ALL_ISSUE_TYPES.map(type => (
+                  {availableIssueTypes.map(type => (
                     <option key={type} value={type}>{type}</option>
                   ))}
+                  <option disabled className="text-muted">──────────</option>
+                  <option value="__ADD_ISSUE_TYPE__" className="text-primary font-semibold">
+                    + Add Issue Type
+                  </option>
                 </select>
               </div>
 
-              {hasSubOptions(issueType) && (
+              {availableSubOptions.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-muted mb-1">{getSubIssueLabel(issueType)}</label>
                   <select 
                     value={subIssue}
-                    onChange={(e) => setSubIssue(e.target.value)}
+                    onChange={handleSubIssueSelect}
                     className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary outline-none"
                   >
                     <option value="">-- Select Sub-Option --</option>
-                    {getSubOptionsForIssueType(issueType).map(opt => (
+                    {availableSubOptions.map(opt => (
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
+                    <option disabled className="text-muted">──────────</option>
+                    <option value="__ADD_SUB_ISSUE__" className="text-primary font-semibold">
+                      + Add Sub-Issue
+                    </option>
                   </select>
                 </div>
               )}
@@ -283,6 +369,22 @@ export const TicketDetails = () => {
           </Card>
         </div>
       </div>
+
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <AddCategoryModal
+          type={modalCategoryType}
+          parentIssueType={issueType}
+          parentIssueTypeId={customIssueTypeIdMap[issueType.toLowerCase()]}
+          existingNames={
+            modalCategoryType === 'issueType'
+              ? availableIssueTypes
+              : availableSubOptions
+          }
+          onClose={() => setShowAddCategoryModal(false)}
+          onSuccess={handleCategoryAdded}
+        />
+      )}
     </div>
   );
 };

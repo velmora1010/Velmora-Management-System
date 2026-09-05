@@ -1,16 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Save, X, AlertTriangle } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
-import type { CustomerTicket, IssueType, TicketPriority } from '../../types/customer-tickets';
-import { ALL_ISSUE_TYPES, getSubOptionsForIssueType, hasSubOptions, getSubIssueLabel } from '../../config/ticketConfig';
+import type { CustomerTicket, IssueType, TicketPriority, CustomIssueTypeRecord } from '../../types/customer-tickets';
+import { DEFAULT_ISSUE_TYPES, getSubOptionsForIssueType, hasSubOptions, getSubIssueLabel } from '../../config/ticketConfig';
+import { AddCategoryModal } from './AddCategoryModal';
 import toast from 'react-hot-toast';
 
 export const AddTicket = () => {
   const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState<CustomerTicket | null>(null);
+
+  // Category State
+  const [customIssueTypes, setCustomIssueTypes] = useState<CustomIssueTypeRecord[]>([]);
+  const [customSubIssuesMap, setCustomSubIssuesMap] = useState<Record<string, string[]>>({});
+  const [customIssueTypeIdMap, setCustomIssueTypeIdMap] = useState<Record<string, number>>({});
+
+  // Modal State
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [modalCategoryType, setModalCategoryType] = useState<'issueType' | 'subIssue'>('issueType');
 
   const [formData, setFormData] = useState({
     customerName: '',
@@ -21,12 +31,52 @@ export const AddTicket = () => {
     courierPartner: '',
     state: '',
     city: '',
-    issueType: 'Transport Issue' as IssueType,
+    issueType: DEFAULT_ISSUE_TYPES[0] as IssueType,
     subIssue: '',
     issueDescription: '',
     priority: 'Low' as TicketPriority,
     internalNotes: ''
   });
+
+  const loadCategories = async () => {
+    const { customIssueTypes: cTypes, customSubIssues: cSub } = await customerTicketsService.getCustomCategories();
+    setCustomIssueTypes(cTypes);
+
+    const subMap: Record<string, string[]> = {};
+    const idMap: Record<string, number> = {};
+
+    cTypes.forEach(ct => {
+      idMap[ct.name.toLowerCase()] = ct.id;
+    });
+
+    cSub.forEach(cs => {
+      if (cs.issueTypeName) {
+        const key = cs.issueTypeName;
+        if (!subMap[key]) subMap[key] = [];
+        if (!subMap[key].some(n => n.toLowerCase() === cs.name.toLowerCase())) {
+          subMap[key].push(cs.name);
+        }
+      }
+    });
+
+    setCustomSubIssuesMap(subMap);
+    setCustomIssueTypeIdMap(idMap);
+  };
+
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  // Compute unified list of Issue Types (Defaults + Custom, deduplicated case-insensitively)
+  const availableIssueTypes: string[] = [...DEFAULT_ISSUE_TYPES];
+  customIssueTypes.forEach(c => {
+    if (!availableIssueTypes.some(d => d.toLowerCase() === c.name.toLowerCase())) {
+      availableIssueTypes.push(c.name);
+    }
+  });
+
+  // Compute sub-options for currently selected issue type
+  const availableSubOptions = getSubOptionsForIssueType(formData.issueType, customSubIssuesMap);
 
   const checkDuplicate = async (orderId: string, awbNumber: string) => {
     if (!orderId && !awbNumber) return;
@@ -38,14 +88,31 @@ export const AddTicket = () => {
     const { name, value } = e.target;
 
     if (name === 'issueType') {
+      if (value === '__ADD_ISSUE_TYPE__') {
+        setModalCategoryType('issueType');
+        setShowAddCategoryModal(true);
+        return;
+      }
+
       const newIssueType = value as IssueType;
-      const validSubOptions = getSubOptionsForIssueType(newIssueType);
-      const isCurrentSubValid = validSubOptions.includes(formData.subIssue);
+      const validSubOptions = getSubOptionsForIssueType(newIssueType, customSubIssuesMap);
+      const isCurrentSubValid = validSubOptions.some(opt => opt.toLowerCase() === formData.subIssue.toLowerCase());
+      
       setFormData(prev => ({
         ...prev,
         issueType: newIssueType,
         subIssue: isCurrentSubValid ? prev.subIssue : ''
       }));
+      return;
+    }
+
+    if (name === 'subIssue') {
+      if (value === '__ADD_SUB_ISSUE__') {
+        setModalCategoryType('subIssue');
+        setShowAddCategoryModal(true);
+        return;
+      }
+      setFormData(prev => ({ ...prev, subIssue: value }));
       return;
     }
 
@@ -58,9 +125,27 @@ export const AddTicket = () => {
     }
   };
 
+  const handleCategoryAdded = async (addedName: string) => {
+    await loadCategories();
+    setShowAddCategoryModal(false);
+
+    if (modalCategoryType === 'issueType') {
+      setFormData(prev => ({
+        ...prev,
+        issueType: addedName,
+        subIssue: ''
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        subIssue: addedName
+      }));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (hasSubOptions(formData.issueType) && !formData.subIssue.trim()) {
+    if (hasSubOptions(formData.issueType, customSubIssuesMap) && !formData.subIssue.trim()) {
       toast.error(`Please select a ${getSubIssueLabel(formData.issueType).replace('*', '').trim()} option.`);
       return;
     }
@@ -120,7 +205,7 @@ export const AddTicket = () => {
                   name="customerName"
                   value={formData.customerName}
                   onChange={handleChange}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                   placeholder="e.g. John Doe"
                 />
               </div>
@@ -132,7 +217,7 @@ export const AddTicket = () => {
                   name="phoneNumber"
                   value={formData.phoneNumber}
                   onChange={handleChange}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                   placeholder="e.g. 9876543210"
                 />
               </div>
@@ -145,7 +230,7 @@ export const AddTicket = () => {
                     name="state"
                     value={formData.state}
                     onChange={handleChange}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                     placeholder="e.g. Maharashtra"
                   />
                 </div>
@@ -156,7 +241,7 @@ export const AddTicket = () => {
                     name="city"
                     value={formData.city}
                     onChange={handleChange}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                     placeholder="e.g. Mumbai"
                   />
                 </div>
@@ -175,7 +260,7 @@ export const AddTicket = () => {
                   name="orderId"
                   value={formData.orderId}
                   onChange={handleChange}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                   placeholder="e.g. ORD-12345"
                 />
               </div>
@@ -187,7 +272,7 @@ export const AddTicket = () => {
                   name="orderDate"
                   value={formData.orderDate}
                   onChange={handleChange}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                 />
               </div>
 
@@ -200,7 +285,7 @@ export const AddTicket = () => {
                     name="awbNumber"
                     value={formData.awbNumber}
                     onChange={handleChange}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                     placeholder="e.g. AWB9876"
                   />
                 </div>
@@ -211,7 +296,7 @@ export const AddTicket = () => {
                     name="courierPartner"
                     value={formData.courierPartner}
                     onChange={handleChange}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                     placeholder="e.g. Delhivery"
                   />
                 </div>
@@ -231,15 +316,19 @@ export const AddTicket = () => {
                   name="issueType"
                   value={formData.issueType}
                   onChange={handleChange}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                 >
-                  {ALL_ISSUE_TYPES.map(type => (
+                  {availableIssueTypes.map(type => (
                     <option key={type} value={type}>{type}</option>
                   ))}
+                  <option disabled className="text-muted">──────────</option>
+                  <option value="__ADD_ISSUE_TYPE__" className="text-primary font-semibold">
+                    + Add Issue Type
+                  </option>
                 </select>
               </div>
 
-              {hasSubOptions(formData.issueType) && (
+              {availableSubOptions.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-muted mb-1">{getSubIssueLabel(formData.issueType)}</label>
                   <select 
@@ -247,12 +336,16 @@ export const AddTicket = () => {
                     name="subIssue"
                     value={formData.subIssue}
                     onChange={handleChange}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                   >
                     <option value="">-- Select Sub-Option --</option>
-                    {getSubOptionsForIssueType(formData.issueType).map(opt => (
+                    {availableSubOptions.map(opt => (
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
+                    <option disabled className="text-muted">──────────</option>
+                    <option value="__ADD_SUB_ISSUE__" className="text-primary font-semibold">
+                      + Add Sub-Issue
+                    </option>
                   </select>
                 </div>
               )}
@@ -264,7 +357,7 @@ export const AddTicket = () => {
                   name="priority"
                   value={formData.priority}
                   onChange={handleChange}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                 >
                   <option value="Low">Low</option>
                   <option value="Medium">Medium</option>
@@ -282,7 +375,7 @@ export const AddTicket = () => {
                 value={formData.issueDescription}
                 onChange={handleChange}
                 rows={3}
-                className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                 placeholder="Describe the issue in detail..."
               />
             </div>
@@ -294,7 +387,7 @@ export const AddTicket = () => {
                 value={formData.internalNotes}
                 onChange={handleChange}
                 rows={2}
-                className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                 placeholder="Any internal notes for the team..."
               />
             </div>
@@ -304,20 +397,36 @@ export const AddTicket = () => {
             <button
               type="button"
               onClick={() => navigate('/tickets/open')}
-              className="px-6 py-2.5 rounded-xl border border-border text-white hover:bg-white/5 transition-colors flex items-center gap-2"
+              className="px-6 py-2.5 rounded-xl border border-border text-white hover:bg-white/5 transition-colors flex items-center gap-2 text-sm"
             >
               <X size={18} /> Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 disabled:opacity-50"
+              className="px-6 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 disabled:opacity-50 text-sm"
             >
               <Save size={18} /> {isSubmitting ? 'Saving...' : 'Create Ticket'}
             </button>
           </div>
         </Card>
       </form>
+
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <AddCategoryModal
+          type={modalCategoryType}
+          parentIssueType={formData.issueType}
+          parentIssueTypeId={customIssueTypeIdMap[formData.issueType.toLowerCase()]}
+          existingNames={
+            modalCategoryType === 'issueType'
+              ? availableIssueTypes
+              : availableSubOptions
+          }
+          onClose={() => setShowAddCategoryModal(false)}
+          onSuccess={handleCategoryAdded}
+        />
+      )}
     </div>
   );
 };

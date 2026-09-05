@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, AlertCircle, Clock, Eye, CheckCircle2, X, Edit, FileText } from 'lucide-react';
+import { Search, AlertCircle, Clock, Eye, CheckCircle2, X, Edit, FileText, Calendar as CalendarIcon } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
-import type { CustomerTicket } from '../../types/customer-tickets';
+import type { CustomerTicket, CustomIssueTypeRecord } from '../../types/customer-tickets';
 import { customerTicketsService } from '../../services/customerTicketsService';
-import { ALL_ISSUE_TYPES, getSubIssueLabel } from '../../config/ticketConfig';
+import { DEFAULT_ISSUE_TYPES, getSubIssueLabel } from '../../config/ticketConfig';
+import { DateRangePickerModal, DateRange } from '../../components/ui/DateRangePickerModal';
 import toast from 'react-hot-toast';
 
 interface TicketListProps {
@@ -26,6 +27,11 @@ export const TicketList: React.FC<TicketListProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [issueFilter, setIssueFilter] = useState('');
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Custom Categories
+  const [customIssueTypes, setCustomIssueTypes] = useState<CustomIssueTypeRecord[]>([]);
 
   // Modal States
   const [viewingTicket, setViewingTicket] = useState<CustomerTicket | null>(null);
@@ -33,6 +39,23 @@ export const TicketList: React.FC<TicketListProps> = ({
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [validationError, setValidationError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    loadCustomCategories();
+  }, []);
+
+  const loadCustomCategories = async () => {
+    const { customIssueTypes: cTypes } = await customerTicketsService.getCustomCategories();
+    setCustomIssueTypes(cTypes);
+  };
+
+  // Combine Issue Types (Defaults + Custom, deduplicated case-insensitively)
+  const availableIssueTypes: string[] = [...DEFAULT_ISSUE_TYPES];
+  customIssueTypes.forEach(c => {
+    if (!availableIssueTypes.some(d => d.toLowerCase() === c.name.toLowerCase())) {
+      availableIssueTypes.push(c.name);
+    }
+  });
 
   const filteredTickets = tickets.filter(ticket => {
     const matchesSearch = 
@@ -45,7 +68,16 @@ export const TicketList: React.FC<TicketListProps> = ({
     const matchesStatus = statusFilter ? ticket.status === statusFilter : true;
     const matchesIssue = issueFilter ? ticket.issueType === issueFilter : true;
 
-    return matchesSearch && matchesStatus && matchesIssue;
+    // Date Range Match
+    let matchesDate = true;
+    if (dateRange && dateRange.startDate) {
+      const ticketTime = new Date(ticket.createdAt).getTime();
+      const startTime = dateRange.startDate.getTime();
+      const endTime = dateRange.endDate ? dateRange.endDate.getTime() : startTime;
+      matchesDate = ticketTime >= startTime && ticketTime <= endTime;
+    }
+
+    return matchesSearch && matchesStatus && matchesIssue && matchesDate;
   });
 
   const getStatusColor = (status: string) => {
@@ -121,6 +153,19 @@ export const TicketList: React.FC<TicketListProps> = ({
     setValidationError('');
   };
 
+  // Helper for Date Filter Button Badge
+  const getDateFilterLabel = (): string => {
+    if (!dateRange || !dateRange.startDate) return 'Date Range';
+    if (dateRange.label) return dateRange.label;
+    
+    const start = dateRange.startDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (!dateRange.endDate || dateRange.startDate.toDateString() === dateRange.endDate.toDateString()) {
+      return start;
+    }
+    const end = dateRange.endDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+    return `${start} – ${end}`;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -130,23 +175,24 @@ export const TicketList: React.FC<TicketListProps> = ({
         </div>
       </div>
 
-      <Card className="p-4 flex flex-col sm:flex-row gap-4">
+      <Card className="p-4 flex flex-col lg:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
           <input
             type="text"
-            placeholder="Search by Name, Order ID, AWB, Phone..."
+            placeholder="Search by Name, Order ID, AWB, Phone, Sub-Issue..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-background border border-border rounded-xl pl-10 pr-4 py-2 text-white focus:border-primary outline-none"
+            className="w-full bg-background border border-border rounded-xl pl-10 pr-4 py-2 text-white text-sm focus:border-primary outline-none"
           />
         </div>
         
-        <div className="flex gap-4">
+        <div className="flex flex-wrap sm:flex-nowrap gap-3">
+          {/* Status Filter */}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-background border border-border rounded-xl px-4 py-2 text-white focus:border-primary outline-none"
+            className="bg-background border border-border rounded-xl px-4 py-2 text-white text-sm focus:border-primary outline-none"
           >
             <option value="">All Statuses</option>
             <option value="Open">Open</option>
@@ -158,16 +204,42 @@ export const TicketList: React.FC<TicketListProps> = ({
             <option value="Resolved">Resolved</option>
           </select>
 
+          {/* Issue Filter */}
           <select
             value={issueFilter}
             onChange={(e) => setIssueFilter(e.target.value)}
-            className="bg-background border border-border rounded-xl px-4 py-2 text-white focus:border-primary outline-none"
+            className="bg-background border border-border rounded-xl px-4 py-2 text-white text-sm focus:border-primary outline-none"
           >
             <option value="">All Issues</option>
-            {ALL_ISSUE_TYPES.map((issue) => (
+            {availableIssueTypes.map((issue) => (
               <option key={issue} value={issue}>{issue}</option>
             ))}
           </select>
+
+          {/* Date Range Filter Button */}
+          {dateRange ? (
+            <div className="flex items-center gap-1 bg-primary/10 border border-primary/30 rounded-xl px-3 py-2 text-primary font-semibold text-sm">
+              <CalendarIcon size={16} />
+              <span>{getDateFilterLabel()}</span>
+              <button
+                type="button"
+                onClick={() => setDateRange(null)}
+                className="ml-1 text-primary/70 hover:text-white transition-colors"
+                title="Clear Date Filter"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowDatePicker(true)}
+              className="bg-background border border-border rounded-xl px-4 py-2 text-slate-300 hover:text-white hover:border-primary/50 transition-colors text-sm flex items-center gap-2"
+            >
+              <CalendarIcon size={16} className="text-muted" />
+              <span>Date Range</span>
+            </button>
+          )}
         </div>
       </Card>
 
@@ -202,22 +274,22 @@ export const TicketList: React.FC<TicketListProps> = ({
 
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
-                      <p className="text-muted mb-1">Customer</p>
+                      <p className="text-muted text-xs mb-1">Customer</p>
                       <p className="text-white font-medium">{ticket.customerName}</p>
                     </div>
                     <div>
-                      <p className="text-muted mb-1">Order ID</p>
+                      <p className="text-muted text-xs mb-1">Order ID</p>
                       <p className="text-white font-medium">{ticket.orderId}</p>
                     </div>
                     <div>
-                      <p className="text-muted mb-1">Issue</p>
+                      <p className="text-muted text-xs mb-1">Issue</p>
                       <p className="text-white font-medium">{ticket.issueType}</p>
                       {ticket.subIssue && (
                         <p className="text-xs text-primary font-medium mt-0.5">{ticket.subIssue}</p>
                       )}
                     </div>
                     <div>
-                      <p className="text-muted mb-1">Days Open</p>
+                      <p className="text-muted text-xs mb-1">Days Open</p>
                       <p className="text-white font-medium">{getDaysOpen(ticket)} Days</p>
                     </div>
                   </div>
@@ -362,7 +434,7 @@ export const TicketList: React.FC<TicketListProps> = ({
                 </div>
                 <div>
                   <p className="text-xs text-muted mb-1">Description</p>
-                  <div className="bg-background p-3.5 rounded-xl border border-border text-white whitespace-pre-wrap leading-relaxed">
+                  <div className="bg-background p-3.5 rounded-xl border border-border text-white whitespace-pre-wrap leading-relaxed text-sm">
                     {viewingTicket.issueDescription}
                   </div>
                 </div>
@@ -477,6 +549,18 @@ export const TicketList: React.FC<TicketListProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* DATE RANGE PICKER MODAL */}
+      {showDatePicker && (
+        <DateRangePickerModal
+          initialRange={dateRange}
+          onClose={() => setShowDatePicker(false)}
+          onApply={(range) => {
+            setDateRange(range);
+            setShowDatePicker(false);
+          }}
+        />
       )}
     </div>
   );

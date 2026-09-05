@@ -286,5 +286,169 @@ export const customerTicketsService = {
       courierPartnerCount,
       allTickets
     };
+  },
+
+  // ==========================================
+  // CUSTOM CATEGORY MANAGEMENT SERVICES
+  // ==========================================
+  async getCustomCategories() {
+    try {
+      const { data: issueTypes, error: itError } = await supabase
+        .from('ticket_issue_types')
+        .select('*')
+        .eq('active', true)
+        .order('name', { ascending: true });
+
+      if (itError) throw itError;
+
+      const { data: subIssues, error: siError } = await supabase
+        .from('ticket_sub_issues')
+        .select(`
+          *,
+          ticket_issue_types ( id, name )
+        `)
+        .eq('active', true)
+        .order('name', { ascending: true });
+
+      if (siError) throw siError;
+
+      const customSubIssues = (subIssues || []).map((item: any) => ({
+        id: item.id,
+        issue_type_id: item.issue_type_id,
+        name: item.name,
+        description: item.description,
+        active: item.active,
+        created_at: item.created_at,
+        issueTypeName: item.ticket_issue_types?.name
+      }));
+
+      return {
+        customIssueTypes: issueTypes || [],
+        customSubIssues
+      };
+    } catch (err: any) {
+      console.warn('Custom ticket categories tables not available yet or query failed:', err.message);
+      return {
+        customIssueTypes: [],
+        customSubIssues: []
+      };
+    }
+  },
+
+  async ensureIssueTypeRecord(issueTypeName: string) {
+    const trimmedName = issueTypeName.trim();
+    if (!trimmedName) throw new Error('Issue Type name cannot be empty');
+
+    // 1. Try case-insensitive lookup
+    const { data: existing, error: fetchErr } = await supabase
+      .from('ticket_issue_types')
+      .select('id, name')
+      .ilike('name', trimmedName)
+      .maybeSingle();
+
+    if (fetchErr) throw fetchErr;
+    if (existing) {
+      return existing;
+    }
+
+    // 2. Insert new parent row
+    const { data: inserted, error: insertErr } = await supabase
+      .from('ticket_issue_types')
+      .insert([{ name: trimmedName }])
+      .select()
+      .single();
+
+    if (insertErr) {
+      // Race-condition fallback: if duplicate error occurred, fetch again
+      if (insertErr.code === '23505' || insertErr.message.includes('duplicate') || insertErr.message.includes('unique')) {
+        const { data: retryData, error: retryErr } = await supabase
+          .from('ticket_issue_types')
+          .select('id, name')
+          .ilike('name', trimmedName)
+          .single();
+        if (retryErr) throw retryErr;
+        return retryData;
+      }
+      throw insertErr;
+    }
+
+    return inserted;
+  },
+
+  async addCustomIssueType(name: string, description?: string) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new Error('Issue Type name is required');
+    }
+
+    // Case-insensitive check
+    const { data: existing } = await supabase
+      .from('ticket_issue_types')
+      .select('id, name')
+      .ilike('name', trimmedName)
+      .maybeSingle();
+
+    if (existing) {
+      throw new Error(`Issue Type "${trimmedName}" already exists`);
+    }
+
+    const { data, error } = await supabase
+      .from('ticket_issue_types')
+      .insert([{
+        name: trimmedName,
+        description: description?.trim() || null
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505' || error.message.includes('unique')) {
+        throw new Error(`Issue Type "${trimmedName}" already exists`);
+      }
+      throw error;
+    }
+
+    return data;
+  },
+
+  async addCustomSubIssue(issueTypeId: number, name: string, description?: string) {
+    const trimmedName = name.trim();
+    if (!issueTypeId) {
+      throw new Error('Valid Issue Type ID is required');
+    }
+    if (!trimmedName) {
+      throw new Error('Sub-Issue name is required');
+    }
+
+    // Scoped case-insensitive duplicate check
+    const { data: existing } = await supabase
+      .from('ticket_sub_issues')
+      .select('id, name')
+      .eq('issue_type_id', issueTypeId)
+      .ilike('name', trimmedName)
+      .maybeSingle();
+
+    if (existing) {
+      throw new Error(`Sub-Issue "${trimmedName}" already exists under this Issue Type`);
+    }
+
+    const { data, error } = await supabase
+      .from('ticket_sub_issues')
+      .insert([{
+        issue_type_id: issueTypeId,
+        name: trimmedName,
+        description: description?.trim() || null
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505' || error.message.includes('unique')) {
+        throw new Error(`Sub-Issue "${trimmedName}" already exists under this Issue Type`);
+      }
+      throw error;
+    }
+
+    return data;
   }
 };

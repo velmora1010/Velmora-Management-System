@@ -1,4 +1,4 @@
-export type IssueType = 
+export type DefaultIssueType = 
   | 'Transport Issue'
   | 'Delivery Delay'
   | 'Delivery Attempt Failed'
@@ -18,8 +18,9 @@ export type IssueType =
   | 'Replacement'
   | 'Refund'
   | 'Order Cancellation'
-  | 'Payment Issue'
-  | 'Other';
+  | 'Payment Issue';
+
+export type IssueType = DefaultIssueType | string;
 
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
@@ -53,4 +54,21 @@ export interface CustomerTicket {
   resolvedAt?: string;
   resolutionNotes?: string;
   internalNotes?: string;
+}
+
+export interface CustomIssueTypeRecord {
+  id: number;
+  name: string;
+  description?: string;
+  active?: boolean;
+  created_at?: string;
+}
+
+export interface CustomSubIssueRecord {
+  id: number;
+  issue_type_id: number;
+  name: string;
+  description?: string;
+  active?: boolean;
+  created_at?: string;
 }
