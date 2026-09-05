@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Save, X, AlertTriangle, Image as ImageIcon, Trash2, RefreshCw } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
@@ -82,20 +82,34 @@ export const AddTicket = () => {
   const availableSubOptions = getSubOptionsForIssueType(formData.issueType, customSubIssuesMap);
 
   useEffect(() => {
+    let isActive = true;
     const trimmed = formData.orderId ? formData.orderId.trim() : '';
-    if (!trimmed) { setOrderIdError(null); setIsCheckingOrderId(false); return; }
+    if (!trimmed) {
+      setOrderIdError(null);
+      setIsCheckingOrderId(false);
+      return;
+    }
+
     setIsCheckingOrderId(true);
     const timer = setTimeout(async () => {
       try {
         const { exists } = await customerTicketsService.checkOrderIdExists(trimmed);
-        setOrderIdError(exists ? `Order ID ${trimmed} already has a ticket.` : null);
+        if (isActive) {
+          setOrderIdError(exists ? `Order ID ${trimmed} already has a ticket.` : null);
+        }
       } catch (err) {
         console.error('Error during real-time order id check:', err);
       } finally {
-        setIsCheckingOrderId(false);
+        if (isActive) {
+          setIsCheckingOrderId(false);
+        }
       }
     }, 300);
-    return () => clearTimeout(timer);
+
+    return () => {
+      isActive = false;
+      clearTimeout(timer);
+    };
   }, [formData.orderId]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {

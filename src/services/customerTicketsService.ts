@@ -141,6 +141,33 @@ export const customerTicketsService = {
     return { exists: false, existingTicket: null };
   },
 
+  async getNextTicketId(): Promise<string> {
+    const { data, error } = await supabase
+      .from('customer_tickets')
+      .select('ticket_id')
+      .order('id', { ascending: false })
+      .limit(50);
+
+    if (error) {
+      console.warn('Error fetching latest ticket_ids for sequence calculation:', error);
+    }
+
+    let maxNum = 0;
+    if (data && data.length > 0) {
+      data.forEach(row => {
+        const match = String(row.ticket_id || '').match(/^CT-(\d+)$/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
+      });
+    }
+
+    return `CT-${String(maxNum + 1).padStart(4, '0')}`;
+  },
+
   async createTicket(ticket: Omit<CustomerTicket, 'id' | 'ticketId' | 'createdAt' | 'updatedAt'>) {
     const normalizedOrderId = ticket.orderId ? ticket.orderId.trim() : '';
     
@@ -152,12 +179,8 @@ export const customerTicketsService = {
       }
     }
 
-    const { count, error: countError } = await supabase
-      .from('customer_tickets')
-      .select('*', { count: 'exact', head: true });
-    if (countError) throw countError;
-
-    const newTicketId = `CT-${String((count || 0) + 1).padStart(4, '0')}`;
+    // Determine the next sequential ticket ID based on highest existing number
+    const newTicketId = await this.getNextTicketId();
     const now = new Date().toISOString();
 
     let dbPayload = mapToDb({
@@ -175,9 +198,13 @@ export const customerTicketsService = {
       .single();
 
     if (error) {
-      const errStr = (error.message || '') + (error.details || '') + (error.code || '');
-      if (error.code === '23505' || errStr.toLowerCase().includes('unique') || errStr.toLowerCase().includes('order_id') || errStr.toLowerCase().includes('duplicate')) {
+      const errStr = ((error.message || '') + ' ' + (error.details || '')).toLowerCase();
+      // Only report Order ID duplicate if the error actually relates to order_id / idx_customer_tickets_unique_order_id
+      if (errStr.includes('order_id') || errStr.includes('unique_order_id')) {
         throw new Error(`Order ID ${normalizedOrderId} already has a ticket.`);
+      }
+      if (errStr.includes('ticket_id')) {
+        throw new Error(`Ticket sequence collision on ${newTicketId}. Please try again.`);
       }
       throw error;
     }
@@ -215,19 +242,9 @@ export const customerTicketsService = {
       .update(dbPayload)
       .eq('id', id);
 
-    // Fallback if sub_issue column does not exist on remote schema yet
-    if (error && error.message && error.message.includes('sub_issue')) {
-      delete dbPayload.sub_issue;
-      const res = await supabase
-        .from('customer_tickets')
-        .update(dbPayload)
-        .eq('id', id);
-      error = res.error;
-    }
-
     if (error) {
-      const errStr = (error.message || '') + (error.details || '') + (error.code || '');
-      if (error.code === '23505' || errStr.toLowerCase().includes('unique') || errStr.toLowerCase().includes('order_id') || errStr.toLowerCase().includes('duplicate')) {
+      const errStr = ((error.message || '') + ' ' + (error.details || '')).toLowerCase();
+      if (errStr.includes('order_id') || errStr.includes('unique_order_id')) {
         throw new Error(`Order ID ${updates.orderId} already has a ticket.`);
       }
       throw error;
