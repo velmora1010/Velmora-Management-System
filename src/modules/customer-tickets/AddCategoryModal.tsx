@@ -4,7 +4,7 @@ import { customerTicketsService } from '../../services/customerTicketsService';
 import toast from 'react-hot-toast';
 
 interface AddCategoryModalProps {
-  type: 'issueType' | 'subIssue';
+  type: 'issueType' | 'subIssue' | 'courierPartner';
   parentIssueType?: string;
   parentIssueTypeId?: number;
   existingNames: string[];
@@ -26,9 +26,25 @@ export const AddCategoryModal: React.FC<AddCategoryModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isSubIssue = type === 'subIssue';
-  const title = isSubIssue 
-    ? `Add Sub-Issue ${parentIssueType ? `(${parentIssueType})` : ''}`
-    : 'Add Issue Type';
+  const isCourier = type === 'courierPartner';
+  
+  const title = isCourier
+    ? 'Add Courier Partner'
+    : isSubIssue 
+      ? `Add Sub-Issue ${parentIssueType ? `(${parentIssueType})` : ''}`
+      : 'Add Issue Type';
+
+  const labelName = isCourier
+    ? 'Courier Partner Name'
+    : isSubIssue
+      ? 'Sub-Issue Name'
+      : 'Issue Type Name';
+
+  const placeholderName = isCourier
+    ? 'e.g. BlueDart'
+    : isSubIssue
+      ? 'e.g. Resend Missing Item'
+      : 'e.g. Courier Escalation';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +52,7 @@ export const AddCategoryModal: React.FC<AddCategoryModalProps> = ({
 
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setErrorMsg(`${isSubIssue ? 'Sub-Issue' : 'Issue Type'} name is required.`);
+      setErrorMsg(`${labelName} is required.`);
       return;
     }
 
@@ -51,14 +67,16 @@ export const AddCategoryModal: React.FC<AddCategoryModalProps> = ({
 
     try {
       setIsSubmitting(true);
-      if (isSubIssue) {
+      if (isCourier) {
+        await customerTicketsService.addCustomCourierPartner(trimmedName, description);
+        toast.success(`Courier Partner "${trimmedName}" created successfully!`);
+      } else if (isSubIssue) {
         if (!parentIssueType) {
           throw new Error('Please select an Issue Type before adding a Sub-Issue.');
         }
 
         let targetTypeId: number = parentIssueTypeId || 0;
         if (!targetTypeId) {
-          // Resolve or create parent anchor row in ticket_issue_types case-insensitively
           const parentRecord = await customerTicketsService.ensureIssueTypeRecord(parentIssueType);
           targetTypeId = parentRecord.id;
         }
@@ -97,7 +115,7 @@ export const AddCategoryModal: React.FC<AddCategoryModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-1.5">
-              {isSubIssue ? 'Sub-Issue Name' : 'Issue Type Name'} <span className="text-rose-400">*</span>
+              {labelName} <span className="text-rose-400">*</span>
             </label>
             <input
               type="text"
@@ -107,7 +125,7 @@ export const AddCategoryModal: React.FC<AddCategoryModalProps> = ({
                 setName(e.target.value);
                 if (errorMsg) setErrorMsg('');
               }}
-              placeholder={isSubIssue ? 'e.g. Resend Missing Item' : 'e.g. Courier Escalation'}
+              placeholder={placeholderName}
               className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white text-sm focus:border-primary outline-none transition-colors"
             />
           </div>

@@ -73,3 +73,11 @@ export interface CustomSubIssueRecord {
   active?: boolean;
   created_at?: string;
 }
+
+export interface CustomCourierPartnerRecord {
+  id: number;
+  name: string;
+  description?: string;
+  active?: boolean;
+  created_at?: string;
+}

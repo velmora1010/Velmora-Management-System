@@ -1,4 +1,14 @@
-import type { IssueType, DefaultIssueType } from '../types/customer-tickets';
+﻿import type { IssueType, DefaultIssueType } from '../types/customer-tickets';
+
+export const DEFAULT_COURIER_PARTNERS = [
+  'ST Courier',
+  'Delhivery',
+  'Ekart',
+  'Amazon',
+  'IThink Delhivery',
+  'IThink Ekart',
+  'Ithink Amazon'
+];
 
 export const DEFAULT_ISSUE_TYPES: DefaultIssueType[] = [
   'Transport Issue',
@@ -185,3 +195,4 @@ export const getSubIssueLabel = (issueType: IssueType | string): string => {
   }
   return 'Sub-Issue / Resolution *';
 };
+

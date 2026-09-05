@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import type { CustomerTicket } from '../types/customer-tickets';
+import type { CustomerTicket, CustomCourierPartnerRecord } from '../types/customer-tickets';
 import { logActivity } from './activityService';
 
 const normalizeDate = (val?: string | null): string | null => {
@@ -174,16 +174,26 @@ export const customerTicketsService = {
       .select()
       .single();
 
-    // Fallback if sub_issue column does not exist on remote schema yet
-    if (error && error.message && error.message.includes('sub_issue')) {
-      delete dbPayload.sub_issue;
-      const res = await supabase
-        .from('customer_tickets')
-        .insert([dbPayload])
-        .select()
-        .single();
-      data = res.data;
-      error = res.error;
+    // Safe fallback handling if remote schema lacks sub_issue or qr_image_url columns
+    if (error && error.message) {
+      let needsRetry = false;
+      if (error.message.includes('qr_image_url')) {
+        delete dbPayload.qr_image_url;
+        needsRetry = true;
+      }
+      if (error.message.includes('sub_issue')) {
+        delete dbPayload.sub_issue;
+        needsRetry = true;
+      }
+      if (needsRetry) {
+        const res = await supabase
+          .from('customer_tickets')
+          .insert([dbPayload])
+          .select()
+          .single();
+        data = res.data;
+        error = res.error;
+      }
     }
 
     if (error) {
@@ -570,6 +580,60 @@ export const customerTicketsService = {
       publicUrl: publicData.publicUrl,
       filePath: fileName,
       bucket: bucketName
+    };
+  },
+
+  // ==========================================
+  // CUSTOM COURIER PARTNER MANAGEMENT SERVICES
+  // ==========================================
+  async getCustomCourierPartners(): Promise<CustomCourierPartnerRecord[]> {
+    const { data, error } = await supabase
+      .from('ticket_courier_partners')
+      .select('*')
+      .eq('active', true)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.warn('Could not fetch ticket_courier_partners:', error.message);
+      return [];
+    }
+
+    return (data || []).map((d: any) => ({
+      id: d.id,
+      name: d.name,
+      description: d.description,
+      active: d.active,
+      created_at: d.created_at
+    }));
+  },
+
+  async addCustomCourierPartner(name: string, description?: string): Promise<CustomCourierPartnerRecord> {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error('Courier Partner name is required');
+
+    const { data, error } = await supabase
+      .from('ticket_courier_partners')
+      .insert([{
+        name: trimmedName,
+        description: description?.trim() || null
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      const errStr = (error.message || '') + (error.details || '') + (error.code || '');
+      if (error.code === '23505' || errStr.toLowerCase().includes('unique') || errStr.toLowerCase().includes('duplicate')) {
+        throw new Error(`Courier Partner "${trimmedName}" already exists.`);
+      }
+      throw error;
+    }
+
+    return {
+      id: data.id,
+      name: data.name,
+      description: data.description,
+      active: data.active,
+      created_at: data.created_at
     };
   }
 };
