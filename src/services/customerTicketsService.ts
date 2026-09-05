@@ -15,13 +15,13 @@ const mapToDb = (ticket: Partial<CustomerTicket>) => {
   if (ticket.phoneNumber !== undefined) dbObj.phone_number = ticket.phoneNumber;
   if (ticket.orderId !== undefined) dbObj.order_id = ticket.orderId;
   if (ticket.orderDate !== undefined) dbObj.order_date = normalizeDate(ticket.orderDate);
-  if (ticket.awbNumber !== undefined) dbObj.awb_number = ticket.awbNumber;
-  if (ticket.courierPartner !== undefined) dbObj.courier_partner = ticket.courierPartner;
-  if (ticket.state !== undefined) dbObj.state = ticket.state;
-  if (ticket.city !== undefined) dbObj.city = ticket.city;
+  if (ticket.awbNumber !== undefined) dbObj.awb_number = ticket.awbNumber?.trim() || null;
+  if (ticket.courierPartner !== undefined) dbObj.courier_partner = ticket.courierPartner?.trim() || null;
+  if (ticket.state !== undefined) dbObj.state = ticket.state?.trim() || null;
+  if (ticket.city !== undefined) dbObj.city = ticket.city?.trim() || null;
   if (ticket.issueType !== undefined) dbObj.issue_type = ticket.issueType;
-  if (ticket.subIssue !== undefined) dbObj.sub_issue = ticket.subIssue;
-  if (ticket.issueDescription !== undefined) dbObj.issue_description = ticket.issueDescription;
+  if (ticket.subIssue !== undefined) dbObj.sub_issue = ticket.subIssue?.trim() || null;
+  if (ticket.issueDescription !== undefined) dbObj.issue_description = ticket.issueDescription?.trim() || null;
   if (ticket.priority !== undefined) dbObj.priority = ticket.priority;
   if (ticket.status !== undefined) dbObj.status = ticket.status;
   if (ticket.createdAt !== undefined) dbObj.created_at = normalizeDate(ticket.createdAt);
@@ -168,33 +168,11 @@ export const customerTicketsService = {
       updatedAt: now
     });
 
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('customer_tickets')
       .insert([dbPayload])
       .select()
       .single();
-
-    // Safe fallback handling if remote schema lacks sub_issue or qr_image_url columns
-    if (error && error.message) {
-      let needsRetry = false;
-      if (error.message.includes('qr_image_url')) {
-        delete dbPayload.qr_image_url;
-        needsRetry = true;
-      }
-      if (error.message.includes('sub_issue')) {
-        delete dbPayload.sub_issue;
-        needsRetry = true;
-      }
-      if (needsRetry) {
-        const res = await supabase
-          .from('customer_tickets')
-          .insert([dbPayload])
-          .select()
-          .single();
-        data = res.data;
-        error = res.error;
-      }
-    }
 
     if (error) {
       const errStr = (error.message || '') + (error.details || '') + (error.code || '');
