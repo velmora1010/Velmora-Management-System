@@ -123,8 +123,17 @@ export const COMBINATION_PRODUCTS_MAP: Record<string, string[]> = {
   '5-6 Products': []
 };
 
+export const isVideoLabel = (name?: string | null): boolean => {
+  if (!name || typeof name !== 'string') return true;
+  const clean = name.trim().toLowerCase();
+  if (!clean) return true;
+  if (/^video\s*\d+/i.test(clean)) return true;
+  if (clean === 'unmapped') return true;
+  return false;
+};
+
 export const parseProductsFromCombination = (combStr: string): string[] => {
-  if (!combStr || combStr === '5-6 Products') return [];
+  if (!combStr || combStr === '5-6 Products' || isVideoLabel(combStr)) return [];
   
   const normComb = formatDisplayCombination(combStr);
 

@@ -10,7 +10,7 @@ import { ImportPostDateModal } from '../../components/marketing/ImportPostDateMo
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
-import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, calculateDraftDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination } from './AddCampaignInfluencer';
+import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, calculateDraftDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination, isVideoLabel } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
@@ -477,84 +477,101 @@ City: ${influencer.city}`;
           )}
 
           {activeTab === 'products' && (() => {
-            const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
+            const rawExplicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
+            const validExplicitProducts = rawExplicitProducts.filter((p: any) => p && !isVideoLabel(p.product_name || p.name));
+            
             const pricingVideos = Array.isArray(influencer.pricing?.product_pricing?.videos) 
-              ? influencer.pricing.product_pricing.videos.filter((v: any) => v && (v.combination || v.name))
+              ? influencer.pricing.product_pricing.videos 
               : [];
 
-            if (explicitProducts.length > 0) {
-              return (
-                <div className="space-y-4">
-                  {Object.entries(explicitProducts.reduce((acc, curr) => {
-                    const vNum = curr.video_number || 1;
-                    if (!acc[vNum]) acc[vNum] = [];
-                    acc[vNum].push(curr);
-                    return acc;
-                  }, {} as Record<number, any[]>)).map(([vNum, prods]) => (
-                    <div key={vNum} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
-                      <h5 className="text-xs font-semibold text-purple-300 mb-2 border-b border-slate-700 pb-1">Video {vNum} Products</h5>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {(prods || []).map((p: any, idx: number) => (
-                           <div key={idx} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700">
-                             <div className="flex items-center gap-2">
-                               <div className={`w-2 h-2 rounded-full ${p.selected ? 'bg-emerald-400' : 'bg-slate-600'}`}></div>
-                               <span className={`text-xs ${p.selected ? 'text-slate-200' : 'text-slate-500 line-through'}`}>{formatDisplayProductName(p.product_name)}</span>
-                             </div>
-                             <span className="text-xs text-slate-400">Qty: {p.qty}</span>
-                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              );
+            let totalV = Math.max(
+              pricingVideos.length,
+              Number(influencer.pricing?.total_videos) || 0,
+              validExplicitProducts.length > 0 ? Math.max(...validExplicitProducts.map((p: any) => Number(p.video_number) || 1)) : 0,
+              rawExplicitProducts.length > 0 ? Math.max(...rawExplicitProducts.map((p: any) => Number(p.video_number) || 1)) : 0
+            );
+
+            if (totalV <= 0 && (pricingVideos.length > 0 || validExplicitProducts.length > 0)) {
+              totalV = 1;
             }
 
-            if (pricingVideos.length > 0) {
-              return (
-                <div className="space-y-4">
-                  {pricingVideos.map((v: any, idx: number) => {
-                    const rawCombName = v.combination || v.name || `Video ${idx + 1}`;
-                    const combName = formatDisplayCombination(rawCombName);
-                    const explicitProds = Array.isArray(v.products) && v.products.length > 0 ? v.products : [];
-                    const parsedProdNames = parseProductsFromCombination(rawCombName);
-                    const amt = v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0;
+            if (totalV === 0) {
+              return <div className="text-slate-500 italic">No products selected.</div>;
+            }
 
-                    const displayProducts = explicitProds.length > 0 
-                      ? explicitProds.map((p: any) => ({ name: formatDisplayProductName(p.product_name || p.name), qty: p.qty || 1 }))
-                      : parsedProdNames.map(pName => ({ name: formatDisplayProductName(pName), qty: 1 }));
+            return (
+              <div className="space-y-4">
+                {Array.from({ length: totalV }, (_, idx) => {
+                  const vNum = idx + 1;
+                  const vPricing = pricingVideos[idx] || {};
+                  const amt = vPricing.amount !== undefined && vPricing.amount !== null ? Number(vPricing.amount) : 0;
 
-                    return (
-                      <div key={idx} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
-                        <div className="flex justify-between items-center mb-2 border-b border-slate-700 pb-1">
-                          <h5 className="text-xs font-semibold text-purple-300">
-                            Video {idx + 1} ({combName})
-                          </h5>
-                          {amt > 0 && (
-                            <span className="text-xs font-mono font-bold text-purple-300">
-                              ₹{amt.toLocaleString()}
-                            </span>
-                          )}
-                        </div>
+                  // 1. Try explicit products for this video number first
+                  const explicitForVideo = validExplicitProducts.filter((p: any) => Number(p.video_number) === vNum);
+                  let videoProds: { name: string; qty: number; selected?: boolean }[] = [];
+
+                  if (explicitForVideo.length > 0) {
+                    videoProds = explicitForVideo.map((p: any) => ({
+                      name: formatDisplayProductName(p.product_name || p.name),
+                      qty: Number(p.qty) || 1,
+                      selected: p.selected !== false
+                    }));
+                  } else if (Array.isArray(vPricing.products) && vPricing.products.length > 0) {
+                    const validVP = vPricing.products.filter((p: any) => !isVideoLabel(p.product_name || p.name));
+                    if (validVP.length > 0) {
+                      videoProds = validVP.map((p: any) => ({
+                        name: formatDisplayProductName(p.product_name || p.name),
+                        qty: Number(p.qty) || 1,
+                        selected: true
+                      }));
+                    }
+                  }
+
+                  // 2. Fallback to combination parsing for this video
+                  if (videoProds.length === 0) {
+                    const rawCombName = vPricing.combination || (vPricing.name && !isVideoLabel(vPricing.name) ? vPricing.name : '');
+                    if (rawCombName && !isVideoLabel(rawCombName)) {
+                      const parsedNames = parseProductsFromCombination(rawCombName);
+                      videoProds = parsedNames.map(pName => ({
+                        name: formatDisplayProductName(pName),
+                        qty: 1,
+                        selected: true
+                      }));
+                    }
+                  }
+
+                  return (
+                    <div key={vNum} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
+                      <div className="flex justify-between items-center mb-2 border-b border-slate-700 pb-1">
+                        <h5 className="text-xs font-semibold text-purple-300">
+                          Video {vNum} Products
+                        </h5>
+                        {amt > 0 && (
+                          <span className="text-xs font-mono font-bold text-purple-300">
+                            ₹{amt.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      {videoProds.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {displayProducts.map((p: any, pIdx: number) => (
+                          {videoProds.map((p, pIdx) => (
                             <div key={pIdx} className="flex justify-between items-center bg-slate-900 p-2.5 rounded border border-slate-700">
                               <div className="flex items-center gap-2">
-                                <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
-                                <span className="text-xs text-slate-200 font-medium">{formatDisplayProductName(p.name)}</span>
+                                <div className={`w-2 h-2 rounded-full ${p.selected !== false ? 'bg-emerald-400' : 'bg-slate-600'}`}></div>
+                                <span className={`text-xs ${p.selected !== false ? 'text-slate-200 font-medium' : 'text-slate-500 line-through'}`}>{p.name}</span>
                               </div>
                               <span className="text-xs text-slate-400">Qty: {p.qty}</span>
                             </div>
                           ))}
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            }
-
-            return <div className="text-slate-500 italic">No products selected.</div>;
+                      ) : (
+                        <div className="text-xs text-slate-500 italic">Product not assigned</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
           })()}
 
           {activeTab === 'performance' && (
