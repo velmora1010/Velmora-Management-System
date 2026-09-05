@@ -126,7 +126,7 @@ const renderAgreementPage = (
   let cleanText = item.agreementText
     .replace(/\*/g, '')
     .replace(/₹/g, 'Rs. ')
-    .replace(/Video\s+(\d):\s*(\d{1,2}\s+[A-Za-z]{3,4})(?!\s+\d{4})/gi, (match, vNum, datePart) => {
+    .replace(/Video\s+(\d+):\s*(\d{1,2}\s+[A-Za-z]{3,4})(?!\s+\d{4})/gi, (match, vNum, datePart) => {
       return `Video ${vNum}: ${datePart} 2026`;
     });
 
@@ -138,24 +138,28 @@ const renderAgreementPage = (
     // Extract publishing dates specifically from after YOUR ASSIGNED PUBLISHING DATES header
     const pubDates: Record<number, string> = {};
     const lines = afterPub.split('\n');
-    lines.forEach(l => {
-      const match = l.match(/Video\s+(\d+):\s*(.*)/i);
+    for (const l of lines) {
+      const trimmedLine = l.trim();
+      if (trimmedLine.startsWith('These are your assigned') || trimmedLine.startsWith('DRAFT & APPROVAL') || trimmedLine.startsWith('PAYMENT & COMMERCIAL TERMS')) {
+        break;
+      }
+      const match = trimmedLine.match(/^Video\s+(\d+):\s*(.*)/i);
       if (match) {
         const vNum = parseInt(match[1], 10);
         const val = match[2].trim();
-        if (val && val !== '—' && val !== '-') {
+        if (val && val !== '—' && val !== '-' && !val.toLowerCase().startsWith('payment')) {
           pubDates[vNum] = val;
         }
       }
-    });
+    }
 
     const videoNumbers = Object.keys(pubDates).map(Number).sort((a, b) => a - b);
     if (videoNumbers.length > 0) {
       const draftLines: string[] = [];
       videoNumbers.forEach(v => {
         const pubDate = pubDates[v];
-        const draftDate = pubDate ? calculateDraftDate(pubDate) : '';
-        draftLines.push(draftDate ? `Video ${v}: ${draftDate}` : `Video ${v}:`);
+        const draftDate = (pubDate && pubDate !== 'Not assigned') ? calculateDraftDate(pubDate) : 'Not assigned';
+        draftLines.push(`Video ${v}: ${draftDate || 'Not assigned'}`);
       });
 
       const draftBlockText = `YOUR ASSIGNED DRAFT DATES\n\n${draftLines.join('\n')}\n\n`;

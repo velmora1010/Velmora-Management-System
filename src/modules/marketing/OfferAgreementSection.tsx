@@ -201,7 +201,9 @@ export const getInfluencerVideoDetails = (influencer: CampaignInfluencer): Video
     }
 
     // 3. Resolve post & draft dates for video i
-    const pdFound = postDates.find((pd: any) => Number(pd.video_number) === i);
+    const pdFound = postDates.find((pd: any) => Number(pd.video_number) === i) || 
+      (postDates[i - 1] && (Number(postDates[i - 1].video_number) === i || !postDates[i - 1].video_number) ? postDates[i - 1] : undefined);
+    
     let pubDate = '';
     let draftDate = '';
 
@@ -211,10 +213,15 @@ export const getInfluencerVideoDetails = (influencer: CampaignInfluencer): Video
       }
       if (pdFound.draft_date && typeof pdFound.draft_date === 'string' && pdFound.draft_date.trim()) {
         draftDate = formatAgreementDate(pdFound.draft_date);
-      } else if (pubDate) {
-        draftDate = calculateDraftDate(pubDate);
       }
     }
+
+    if (!draftDate && pubDate) {
+      draftDate = calculateDraftDate(pubDate);
+    }
+
+    if (!pubDate) pubDate = 'Not assigned';
+    if (!draftDate) draftDate = pubDate !== 'Not assigned' ? calculateDraftDate(pubDate) : 'Not assigned';
 
     result.push({
       videoNumber: i,
