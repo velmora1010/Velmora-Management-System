@@ -137,29 +137,36 @@ const renderAgreementPage = (
 
     // Extract publishing dates specifically from after YOUR ASSIGNED PUBLISHING DATES header
     const pubDates: Record<number, string> = {};
-    for (let v = 1; v <= 6; v++) {
-      const match = afterPub.match(new RegExp(`Video\\s+${v}:\\s*([^\\n]+)`));
-      if (match && match[1] && match[1].trim()) {
-        pubDates[v] = match[1].trim();
+    const lines = afterPub.split('\n');
+    lines.forEach(l => {
+      const match = l.match(/Video\s+(\d+):\s*(.*)/i);
+      if (match) {
+        const vNum = parseInt(match[1], 10);
+        const val = match[2].trim();
+        if (val && val !== '—' && val !== '-') {
+          pubDates[vNum] = val;
+        }
       }
-    }
+    });
 
-    // Build draft date lines (Pub Date - 3 days)
-    const draftLines: string[] = [];
-    for (let v = 1; v <= 6; v++) {
-      const pubDate = pubDates[v];
-      const draftDate = pubDate ? calculateDraftDate(pubDate) : '';
-      draftLines.push(draftDate ? `Video ${v}: ${draftDate}` : `Video ${v}:`);
-    }
+    const videoNumbers = Object.keys(pubDates).map(Number).sort((a, b) => a - b);
+    if (videoNumbers.length > 0) {
+      const draftLines: string[] = [];
+      videoNumbers.forEach(v => {
+        const pubDate = pubDates[v];
+        const draftDate = pubDate ? calculateDraftDate(pubDate) : '';
+        draftLines.push(draftDate ? `Video ${v}: ${draftDate}` : `Video ${v}:`);
+      });
 
-    const draftBlockText = `YOUR ASSIGNED DRAFT DATES\n\n${draftLines.join('\n')}\n\n`;
+      const draftBlockText = `YOUR ASSIGNED DRAFT DATES\n\n${draftLines.join('\n')}\n\n`;
 
-    if (cleanText.includes('YOUR ASSIGNED DRAFT DATES')) {
-      const topPart = cleanText.split('YOUR ASSIGNED DRAFT DATES')[0];
-      cleanText = `${topPart}${draftBlockText}YOUR ASSIGNED PUBLISHING DATES${afterPub}`;
-    } else {
-      const beforePub = parts[0];
-      cleanText = `${beforePub}${draftBlockText}YOUR ASSIGNED PUBLISHING DATES${afterPub}`;
+      if (cleanText.includes('YOUR ASSIGNED DRAFT DATES')) {
+        const topPart = cleanText.split('YOUR ASSIGNED DRAFT DATES')[0];
+        cleanText = `${topPart}${draftBlockText}YOUR ASSIGNED PUBLISHING DATES${afterPub}`;
+      } else {
+        const beforePub = parts[0];
+        cleanText = `${beforePub}${draftBlockText}YOUR ASSIGNED PUBLISHING DATES${afterPub}`;
+      }
     }
   }
 

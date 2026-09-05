@@ -6,7 +6,7 @@ import { naturalSortCompare } from '../../config/skuMapping';
 import { generateSingleOfferAgreementPDF, generateCombinedOfferAgreementPDF } from '../../utils/generateOfferAgreementPDF';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
-import { formatDisplayDate } from './AddCampaignInfluencer';
+import { formatDisplayDate, formatDisplayCombination } from './AddCampaignInfluencer';
 import { isActiveStatus } from '../../utils/marketingUtils';
 
 export interface StoredAgreement {
@@ -87,6 +87,7 @@ export const formatAgreementDate = (dateStr: string | null | undefined): string 
 
   return trimmed;
 };
+
 export const calculateDraftDate = (dateStr: string | null | undefined): string => {
   if (!dateStr || !dateStr.trim()) return '';
   const formatted = formatAgreementDate(dateStr);
@@ -114,110 +115,216 @@ export const calculateDraftDate = (dateStr: string | null | undefined): string =
   return `${d} ${mName} ${y}`;
 };
 
+export interface VideoDetailItem {
+  videoNumber: number;
+  productName: string;
+  amount: number;
+  pubDate: string;
+  draftDate: string;
+}
+
+export const getInfluencerVideoDetails = (influencer: CampaignInfluencer): VideoDetailItem[] => {
+  const pricing = (influencer.pricing as any) || {};
+  const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
+  const postDates = Array.isArray(influencer.postDates) ? influencer.postDates : [];
+
+  let videosList: any[] = [];
+  if (Array.isArray(pricing.product_pricing?.videos) && pricing.product_pricing.videos.length > 0) {
+    videosList = pricing.product_pricing.videos;
+  }
+
+  // Determine total video count dynamically from influencer single source of truth
+  let totalV = videosList.length;
+
+  if (totalV === 0 && pricing.total_videos) {
+    totalV = Number(pricing.total_videos) || 0;
+  }
+  if (totalV === 0 && (pricing as any).video_count) {
+    totalV = Number((pricing as any).video_count) || 0;
+  }
+  if (totalV === 0 && postDates.length > 0) {
+    const maxPd = Math.max(...postDates.map((pd: any) => Number(pd.video_number) || 0));
+    if (maxPd > 0) totalV = maxPd;
+  }
+  if (totalV === 0 && explicitProducts.length > 0) {
+    const maxEp = Math.max(...explicitProducts.map((p: any) => Number(p.video_number) || 0));
+    if (maxEp > 0) totalV = maxEp;
+  }
+
+  if (totalV <= 0) {
+    totalV = 1;
+  }
+
+  const result: VideoDetailItem[] = [];
+
+  for (let i = 1; i <= totalV; i++) {
+    const v = videosList[i - 1] || {};
+
+    // 1. Resolve product name for video i
+    let prodName = '';
+    const rawComb = v.combination || (v.name && !v.name.toLowerCase().startsWith('video') ? v.name : null);
+
+    if (rawComb && !rawComb.toLowerCase().startsWith('video') && rawComb !== '5-6 Products') {
+      prodName = formatDisplayCombination(rawComb);
+    } else if (Array.isArray(v.products) && v.products.length > 0) {
+      const validProds = v.products
+        .map((p: any) => p.product_name || p.name)
+        .filter((n: string) => n && typeof n === 'string' && !n.toLowerCase().startsWith('video'));
+      if (validProds.length > 0) {
+        prodName = formatDisplayCombination(validProds.join(' + '));
+      }
+    }
+
+    if (!prodName) {
+      const prodsForVideo = explicitProducts
+        .filter((p: any) => Number(p.video_number) === i)
+        .map((p: any) => p.product_name || p.name)
+        .filter((n: string) => n && typeof n === 'string' && !n.toLowerCase().startsWith('video'));
+      if (prodsForVideo.length > 0) {
+        prodName = formatDisplayCombination(prodsForVideo.join(' + '));
+      }
+    }
+
+    if (!prodName) {
+      if (i === 1) prodName = 'Kitchen Cleaner';
+      else if (i === 2) prodName = 'Brass, Bronze & Copper Cleaner (BBC Cleaner)';
+      else if (i === 3) prodName = 'Detergent + Dishwash';
+      else prodName = 'Products will be updated later.';
+    }
+
+    // 2. Resolve amount for video i
+    let amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
+    if (isNaN(amt) || amt <= 0) {
+      if (i === 1 && pricing.video1_price) amt = Number(pricing.video1_price) || 0;
+      else if (i === 2 && pricing.video2_price) amt = Number(pricing.video2_price) || 0;
+      else if (pricing.final_price) amt = Math.round(Number(pricing.final_price) / totalV);
+    }
+
+    // 3. Resolve post & draft dates for video i
+    const pdFound = postDates.find((pd: any) => Number(pd.video_number) === i);
+    let pubDate = '';
+    let draftDate = '';
+
+    if (pdFound) {
+      if (pdFound.post_date && typeof pdFound.post_date === 'string' && pdFound.post_date.trim()) {
+        pubDate = formatAgreementDate(pdFound.post_date);
+      }
+      if (pdFound.draft_date && typeof pdFound.draft_date === 'string' && pdFound.draft_date.trim()) {
+        draftDate = formatAgreementDate(pdFound.draft_date);
+      } else if (pubDate) {
+        draftDate = calculateDraftDate(pubDate);
+      }
+    }
+
+    result.push({
+      videoNumber: i,
+      productName: prodName,
+      amount: isNaN(amt) ? 0 : amt,
+      pubDate,
+      draftDate
+    });
+  }
+
+  return result;
+};
+
+export const isAgreementStale = (
+  storedAg: StoredAgreement | undefined,
+  influencer: CampaignInfluencer
+): boolean => {
+  if (!storedAg || !storedAg.agreement_text) return true;
+
+  const currentVideos = getInfluencerVideoDetails(influencer);
+  const currentCount = currentVideos.length;
+  const text = storedAg.agreement_text;
+
+  // 1. Check if agreement text mentions a different total video count
+  const matchCount = text.match(/total of (\d+) video/i);
+  if (matchCount && parseInt(matchCount[1], 10) !== currentCount) {
+    return true;
+  }
+
+  // 2. Check if agreement text lists videos beyond current video count (e.g. Video 3: when currentCount is 2)
+  for (let v = currentCount + 1; v <= currentCount + 10; v++) {
+    if (text.includes(`Video ${v}:`)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 export const buildAgreementText = (
   influencer: CampaignInfluencer,
   campaignName: string
 ): string => {
+  const videoDetails = getInfluencerVideoDetails(influencer);
+  const numVideos = videoDetails.length;
+
   const rawUser = (influencer.influencer_name || (influencer as any).username || influencer.name || '').trim();
   const cleanUsername = rawUser ? rawUser.replace(/^@+/, '') : '';
 
-  // Extract per-video price from pricing info
-  const pricing = (influencer.pricing as any) || {};
+  // Extract per-video price
   let videoPrice = 0;
-
-  if (Array.isArray(pricing.product_pricing?.videos) && pricing.product_pricing.videos.length > 0) {
-    for (const v of pricing.product_pricing.videos) {
-      const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
-      if (!isNaN(amt) && amt > 0) {
-        videoPrice = amt;
-        break;
-      }
+  for (const v of videoDetails) {
+    if (v.amount > 0) {
+      videoPrice = v.amount;
+      break;
     }
   }
-
-  if (videoPrice === 0) {
-    if (pricing.video1_price) {
-      const v1 = Number(pricing.video1_price);
-      if (!isNaN(v1) && v1 > 0) videoPrice = v1;
-    } else if (pricing.video2_price) {
-      const v2 = Number(pricing.video2_price);
-      if (!isNaN(v2) && v2 > 0) videoPrice = v2;
-    }
-  }
-
-  if (videoPrice === 0 && pricing.final_price) {
-    const totalV = Number(pricing.total_videos) || 6;
-    const calc = Math.round(Number(pricing.final_price) / (totalV > 0 ? totalV : 6));
-    if (!isNaN(calc) && calc > 0) videoPrice = calc;
-  }
-
   const formattedPrice = videoPrice > 0 ? `₹${videoPrice.toLocaleString('en-IN')} ` : '';
 
-  // Extract assigned products per video
-  const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
-  let video1Prod = 'Kitchen Cleaner';
-  let video2Prod = 'Brass, Bronze & Copper Cleaner (BBC Cleaner)';
-  let video3Prod = 'Detergent + Dishwash';
+  const greetingLine = cleanUsername ? `Hi ${cleanUsername},` : 'Hi,';
+  const videoWord = numVideos === 1 ? '1 video' : `${numVideos} videos`;
 
-  if (explicitProducts.length > 0) {
-    const v1 = explicitProducts.filter((p: any) => p.video_number === 1).map((p: any) => p.product_name || p.name).filter(Boolean);
-    const v2 = explicitProducts.filter((p: any) => p.video_number === 2).map((p: any) => p.product_name || p.name).filter(Boolean);
-    const v3 = explicitProducts.filter((p: any) => p.video_number === 3).map((p: any) => p.product_name || p.name).filter(Boolean);
-    if (v1.length > 0) video1Prod = v1.join(' + ');
-    if (v2.length > 0) video2Prod = v2.join(' + ');
-    if (v3.length > 0) video3Prod = v3.join(' + ');
+  // Dynamic Product plan lines
+  const productPlanLines = videoDetails.map(v => `Video ${v.videoNumber}: ${v.productName}`);
+  
+  let dispatchSentence = '';
+  if (numVideos <= 3) {
+    if (numVideos === 1) {
+      dispatchSentence = 'Products for Video 1 will be dispatched now.';
+    } else {
+      dispatchSentence = `Products for Videos 1–${numVideos} will be dispatched now.`;
+    }
+  } else {
+    dispatchSentence = `Products for Videos 1–3 will be dispatched now. Products for Videos 4–${numVideos} will be confirmed and dispatched separately.`;
   }
 
-  // Extract assigned post dates and calculate draft dates (Pub Date - 3 days)
-  const postDates = Array.isArray(influencer.postDates) ? influencer.postDates : [];
-  const getDateStr = (vNum: number) => {
-    const found = postDates.find((pd: any) => pd.video_number === vNum);
-    if (found && found.post_date && typeof found.post_date === 'string' && found.post_date.trim()) {
-      return formatAgreementDate(found.post_date);
-    }
-    return '';
-  };
+  // Dynamic Draft date lines
+  const draftDateLines = videoDetails.map(v => `Video ${v.videoNumber}: ${v.draftDate}`);
 
-  const getDraftDateStr = (vNum: number) => {
-    const pubDate = getDateStr(vNum);
-    if (!pubDate) return '';
-    return calculateDraftDate(pubDate);
-  };
+  // Dynamic Publishing date lines
+  const pubDateLines = videoDetails.map(v => `Video ${v.videoNumber}: ${v.pubDate}`);
 
-  const greetingLine = cleanUsername ? `Hi ${cleanUsername},` : 'Hi,';
+  // Dynamic Commercial / payment lines
+  let paymentLines = '';
+  if (numVideos === 1) {
+    paymentLines = '• Video 1: Payment will be made in advance after product delivery.';
+  } else {
+    const secondLineHeader = numVideos === 2 ? 'Video 2' : `Videos 2–${numVideos}`;
+    paymentLines = `• Video 1: Payment will be made in advance after product delivery.\n• ${secondLineHeader}: Payment for each Video will be made after the respective Draft is approved.`;
+  }
 
   return `${greetingLine}
 
 Greetings from Justmixx!
 
-We're happy to confirm your collaboration with us for a total of 6 videos as part of our 3-month Influencer Campaign.
+We're happy to confirm your collaboration with us for a total of ${videoWord} as part of our 3-month Influencer Campaign.
 
 PRODUCT PLAN
 
-Video 1: ${video1Prod}
-Video 2: ${video2Prod}
-Video 3: ${video3Prod}
-Videos 4–6: Products will be updated later.
+${productPlanLines.join('\n')}
 
-Products for Videos 1–3 will be dispatched now. Products for Videos 4–6 will be confirmed and dispatched separately.
+${dispatchSentence}
 
 YOUR ASSIGNED DRAFT DATES
 
-Video 1: ${getDraftDateStr(1)}
-Video 2: ${getDraftDateStr(2)}
-Video 3: ${getDraftDateStr(3)}
-Video 4: ${getDraftDateStr(4)}
-Video 5: ${getDraftDateStr(5)}
-Video 6: ${getDraftDateStr(6)}
+${draftDateLines.join('\n')}
 
 YOUR ASSIGNED PUBLISHING DATES
 
-Video 1: ${getDateStr(1)}
-Video 2: ${getDateStr(2)}
-Video 3: ${getDateStr(3)}
-Video 4: ${getDateStr(4)}
-Video 5: ${getDateStr(5)}
-Video 6: ${getDateStr(6)}
+${pubDateLines.join('\n')}
 
 These are your assigned Publishing Dates. Please plan the content accordingly.
 
@@ -229,13 +336,12 @@ DRAFT & APPROVAL
 
 PAYMENT & COMMERCIAL TERMS
 
-• Video 1: Payment will be made in advance after product delivery.
-• Videos 2–6: Payment for each Video will be made after the respective Draft is approved.
-• The commercial amount already agreed ${formattedPrice}will remain the same for all 6 videos and cannot be increased during the collaboration period.
+${paymentLines}
+• The commercial amount already agreed ${formattedPrice}will remain the same for all ${videoWord} and cannot be increased during the collaboration period.
 
 The Publishing Dates are planned in advance for our overall campaign. If there is any unavoidable issue, please inform our team in advance.
 
-By proceeding with the collaboration and accepting the products, you confirm your acceptance of the 6-video schedule, payment terms and agreed commercials.
+By proceeding with the collaboration and accepting the products, you confirm your acceptance of the ${numVideos}-video schedule, payment terms and agreed commercials.
 
 Looking forward to a smooth and successful collaboration!
 
@@ -325,13 +431,51 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       // Supabase table fallback
     }
 
+    // 3. Auto-sync stale agreements with current influencer single source of truth
+    for (const inf of influencers) {
+      const infId = String(inf.id);
+      const ag = map[infId];
+      if (ag && isAgreementStale(ag, inf)) {
+        console.log(`[OfferAgreement AUTO-SYNC] Stale agreement detected for ${inf.code || infId}. Auto-regenerating...`);
+        const freshText = buildAgreementText(inf, campaign.campaign_name);
+        const videoDetails = getInfluencerVideoDetails(inf);
+        const updatedAg: StoredAgreement = {
+          ...ag,
+          price_per_video: getVideoPrice(inf),
+          publishing_dates: videoDetails.map(v => ({ video_number: v.videoNumber, post_date: v.pubDate })),
+          draft_dates: videoDetails.map(v => ({ video_number: v.videoNumber, draft_date: v.draftDate })),
+          agreement_text: freshText,
+          updated_at: new Date().toISOString()
+        };
+        map[infId] = updatedAg;
+        // Persist updated agreement
+        try {
+          const payload = {
+            campaign_id: updatedAg.campaign_id,
+            influencer_id: updatedAg.influencer_id,
+            influencer_code: updatedAg.influencer_code,
+            username: updatedAg.username,
+            price_per_video: updatedAg.price_per_video,
+            agreement_price: updatedAg.price_per_video,
+            publishing_dates: updatedAg.publishing_dates || null,
+            draft_dates: updatedAg.draft_dates || null,
+            agreement_text: updatedAg.agreement_text,
+            generated_at: updatedAg.generated_at,
+            updated_at: updatedAg.updated_at
+          };
+          await supabase.from('offer_agreements').upsert([payload], { onConflict: 'campaign_id,influencer_id' });
+          await supabase.from(SUPABASE_TABLES.offerAgreements).upsert([payload], { onConflict: 'campaign_id,influencer_id' });
+        } catch (e) {}
+      }
+    }
+
     setAgreementsMap(map);
     setIsLoading(false);
   };
 
   useEffect(() => {
     loadAgreements();
-  }, [campaign.id]);
+  }, [campaign.id, influencers]);
 
   // Save Agreement Helper
   const persistAgreement = async (agreement: StoredAgreement) => {
@@ -386,8 +530,36 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     }
     if (pricing.video1_price) return Number(pricing.video1_price) || 0;
     if (pricing.video2_price) return Number(pricing.video2_price) || 0;
-    if (pricing.final_price) return Math.round(Number(pricing.final_price) / (Number(pricing.total_videos) || 6));
+    if (pricing.final_price) return Math.round(Number(pricing.final_price) / (Number(pricing.total_videos) || 1));
     return 0;
+  };
+
+  const getOrRefreshAgreement = async (inf: CampaignInfluencer): Promise<StoredAgreement> => {
+    const infId = String(inf.id);
+    let ag = agreementsMap[infId];
+
+    if (!ag || isAgreementStale(ag, inf)) {
+      const price = getVideoPrice(inf);
+      const text = buildAgreementText(inf, campaign.campaign_name);
+      const videoDetails = getInfluencerVideoDetails(inf);
+
+      ag = {
+        campaign_id: campaign.id,
+        influencer_id: inf.id,
+        influencer_code: inf.code || (inf as any).influencer_code || '',
+        username: inf.influencer_name || (inf as any).username || inf.name || '',
+        price_per_video: price,
+        publishing_dates: videoDetails.map(v => ({ video_number: v.videoNumber, post_date: v.pubDate })),
+        draft_dates: videoDetails.map(v => ({ video_number: v.videoNumber, draft_date: v.draftDate })),
+        agreement_text: text,
+        generated_at: ag?.generated_at || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      await persistAgreement(ag);
+    }
+
+    return ag;
   };
 
   // Generate Agreement for a set of influencers
@@ -406,17 +578,9 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       const price = getVideoPrice(inf);
       const text = buildAgreementText(inf, campaign.campaign_name);
 
-      const postDates = Array.isArray(inf.postDates) ? inf.postDates : [];
-      const pubDatesList: any[] = [];
-      const draftDatesList: any[] = [];
-
-      for (let v = 1; v <= 6; v++) {
-        const found = postDates.find((pd: any) => pd.video_number === v);
-        const pDate = (found && found.post_date && typeof found.post_date === 'string') ? formatAgreementDate(found.post_date) : '';
-        const dDate = pDate ? calculateDraftDate(pDate) : '';
-        if (pDate) pubDatesList.push({ video_number: v, post_date: pDate });
-        if (dDate) draftDatesList.push({ video_number: v, draft_date: dDate });
-      }
+      const videoDetails = getInfluencerVideoDetails(inf);
+      const pubDatesList = videoDetails.map(v => ({ video_number: v.videoNumber, post_date: v.pubDate }));
+      const draftDatesList = videoDetails.map(v => ({ video_number: v.videoNumber, draft_date: v.draftDate }));
 
       const record: StoredAgreement = {
         campaign_id: campaign.id,
@@ -476,19 +640,18 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
   };
 
   // Combined PDF download
-  const handleDownloadCombinedPDF = () => {
+  const handleDownloadCombinedPDF = async () => {
     const selectedList = generatedInfluencers.filter(inf => selectedIds.has(inf.id) || selectedIds.size === 0);
-    const pdfItems = selectedList
-      .filter(inf => agreementsMap[String(inf.id)])
-      .map(inf => {
-        const ag = agreementsMap[String(inf.id)];
-        return {
-          influencerCode: ag.influencer_code,
-          username: ag.username,
-          pricePerVideo: ag.price_per_video,
-          agreementText: ag.agreement_text
-        };
+    const pdfItems: any[] = [];
+    for (const inf of selectedList) {
+      const ag = await getOrRefreshAgreement(inf);
+      pdfItems.push({
+        influencerCode: ag.influencer_code,
+        username: ag.username,
+        pricePerVideo: ag.price_per_video,
+        agreementText: ag.agreement_text
       });
+    }
 
     if (pdfItems.length === 0) {
       toast.error('No generated agreements found to download. Generate an agreement first.');
@@ -500,23 +663,8 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
   };
 
   // Open Text Viewer/Editor Modal
-  const handleOpenTextModal = (inf: CampaignInfluencer) => {
-    const infId = String(inf.id);
-    let ag = agreementsMap[infId];
-    if (!ag) {
-      const price = getVideoPrice(inf);
-      const text = buildAgreementText(inf, campaign.campaign_name);
-      ag = {
-        campaign_id: campaign.id,
-        influencer_id: inf.id,
-        influencer_code: inf.code || (inf as any).influencer_code || '',
-        username: inf.influencer_name || (inf as any).username || inf.name || '',
-        price_per_video: price,
-        agreement_text: text,
-        generated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-    }
+  const handleOpenTextModal = async (inf: CampaignInfluencer) => {
+    const ag = await getOrRefreshAgreement(inf);
     setTextModalItem({ influencer: inf, agreement: ag });
     setEditingText(ag.agreement_text);
     setIsEditingMode(false);
@@ -540,23 +688,8 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     toast.success('Agreement text copied to clipboard!');
   };
 
-  const handleSinglePDFDownload = (inf: CampaignInfluencer) => {
-    const infId = String(inf.id);
-    let ag = agreementsMap[infId];
-    if (!ag) {
-      const price = getVideoPrice(inf);
-      const text = buildAgreementText(inf, campaign.campaign_name);
-      ag = {
-        campaign_id: campaign.id,
-        influencer_id: inf.id,
-        influencer_code: inf.code || (inf as any).influencer_code || '',
-        username: inf.influencer_name || (inf as any).username || inf.name || '',
-        price_per_video: price,
-        agreement_text: text,
-        generated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-    }
+  const handleSinglePDFDownload = async (inf: CampaignInfluencer) => {
+    const ag = await getOrRefreshAgreement(inf);
     generateSingleOfferAgreementPDF(campaign.campaign_name, {
       influencerCode: ag.influencer_code,
       username: ag.username,
@@ -578,16 +711,22 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     const localKey = `velmora_offer_agreements_${campaign.id}`;
 
     try {
-      // 1. Supabase delete query targeting offerAgreements table ONLY
-      const { error } = await supabase
-        .from(SUPABASE_TABLES.offerAgreements)
-        .delete()
-        .eq('campaign_id', campaign.id)
-        .eq('influencer_id', inf.id);
+      // 1. Supabase delete query targeting both offer_agreements tables
+      try {
+        await supabase
+          .from('offer_agreements')
+          .delete()
+          .eq('campaign_id', campaign.id)
+          .eq('influencer_id', inf.id);
+      } catch (e) {}
 
-      if (error) {
-        console.error('Supabase delete error:', error);
-      }
+      try {
+        await supabase
+          .from(SUPABASE_TABLES.offerAgreements)
+          .delete()
+          .eq('campaign_id', campaign.id)
+          .eq('influencer_id', inf.id);
+      } catch (e) {}
 
       // 2. Remove from localStorage
       try {
@@ -635,16 +774,22 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     const localKey = `velmora_offer_agreements_${campaign.id}`;
 
     try {
-      // 1. Execute Supabase bulk delete query targeting offerAgreements table ONLY
-      const { error } = await supabase
-        .from(SUPABASE_TABLES.offerAgreements)
-        .delete()
-        .eq('campaign_id', campaign.id)
-        .in('influencer_id', selectedInfIds);
+      // 1. Execute Supabase bulk delete query targeting both offer_agreements tables
+      try {
+        await supabase
+          .from('offer_agreements')
+          .delete()
+          .eq('campaign_id', campaign.id)
+          .in('influencer_id', selectedInfIds);
+      } catch (e) {}
 
-      if (error) {
-        console.error('Supabase bulk delete error:', error);
-      }
+      try {
+        await supabase
+          .from(SUPABASE_TABLES.offerAgreements)
+          .delete()
+          .eq('campaign_id', campaign.id)
+          .in('influencer_id', selectedInfIds);
+      } catch (e) {}
 
       // 2. Remove from localStorage
       try {
