@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, FileText, Copy, Edit2, Download, Eye, RefreshCcw, CheckSquare, Sparkles, X, Save, Trash2 } from 'lucide-react';
+import { Search, FileText, Copy, Edit2, Download, Eye, RefreshCcw, CheckSquare, Sparkles, X, Save, Trash2, ChevronDown, Check, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { naturalSortCompare } from '../../config/skuMapping';
 import { generateSingleOfferAgreementPDF, generateCombinedOfferAgreementPDF } from '../../utils/generateOfferAgreementPDF';
@@ -19,6 +19,7 @@ export interface StoredAgreement {
   publishing_dates?: any;
   draft_dates?: any;
   agreement_text: string;
+  mail_acceptance?: 'Accepted' | 'Not Accepted' | null;
   generated_at: string;
   updated_at: string;
 }
@@ -27,6 +28,8 @@ interface OfferAgreementSectionProps {
   campaign: Campaign;
   influencers: CampaignInfluencer[];
   onBackToList: () => void;
+  onOpenImportMailAcceptance?: () => void;
+  refreshTrigger?: number;
 }
 
 export const formatAgreementDate = (dateStr: string | null | undefined): string => {
@@ -321,10 +324,94 @@ Team Justmixx
 Velmora Consumer Products LLP`;
 };
 
+// Helper to extract video price
+export const getVideoPrice = (inf: CampaignInfluencer): number => {
+  const pricing = (inf.pricing as any) || {};
+  if (Array.isArray(pricing.product_pricing?.videos)) {
+    for (const v of pricing.product_pricing.videos) {
+      const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
+      if (!isNaN(amt) && amt > 0) return amt;
+    }
+  }
+  if (pricing.video1_price) return Number(pricing.video1_price) || 0;
+  if (pricing.video2_price) return Number(pricing.video2_price) || 0;
+  if (pricing.final_price) return Math.round(Number(pricing.final_price) / (Number(pricing.total_videos) || 1));
+  return 0;
+};
+
+// Exported standalone persistence helper for Offer Agreements & Mail Acceptance
+export const persistSingleAgreement = async (
+  campaignId: string | number,
+  agreement: StoredAgreement
+): Promise<void> => {
+  const infId = String(agreement.influencer_id);
+  const localKey = `velmora_offer_agreements_${campaignId}`;
+
+  // 1. Update localStorage
+  try {
+    const raw = localStorage.getItem(localKey);
+    const parsed = raw ? JSON.parse(raw) : {};
+    parsed[infId] = agreement;
+    localStorage.setItem(localKey, JSON.stringify(parsed));
+  } catch (e) {
+    console.error('Failed to update localStorage:', e);
+  }
+
+  // 2. Draft dates with metadata fallback for database persistence
+  let draftDatesWithMeta = agreement.draft_dates;
+  if (Array.isArray(draftDatesWithMeta)) {
+    const cleanList = draftDatesWithMeta.filter((d: any) => !d?.__mail_acceptance);
+    if (agreement.mail_acceptance) {
+      cleanList.push({ __mail_acceptance: agreement.mail_acceptance });
+    }
+    draftDatesWithMeta = cleanList;
+  } else if (draftDatesWithMeta && typeof draftDatesWithMeta === 'object') {
+    draftDatesWithMeta = { ...draftDatesWithMeta, __mail_acceptance: agreement.mail_acceptance || null };
+  } else if (agreement.mail_acceptance) {
+    draftDatesWithMeta = [{ __mail_acceptance: agreement.mail_acceptance }];
+  }
+
+  const payloadWithCol: any = {
+    campaign_id: agreement.campaign_id,
+    influencer_id: agreement.influencer_id,
+    influencer_code: agreement.influencer_code,
+    username: agreement.username,
+    price_per_video: agreement.price_per_video,
+    agreement_price: agreement.price_per_video,
+    publishing_dates: agreement.publishing_dates || null,
+    draft_dates: draftDatesWithMeta || null,
+    agreement_text: agreement.agreement_text,
+    mail_acceptance: agreement.mail_acceptance || null,
+    generated_at: agreement.generated_at,
+    updated_at: agreement.updated_at
+  };
+
+  try {
+    const { error } = await supabase
+      .from('offer_agreements')
+      .upsert([payloadWithCol], { onConflict: 'campaign_id,influencer_id' });
+
+    if (error) {
+      const { mail_acceptance, ...payloadWithoutCol } = payloadWithCol;
+      await supabase
+        .from('offer_agreements')
+        .upsert([payloadWithoutCol], { onConflict: 'campaign_id,influencer_id' });
+
+      await supabase
+        .from(SUPABASE_TABLES.offerAgreements)
+        .upsert([payloadWithoutCol], { onConflict: 'campaign_id,influencer_id' });
+    }
+  } catch (e) {
+    console.error('persistSingleAgreement db error:', e);
+  }
+};
+
 export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
   campaign,
   influencers,
-  onBackToList
+  onBackToList,
+  onOpenImportMailAcceptance,
+  refreshTrigger
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [agreementsMap, setAgreementsMap] = useState<Record<string, StoredAgreement>>({});
@@ -334,6 +421,11 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
   const [textModalItem, setTextModalItem] = useState<{ influencer: CampaignInfluencer; agreement: StoredAgreement } | null>(null);
   const [editingText, setEditingText] = useState('');
   const [isEditingMode, setIsEditingMode] = useState(false);
+
+  // Mail Acceptance filter state: 'all' | 'Accepted' | 'Not Accepted' | 'not_set'
+  const [acceptanceFilter, setAcceptanceFilter] = useState<'all' | 'Accepted' | 'Not Accepted' | 'not_set'>('all');
+  // Interactive popover state for inline editing
+  const [activeAcceptanceDropdownId, setActiveAcceptanceDropdownId] = useState<string | null>(null);
 
   // Filter ALL Active Influencers
   const activeInfluencers = useMemo(() => {
@@ -380,6 +472,27 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
         const dbMap: Record<string, StoredAgreement> = {};
         data.forEach((row: any) => {
           const infId = String(row.influencer_id);
+
+          let mailAcceptance: 'Accepted' | 'Not Accepted' | null = null;
+          if (row.mail_acceptance === 'Accepted' || row.mail_acceptance === 'Not Accepted') {
+            mailAcceptance = row.mail_acceptance;
+          } else if (row.draft_dates) {
+            if (Array.isArray(row.draft_dates)) {
+              const meta = row.draft_dates.find((d: any) => d && d.__mail_acceptance);
+              if (meta && (meta.__mail_acceptance === 'Accepted' || meta.__mail_acceptance === 'Not Accepted')) {
+                mailAcceptance = meta.__mail_acceptance;
+              }
+            } else if (typeof row.draft_dates === 'object' && row.draft_dates.__mail_acceptance) {
+              mailAcceptance = row.draft_dates.__mail_acceptance;
+            }
+          }
+
+          // Merge local cache if newer
+          const localAg = map[infId];
+          if (!mailAcceptance && localAg?.mail_acceptance) {
+            mailAcceptance = localAg.mail_acceptance;
+          }
+
           dbMap[infId] = {
             id: row.id,
             campaign_id: row.campaign_id,
@@ -390,6 +503,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
             publishing_dates: row.publishing_dates || null,
             draft_dates: row.draft_dates || null,
             agreement_text: row.agreement_text,
+            mail_acceptance: mailAcceptance,
             generated_at: row.generated_at || row.created_at,
             updated_at: row.updated_at
           };
@@ -414,26 +528,13 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
           publishing_dates: videoDetails.map(v => ({ video_number: v.videoNumber, post_date: v.pubDate })),
           draft_dates: videoDetails.map(v => ({ video_number: v.videoNumber, draft_date: v.draftDate })),
           agreement_text: freshText,
+          mail_acceptance: ag.mail_acceptance || null,
           updated_at: new Date().toISOString()
         };
         map[infId] = updatedAg;
         // Persist updated agreement
         try {
-          const payload = {
-            campaign_id: updatedAg.campaign_id,
-            influencer_id: updatedAg.influencer_id,
-            influencer_code: updatedAg.influencer_code,
-            username: updatedAg.username,
-            price_per_video: updatedAg.price_per_video,
-            agreement_price: updatedAg.price_per_video,
-            publishing_dates: updatedAg.publishing_dates || null,
-            draft_dates: updatedAg.draft_dates || null,
-            agreement_text: updatedAg.agreement_text,
-            generated_at: updatedAg.generated_at,
-            updated_at: updatedAg.updated_at
-          };
-          await supabase.from('offer_agreements').upsert([payload], { onConflict: 'campaign_id,influencer_id' });
-          await supabase.from(SUPABASE_TABLES.offerAgreements).upsert([payload], { onConflict: 'campaign_id,influencer_id' });
+          await persistSingleAgreement(campaign.id, updatedAg);
         } catch (e) {}
       }
     }
@@ -444,63 +545,40 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
   useEffect(() => {
     loadAgreements();
-  }, [campaign.id, influencers]);
+  }, [campaign.id, influencers, refreshTrigger]);
 
   // Save Agreement Helper
   const persistAgreement = async (agreement: StoredAgreement) => {
     const infId = String(agreement.influencer_id);
-    const localKey = `velmora_offer_agreements_${campaign.id}`;
-
-    // Update local state & localStorage immediately
-    setAgreementsMap(prev => {
-      const next = { ...prev, [infId]: agreement };
-      try {
-        localStorage.setItem(localKey, JSON.stringify(next));
-      } catch (e) {}
-      return next;
-    });
-
-    const payload = {
-      campaign_id: agreement.campaign_id,
-      influencer_id: agreement.influencer_id,
-      influencer_code: agreement.influencer_code,
-      username: agreement.username,
-      price_per_video: agreement.price_per_video,
-      agreement_price: agreement.price_per_video,
-      publishing_dates: agreement.publishing_dates || null,
-      draft_dates: agreement.draft_dates || null,
-      agreement_text: agreement.agreement_text,
-      generated_at: agreement.generated_at,
-      updated_at: agreement.updated_at
-    };
-
-    // Upsert to offer_agreements table, with fallback to SUPABASE_TABLES.offerAgreements
-    try {
-      const { error } = await supabase
-        .from('offer_agreements')
-        .upsert([payload], { onConflict: 'campaign_id,influencer_id' });
-
-      if (error) {
-        await supabase
-          .from(SUPABASE_TABLES.offerAgreements)
-          .upsert([payload], { onConflict: 'campaign_id,influencer_id' });
-      }
-    } catch (e) {}
+    setAgreementsMap(prev => ({ ...prev, [infId]: agreement }));
+    await persistSingleAgreement(campaign.id, agreement);
   };
 
-  // Helper to extract video price
-  const getVideoPrice = (inf: CampaignInfluencer): number => {
-    const pricing = (inf.pricing as any) || {};
-    if (Array.isArray(pricing.product_pricing?.videos)) {
-      for (const v of pricing.product_pricing.videos) {
-        const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
-        if (!isNaN(amt) && amt > 0) return amt;
-      }
+  const handleUpdateMailAcceptance = async (inf: CampaignInfluencer, status: 'Accepted' | 'Not Accepted' | null) => {
+    const infId = String(inf.id);
+    const code = inf.code || (inf as any).influencer_code || inf.name || '';
+    let ag = agreementsMap[infId];
+
+    if (!ag) {
+      ag = await getOrRefreshAgreement(inf);
     }
-    if (pricing.video1_price) return Number(pricing.video1_price) || 0;
-    if (pricing.video2_price) return Number(pricing.video2_price) || 0;
-    if (pricing.final_price) return Math.round(Number(pricing.final_price) / (Number(pricing.total_videos) || 1));
-    return 0;
+
+    const updated: StoredAgreement = {
+      ...ag,
+      mail_acceptance: status,
+      updated_at: new Date().toISOString()
+    };
+
+    await persistAgreement(updated);
+    setActiveAcceptanceDropdownId(null);
+
+    if (status === 'Accepted') {
+      toast.success(`Mail acceptance for ${code} set to Accepted 🟢`);
+    } else if (status === 'Not Accepted') {
+      toast.error(`Mail acceptance for ${code} set to Not Accepted 🔴`);
+    } else {
+      toast(`Mail acceptance for ${code} set to Not Set`, { icon: '⚪' });
+    }
   };
 
   const getOrRefreshAgreement = async (inf: CampaignInfluencer): Promise<StoredAgreement> => {
@@ -521,6 +599,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
         publishing_dates: videoDetails.map(v => ({ video_number: v.videoNumber, post_date: v.pubDate })),
         draft_dates: videoDetails.map(v => ({ video_number: v.videoNumber, draft_date: v.draftDate })),
         agreement_text: text,
+        mail_acceptance: ag?.mail_acceptance || null,
         generated_at: ag?.generated_at || new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -576,17 +655,48 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
     return activeInfluencers.filter(inf => !!agreementsMap[String(inf.id)]);
   }, [activeInfluencers, agreementsMap]);
 
-  // Filtered by search term
+  // Counts for Mail Acceptance filter badges
+  const acceptanceCounts = useMemo(() => {
+    let accepted = 0;
+    let notAccepted = 0;
+    let notSet = 0;
+
+    generatedInfluencers.forEach(inf => {
+      const acc = agreementsMap[String(inf.id)]?.mail_acceptance;
+      if (acc === 'Accepted') accepted++;
+      else if (acc === 'Not Accepted') notAccepted++;
+      else notSet++;
+    });
+
+    return {
+      all: generatedInfluencers.length,
+      accepted,
+      notAccepted,
+      notSet
+    };
+  }, [generatedInfluencers, agreementsMap]);
+
+  // Filtered by mail acceptance filter AND search term
   const filteredInfluencers = useMemo(() => {
-    if (!searchTerm.trim()) return generatedInfluencers;
+    let list = generatedInfluencers;
+
+    if (acceptanceFilter === 'Accepted') {
+      list = list.filter(inf => agreementsMap[String(inf.id)]?.mail_acceptance === 'Accepted');
+    } else if (acceptanceFilter === 'Not Accepted') {
+      list = list.filter(inf => agreementsMap[String(inf.id)]?.mail_acceptance === 'Not Accepted');
+    } else if (acceptanceFilter === 'not_set') {
+      list = list.filter(inf => !agreementsMap[String(inf.id)]?.mail_acceptance);
+    }
+
+    if (!searchTerm.trim()) return list;
     const term = searchTerm.trim().toLowerCase();
-    return generatedInfluencers.filter(inf => {
+    return list.filter(inf => {
       const code = (inf.code || (inf as any).influencer_code || '').toLowerCase();
       const name = (inf.name || '').toLowerCase();
       const username = (inf.influencer_name || (inf as any).username || '').toLowerCase();
       return code.includes(term) || username.includes(term) || name.includes(term);
     });
-  }, [generatedInfluencers, searchTerm]);
+  }, [generatedInfluencers, acceptanceFilter, searchTerm, agreementsMap]);
 
   // Bulk Selection Handlers
   const handleToggleSelect = (id: string | number) => {
@@ -813,6 +923,16 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
         {/* Global Action Toolbar */}
         <div className="flex items-center gap-2 flex-wrap">
+          {onOpenImportMailAcceptance && (
+            <button
+              onClick={onOpenImportMailAcceptance}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-purple-300 border border-purple-500/30 hover:border-purple-500/60 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+              title="Upload Mail Acceptance Spreadsheet (.xlsx, .xls, .csv)"
+            >
+              <Upload size={13} className="text-purple-400" /> Upload Mail Acceptance
+            </button>
+          )}
+
           {selectedIds.size > 0 && (
             <button
               onClick={() => {
@@ -835,20 +955,73 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
         </div>
       </div>
 
-      {/* Search & Selection Bar */}
-      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/80 flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="relative w-full sm:w-80">
-          <input
-            type="text"
-            placeholder="Search by username or influencer code..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-          />
-          <Search size={15} className="absolute left-3 top-2.5 text-slate-500" />
+      {/* Search & Filter & Selection Bar */}
+      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/80 flex flex-col lg:flex-row items-center justify-between gap-3">
+        <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full lg:w-auto">
+          <div className="relative w-full sm:w-72">
+            <input
+              type="text"
+              placeholder="Search by username or influencer code..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+            />
+            <Search size={14} className="absolute left-3 top-2.5 text-slate-500" />
+          </div>
+
+          {/* Mail Acceptance Filter Buttons */}
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 w-full sm:w-auto overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setAcceptanceFilter('all')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                acceptanceFilter === 'all'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              All ({acceptanceCounts.all})
+            </button>
+            <button
+              type="button"
+              onClick={() => setAcceptanceFilter('Accepted')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                acceptanceFilter === 'Accepted'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-emerald-400/80 hover:text-emerald-300 hover:bg-slate-800'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              Accepted ({acceptanceCounts.accepted})
+            </button>
+            <button
+              type="button"
+              onClick={() => setAcceptanceFilter('Not Accepted')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                acceptanceFilter === 'Not Accepted'
+                  ? 'bg-rose-600 text-white shadow-sm'
+                  : 'text-rose-400/80 hover:text-rose-300 hover:bg-slate-800'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+              Not Accepted ({acceptanceCounts.notAccepted})
+            </button>
+            <button
+              type="button"
+              onClick={() => setAcceptanceFilter('not_set')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                acceptanceFilter === 'not_set'
+                  ? 'bg-slate-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+              Not Set ({acceptanceCounts.notSet})
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 w-full lg:w-auto justify-between lg:justify-end">
           <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-300 select-none">
             <input
               type="checkbox"
@@ -888,7 +1061,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
             <p className="text-sm font-semibold text-slate-400">
               {generatedInfluencers.length === 0 
                 ? 'No generated offer agreements found.' 
-                : `No offer agreements found matching "${searchTerm}".`}
+                : `No offer agreements found matching current filters.`}
             </p>
             {generatedInfluencers.length === 0 && (
               <p className="text-xs text-slate-500 max-w-md text-center">
@@ -902,16 +1075,18 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
               <thead>
                 <tr className="bg-slate-900/90 text-slate-300 text-xs font-bold border-b border-slate-700 uppercase tracking-wider">
                   {selectedIds.size > 0 && <th className="p-3 w-10 text-center">Select</th>}
-                  <th className="p-3 w-32">Code</th>
+                  <th className="p-3 w-28">Code</th>
                   <th className="p-3">Username</th>
-                  <th className="p-3 w-48 text-center">Text Format</th>
-                  <th className="p-3 w-44 text-center">PDF Format</th>
+                  <th className="p-3 w-44 text-center">Mail Acceptance</th>
+                  <th className="p-3 w-44 text-center">Text Format</th>
+                  <th className="p-3 w-40 text-center">PDF Format</th>
                   <th className="p-3 w-20 text-center">Delete</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/60 text-xs">
                 {filteredInfluencers.map((inf) => {
                   const infId = String(inf.id);
+                  const ag = agreementsMap[infId];
                   const code = inf.code || (inf as any).influencer_code || '';
                   const user = inf.influencer_name || (inf as any).username || inf.name || '';
                   const cleanUser = user ? (user.startsWith('@') ? user : `@${user}`) : '';
@@ -939,6 +1114,88 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
                       <td className="p-3 font-semibold text-slate-200">
                         {cleanUser || <span className="text-slate-500 font-normal italic">—</span>}
+                      </td>
+
+                      {/* Mail Acceptance Column */}
+                      <td className="p-3 text-center relative">
+                        <div className="inline-block text-left">
+                          <button
+                            type="button"
+                            onClick={() => setActiveAcceptanceDropdownId(activeAcceptanceDropdownId === infId ? null : infId)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer shadow-sm ${
+                              ag?.mail_acceptance === 'Accepted'
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                                : ag?.mail_acceptance === 'Not Accepted'
+                                ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
+                                : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:border-slate-600'
+                            }`}
+                            title="Click to toggle Mail Acceptance status"
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              ag?.mail_acceptance === 'Accepted'
+                                ? 'bg-emerald-400'
+                                : ag?.mail_acceptance === 'Not Accepted'
+                                ? 'bg-rose-400'
+                                : 'bg-slate-500'
+                            }`} />
+                            <span>{ag?.mail_acceptance || 'Not Set'}</span>
+                            <ChevronDown size={12} className="opacity-60 ml-0.5" />
+                          </button>
+
+                          {activeAcceptanceDropdownId === infId && (
+                            <>
+                              <div 
+                                className="fixed inset-0 z-40" 
+                                onClick={() => setActiveAcceptanceDropdownId(null)} 
+                              />
+                              <div className="absolute left-1/2 -translate-x-1/2 mt-1 w-36 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 text-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateMailAcceptance(inf, 'Accepted')}
+                                  className={`w-full text-left px-3 py-1.5 flex items-center justify-between hover:bg-emerald-950/40 text-emerald-400 transition-colors cursor-pointer ${
+                                    ag?.mail_acceptance === 'Accepted' ? 'bg-emerald-950/20 font-bold' : ''
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                    Accepted
+                                  </span>
+                                  {ag?.mail_acceptance === 'Accepted' && <Check size={12} />}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateMailAcceptance(inf, 'Not Accepted')}
+                                  className={`w-full text-left px-3 py-1.5 flex items-center justify-between hover:bg-rose-950/40 text-rose-400 transition-colors cursor-pointer ${
+                                    ag?.mail_acceptance === 'Not Accepted' ? 'bg-rose-950/20 font-bold' : ''
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                                    Not Accepted
+                                  </span>
+                                  {ag?.mail_acceptance === 'Not Accepted' && <Check size={12} />}
+                                </button>
+
+                                <div className="my-1 border-t border-slate-800" />
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateMailAcceptance(inf, null)}
+                                  className={`w-full text-left px-3 py-1.5 flex items-center justify-between hover:bg-slate-800 text-slate-400 transition-colors cursor-pointer ${
+                                    !ag?.mail_acceptance ? 'bg-slate-800/40 font-bold' : ''
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                                    Not Set
+                                  </span>
+                                  {!ag?.mail_acceptance && <Check size={12} />}
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </td>
 
                       <td className="p-3 text-center">

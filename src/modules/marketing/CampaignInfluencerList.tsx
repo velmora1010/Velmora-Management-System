@@ -19,6 +19,7 @@ import { CampaignInfluencerAnalyticsFilterDrawer, CampaignAnalyticsFilterState, 
 import { buildPickListRecords, PickListInfluencerRecord } from '../../config/skuMapping';
 import { generatePickListPDF } from '../../utils/generatePickListPDF';
 import { SingleInfluencerPickListModal } from '../../components/marketing/SingleInfluencerPickListModal';
+import { ImportMailAcceptanceModal } from '../../components/marketing/ImportMailAcceptanceModal';
 import { OfferAgreementSection, buildAgreementText, StoredAgreement } from './OfferAgreementSection';
 
 const resolvePerformanceCode = (
@@ -797,6 +798,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
   const [isImportPricingModalOpen, setIsImportPricingModalOpen] = useState(false);
   const [isImportPostDateModalOpen, setIsImportPostDateModalOpen] = useState(false);
+  const [isImportMailAcceptanceModalOpen, setIsImportMailAcceptanceModalOpen] = useState(false);
+  const [offerAgreementRefreshTrigger, setOfferAgreementRefreshTrigger] = useState(0);
   const [targetUploadCode, setTargetUploadCode] = useState<string | undefined>();
   const [activeEditInfluencer, setActiveEditInfluencer] = useState<CampaignInfluencer | null>(null);
   const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false);
@@ -1386,6 +1389,19 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                   <Upload size={13} className="text-purple-400" />
                   <span>Post Date</span>
                 </button>
+
+                {mainViewMode === 'offer_agreement' && (
+                  <button 
+                    onClick={() => {
+                      setIsUploadDropdownOpen(false);
+                      setIsImportMailAcceptanceModalOpen(true);
+                    }}
+                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-purple-600 hover:text-white flex items-center gap-2 transition-colors cursor-pointer border-t border-slate-700/60"
+                  >
+                    <Upload size={13} className="text-purple-400" />
+                    <span>Mail Acceptance</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1397,6 +1413,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           campaign={campaign}
           influencers={influencers}
           onBackToList={() => setMainViewMode('list')}
+          onOpenImportMailAcceptance={() => setIsImportMailAcceptanceModalOpen(true)}
+          refreshTrigger={offerAgreementRefreshTrigger}
         />
       ) : mainViewMode === 'analytics' ? (
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
@@ -1805,6 +1823,19 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           onClose={() => setIsImportPostDateModalOpen(false)}
           onSuccess={async () => {
             setIsImportPostDateModalOpen(false);
+            await refresh();
+          }}
+        />
+      )}
+
+      {isImportMailAcceptanceModalOpen && (
+        <ImportMailAcceptanceModal
+          campaign={campaign}
+          existingInfluencers={influencers}
+          onClose={() => setIsImportMailAcceptanceModalOpen(false)}
+          onSuccess={async () => {
+            setIsImportMailAcceptanceModalOpen(false);
+            setOfferAgreementRefreshTrigger(prev => prev + 1);
             await refresh();
           }}
         />
