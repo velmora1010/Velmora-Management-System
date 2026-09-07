@@ -14,15 +14,9 @@ import {
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { logActivity } from '../../services/activityService';
+import { offerAgreementService } from '../../services/offerAgreementService';
 import toast from 'react-hot-toast';
 import { isActiveStatus } from '../../utils/marketingUtils';
-import { 
-  StoredAgreement, 
-  buildAgreementText, 
-  getVideoPrice, 
-  getInfluencerVideoDetails,
-  persistSingleAgreement 
-} from '../../modules/marketing/OfferAgreementSection';
 
 interface ImportMailAcceptanceModalProps {
   campaign: Campaign;
@@ -264,57 +258,94 @@ export const ImportMailAcceptanceModal: React.FC<ImportMailAcceptanceModalProps>
     setIsSaving(true);
 
     try {
-      const localKey = `velmora_offer_agreements_${campaign.id}`;
-      let agreementsMap: Record<string, StoredAgreement> = {};
-      try {
-        const stored = localStorage.getItem(localKey);
-        if (stored) agreementsMap = JSON.parse(stored);
-      } catch (e) {}
+      // 1. Fetch current existing offer agreements for this campaign directly from Supabase
+      const existingAgreements = await offerAgreementService.getAgreements(campaign.id);
 
-      let updatedCount = 0;
+      // Create lookup maps by influencer_id and normalized influencer_code
+      const idByInfId = new Map<string, string>();
+      const idByCode = new Map<string, string>();
+
+      existingAgreements.forEach(ag => {
+        if (ag.influencer_id) {
+          idByInfId.set(String(ag.influencer_id), ag.id);
+        }
+        if (ag.influencer_code) {
+          idByCode.set(normCode(ag.influencer_code), ag.id);
+        }
+      });
+
+      // 2. Prepare updates for matching rows with existing agreements
+      const updatesList: Array<{
+        id?: string;
+        influencerId?: string | number;
+        influencerCode?: string;
+        mailAcceptance: 'Accepted' | 'Not Accepted';
+      }> = [];
 
       for (const row of willUpdateRows) {
         const inf = row.matchedInfluencer;
         if (!inf || !row.normalizedAcceptance) continue;
 
         const infId = String(inf.id);
-        let agreement = agreementsMap[infId];
+        const code = row.code || inf.code || (inf as any).influencer_code || '';
+        const nCode = normCode(code);
 
-        if (agreement) {
-          // Update existing agreement with acceptance status
-          agreement = {
-            ...agreement,
-            mail_acceptance: row.normalizedAcceptance,
-            updated_at: new Date().toISOString()
-          };
-        } else {
-          // Construct fresh agreement
-          const price = getVideoPrice(inf);
-          const text = buildAgreementText(inf, campaign.campaign_name);
-          const videoDetails = getInfluencerVideoDetails(inf);
+        // Matching priority:
+        // 1. Existing offer_agreements.id
+        // 2. Existing influencer ID
+        // 3. Influencer Code
+        const existingId = idByInfId.get(infId) || idByCode.get(nCode);
 
-          agreement = {
-            campaign_id: campaign.id,
-            influencer_id: inf.id,
-            influencer_code: inf.code || (inf as any).influencer_code || row.code,
-            username: inf.influencer_name || (inf as any).username || inf.name || row.username,
-            price_per_video: price,
-            publishing_dates: videoDetails.map(v => ({ video_number: v.videoNumber, post_date: v.pubDate })),
-            draft_dates: videoDetails.map(v => ({ video_number: v.videoNumber, draft_date: v.draftDate })),
-            agreement_text: text,
-            mail_acceptance: row.normalizedAcceptance,
-            generated_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          };
+        // If the influencer does not have an existing Offer Agreement in this campaign:
+        // Rule 11: Do NOT create a new Offer Agreement.
+        if (!existingId && !idByInfId.has(infId) && !idByCode.has(nCode)) {
+          console.warn(`Skipping ${code} (${infId}): No existing Offer Agreement record in Supabase.`);
+          continue;
         }
 
-        // Persist to Supabase and localStorage
-        await persistSingleAgreement(campaign.id, agreement);
-        agreementsMap[infId] = agreement;
-        updatedCount++;
+        updatesList.push({
+          id: existingId,
+          influencerId: inf.id,
+          influencerCode: code,
+          mailAcceptance: row.normalizedAcceptance
+        });
       }
 
-      // Log Activity
+      if (updatesList.length === 0) {
+        toast.error('None of the matched influencers have existing Offer Agreement records in this campaign.');
+        setStep('preview');
+        setIsSaving(false);
+        return;
+      }
+
+      // 3. Perform batch update to Supabase offer_agreements table
+      const { updatedCount, errors } = await offerAgreementService.batchUpdateMailAcceptance(
+        campaign.id,
+        updatesList
+      );
+
+      if (errors.length > 0) {
+        console.warn(`Batch update encountered ${errors.length} error(s):`, errors);
+      }
+
+      // 4. Update localStorage cache if present so local cache mirrors database
+      try {
+        const localKey = `velmora_offer_agreements_${campaign.id}`;
+        const stored = localStorage.getItem(localKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          updatesList.forEach(u => {
+            const key = String(u.influencerId);
+            if (parsed[key]) {
+              parsed[key].mail_acceptance = u.mailAcceptance;
+              parsed[key].updated_at = new Date().toISOString();
+            }
+          });
+          localStorage.setItem(localKey, JSON.stringify(parsed));
+        }
+      } catch (e) {}
+
+      // 5. Log Activity
       try {
         logActivity(
           'Marketing',
@@ -327,7 +358,7 @@ export const ImportMailAcceptanceModal: React.FC<ImportMailAcceptanceModalProps>
       onSuccess();
     } catch (err: any) {
       console.error('Import error:', err);
-      toast.error('Failed to import mail acceptance records.');
+      toast.error('Failed to import mail acceptance records: ' + (err?.message || 'Unknown error'));
       setStep('preview');
     } finally {
       setIsSaving(false);

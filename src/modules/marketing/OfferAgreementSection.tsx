@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { formatDisplayDate, formatDisplayCombination, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
 import { isActiveStatus } from '../../utils/marketingUtils';
+import { offerAgreementService } from '../../services/offerAgreementService';
 
 export interface StoredAgreement {
   id?: string | number;
@@ -357,33 +358,25 @@ export const persistSingleAgreement = async (
     console.error('Failed to update localStorage:', e);
   }
 
-  // 2. Draft dates with metadata fallback for database persistence
-  let draftDatesWithMeta = agreement.draft_dates;
-  if (Array.isArray(draftDatesWithMeta)) {
-    const cleanList = draftDatesWithMeta.filter((d: any) => !d?.__mail_acceptance);
-    if (agreement.mail_acceptance) {
-      cleanList.push({ __mail_acceptance: agreement.mail_acceptance });
-    }
-    draftDatesWithMeta = cleanList;
-  } else if (draftDatesWithMeta && typeof draftDatesWithMeta === 'object') {
-    draftDatesWithMeta = { ...draftDatesWithMeta, __mail_acceptance: agreement.mail_acceptance || null };
-  } else if (agreement.mail_acceptance) {
-    draftDatesWithMeta = [{ __mail_acceptance: agreement.mail_acceptance }];
+  // 2. Draft dates clean list without metadata pollution
+  let cleanDraftDates = agreement.draft_dates;
+  if (Array.isArray(cleanDraftDates)) {
+    cleanDraftDates = cleanDraftDates.filter((d: any) => !d?.__mail_acceptance);
   }
 
   const payloadWithCol: any = {
-    campaign_id: agreement.campaign_id,
-    influencer_id: agreement.influencer_id,
+    campaign_id: String(agreement.campaign_id),
+    influencer_id: String(agreement.influencer_id),
     influencer_code: agreement.influencer_code,
     username: agreement.username,
     price_per_video: agreement.price_per_video,
     agreement_price: agreement.price_per_video,
     publishing_dates: agreement.publishing_dates || null,
-    draft_dates: draftDatesWithMeta || null,
+    draft_dates: cleanDraftDates || null,
     agreement_text: agreement.agreement_text,
-    mail_acceptance: agreement.mail_acceptance || null,
+    mail_acceptance: (agreement.mail_acceptance === 'Accepted' || agreement.mail_acceptance === 'Not Accepted') ? agreement.mail_acceptance : null,
     generated_at: agreement.generated_at,
-    updated_at: agreement.updated_at
+    updated_at: agreement.updated_at || new Date().toISOString()
   };
 
   try {
@@ -392,17 +385,10 @@ export const persistSingleAgreement = async (
       .upsert([payloadWithCol], { onConflict: 'campaign_id,influencer_id' });
 
     if (error) {
-      const { mail_acceptance, ...payloadWithoutCol } = payloadWithCol;
-      await supabase
-        .from('offer_agreements')
-        .upsert([payloadWithoutCol], { onConflict: 'campaign_id,influencer_id' });
-
-      await supabase
-        .from(SUPABASE_TABLES.offerAgreements)
-        .upsert([payloadWithoutCol], { onConflict: 'campaign_id,influencer_id' });
+      console.error('persistSingleAgreement db error:', error);
     }
   } catch (e) {
-    console.error('persistSingleAgreement db error:', e);
+    console.error('persistSingleAgreement db exception:', e);
   }
 };
 
@@ -491,25 +477,15 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
         data.forEach((row: any) => {
           const infId = String(row.influencer_id);
 
-          let mailAcceptance: 'Accepted' | 'Not Accepted' | null = null;
-          if (row.mail_acceptance === 'Accepted' || row.mail_acceptance === 'Not Accepted') {
-            mailAcceptance = row.mail_acceptance;
-          } else if (row.draft_dates) {
-            if (Array.isArray(row.draft_dates)) {
-              const meta = row.draft_dates.find((d: any) => d && d.__mail_acceptance);
-              if (meta && (meta.__mail_acceptance === 'Accepted' || meta.__mail_acceptance === 'Not Accepted')) {
-                mailAcceptance = meta.__mail_acceptance;
-              }
-            } else if (typeof row.draft_dates === 'object' && row.draft_dates.__mail_acceptance) {
-              mailAcceptance = row.draft_dates.__mail_acceptance;
-            }
-          }
+          // Supabase offer_agreements.mail_acceptance is the single source of truth
+          const mailAcceptance: 'Accepted' | 'Not Accepted' | null =
+            (row.mail_acceptance === 'Accepted' || row.mail_acceptance === 'Not Accepted')
+              ? row.mail_acceptance
+              : null;
 
-          // Merge local cache if newer
-          const localAg = map[infId];
-          if (!mailAcceptance && localAg?.mail_acceptance) {
-            mailAcceptance = localAg.mail_acceptance;
-          }
+          const cleanDraftDates = Array.isArray(row.draft_dates)
+            ? row.draft_dates.filter((d: any) => !d?.__mail_acceptance)
+            : row.draft_dates;
 
           dbMap[infId] = {
             id: row.id,
@@ -519,7 +495,7 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
             username: row.username,
             price_per_video: Number(row.price_per_video || row.agreement_price) || 0,
             publishing_dates: row.publishing_dates || null,
-            draft_dates: row.draft_dates || null,
+            draft_dates: cleanDraftDates || null,
             agreement_text: row.agreement_text,
             mail_acceptance: mailAcceptance,
             generated_at: row.generated_at || row.created_at,
@@ -575,27 +551,64 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
   const handleUpdateMailAcceptance = async (inf: CampaignInfluencer, status: 'Accepted' | 'Not Accepted' | null) => {
     const infId = String(inf.id);
     const code = inf.code || (inf as any).influencer_code || inf.name || '';
-    let ag = agreementsMap[infId];
+    const currentAg = agreementsMap[infId];
 
-    if (!ag) {
-      ag = await getOrRefreshAgreement(inf);
-    }
+    // 1. Optimistic UI update for instant visual feedback
+    setAgreementsMap(prev => {
+      const existing = prev[infId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [infId]: {
+          ...existing,
+          mail_acceptance: status,
+          updated_at: new Date().toISOString()
+        }
+      };
+    });
 
-    const updated: StoredAgreement = {
-      ...ag,
-      mail_acceptance: status,
-      updated_at: new Date().toISOString()
-    };
-
-    await persistAgreement(updated);
     setActiveAcceptanceDropdownId(null);
 
-    if (status === 'Accepted') {
-      toast.success(`Mail acceptance for ${code} set to Accepted 🟢`);
-    } else if (status === 'Not Accepted') {
-      toast.error(`Mail acceptance for ${code} set to Not Accepted 🔴`);
-    } else {
-      toast(`Mail acceptance for ${code} set to Not Set`, { icon: '⚪' });
+    try {
+      // 2. Persist to Supabase offer_agreements table via canonical service
+      await offerAgreementService.updateMailAcceptance(
+        {
+          id: currentAg?.id ? String(currentAg.id) : undefined,
+          campaignId: campaign.id,
+          influencerId: inf.id,
+          influencerCode: code
+        },
+        status
+      );
+
+      // 3. Keep local cache in sync if present
+      try {
+        const localKey = `velmora_offer_agreements_${campaign.id}`;
+        const stored = localStorage.getItem(localKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed[infId]) {
+            parsed[infId].mail_acceptance = status;
+            parsed[infId].updated_at = new Date().toISOString();
+            localStorage.setItem(localKey, JSON.stringify(parsed));
+          }
+        }
+      } catch (e) {}
+
+      if (status === 'Accepted') {
+        toast.success(`Mail acceptance for ${code} set to Accepted 🟢`);
+      } else if (status === 'Not Accepted') {
+        toast.error(`Mail acceptance for ${code} set to Not Accepted 🔴`);
+      } else {
+        toast(`Mail acceptance for ${code} set to Not Set`, { icon: '⚪' });
+      }
+    } catch (err: any) {
+      console.error('Failed to update mail_acceptance in Supabase:', err);
+      toast.error(`Failed to update database for ${code}: ${err?.message || 'Unknown error'}`);
+      // Revert optimistic update on failure
+      if (currentAg) {
+        setAgreementsMap(prev => ({ ...prev, [infId]: currentAg }));
+      }
     }
   };
 
