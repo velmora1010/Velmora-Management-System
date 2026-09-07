@@ -81,6 +81,12 @@ export const TicketList: React.FC<TicketListProps> = ({
     return matchesSearch && matchesStatus && matchesIssue && matchesDate;
   });
 
+  const formatAmount = (val?: number | null) => {
+    if (val === undefined || val === null || isNaN(Number(val))) return null;
+    const num = Number(val);
+    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
+  };
+
   const getStatusColor = (status: string) => {
     switch(status) {
       case 'Open': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
@@ -281,6 +287,11 @@ export const TicketList: React.FC<TicketListProps> = ({
                     <div>
                       <p className="text-muted text-xs mb-1">Order ID</p>
                       <p className="text-white font-medium">{ticket.orderId}</p>
+                      {ticket.amount !== undefined && ticket.amount !== null && (
+                        <p className="text-xs text-emerald-400 font-semibold mt-0.5">
+                          {formatAmount(ticket.amount)}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <p className="text-muted text-xs mb-1">Issue</p>
@@ -395,6 +406,14 @@ export const TicketList: React.FC<TicketListProps> = ({
                   <div>
                     <p className="text-xs text-muted">Order ID</p>
                     <p className="text-white font-medium">{viewingTicket.orderId}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted">Amount</p>
+                    <p className="text-white font-medium">
+                      {viewingTicket.amount !== undefined && viewingTicket.amount !== null
+                        ? formatAmount(viewingTicket.amount)
+                        : 'Not provided'}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs text-muted">Order Date</p>

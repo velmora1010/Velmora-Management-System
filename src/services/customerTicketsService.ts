@@ -30,6 +30,9 @@ const mapToDb = (ticket: Partial<CustomerTicket>) => {
   if (ticket.resolutionNotes !== undefined) dbObj.resolution_notes = ticket.resolutionNotes;
   if (ticket.internalNotes !== undefined) dbObj.internal_notes = ticket.internalNotes;
   if (ticket.qrImageUrl !== undefined) dbObj.qr_image_url = ticket.qrImageUrl || null;
+  if (ticket.amount !== undefined) {
+    dbObj.amount = ticket.amount !== null && !isNaN(Number(ticket.amount)) ? Number(ticket.amount) : null;
+  }
   return dbObj;
 };
 
@@ -55,7 +58,8 @@ const mapFromDb = (dbObj: any): CustomerTicket => {
     resolvedAt: dbObj.resolved_at || undefined,
     resolutionNotes: dbObj.resolution_notes,
     internalNotes: dbObj.internal_notes,
-    qrImageUrl: dbObj.qr_image_url || null
+    qrImageUrl: dbObj.qr_image_url || null,
+    amount: dbObj.amount !== undefined && dbObj.amount !== null ? Number(dbObj.amount) : undefined
   };
 };
 

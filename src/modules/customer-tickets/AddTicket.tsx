@@ -28,6 +28,7 @@ export const AddTicket = () => {
     orderId: '',
     orderDate: '',
     courierPartner: '',
+    amount: '',
     state: '',
     issueType: DEFAULT_ISSUE_TYPES[0] as IssueType,
     subIssue: '',
@@ -130,6 +131,13 @@ export const AddTicket = () => {
       if (value === '__ADD_COURIER__') { setModalCategoryType('courierPartner'); setShowAddCategoryModal(true); return; }
       setFormData(prev => ({ ...prev, courierPartner: value })); return;
     }
+    if (name === 'amount') {
+      const cleanVal = value.trim();
+      if (cleanVal === '' || /^\d*\.?\d*$/.test(cleanVal)) {
+        setFormData(prev => ({ ...prev, amount: cleanVal }));
+      }
+      return;
+    }
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
@@ -171,6 +179,17 @@ export const AddTicket = () => {
     if (hasSubOptions(formData.issueType, customSubIssuesMap) && !formData.subIssue.trim()) {
       toast.error(`Please select a ${getSubIssueLabel(formData.issueType).replace('*', '').trim()} option.`); return;
     }
+
+    let parsedAmount: number | null = null;
+    if (formData.amount.trim() !== '') {
+      const num = Number(formData.amount.trim());
+      if (isNaN(num) || num < 0) {
+        toast.error('Please enter a valid numeric amount.');
+        return;
+      }
+      parsedAmount = num;
+    }
+
     try {
       const { exists } = await customerTicketsService.checkOrderIdExists(trimmedOrderId);
       if (exists) {
@@ -199,6 +218,7 @@ export const AddTicket = () => {
         phoneNumber: formData.phoneNumber,
         orderId: trimmedOrderId,
         orderDate: formData.orderDate,
+        amount: parsedAmount,
         awbNumber: '',
         courierPartner: formData.courierPartner,
         state: formData.state,
@@ -305,6 +325,20 @@ export const AddTicket = () => {
                   <option disabled className="text-muted">──────────</option>
                   <option value="__ADD_COURIER__" className="text-primary font-semibold">+ Add</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-muted mb-1">Amount</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-2.5 text-muted text-sm font-semibold">₹</span>
+                  <input
+                    type="text"
+                    name="amount"
+                    value={formData.amount}
+                    onChange={handleChange}
+                    className="w-full bg-background border border-border rounded-xl pl-8 pr-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
+                    placeholder="Enter Amount"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-muted mb-1 flex items-center justify-between">
