@@ -55,6 +55,7 @@ export interface CustomerTicket {
   resolutionNotes?: string;
   internalNotes?: string;
   qrImageUrl?: string | null;
+  amount?: number | null;
 }
 
 export interface CustomIssueTypeRecord {

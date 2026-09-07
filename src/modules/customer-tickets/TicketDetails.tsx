@@ -16,9 +16,23 @@ export const TicketDetails = () => {
   const [issueType, setIssueType] = useState<IssueType>('Transport Issue');
   const [subIssue, setSubIssue] = useState<string>('');
   const [priority, setPriority] = useState<TicketPriority>('Low');
+  const [amount, setAmount] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const formatCurrency = (val?: number | null) => {
+    if (val === undefined || val === null || isNaN(Number(val))) return 'Not provided';
+    const num = Number(val);
+    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
+  };
+
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value.trim();
+    if (val === '' || /^\d*\.?\d*$/.test(val)) {
+      setAmount(val);
+    }
+  };
 
   // QR Image State
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
@@ -100,6 +114,7 @@ export const TicketDetails = () => {
       setIssueType(data.issueType || DEFAULT_ISSUE_TYPES[0]);
       setSubIssue(data.subIssue || '');
       setPriority(data.priority || 'Low');
+      setAmount(data.amount !== undefined && data.amount !== null ? String(data.amount) : '');
       setInternalNotes(data.internalNotes || '');
       setResolutionNotes(data.resolutionNotes || '');
       setQrImageUrl(data.qrImageUrl || null);
@@ -189,6 +204,16 @@ export const TicketDetails = () => {
       return;
     }
 
+    let parsedAmount: number | null = null;
+    if (amount.trim() !== '') {
+      const num = Number(amount.trim());
+      if (isNaN(num) || num < 0) {
+        toast.error('Please enter a valid numeric amount.');
+        return;
+      }
+      parsedAmount = num;
+    }
+
     try {
       setIsSubmitting(true);
       let finalQrUrl = qrImageUrl;
@@ -205,6 +230,7 @@ export const TicketDetails = () => {
         issueType,
         subIssue,
         priority,
+        amount: parsedAmount,
         internalNotes,
         resolutionNotes,
         qrImageUrl: finalQrUrl,
@@ -267,6 +293,10 @@ export const TicketDetails = () => {
               <div>
                 <p className="text-muted">Courier</p>
                 <p className="text-white font-medium">{ticket.courierPartner || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-muted">Amount</p>
+                <p className="text-white font-medium">{formatCurrency(ticket.amount)}</p>
               </div>
             </div>
           </Card>
@@ -399,6 +429,20 @@ export const TicketDetails = () => {
                   <option value="High">High</option>
                   <option value="Urgent">Urgent</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted mb-1">Amount</label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-2.5 text-muted text-sm font-semibold">₹</span>
+                  <input
+                    type="text"
+                    value={amount}
+                    onChange={handleAmountChange}
+                    className="w-full bg-background border border-border rounded-xl pl-8 pr-4 py-2.5 text-white focus:border-primary outline-none text-sm"
+                    placeholder="Enter Amount"
+                  />
+                </div>
               </div>
 
               <div>
