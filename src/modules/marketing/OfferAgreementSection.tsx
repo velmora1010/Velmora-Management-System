@@ -6,7 +6,7 @@ import { naturalSortCompare } from '../../config/skuMapping';
 import { generateSingleOfferAgreementPDF, generateCombinedOfferAgreementPDF } from '../../utils/generateOfferAgreementPDF';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
-import { formatDisplayDate, formatDisplayCombination } from './AddCampaignInfluencer';
+import { formatDisplayDate, formatDisplayCombination, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
 import { isActiveStatus } from '../../utils/marketingUtils';
 
 export interface StoredAgreement {
@@ -124,76 +124,30 @@ export interface VideoDetailItem {
 }
 
 export const getInfluencerVideoDetails = (influencer: CampaignInfluencer): VideoDetailItem[] => {
-  const pricing = (influencer.pricing as any) || {};
-  const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
+  const resolvedVideos = getInfluencerResolvedVideoProducts(influencer);
   const postDates = Array.isArray(influencer.postDates) ? influencer.postDates : [];
+  const pricing = (influencer.pricing as any) || {};
 
-  let videosList: any[] = [];
-  if (Array.isArray(pricing.product_pricing?.videos) && pricing.product_pricing.videos.length > 0) {
-    videosList = pricing.product_pricing.videos;
-  }
-
-  // Determine total video count dynamically from influencer single source of truth
-  let totalV = videosList.length;
-
-  if (totalV === 0 && pricing.total_videos) {
-    totalV = Number(pricing.total_videos) || 0;
-  }
-  if (totalV === 0 && (pricing as any).video_count) {
-    totalV = Number((pricing as any).video_count) || 0;
-  }
-  if (totalV === 0 && postDates.length > 0) {
-    const maxPd = Math.max(...postDates.map((pd: any) => Number(pd.video_number) || 0));
-    if (maxPd > 0) totalV = maxPd;
-  }
-  if (totalV === 0 && explicitProducts.length > 0) {
-    const maxEp = Math.max(...explicitProducts.map((p: any) => Number(p.video_number) || 0));
-    if (maxEp > 0) totalV = maxEp;
-  }
-
+  const totalV = resolvedVideos.length;
   if (totalV <= 0) {
-    totalV = 1;
+    return [];
   }
 
   const result: VideoDetailItem[] = [];
 
-  for (let i = 1; i <= totalV; i++) {
-    const v = videosList[i - 1] || {};
+  for (const rVideo of resolvedVideos) {
+    const i = rVideo.videoNumber;
 
-    // 1. Resolve product name for video i
+    // 1. Resolve product name strictly from canonical resolved video products
     let prodName = '';
-    const rawComb = v.combination || (v.name && !v.name.toLowerCase().startsWith('video') ? v.name : null);
-
-    if (rawComb && !rawComb.toLowerCase().startsWith('video') && rawComb !== '5-6 Products') {
-      prodName = formatDisplayCombination(rawComb);
-    } else if (Array.isArray(v.products) && v.products.length > 0) {
-      const validProds = v.products
-        .map((p: any) => p.product_name || p.name)
-        .filter((n: string) => n && typeof n === 'string' && !n.toLowerCase().startsWith('video'));
-      if (validProds.length > 0) {
-        prodName = formatDisplayCombination(validProds.join(' + '));
-      }
-    }
-
-    if (!prodName) {
-      const prodsForVideo = explicitProducts
-        .filter((p: any) => Number(p.video_number) === i)
-        .map((p: any) => p.product_name || p.name)
-        .filter((n: string) => n && typeof n === 'string' && !n.toLowerCase().startsWith('video'));
-      if (prodsForVideo.length > 0) {
-        prodName = formatDisplayCombination(prodsForVideo.join(' + '));
-      }
-    }
-
-    if (!prodName) {
-      if (i === 1) prodName = 'Kitchen Cleaner';
-      else if (i === 2) prodName = 'Brass, Bronze & Copper Cleaner (BBC Cleaner)';
-      else if (i === 3) prodName = 'Detergent + Dishwash';
-      else prodName = 'Products will be updated later.';
+    if (rVideo.products && rVideo.products.length > 0) {
+      prodName = rVideo.products.map(p => p.name).join(' + ');
+    } else {
+      prodName = 'No product assigned';
     }
 
     // 2. Resolve amount for video i
-    let amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
+    let amt = rVideo.amount;
     if (isNaN(amt) || amt <= 0) {
       if (i === 1 && pricing.video1_price) amt = Number(pricing.video1_price) || 0;
       else if (i === 2 && pricing.video2_price) amt = Number(pricing.video2_price) || 0;
@@ -254,6 +208,14 @@ export const isAgreementStale = (
   // 2. Check if agreement text lists videos beyond current video count (e.g. Video 3: when currentCount is 2)
   for (let v = currentCount + 1; v <= currentCount + 10; v++) {
     if (text.includes(`Video ${v}:`)) {
+      return true;
+    }
+  }
+
+  // 3. Check if any video's product assignment in agreement text has changed from the canonical products
+  for (const v of currentVideos) {
+    const expectedLine = `Video ${v.videoNumber}: ${v.productName}`;
+    if (!text.includes(expectedLine)) {
       return true;
     }
   }
