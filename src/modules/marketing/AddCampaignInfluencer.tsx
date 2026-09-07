@@ -213,18 +213,20 @@ export const getInfluencerResolvedVideoProducts = (influencer: any): ResolvedVid
     ? influencer.pricing.product_pricing.videos
     : [];
 
-  let totalV = Math.max(
-    pricingVideos.length,
-    Number(influencer.pricing?.total_videos) || 0,
-    validExplicitProducts.length > 0 ? Math.max(...validExplicitProducts.map((p: any) => Number(p.video_number) || 1)) : 0,
-    rawExplicitProducts.length > 0 ? Math.max(...rawExplicitProducts.map((p: any) => Number(p.video_number) || 1)) : 0
-  );
+  const hasPricingInfo = pricingVideos.length > 0 || Boolean(influencer.pricing && Number(influencer.pricing.total_videos) > 0);
 
-  if (totalV <= 0 && (pricingVideos.length > 0 || validExplicitProducts.length > 0)) {
-    totalV = 1;
+  let totalV = 0;
+  if (hasPricingInfo) {
+    totalV = pricingVideos.length > 0 
+      ? pricingVideos.length 
+      : (Number(influencer.pricing?.total_videos) || 0);
+  } else {
+    totalV = validExplicitProducts.length > 0
+      ? Math.max(...validExplicitProducts.map((p: any) => Number(p.video_number) || 1))
+      : (rawExplicitProducts.length > 0 ? Math.max(...rawExplicitProducts.map((p: any) => Number(p.video_number) || 1)) : 0);
   }
 
-  if (totalV === 0) {
+  if (totalV <= 0) {
     return [];
   }
 
@@ -232,44 +234,44 @@ export const getInfluencerResolvedVideoProducts = (influencer: any): ResolvedVid
 
   for (let idx = 0; idx < totalV; idx++) {
     const vNum = idx + 1;
-    const vPricing = pricingVideos[idx] || {};
-    const amt = (vPricing && typeof vPricing === 'object' && vPricing.amount !== undefined && vPricing.amount !== null)
-      ? Number(vPricing.amount)
-      : (typeof vPricing === 'number' ? vPricing : 0);
-
-    const rawComb = (vPricing && typeof vPricing === 'object')
-      ? (vPricing.combination || (vPricing.name && !isVideoLabel(vPricing.name) ? vPricing.name : ''))
-      : '';
-    const formattedComb = formatDisplayCombination(rawComb);
-
     let videoProds: ResolvedVideoProduct[] = [];
+    let formattedComb = '';
+    let amt = 0;
 
-    // Priority 1: Check pricing video's combination (Source of Truth from Pricing Info)
-    if (formattedComb && !isVideoLabel(formattedComb) && formattedComb !== '5-6 Products') {
-      const parsedNames = parseProductsFromCombination(formattedComb);
-      if (parsedNames.length > 0) {
-        videoProds = parsedNames.map(pName => ({
-          name: formatDisplayProductName(pName),
+    if (hasPricingInfo) {
+      const vPricing = pricingVideos[idx] || {};
+      amt = (vPricing && typeof vPricing === 'object' && vPricing.amount !== undefined && vPricing.amount !== null)
+        ? Number(vPricing.amount)
+        : (typeof vPricing === 'number' ? vPricing : 0);
+
+      const rawComb = (vPricing && typeof vPricing === 'object')
+        ? (vPricing.combination || (vPricing.name && !isVideoLabel(vPricing.name) ? vPricing.name : ''))
+        : '';
+
+      // Priority 1: Check pricing video's combination (Canonical Source of Truth from Pricing Info)
+      // DO NOT SPLIT PRODUCT COMBINATIONS - Preserve exact uploaded string (e.g. "Detergent + Dishwash")
+      if (rawComb && !isVideoLabel(rawComb) && rawComb !== '5-6 Products') {
+        formattedComb = formatDisplayCombination(rawComb) || rawComb.trim();
+        videoProds = [{
+          name: formattedComb,
           qty: 1,
           selected: true
-        }));
+        }];
+      } else if (Array.isArray(vPricing.products) && vPricing.products.length > 0) {
+        // Priority 2: Structured products inside pricing.product_pricing.videos[idx].products (only if not video labels)
+        const validVP = vPricing.products.filter((p: any) => !isVideoLabel(p.product_name || p.name));
+        if (validVP.length > 0) {
+          videoProds = validVP.map((p: any) => ({
+            name: formatDisplayProductName(p.product_name || p.name),
+            qty: Number(p.qty) || 1,
+            selected: true
+          }));
+        }
       }
-    }
-
-    // Priority 2: Check structured products inside pricing.product_pricing.videos[idx].products
-    if (videoProds.length === 0 && Array.isArray(vPricing.products) && vPricing.products.length > 0) {
-      const validVP = vPricing.products.filter((p: any) => !isVideoLabel(p.product_name || p.name));
-      if (validVP.length > 0) {
-        videoProds = validVP.map((p: any) => ({
-          name: formatDisplayProductName(p.product_name || p.name),
-          qty: Number(p.qty) || 1,
-          selected: true
-        }));
-      }
-    }
-
-    // Priority 3: Fallback to valid explicit products assigned to this video number (if no pricing combination exists)
-    if (videoProds.length === 0) {
+      // Note: When hasPricingInfo is true, blank video cells (e.g. Video 4, 5, 6) intentionally remain empty (No product assigned)
+      // Legacy explicit products must NEVER override a current Pricing Info assignment!
+    } else {
+      // Fallback: Influencer has NO Pricing Info record at all -> use legacy explicit products
       const explicitForVideo = validExplicitProducts.filter((p: any) => Number(p.video_number) === vNum);
       if (explicitForVideo.length > 0) {
         videoProds = explicitForVideo.map((p: any) => ({

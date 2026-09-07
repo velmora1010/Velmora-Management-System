@@ -515,7 +515,7 @@ City: ${influencer.city}`;
                           ))}
                         </div>
                       ) : (
-                        <div className="text-xs text-slate-500 italic">Product not assigned</div>
+                        <div className="text-xs text-slate-500 italic">No product assigned</div>
                       )}
                     </div>
                   );
