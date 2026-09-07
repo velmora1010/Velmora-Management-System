@@ -190,6 +190,109 @@ export const COMBINATIONS = [
   '5-6 Products'
 ];
 
+export interface ResolvedVideoProduct {
+  name: string;
+  qty: number;
+  selected?: boolean;
+}
+
+export interface ResolvedVideoItem {
+  videoNumber: number;
+  amount: number;
+  combination: string;
+  products: ResolvedVideoProduct[];
+}
+
+export const getInfluencerResolvedVideoProducts = (influencer: any): ResolvedVideoItem[] => {
+  if (!influencer) return [];
+
+  const rawExplicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
+  const validExplicitProducts = rawExplicitProducts.filter((p: any) => p && !isVideoLabel(p.product_name || p.name));
+
+  const pricingVideos = Array.isArray(influencer.pricing?.product_pricing?.videos)
+    ? influencer.pricing.product_pricing.videos
+    : [];
+
+  const hasPricingInfo = pricingVideos.length > 0 || Boolean(influencer.pricing && Number(influencer.pricing.total_videos) > 0);
+
+  let totalV = 0;
+  if (hasPricingInfo) {
+    totalV = pricingVideos.length > 0 
+      ? pricingVideos.length 
+      : (Number(influencer.pricing?.total_videos) || 0);
+  } else {
+    totalV = validExplicitProducts.length > 0
+      ? Math.max(...validExplicitProducts.map((p: any) => Number(p.video_number) || 1))
+      : (rawExplicitProducts.length > 0 ? Math.max(...rawExplicitProducts.map((p: any) => Number(p.video_number) || 1)) : 0);
+  }
+
+  if (totalV <= 0) {
+    return [];
+  }
+
+  const result: ResolvedVideoItem[] = [];
+
+  for (let idx = 0; idx < totalV; idx++) {
+    const vNum = idx + 1;
+    let videoProds: ResolvedVideoProduct[] = [];
+    let formattedComb = '';
+    let amt = 0;
+
+    if (hasPricingInfo) {
+      const vPricing = pricingVideos[idx] || {};
+      amt = (vPricing && typeof vPricing === 'object' && vPricing.amount !== undefined && vPricing.amount !== null)
+        ? Number(vPricing.amount)
+        : (typeof vPricing === 'number' ? vPricing : 0);
+
+      const rawComb = (vPricing && typeof vPricing === 'object')
+        ? (vPricing.combination || (vPricing.name && !isVideoLabel(vPricing.name) ? vPricing.name : ''))
+        : '';
+
+      // Priority 1: Check pricing video's combination (Canonical Source of Truth from Pricing Info)
+      // DO NOT SPLIT PRODUCT COMBINATIONS - Preserve exact uploaded string (e.g. "Detergent + Dishwash")
+      if (rawComb && !isVideoLabel(rawComb) && rawComb !== '5-6 Products') {
+        formattedComb = formatDisplayCombination(rawComb) || rawComb.trim();
+        videoProds = [{
+          name: formattedComb,
+          qty: 1,
+          selected: true
+        }];
+      } else if (Array.isArray(vPricing.products) && vPricing.products.length > 0) {
+        // Priority 2: Structured products inside pricing.product_pricing.videos[idx].products (only if not video labels)
+        const validVP = vPricing.products.filter((p: any) => !isVideoLabel(p.product_name || p.name));
+        if (validVP.length > 0) {
+          videoProds = validVP.map((p: any) => ({
+            name: formatDisplayProductName(p.product_name || p.name),
+            qty: Number(p.qty) || 1,
+            selected: true
+          }));
+        }
+      }
+      // Note: When hasPricingInfo is true, blank video cells (e.g. Video 4, 5, 6) intentionally remain empty (No product assigned)
+      // Legacy explicit products must NEVER override a current Pricing Info assignment!
+    } else {
+      // Fallback: Influencer has NO Pricing Info record at all -> use legacy explicit products
+      const explicitForVideo = validExplicitProducts.filter((p: any) => Number(p.video_number) === vNum);
+      if (explicitForVideo.length > 0) {
+        videoProds = explicitForVideo.map((p: any) => ({
+          name: formatDisplayProductName(p.product_name || p.name),
+          qty: Number(p.qty) || 1,
+          selected: p.selected !== false
+        }));
+      }
+    }
+
+    result.push({
+      videoNumber: vNum,
+      amount: amt,
+      combination: formattedComb,
+      products: videoProds
+    });
+  }
+
+  return result;
+};
+
 export const formatDateDMY = (date: Date): string => {
   const day = String(date.getDate()).padStart(2, '0');
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

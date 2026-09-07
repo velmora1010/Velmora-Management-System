@@ -3,7 +3,7 @@ import { X, Package, Truck, UploadCloud, Image as ImageIcon } from 'lucide-react
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { useDispatch } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
-import { calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode } from './AddCampaignInfluencer';
+import { calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
 
 // Central Price Config Rules
 export const PRODUCT_PRICES: Record<string, number> = {
@@ -48,10 +48,32 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   const [state, setState] = useState(influencer.state || '');
   const [productName, setProductName] = useState('');
   
-  // Products State
-  const initialProducts = (influencer.products || [])
-    .filter((p: any) => p.selected && p.qty && p.qty > 0)
-    .map((p: any) => ({ ...p, quantity: p.qty })); // Map legacy qty to quantity for consistency
+  // Products State - resolve from canonical Pricing Info source of truth first
+  const initialProducts = (() => {
+    const resolvedVideos = getInfluencerResolvedVideoProducts(influencer);
+    const prodMap = new Map<string, { product_name: string; quantity: number }>();
+
+    resolvedVideos.forEach(v => {
+      (v.products || []).forEach(p => {
+        if (p && p.selected !== false && p.qty > 0) {
+          const key = p.name.trim();
+          if (prodMap.has(key)) {
+            prodMap.get(key)!.quantity += p.qty;
+          } else {
+            prodMap.set(key, { product_name: key, quantity: p.qty });
+          }
+        }
+      });
+    });
+
+    if (prodMap.size > 0) {
+      return Array.from(prodMap.values());
+    }
+
+    return (influencer.products || [])
+      .filter((p: any) => p.selected && p.qty && p.qty > 0)
+      .map((p: any) => ({ ...p, quantity: p.qty }));
+  })();
     
   const [selectedProducts] = useState(initialProducts);
   const [totalProducts, setTotalProducts] = useState(0);

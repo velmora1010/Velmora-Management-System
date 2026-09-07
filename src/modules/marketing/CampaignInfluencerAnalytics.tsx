@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { AnalyticsDonutChart, DonutSliceData } from '../sales/website/components/AnalyticsDonutChart';
 import { normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
-import { formatDisplayProductName, formatDisplayCombination, parseProductsFromCombination } from './AddCampaignInfluencer';
+import { formatDisplayProductName, formatDisplayCombination, parseProductsFromCombination, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
 import type { CampaignAnalyticsFilterState } from '../../components/marketing/CampaignInfluencerAnalyticsFilterDrawer';
 import { getSingleVideoPrices } from './CampaignInfluencerList';
 import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
@@ -381,9 +381,12 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
 
       // Products (Multi-select)
       if (filterState.products.length > 0) {
-        const infProds = (inf.products || []).map((p: any) => formatDisplayProductName(p.product_name || p.name).toLowerCase());
+        const resolved = getInfluencerResolvedVideoProducts(inf);
+        const resolvedProdNames = resolved.flatMap(v => (v.products || []).map(p => p.name.toLowerCase()));
+        const rawProds = (inf.products || []).map((p: any) => formatDisplayProductName(p.product_name || p.name).toLowerCase());
+        const allProds = [...resolvedProdNames, ...rawProds];
         const matchProduct = filterState.products.some(targetP => 
-          infProds.some(p => p.includes(targetP.toLowerCase()))
+          allProds.some(p => p.includes(targetP.toLowerCase()))
         );
         if (!matchProduct) return false;
       }
