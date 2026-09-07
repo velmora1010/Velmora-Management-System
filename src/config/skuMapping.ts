@@ -1,5 +1,5 @@
 import type { CampaignInfluencer } from '../types';
-import { formatDisplayProductName, parseProductsFromCombination } from '../modules/marketing/AddCampaignInfluencer';
+import { formatDisplayProductName, parseProductsFromCombination, getInfluencerResolvedVideoProducts } from '../modules/marketing/AddCampaignInfluencer';
 
 export interface SKUMapping {
   code: string;
@@ -122,39 +122,30 @@ export const getInfluencerProducts = (influencer: CampaignInfluencer): PickListP
     }
   };
 
-  // 1. Explicit Products from database / form
-  const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
-  explicitProducts.forEach((p: any) => {
-    if (p && (p.selected === undefined || p.selected === true)) {
-      const rawName = p.product_name || p.name || '';
-      addProduct(rawName, p.qty);
-    }
-  });
+  // 1. Canonical video-level resolved products (matches Pricing Info source of truth)
+  const resolvedVideos = getInfluencerResolvedVideoProducts(influencer);
+  if (resolvedVideos.length > 0) {
+    resolvedVideos.forEach(v => {
+      (v.products || []).forEach(p => {
+        if (p && p.selected !== false) {
+          addProduct(p.name, p.qty);
+        }
+      });
+    });
+  }
 
-  // 2. If no valid explicit products were found, check pricing videos
+  // 2. Fallback to valid explicit products if no video products were resolved
   if (prodMap.size === 0) {
-    const pricingVideos = Array.isArray(influencer.pricing?.product_pricing?.videos) 
-      ? influencer.pricing.product_pricing.videos 
-      : [];
-
-    pricingVideos.forEach((v: any) => {
-      if (!v) return;
-      const explicitProds = Array.isArray(v.products) ? v.products : [];
-      if (explicitProds.length > 0) {
-        explicitProds.forEach((p: any) => {
-          addProduct(p.product_name || p.name || '', p.qty);
-        });
-      } else {
-        const rawCombName = v.combination || v.name || '';
-        const parsedProdNames = parseProductsFromCombination(rawCombName);
-        parsedProdNames.forEach(pName => {
-          addProduct(pName, 1);
-        });
+    const explicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
+    explicitProducts.forEach((p: any) => {
+      if (p && (p.selected === undefined || p.selected === true)) {
+        const rawName = p.product_name || p.name || '';
+        addProduct(rawName, p.qty);
       }
     });
   }
 
-  // 3. If still no valid products found, check pricing.product_pricing map object
+  // 3. Fallback to pricing.product_pricing map object if still empty
   if (prodMap.size === 0 && influencer.pricing?.product_pricing && typeof influencer.pricing.product_pricing === 'object') {
     Object.entries(influencer.pricing.product_pricing).forEach(([key, val]: [string, any]) => {
       if (key !== 'videos' && !isVideoLabel(key)) {

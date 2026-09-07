@@ -190,6 +190,107 @@ export const COMBINATIONS = [
   '5-6 Products'
 ];
 
+export interface ResolvedVideoProduct {
+  name: string;
+  qty: number;
+  selected?: boolean;
+}
+
+export interface ResolvedVideoItem {
+  videoNumber: number;
+  amount: number;
+  combination: string;
+  products: ResolvedVideoProduct[];
+}
+
+export const getInfluencerResolvedVideoProducts = (influencer: any): ResolvedVideoItem[] => {
+  if (!influencer) return [];
+
+  const rawExplicitProducts = Array.isArray(influencer.products) ? influencer.products : [];
+  const validExplicitProducts = rawExplicitProducts.filter((p: any) => p && !isVideoLabel(p.product_name || p.name));
+
+  const pricingVideos = Array.isArray(influencer.pricing?.product_pricing?.videos)
+    ? influencer.pricing.product_pricing.videos
+    : [];
+
+  let totalV = Math.max(
+    pricingVideos.length,
+    Number(influencer.pricing?.total_videos) || 0,
+    validExplicitProducts.length > 0 ? Math.max(...validExplicitProducts.map((p: any) => Number(p.video_number) || 1)) : 0,
+    rawExplicitProducts.length > 0 ? Math.max(...rawExplicitProducts.map((p: any) => Number(p.video_number) || 1)) : 0
+  );
+
+  if (totalV <= 0 && (pricingVideos.length > 0 || validExplicitProducts.length > 0)) {
+    totalV = 1;
+  }
+
+  if (totalV === 0) {
+    return [];
+  }
+
+  const result: ResolvedVideoItem[] = [];
+
+  for (let idx = 0; idx < totalV; idx++) {
+    const vNum = idx + 1;
+    const vPricing = pricingVideos[idx] || {};
+    const amt = (vPricing && typeof vPricing === 'object' && vPricing.amount !== undefined && vPricing.amount !== null)
+      ? Number(vPricing.amount)
+      : (typeof vPricing === 'number' ? vPricing : 0);
+
+    const rawComb = (vPricing && typeof vPricing === 'object')
+      ? (vPricing.combination || (vPricing.name && !isVideoLabel(vPricing.name) ? vPricing.name : ''))
+      : '';
+    const formattedComb = formatDisplayCombination(rawComb);
+
+    let videoProds: ResolvedVideoProduct[] = [];
+
+    // Priority 1: Check pricing video's combination (Source of Truth from Pricing Info)
+    if (formattedComb && !isVideoLabel(formattedComb) && formattedComb !== '5-6 Products') {
+      const parsedNames = parseProductsFromCombination(formattedComb);
+      if (parsedNames.length > 0) {
+        videoProds = parsedNames.map(pName => ({
+          name: formatDisplayProductName(pName),
+          qty: 1,
+          selected: true
+        }));
+      }
+    }
+
+    // Priority 2: Check structured products inside pricing.product_pricing.videos[idx].products
+    if (videoProds.length === 0 && Array.isArray(vPricing.products) && vPricing.products.length > 0) {
+      const validVP = vPricing.products.filter((p: any) => !isVideoLabel(p.product_name || p.name));
+      if (validVP.length > 0) {
+        videoProds = validVP.map((p: any) => ({
+          name: formatDisplayProductName(p.product_name || p.name),
+          qty: Number(p.qty) || 1,
+          selected: true
+        }));
+      }
+    }
+
+    // Priority 3: Fallback to valid explicit products assigned to this video number (if no pricing combination exists)
+    if (videoProds.length === 0) {
+      const explicitForVideo = validExplicitProducts.filter((p: any) => Number(p.video_number) === vNum);
+      if (explicitForVideo.length > 0) {
+        videoProds = explicitForVideo.map((p: any) => ({
+          name: formatDisplayProductName(p.product_name || p.name),
+          qty: Number(p.qty) || 1,
+          selected: p.selected !== false
+        }));
+      }
+    }
+
+    result.push({
+      videoNumber: vNum,
+      amount: amt,
+      combination: formattedComb,
+      products: videoProds
+    });
+  }
+
+  return result;
+};
+
 export const formatDateDMY = (date: Date): string => {
   const day = String(date.getDate()).padStart(2, '0');
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
