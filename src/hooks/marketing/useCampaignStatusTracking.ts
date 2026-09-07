@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
+import { isActiveStatus } from '../../utils/marketingUtils';
 
 export interface StatusTrackingRecord {
   id: string;
@@ -74,6 +75,7 @@ export interface StatusTrackingRecord {
     influencer_name: string;
     influencer_code: string;
     influencer_avatar: string;
+    is_archived?: any;
   };
   pricing?: {
     final_price: number;
@@ -177,8 +179,8 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
             };
           })
           .filter(r => {
-            // We soft-delete by checking is_archived (true/false)
-            return r.dispatch.is_archived !== true && r.dispatch.is_archived !== 'true';
+            // Keep only active influencers (exclude eliminate and recycle bin)
+            return isActiveStatus(r.dispatch.is_archived);
           });
         
         setTrackingRecords(combined);

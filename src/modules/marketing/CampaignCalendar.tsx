@@ -4,6 +4,7 @@ import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../ho
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -70,7 +71,8 @@ const createFallbackRecord = (inf: CampaignInfluencer, campaign: Campaign): Stat
       product_name: inf.products?.[0]?.product_name || 'N/A',
       total_products: inf.products?.[0]?.qty || 0,
       expected_delivery_date: null,
-      dispatch_date: null
+      dispatch_date: null,
+      is_archived: inf.is_archived
     }
   } as unknown as StatusTrackingRecord;
 };
@@ -334,15 +336,36 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
   // Generate today string
   const todayStr = useMemo(() => {
-    const today = new Date();
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return parseDateOnly(new Date(), 2026);
   }, []);
 
-  // Fetch influencer platforms reactively
+  // Single Source of Truth: Active Influencers only for Calendar
+  const activeInfluencers = useMemo(() => {
+    return (influencers || []).filter(inf => isActiveStatus(inf.is_archived));
+  }, [influencers]);
+
+  const activeInfluencerIdSet = useMemo(() => {
+    return new Set(activeInfluencers.map(inf => String(inf.id)));
+  }, [activeInfluencers]);
+
+  // Single Source of Truth: Active Tracking Records only for Calendar
+  const activeTrackingRecords = useMemo(() => {
+    return (trackingRecords || []).filter(r => {
+      if (r.dispatch?.is_archived !== undefined && !isActiveStatus(r.dispatch.is_archived)) {
+        return false;
+      }
+      if (r.influencer_id && !activeInfluencerIdSet.has(String(r.influencer_id))) {
+        return false;
+      }
+      return true;
+    });
+  }, [trackingRecords, activeInfluencerIdSet]);
+
+  // Fetch influencer platforms reactively (Active influencers only)
   useEffect(() => {
     const fetchPlatforms = async () => {
-      const trackingIds = trackingRecords.map(r => r.influencer_id).filter(Boolean);
-      const infIds = (influencers || []).map(i => i.id).filter(Boolean);
+      const trackingIds = activeTrackingRecords.map(r => r.influencer_id).filter(Boolean);
+      const infIds = activeInfluencers.map(i => i.id).filter(Boolean);
       const influencerIds = Array.from(new Set([...trackingIds, ...infIds]));
       if (influencerIds.length === 0) return;
 
@@ -368,12 +391,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     };
 
     fetchPlatforms();
-  }, [trackingRecords, influencers]);
+  }, [activeTrackingRecords, activeInfluencers]);
 
-  // Filter bills for this campaign once in memory using preferred order matching
+  // Filter bills for this campaign once in memory using preferred order matching (Active tracking records only)
   const campaignBills = useMemo(() => {
     return bills.filter(b => {
-      return trackingRecords.some(r => {
+      return activeTrackingRecords.some(r => {
         const note = b.notes?.toLowerCase() || '';
         const s3 = b.sub_category3?.toLowerCase() || '';
         const s2 = b.sub_category2?.toLowerCase() || '';
@@ -418,13 +441,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         return false;
       });
     });
-  }, [bills, trackingRecords]);
+  }, [bills, activeTrackingRecords]);
 
-  // Map tracking records to calendar events
+  // Map tracking records and scheduled post dates to calendar events (ACTIVE ONLY)
   const events = useMemo(() => {
     const list: CalendarEvent[] = [];
 
-    for (const r of trackingRecords) {
+    // 1. Process active status tracking milestones
+    for (const r of activeTrackingRecords) {
       const influencerName = r.dispatch?.influencer_name || 'Unknown';
       const influencerUsername = r.dispatch?.influencer_code || '';
       const campaignName = r.dispatch?.campaign_name || campaign.campaign_name;
@@ -482,7 +506,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             influencerUsername,
             campaignName,
             avatarUrl,
-            record: r
+            record: r,
+            videoNumber: 1
           });
         }
       }
@@ -510,7 +535,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             influencerUsername,
             campaignName,
             avatarUrl,
-            record: r
+            record: r,
+            videoNumber: 2
           });
         }
       }
@@ -536,7 +562,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             influencerUsername,
             campaignName,
             avatarUrl,
-            record: r
+            record: r,
+            videoNumber: 1
           });
         }
       }
@@ -560,7 +587,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             influencerUsername,
             campaignName,
             avatarUrl,
-            record: r
+            record: r,
+            videoNumber: 2
           });
         }
       }
@@ -625,31 +653,36 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       }
     }
 
-    // Add Post Date & Draft Date events for each influencer in this campaign
-    for (const inf of influencers) {
+    // 2. Add Post Date & Draft Date events for each ACTIVE influencer in this campaign
+    const seenEventKeys = new Set<string>();
+
+    for (const inf of activeInfluencers) {
       const influencerName = inf.influencer_name || inf.name || 'Unknown';
       const influencerUsername = inf.name || inf.code || '';
       const campaignName = campaign.campaign_name;
       const avatarUrl = inf.profile_file_url || '';
       const postDates = inf.postDates || [];
+      const infId = String(inf.id);
 
       // Find matching status tracking record if available
-      const matchingRecord = trackingRecords.find(r => 
-        String(r.influencer_id) === String(inf.id) ||
+      const matchingRecord = activeTrackingRecords.find(r => 
+        String(r.influencer_id) === infId ||
         (r.dispatch?.influencer_code && r.dispatch.influencer_code.toLowerCase() === influencerUsername.toLowerCase())
       ) || createFallbackRecord(inf, campaign);
 
-      for (const pd of postDates) {
-        const vNum = pd.video_number || 1;
+      for (let idx = 0; idx < postDates.length; idx++) {
+        const pd = postDates[idx];
+        const vNum = Number(pd.video_number) || (idx + 1);
 
         // 1. Draft Date Event (calculate if not stored)
         const drDate = pd.draft_date ? parseDateOnly(pd.draft_date, 2026) : (pd.post_date ? calculateDraftDate(pd.post_date, 2026) : '');
         if (drDate) {
-          const exists = list.some(e => e.dateStr === drDate && e.type === 'Draft' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
-          if (!exists) {
+          const key = `${infId}_v${vNum}_Draft_${drDate}`;
+          if (!seenEventKeys.has(key)) {
+            seenEventKeys.add(key);
             list.push({
               id: `inf-${inf.id}-v${vNum}-draft`,
-              recordId: String(inf.id),
+              recordId: infId,
               type: 'Draft',
               label: `Video ${vNum} Draft`,
               icon: '🎬',
@@ -670,11 +703,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         // 2. Final Post Event
         const fpDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
         if (fpDate) {
-          const exists = list.some(e => e.dateStr === fpDate && e.type === 'Final Post' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
-          if (!exists) {
+          const key = `${infId}_v${vNum}_FinalPost_${fpDate}`;
+          if (!seenEventKeys.has(key)) {
+            seenEventKeys.add(key);
             list.push({
               id: `inf-${inf.id}-v${vNum}-finalpost`,
-              recordId: String(inf.id),
+              recordId: infId,
               type: 'Final Post',
               label: `Video ${vNum} Final Post`,
               icon: '🚀',
@@ -695,7 +729,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     }
 
     return list;
-  }, [trackingRecords, influencers, campaign, bills, todayStr]);
+  }, [activeTrackingRecords, activeInfluencers, campaign, campaignBills, todayStr]);
 
   // Calculate Today's Stats dynamically adapting to active filters
   const todaySummaryStats = useMemo(() => {
@@ -1087,7 +1121,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               const seen = new Set<string>();
               const uniqueEvents: typeof sortedDayEvents = [];
               for (const ev of sortedDayEvents) {
-                const infId = ev.record.influencer_id;
+                const infId = String(ev.record?.influencer_id || ev.recordId);
                 if (!seen.has(infId)) {
                   seen.add(infId);
                   uniqueEvents.push(ev);
@@ -1613,9 +1647,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               className="flex-1 grid grid-cols-7 auto-rows-fr bg-slate-950/20 divide-x divide-y divide-slate-800/60 animate-fade-in"
             >
               {daysGrid.map((day, idx) => {
-                const dayEvents = eventsByDate[day.dateStr] || [];
+                const dayEvents = day.isCurrentMonth ? (eventsByDate[day.dateStr] || []) : [];
                 const isToday = day.dateStr === todayStr;
                 
+                const draftCount = dayEvents.filter(ev => ev.type === 'Draft').length;
+                const postCount = dayEvents.filter(ev => ev.type === 'Final Post').length;
+                const deliveredCount = dayEvents.filter(ev => ev.type === 'Delivered').length;
+                const paymentCount = dayEvents.filter(ev => ev.type === 'Payment').length;
+
                 const MAX_VISIBLE_EVENTS = 2;
                 const hasMoreEvents = dayEvents.length > MAX_VISIBLE_EVENTS;
                 const visibleEvents = hasMoreEvents ? dayEvents.slice(0, MAX_VISIBLE_EVENTS) : dayEvents;
@@ -1643,18 +1682,59 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                     } ${dayEvents.length > 0 ? 'cursor-pointer hover:bg-slate-800/30' : ''}`}
                   >
                     
-                    {/* Top Row: Date Value */}
-                    <div className="flex justify-between items-center mb-1.5 shrink-0">
+                    {/* Top Row: Date Value & Type-level Counts */}
+                    <div className="flex justify-between items-start mb-1.5 shrink-0 gap-1">
                       {isToday ? (
-                        <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-md">
+                        <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-md shrink-0">
                           {day.date.getDate()}
                         </span>
                       ) : (
-                        <span className={`text-xs font-bold ${
+                        <span className={`text-xs font-bold shrink-0 ${
                           day.isCurrentMonth ? 'text-slate-100' : 'text-slate-600 font-medium'
                         }`}>
                           {day.date.getDate()}
                         </span>
+                      )}
+
+                      {dayEvents.length > 0 && (
+                        <div className="flex flex-wrap items-center justify-end gap-1 overflow-hidden">
+                          {draftCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 shadow-sm leading-none"
+                              title={`${draftCount} Draft${draftCount > 1 ? 's' : ''}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                              <span>Draft · {draftCount}</span>
+                            </span>
+                          )}
+                          {postCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 shadow-sm leading-none"
+                              title={`${postCount} Final Post${postCount > 1 ? 's' : ''}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                              <span>Post · {postCount}</span>
+                            </span>
+                          )}
+                          {deliveredCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm leading-none"
+                              title={`${deliveredCount} Delivered`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                              <span>Delivered · {deliveredCount}</span>
+                            </span>
+                          )}
+                          {paymentCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm leading-none"
+                              title={`${paymentCount} Payment${paymentCount > 1 ? 's' : ''}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                              <span>Payment · {paymentCount}</span>
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
 

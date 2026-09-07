@@ -12,14 +12,22 @@ const MONTH_NAME_MAP: Record<string, number> = {
 
 export const parseToYMD = (val: any, defaultYear = 2026): string => {
   if (!val) return '';
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    let y = val.getFullYear();
+    if (y <= 2010) y = defaultYear;
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
   const str = String(val).trim();
   if (!str) return '';
 
-  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (isoMatch) {
     let y = parseInt(isoMatch[1], 10);
     if (isNaN(y) || y <= 2010) y = defaultYear;
-    return `${y}-${isoMatch[2]}-${isoMatch[3]}`;
+    return `${y}-${String(isoMatch[2]).padStart(2, '0')}-${String(isoMatch[3]).padStart(2, '0')}`;
   }
 
   const dmMatch = str.match(/^(\d{1,2})[\s\-\/]+([a-zA-Z]+)(?:[\s\-\/]+(\d{2,4}))?$/);
@@ -265,43 +273,51 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
           const postDatesMap = new Map<number, any>();
 
-          (viewsJson?.post_dates || []).forEach((pd: any) => {
-            if (pd.video_number && pd.post_date && String(pd.post_date).trim() !== '') {
-              const vNum = Number(pd.video_number);
-              const postYmd = parseToYMD(pd.post_date, 2026);
-              const draftYmd = pd.draft_date ? parseToYMD(pd.draft_date, 2026) : calculateDraftDate(pd.post_date, 2026);
+          (viewsJson?.post_dates || []).forEach((pd: any, pIdx: number) => {
+            const hasPost = pd.post_date && String(pd.post_date).trim() !== '';
+            const hasDraft = pd.draft_date && String(pd.draft_date).trim() !== '';
+            if (hasPost || hasDraft) {
+              const vNum = Number(pd.video_number) || (pIdx + 1);
+              const postYmd = hasPost ? parseToYMD(pd.post_date, 2026) : null;
+              const draftYmd = hasDraft 
+                ? parseToYMD(pd.draft_date, 2026) 
+                : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
               postDatesMap.set(vNum, {
                 video_number: vNum,
-                post_date: postYmd || pd.post_date,
-                draft_date: draftYmd || (postYmd ? calculateDraftDate(postYmd, 2026) : '')
+                post_date: postYmd || pd.post_date || null,
+                draft_date: draftYmd || null
               });
             }
           });
 
           (postDatesData || [])
             .filter(pd => String(pd.influencer_id) === String(inf.id))
-            .forEach(pd => {
-              if (pd.video_number && pd.post_date && String(pd.post_date).trim() !== '') {
-                const vNum = Number(pd.video_number);
-                const postYmd = parseToYMD(pd.post_date, 2026);
-                const draftYmd = pd.draft_date ? parseToYMD(pd.draft_date, 2026) : calculateDraftDate(pd.post_date, 2026);
+            .forEach((pd, pIdx) => {
+              const hasPost = pd.post_date && String(pd.post_date).trim() !== '';
+              const hasDraft = pd.draft_date && String(pd.draft_date).trim() !== '';
+              if (hasPost || hasDraft) {
+                const vNum = Number(pd.video_number) || (pIdx + 1);
+                const postYmd = hasPost ? parseToYMD(pd.post_date, 2026) : null;
+                const draftYmd = hasDraft 
+                  ? parseToYMD(pd.draft_date, 2026) 
+                  : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
                 postDatesMap.set(vNum, {
                   id: pd.id,
                   influencer_id: pd.influencer_id,
                   campaign_id: pd.campaign_id,
                   video_number: vNum,
-                  post_date: postYmd || pd.post_date,
-                  draft_date: draftYmd || (postYmd ? calculateDraftDate(postYmd, 2026) : '')
+                  post_date: postYmd || pd.post_date || null,
+                  draft_date: draftYmd || null
                 });
               }
             });
 
           const postDates = Array.from(postDatesMap.values()).map((pd: any) => {
-            const postYmd = parseToYMD(pd.post_date, 2026);
+            const postYmd = pd.post_date ? parseToYMD(pd.post_date, 2026) : null;
             const draftYmd = pd.draft_date ? parseToYMD(pd.draft_date, 2026) : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
             return {
               ...pd,
-              post_date: postYmd || pd.post_date,
+              post_date: postYmd || pd.post_date || null,
               draft_date: draftYmd || null
             };
           }).sort((a: any, b: any) => (a.video_number || 0) - (b.video_number || 0));

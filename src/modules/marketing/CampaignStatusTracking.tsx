@@ -5,6 +5,7 @@ import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStat
 import { MapPin, Phone, RefreshCcw, Clock, Package, Video, CreditCard, PenTool, CheckCircle, X, UploadCloud } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
 interface CampaignStatusTrackingProps {
@@ -40,6 +41,9 @@ const formatForDateTimeInput = (dateStr: string | undefined | null) => {
 
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
   const { trackingRecords, isLoading, refresh, saveMilestone } = useCampaignStatusTracking(campaign.id);
+  const activeTrackingRecords = React.useMemo(() => {
+    return (trackingRecords || []).filter(r => isActiveStatus(r.dispatch?.is_archived));
+  }, [trackingRecords]);
   const [activeModal, setActiveModal] = useState<{ recordId: string, stageId: string } | null>(null);
 
   const calculateStepStatuses = (record: StatusTrackingRecord, currentStep: number) => {
@@ -98,7 +102,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   // Shared save handler: saves milestone, refreshes from DB, shows feedback
   const handleFormSave = async (recordId: string, data: any) => {
     console.log("handleFormSave clicked. recordId:", recordId, "data:", data);
-    const record = trackingRecords.find(r => r.id === recordId);
+    const record = activeTrackingRecords.find(r => r.id === recordId) || trackingRecords.find(r => r.id === recordId);
     if (!record) {
       console.error("handleFormSave failed: record not found.");
       return;
@@ -231,7 +235,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   };
 
   useEffect(() => {
-    if (!isLoading && trackingRecords.length > 0) {
+    if (!isLoading && activeTrackingRecords.length > 0) {
       const target = (window as any).activeTrackingScrollTarget;
       if (target) {
         delete (window as any).activeTrackingScrollTarget;
@@ -329,7 +333,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           <div className="flex justify-center items-center h-full text-slate-500">
             <RefreshCcw size={24} className="animate-spin mr-2" /> Loading tracking records...
           </div>
-        ) : trackingRecords.length === 0 ? (
+        ) : activeTrackingRecords.length === 0 ? (
           <div className="flex flex-col justify-center items-center h-full text-slate-500 italic">
             <div className="text-4xl mb-4 opacity-50">🛤️</div>
             <h3 className="text-slate-300 text-lg mb-2 font-semibold">No active tracking records.</h3>
@@ -337,7 +341,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           </div>
         ) : (
           <div className="space-y-6" id="st-cards-container">
-            {trackingRecords.map(record => {
+            {activeTrackingRecords.map(record => {
               const dispatch = record.dispatch as any;
               const avatarUrl = dispatch.influencer_avatar;
               const dispatchId = dispatch.influencer_code || record.dispatch_id;
