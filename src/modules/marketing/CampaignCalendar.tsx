@@ -336,8 +336,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
   // Generate today string
   const todayStr = useMemo(() => {
-    const today = new Date();
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return parseDateOnly(new Date(), 2026);
   }, []);
 
   // Single Source of Truth: Active Influencers only for Calendar
@@ -655,16 +654,19 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     }
 
     // 2. Add Post Date & Draft Date events for each ACTIVE influencer in this campaign
+    const seenEventKeys = new Set<string>();
+
     for (const inf of activeInfluencers) {
       const influencerName = inf.influencer_name || inf.name || 'Unknown';
       const influencerUsername = inf.name || inf.code || '';
       const campaignName = campaign.campaign_name;
       const avatarUrl = inf.profile_file_url || '';
       const postDates = inf.postDates || [];
+      const infId = String(inf.id);
 
       // Find matching status tracking record if available
       const matchingRecord = activeTrackingRecords.find(r => 
-        String(r.influencer_id) === String(inf.id) ||
+        String(r.influencer_id) === infId ||
         (r.dispatch?.influencer_code && r.dispatch.influencer_code.toLowerCase() === influencerUsername.toLowerCase())
       ) || createFallbackRecord(inf, campaign);
 
@@ -675,16 +677,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         // 1. Draft Date Event (calculate if not stored)
         const drDate = pd.draft_date ? parseDateOnly(pd.draft_date, 2026) : (pd.post_date ? calculateDraftDate(pd.post_date, 2026) : '');
         if (drDate) {
-          const exists = list.some(e => 
-            e.dateStr === drDate && 
-            e.type === 'Draft' && 
-            String(e.record?.influencer_id) === String(inf.id) && 
-            (e.videoNumber === vNum || e.label.includes(`Video ${vNum}`))
-          );
-          if (!exists) {
+          const key = `${infId}_v${vNum}_Draft_${drDate}`;
+          if (!seenEventKeys.has(key)) {
+            seenEventKeys.add(key);
             list.push({
               id: `inf-${inf.id}-v${vNum}-draft`,
-              recordId: String(inf.id),
+              recordId: infId,
               type: 'Draft',
               label: `Video ${vNum} Draft`,
               icon: '🎬',
@@ -705,16 +703,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         // 2. Final Post Event
         const fpDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
         if (fpDate) {
-          const exists = list.some(e => 
-            e.dateStr === fpDate && 
-            e.type === 'Final Post' && 
-            String(e.record?.influencer_id) === String(inf.id) && 
-            (e.videoNumber === vNum || (vNum === 1 && e.label.includes('Final Post')))
-          );
-          if (!exists) {
+          const key = `${infId}_v${vNum}_FinalPost_${fpDate}`;
+          if (!seenEventKeys.has(key)) {
+            seenEventKeys.add(key);
             list.push({
               id: `inf-${inf.id}-v${vNum}-finalpost`,
-              recordId: String(inf.id),
+              recordId: infId,
               type: 'Final Post',
               label: `Video ${vNum} Final Post`,
               icon: '🚀',
@@ -1127,7 +1121,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               const seen = new Set<string>();
               const uniqueEvents: typeof sortedDayEvents = [];
               for (const ev of sortedDayEvents) {
-                const infId = ev.record.influencer_id;
+                const infId = String(ev.record?.influencer_id || ev.recordId);
                 if (!seen.has(infId)) {
                   seen.add(infId);
                   uniqueEvents.push(ev);
@@ -1653,9 +1647,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               className="flex-1 grid grid-cols-7 auto-rows-fr bg-slate-950/20 divide-x divide-y divide-slate-800/60 animate-fade-in"
             >
               {daysGrid.map((day, idx) => {
-                const dayEvents = eventsByDate[day.dateStr] || [];
+                const dayEvents = day.isCurrentMonth ? (eventsByDate[day.dateStr] || []) : [];
                 const isToday = day.dateStr === todayStr;
                 
+                const draftCount = dayEvents.filter(ev => ev.type === 'Draft').length;
+                const postCount = dayEvents.filter(ev => ev.type === 'Final Post').length;
+                const deliveredCount = dayEvents.filter(ev => ev.type === 'Delivered').length;
+                const paymentCount = dayEvents.filter(ev => ev.type === 'Payment').length;
+
                 const MAX_VISIBLE_EVENTS = 2;
                 const hasMoreEvents = dayEvents.length > MAX_VISIBLE_EVENTS;
                 const visibleEvents = hasMoreEvents ? dayEvents.slice(0, MAX_VISIBLE_EVENTS) : dayEvents;
@@ -1683,18 +1682,59 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                     } ${dayEvents.length > 0 ? 'cursor-pointer hover:bg-slate-800/30' : ''}`}
                   >
                     
-                    {/* Top Row: Date Value */}
-                    <div className="flex justify-between items-center mb-1.5 shrink-0">
+                    {/* Top Row: Date Value & Type-level Counts */}
+                    <div className="flex justify-between items-start mb-1.5 shrink-0 gap-1">
                       {isToday ? (
-                        <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-md">
+                        <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-md shrink-0">
                           {day.date.getDate()}
                         </span>
                       ) : (
-                        <span className={`text-xs font-bold ${
+                        <span className={`text-xs font-bold shrink-0 ${
                           day.isCurrentMonth ? 'text-slate-100' : 'text-slate-600 font-medium'
                         }`}>
                           {day.date.getDate()}
                         </span>
+                      )}
+
+                      {dayEvents.length > 0 && (
+                        <div className="flex flex-wrap items-center justify-end gap-1 overflow-hidden">
+                          {draftCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 shadow-sm leading-none"
+                              title={`${draftCount} Draft${draftCount > 1 ? 's' : ''}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                              <span>Draft · {draftCount}</span>
+                            </span>
+                          )}
+                          {postCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 shadow-sm leading-none"
+                              title={`${postCount} Final Post${postCount > 1 ? 's' : ''}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                              <span>Post · {postCount}</span>
+                            </span>
+                          )}
+                          {deliveredCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm leading-none"
+                              title={`${deliveredCount} Delivered`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                              <span>Delivered · {deliveredCount}</span>
+                            </span>
+                          )}
+                          {paymentCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm leading-none"
+                              title={`${paymentCount} Payment${paymentCount > 1 ? 's' : ''}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                              <span>Payment · {paymentCount}</span>
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
 
