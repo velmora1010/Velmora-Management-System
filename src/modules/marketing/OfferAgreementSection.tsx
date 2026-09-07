@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, FileText, Copy, Edit2, Download, Eye, RefreshCcw, CheckSquare, Sparkles, X, Save, Trash2, ChevronDown, Check, Upload } from 'lucide-react';
+import { Search, FileText, Copy, Edit2, Download, Eye, RefreshCcw, CheckSquare, Sparkles, X, Save, Trash2, ChevronDown, Check, Upload, Filter } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { naturalSortCompare } from '../../config/skuMapping';
 import { generateSingleOfferAgreementPDF, generateCombinedOfferAgreementPDF } from '../../utils/generateOfferAgreementPDF';
@@ -424,8 +424,26 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
 
   // Mail Acceptance filter state: 'all' | 'Accepted' | 'Not Accepted' | 'not_set'
   const [acceptanceFilter, setAcceptanceFilter] = useState<'all' | 'Accepted' | 'Not Accepted' | 'not_set'>('all');
+  // Popover state for compact filter button
+  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+  const filterPopoverRef = useRef<HTMLDivElement>(null);
+
   // Interactive popover state for inline editing
   const [activeAcceptanceDropdownId, setActiveAcceptanceDropdownId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (filterPopoverRef.current && !filterPopoverRef.current.contains(e.target as Node)) {
+        setIsFilterPopoverOpen(false);
+      }
+    };
+    if (isFilterPopoverOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [isFilterPopoverOpen]);
 
   // Filter ALL Active Influencers
   const activeInfluencers = useMemo(() => {
@@ -675,6 +693,14 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       notSet
     };
   }, [generatedInfluencers, agreementsMap]);
+
+  // Active Filter Count for button indicator
+  const activeFilterCount = useMemo(() => {
+    if (acceptanceFilter === 'Accepted') return acceptanceCounts.accepted;
+    if (acceptanceFilter === 'Not Accepted') return acceptanceCounts.notAccepted;
+    if (acceptanceFilter === 'not_set') return acceptanceCounts.notSet;
+    return null;
+  }, [acceptanceFilter, acceptanceCounts]);
 
   // Filtered by mail acceptance filter AND search term
   const filteredInfluencers = useMemo(() => {
@@ -969,55 +995,166 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
             <Search size={14} className="absolute left-3 top-2.5 text-slate-500" />
           </div>
 
-          {/* Mail Acceptance Filter Buttons */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 w-full sm:w-auto overflow-x-auto">
+          {/* Mail Acceptance Filter Popover */}
+          <div className="relative" ref={filterPopoverRef}>
             <button
               type="button"
-              onClick={() => setAcceptanceFilter('all')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                acceptanceFilter === 'all'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              onClick={() => setIsFilterPopoverOpen(!isFilterPopoverOpen)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm select-none ${
+                acceptanceFilter !== 'all'
+                  ? acceptanceFilter === 'Accepted'
+                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/50 hover:bg-emerald-900/60'
+                    : acceptanceFilter === 'Not Accepted'
+                    ? 'bg-rose-950/60 text-rose-300 border-rose-500/50 hover:bg-rose-900/60'
+                    : 'bg-slate-800 text-slate-200 border-slate-600 hover:bg-slate-700'
+                  : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border-slate-700'
               }`}
+              title="Filter by Mail Acceptance"
             >
-              All ({acceptanceCounts.all})
+              <Filter size={13} className={acceptanceFilter !== 'all' ? (acceptanceFilter === 'Accepted' ? 'text-emerald-400' : acceptanceFilter === 'Not Accepted' ? 'text-rose-400' : 'text-purple-400') : 'text-slate-400'} />
+              <span>Filter</span>
+              {acceptanceFilter !== 'all' && (
+                <span className="font-bold text-[11px] text-purple-300">
+                  • {activeFilterCount}
+                </span>
+              )}
+              <ChevronDown size={12} className={`transition-transform duration-200 opacity-60 ml-0.5 ${isFilterPopoverOpen ? 'rotate-180' : ''}`} />
             </button>
-            <button
-              type="button"
-              onClick={() => setAcceptanceFilter('Accepted')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                acceptanceFilter === 'Accepted'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-emerald-400/80 hover:text-emerald-300 hover:bg-slate-800'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              Accepted ({acceptanceCounts.accepted})
-            </button>
-            <button
-              type="button"
-              onClick={() => setAcceptanceFilter('Not Accepted')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                acceptanceFilter === 'Not Accepted'
-                  ? 'bg-rose-600 text-white shadow-sm'
-                  : 'text-rose-400/80 hover:text-rose-300 hover:bg-slate-800'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
-              Not Accepted ({acceptanceCounts.notAccepted})
-            </button>
-            <button
-              type="button"
-              onClick={() => setAcceptanceFilter('not_set')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                acceptanceFilter === 'not_set'
-                  ? 'bg-slate-700 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
-              Not Set ({acceptanceCounts.notSet})
-            </button>
+
+            {isFilterPopoverOpen && (
+              <div className="absolute left-0 mt-1.5 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
+                <div className="px-3.5 py-2 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>Mail Acceptance</span>
+                  {acceptanceFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAcceptanceFilter('all');
+                      }}
+                      className="text-[10px] text-purple-400 hover:text-purple-300 font-semibold cursor-pointer lowercase"
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="p-1 space-y-0.5">
+                  {/* All */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAcceptanceFilter('all');
+                      setIsFilterPopoverOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 rounded-lg flex items-center justify-between text-left transition-colors cursor-pointer ${
+                      acceptanceFilter === 'all'
+                        ? 'bg-purple-950/40 text-purple-200 font-bold'
+                        : 'text-slate-300 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center border transition-all ${
+                        acceptanceFilter === 'all' ? 'border-purple-400 bg-purple-500/20' : 'border-slate-600'
+                      }`}>
+                        {acceptanceFilter === 'all' && <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />}
+                      </div>
+                      <span>All</span>
+                    </div>
+                    <span className="font-mono text-slate-400 text-[11px] bg-slate-800/80 px-2 py-0.5 rounded-md">
+                      {acceptanceCounts.all}
+                    </span>
+                  </button>
+
+                  {/* Accepted */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAcceptanceFilter('Accepted');
+                      setIsFilterPopoverOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 rounded-lg flex items-center justify-between text-left transition-colors cursor-pointer ${
+                      acceptanceFilter === 'Accepted'
+                        ? 'bg-emerald-950/40 text-emerald-300 font-bold'
+                        : 'text-slate-300 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center border transition-all ${
+                        acceptanceFilter === 'Accepted' ? 'border-emerald-400 bg-emerald-500/20' : 'border-slate-600'
+                      }`}>
+                        {acceptanceFilter === 'Accepted' && <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                      </div>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        Accepted
+                      </span>
+                    </div>
+                    <span className="font-mono text-emerald-400 text-[11px] bg-emerald-950/50 border border-emerald-800/30 px-2 py-0.5 rounded-md">
+                      {acceptanceCounts.accepted}
+                    </span>
+                  </button>
+
+                  {/* Not Accepted */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAcceptanceFilter('Not Accepted');
+                      setIsFilterPopoverOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 rounded-lg flex items-center justify-between text-left transition-colors cursor-pointer ${
+                      acceptanceFilter === 'Not Accepted'
+                        ? 'bg-rose-950/40 text-rose-300 font-bold'
+                        : 'text-slate-300 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center border transition-all ${
+                        acceptanceFilter === 'Not Accepted' ? 'border-rose-400 bg-rose-500/20' : 'border-slate-600'
+                      }`}>
+                        {acceptanceFilter === 'Not Accepted' && <div className="w-1.5 h-1.5 rounded-full bg-rose-400" />}
+                      </div>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                        Not Accepted
+                      </span>
+                    </div>
+                    <span className="font-mono text-rose-400 text-[11px] bg-rose-950/50 border border-rose-800/30 px-2 py-0.5 rounded-md">
+                      {acceptanceCounts.notAccepted}
+                    </span>
+                  </button>
+
+                  {/* Not Set */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAcceptanceFilter('not_set');
+                      setIsFilterPopoverOpen(false);
+                    }}
+                    className={`w-full px-3 py-2 rounded-lg flex items-center justify-between text-left transition-colors cursor-pointer ${
+                      acceptanceFilter === 'not_set'
+                        ? 'bg-slate-800 text-slate-200 font-bold'
+                        : 'text-slate-300 hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center border transition-all ${
+                        acceptanceFilter === 'not_set' ? 'border-slate-400 bg-slate-500/20' : 'border-slate-600'
+                      }`}>
+                        {acceptanceFilter === 'not_set' && <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />}
+                      </div>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                        Not Set
+                      </span>
+                    </div>
+                    <span className="font-mono text-slate-400 text-[11px] bg-slate-800/80 px-2 py-0.5 rounded-md">
+                      {acceptanceCounts.notSet}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
