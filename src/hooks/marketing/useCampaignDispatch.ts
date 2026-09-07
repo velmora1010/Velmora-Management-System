@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { isActiveStatus } from '../../utils/marketingUtils';
 
 export interface DispatchDetails {
   id: string;
@@ -84,7 +85,7 @@ export const useCampaignDispatch = (campaignId?: string) => {
             influencer: infoMap[r.influencer_id]
           }))
           .filter(r => {
-            return !r.influencer || (r.influencer.is_archived !== true && r.influencer.is_archived !== 'true');
+            return Boolean(r.influencer) && isActiveStatus(r.influencer?.is_archived);
           });
         
         setDispatchRecords(combined);

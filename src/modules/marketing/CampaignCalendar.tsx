@@ -4,6 +4,7 @@ import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../ho
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -70,7 +71,8 @@ const createFallbackRecord = (inf: CampaignInfluencer, campaign: Campaign): Stat
       product_name: inf.products?.[0]?.product_name || 'N/A',
       total_products: inf.products?.[0]?.qty || 0,
       expected_delivery_date: null,
-      dispatch_date: null
+      dispatch_date: null,
+      is_archived: inf.is_archived
     }
   } as unknown as StatusTrackingRecord;
 };
@@ -338,11 +340,33 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   }, []);
 
-  // Fetch influencer platforms reactively
+  // Single Source of Truth: Active Influencers only for Calendar
+  const activeInfluencers = useMemo(() => {
+    return (influencers || []).filter(inf => isActiveStatus(inf.is_archived));
+  }, [influencers]);
+
+  const activeInfluencerIdSet = useMemo(() => {
+    return new Set(activeInfluencers.map(inf => String(inf.id)));
+  }, [activeInfluencers]);
+
+  // Single Source of Truth: Active Tracking Records only for Calendar
+  const activeTrackingRecords = useMemo(() => {
+    return (trackingRecords || []).filter(r => {
+      if (r.dispatch?.is_archived !== undefined && !isActiveStatus(r.dispatch.is_archived)) {
+        return false;
+      }
+      if (r.influencer_id && !activeInfluencerIdSet.has(String(r.influencer_id))) {
+        return false;
+      }
+      return true;
+    });
+  }, [trackingRecords, activeInfluencerIdSet]);
+
+  // Fetch influencer platforms reactively (Active influencers only)
   useEffect(() => {
     const fetchPlatforms = async () => {
-      const trackingIds = trackingRecords.map(r => r.influencer_id).filter(Boolean);
-      const infIds = (influencers || []).map(i => i.id).filter(Boolean);
+      const trackingIds = activeTrackingRecords.map(r => r.influencer_id).filter(Boolean);
+      const infIds = activeInfluencers.map(i => i.id).filter(Boolean);
       const influencerIds = Array.from(new Set([...trackingIds, ...infIds]));
       if (influencerIds.length === 0) return;
 
@@ -368,12 +392,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     };
 
     fetchPlatforms();
-  }, [trackingRecords, influencers]);
+  }, [activeTrackingRecords, activeInfluencers]);
 
-  // Filter bills for this campaign once in memory using preferred order matching
+  // Filter bills for this campaign once in memory using preferred order matching (Active tracking records only)
   const campaignBills = useMemo(() => {
     return bills.filter(b => {
-      return trackingRecords.some(r => {
+      return activeTrackingRecords.some(r => {
         const note = b.notes?.toLowerCase() || '';
         const s3 = b.sub_category3?.toLowerCase() || '';
         const s2 = b.sub_category2?.toLowerCase() || '';
@@ -418,13 +442,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         return false;
       });
     });
-  }, [bills, trackingRecords]);
+  }, [bills, activeTrackingRecords]);
 
-  // Map tracking records to calendar events
+  // Map tracking records and scheduled post dates to calendar events (ACTIVE ONLY)
   const events = useMemo(() => {
     const list: CalendarEvent[] = [];
 
-    for (const r of trackingRecords) {
+    // 1. Process active status tracking milestones
+    for (const r of activeTrackingRecords) {
       const influencerName = r.dispatch?.influencer_name || 'Unknown';
       const influencerUsername = r.dispatch?.influencer_code || '';
       const campaignName = r.dispatch?.campaign_name || campaign.campaign_name;
@@ -482,7 +507,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             influencerUsername,
             campaignName,
             avatarUrl,
-            record: r
+            record: r,
+            videoNumber: 1
           });
         }
       }
@@ -510,7 +536,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             influencerUsername,
             campaignName,
             avatarUrl,
-            record: r
+            record: r,
+            videoNumber: 2
           });
         }
       }
@@ -536,7 +563,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             influencerUsername,
             campaignName,
             avatarUrl,
-            record: r
+            record: r,
+            videoNumber: 1
           });
         }
       }
@@ -560,7 +588,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             influencerUsername,
             campaignName,
             avatarUrl,
-            record: r
+            record: r,
+            videoNumber: 2
           });
         }
       }
@@ -625,8 +654,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       }
     }
 
-    // Add Post Date & Draft Date events for each influencer in this campaign
-    for (const inf of influencers) {
+    // 2. Add Post Date & Draft Date events for each ACTIVE influencer in this campaign
+    for (const inf of activeInfluencers) {
       const influencerName = inf.influencer_name || inf.name || 'Unknown';
       const influencerUsername = inf.name || inf.code || '';
       const campaignName = campaign.campaign_name;
@@ -634,18 +663,24 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       const postDates = inf.postDates || [];
 
       // Find matching status tracking record if available
-      const matchingRecord = trackingRecords.find(r => 
+      const matchingRecord = activeTrackingRecords.find(r => 
         String(r.influencer_id) === String(inf.id) ||
         (r.dispatch?.influencer_code && r.dispatch.influencer_code.toLowerCase() === influencerUsername.toLowerCase())
       ) || createFallbackRecord(inf, campaign);
 
-      for (const pd of postDates) {
-        const vNum = pd.video_number || 1;
+      for (let idx = 0; idx < postDates.length; idx++) {
+        const pd = postDates[idx];
+        const vNum = Number(pd.video_number) || (idx + 1);
 
         // 1. Draft Date Event (calculate if not stored)
         const drDate = pd.draft_date ? parseDateOnly(pd.draft_date, 2026) : (pd.post_date ? calculateDraftDate(pd.post_date, 2026) : '');
         if (drDate) {
-          const exists = list.some(e => e.dateStr === drDate && e.type === 'Draft' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
+          const exists = list.some(e => 
+            e.dateStr === drDate && 
+            e.type === 'Draft' && 
+            String(e.record?.influencer_id) === String(inf.id) && 
+            (e.videoNumber === vNum || e.label.includes(`Video ${vNum}`))
+          );
           if (!exists) {
             list.push({
               id: `inf-${inf.id}-v${vNum}-draft`,
@@ -670,7 +705,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         // 2. Final Post Event
         const fpDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
         if (fpDate) {
-          const exists = list.some(e => e.dateStr === fpDate && e.type === 'Final Post' && String(e.record?.influencer_id) === String(inf.id) && e.label.includes(`Video ${vNum}`));
+          const exists = list.some(e => 
+            e.dateStr === fpDate && 
+            e.type === 'Final Post' && 
+            String(e.record?.influencer_id) === String(inf.id) && 
+            (e.videoNumber === vNum || (vNum === 1 && e.label.includes('Final Post')))
+          );
           if (!exists) {
             list.push({
               id: `inf-${inf.id}-v${vNum}-finalpost`,
@@ -695,7 +735,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     }
 
     return list;
-  }, [trackingRecords, influencers, campaign, bills, todayStr]);
+  }, [activeTrackingRecords, activeInfluencers, campaign, campaignBills, todayStr]);
 
   // Calculate Today's Stats dynamically adapting to active filters
   const todaySummaryStats = useMemo(() => {

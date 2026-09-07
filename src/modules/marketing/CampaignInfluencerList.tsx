@@ -1411,7 +1411,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
       {mainViewMode === 'offer_agreement' ? (
         <OfferAgreementSection
           campaign={campaign}
-          influencers={influencers}
+          influencers={influencers.filter(inf => isActiveStatus(inf.is_archived))}
           onBackToList={() => setMainViewMode('list')}
           onOpenImportMailAcceptance={() => setIsImportMailAcceptanceModalOpen(true)}
           refreshTrigger={offerAgreementRefreshTrigger}

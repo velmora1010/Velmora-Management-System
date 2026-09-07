@@ -13,7 +13,7 @@ interface CampaignAnalyticsProps {
   onBack: () => void;
 }
 
-import { isArchived } from '../../utils/marketingUtils';
+import { isActiveStatus } from '../../utils/marketingUtils';
 
 const isFakeUrl = (url: string | null | undefined): boolean => {
   if (!url) return true;
@@ -34,7 +34,7 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
   const { trackingRecords, isLoading: isTrackingLoading } = useCampaignStatusTracking(campaign.id);
   const { dispatchRecords, isLoading: isDispatchLoading } = useCampaignDispatch(campaign.id);
 
-  const activeInfluencers = useMemo(() => influencers.filter(inf => !isArchived(inf.is_archived)), [influencers]);
+  const activeInfluencers = useMemo(() => influencers.filter(inf => isActiveStatus(inf.is_archived)), [influencers]);
 
   const metrics = useMemo(() => {
     let diyCount = 0;

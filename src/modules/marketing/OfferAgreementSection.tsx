@@ -508,8 +508,8 @@ export const OfferAgreementSection: React.FC<OfferAgreementSectionProps> = ({
       // Supabase table fallback
     }
 
-    // 3. Auto-sync stale agreements with current influencer single source of truth
-    for (const inf of influencers) {
+    // 3. Auto-sync stale agreements with current influencer single source of truth (Active only)
+    for (const inf of activeInfluencers) {
       const infId = String(inf.id);
       const ag = map[infId];
       if (ag && isAgreementStale(ag, inf)) {

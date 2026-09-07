@@ -381,7 +381,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
       case 'calendar':
         return <CampaignCalendar campaign={campaign} onBack={() => handleViewChange('overview')} onNavigateToStatusTracking={() => handleViewChange('status-tracking')} />;
       case 'analytics':
-        return <CampaignAnalytics campaign={campaign} influencers={influencers} onBack={() => handleViewChange('overview')} />;
+        return <CampaignAnalytics campaign={campaign} influencers={activeInfluencers} onBack={() => handleViewChange('overview')} />;
       case 'overview':
       default:
         return <CampaignInfoTab campaign={campaign} onEditCampaign={() => setIsEditingCampaign(true)} />;
