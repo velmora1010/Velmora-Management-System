@@ -3,6 +3,7 @@ import { SlidersHorizontal, X, RotateCcw, Check, Search, MapPin, Award, Globe, U
 import type { CampaignInfluencer } from '../../types';
 import { normalizeStateName, CREATOR_CATEGORIES, FOLLOWER_RANGES, PLATFORM_COMBOS, PRICE_RANGES } from './InfluencerFilterDrawer';
 import { getAllIndianStates, getIndianCitiesForState } from '../../data/indiaLocations';
+import { getUniqueFilterOptions, areFilterValuesEqual } from '../../utils/filterUtils';
 import { PRODUCT_LIST, formatDisplayProductName } from '../../modules/marketing/AddCampaignInfluencer';
 import { MultiSelectDropdown, OptionItem } from '../../modules/sales/website/components/MultiSelectDropdown';
 
@@ -56,38 +57,38 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
     setDraft(filterState);
   }, [filterState, isOpen]);
 
-  // Options for State MultiSelectDropdown (All Indian states + campaign influencer states)
+  // Options for State MultiSelectDropdown (normalized & deduplicated)
   const stateOptions = useMemo<OptionItem[]>(() => {
-    const set = new Set<string>(getAllIndianStates());
+    const rawList: string[] = [...getAllIndianStates()];
     influencers.forEach(inf => {
       const st = normalizeStateName(inf.state);
-      if (st) set.add(st);
+      if (st) rawList.push(st);
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b)).map(st => ({ label: st, value: st }));
+    return getUniqueFilterOptions(rawList).map(st => ({ label: st, value: st }));
   }, [influencers]);
 
-  // Options for City MultiSelectDropdown (All Indian cities scoped to selected states + influencer cities)
+  // Options for City MultiSelectDropdown (normalized & deduplicated)
   const cityOptions = useMemo<OptionItem[]>(() => {
-    const set = new Set<string>();
+    const rawList: string[] = [];
     if (draft.states.length > 0) {
       draft.states.forEach(st => {
-        getIndianCitiesForState(st).forEach(ct => set.add(ct));
+        rawList.push(...getIndianCitiesForState(st));
       });
     } else {
-      getIndianCitiesForState().forEach(ct => set.add(ct));
+      rawList.push(...getIndianCitiesForState());
     }
 
     influencers.forEach(inf => {
       if (draft.states.length > 0) {
-        const infStateNorm = normalizeStateName(inf.state).toLowerCase();
-        const matchState = draft.states.some(s => s.toLowerCase() === infStateNorm);
+        const infStateNorm = normalizeStateName(inf.state);
+        const matchState = draft.states.some(s => areFilterValuesEqual(s, infStateNorm));
         if (!matchState) return;
       }
       if (inf.city && inf.city.trim()) {
-        set.add(inf.city.trim());
+        rawList.push(inf.city.trim());
       }
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b)).map(ct => ({ label: ct, value: ct }));
+    return getUniqueFilterOptions(rawList).map(ct => ({ label: ct, value: ct }));
   }, [influencers, draft.states]);
 
   // Options for Creator Category

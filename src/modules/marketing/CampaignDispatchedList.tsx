@@ -19,6 +19,11 @@ import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { 
+  getUniqueFilterOptions, 
+  areFilterValuesEqual, 
+  normalizeFilterKey 
+} from '../../utils/filterUtils';
+import { 
   getAllIndianStates, 
   getIndianCitiesForState, 
   MASTER_LOCATIONS, 
@@ -192,43 +197,50 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return `@${clean}`;
   };
 
-  // Master Indian States + active campaign influencer states
+  // Master Indian States + active campaign influencer states (normalized & deduplicated)
   const availableStates = useMemo(() => {
-    const set = new Set<string>(getAllIndianStates());
+    const rawList: string[] = [...getAllIndianStates()];
     activeOnly.forEach(inf => {
       const dispatch = getDispatchData(inf);
-      const st = normalizeStateName(inf.state || dispatch?.state || '');
-      if (st) set.add(st);
+      const st = inf.state || dispatch?.state;
+      if (st && String(st).trim()) {
+        const norm = normalizeStateName(st);
+        rawList.push(norm || st);
+      }
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    return getUniqueFilterOptions(rawList);
   }, [activeOnly, dispatchRecords]);
 
-  // Master Indian Cities scoped to draftState (or all Indian cities) + influencer cities
+  // Master Indian Cities scoped to draftState (or all Indian cities) + influencer cities (normalized & deduplicated)
   const draftAvailableCities = useMemo(() => {
-    const masterCities = getIndianCitiesForState(draftState);
-    const set = new Set<string>(masterCities);
+    const rawList: string[] = [...getIndianCitiesForState(draftState)];
     activeOnly.forEach(inf => {
       const dispatch = getDispatchData(inf);
-      const st = normalizeStateName(inf.state || dispatch?.state || '');
+      const infState = normalizeStateName(inf.state || dispatch?.state || '');
       
-      if (draftState && normalizeStateName(draftState) !== st) {
-        return;
+      // If draftState is selected, strictly scope cities to that state
+      if (draftState) {
+        if (!areFilterValuesEqual(draftState, infState)) {
+          return;
+        }
       }
 
-      const ct = (inf.city || '').trim();
-      if (ct) set.add(ct);
+      if (inf.city && String(inf.city).trim()) {
+        rawList.push(String(inf.city).trim());
+      }
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    return getUniqueFilterOptions(rawList);
   }, [activeOnly, dispatchRecords, draftState]);
 
+  // Unique Courier Partners
   const availableCouriers = useMemo(() => {
-    const couriers = new Set<string>(KNOWN_COURIERS);
+    const rawList: string[] = [...KNOWN_COURIERS];
     dispatchRecords.forEach(d => {
-      if (d.courier_partner && d.courier_partner.trim()) {
-        couriers.add(d.courier_partner.trim());
+      if (d.courier_partner && String(d.courier_partner).trim()) {
+        rawList.push(String(d.courier_partner).trim());
       }
     });
-    return Array.from(couriers);
+    return getUniqueFilterOptions(rawList);
   }, [dispatchRecords]);
 
   // Counts for summary pills
@@ -280,6 +292,25 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     setIsFilterDrawerOpen(false);
   };
 
+  const handleDraftStateChange = (newState: string) => {
+    setDraftState(newState);
+    if (!newState) {
+      return;
+    }
+    // Check if current draftCity is valid for new state
+    if (draftCity) {
+      const validCitiesForNewState = getIndianCitiesForState(newState);
+      const isStillValid = validCitiesForNewState.some(c => areFilterValuesEqual(c, draftCity)) ||
+        activeOnly.some(inf => {
+          const st = normalizeStateName(inf.state || getDispatchData(inf)?.state || '');
+          return areFilterValuesEqual(st, newState) && areFilterValuesEqual(inf.city, draftCity);
+        });
+      if (!isStillValid) {
+        setDraftCity('');
+      }
+    }
+  };
+
   const handleApplyCustomCourier = () => {
     if (!customCourierInput.trim()) return;
     const val = customCourierInput.trim();
@@ -299,7 +330,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       const name = (inf.name || inf.influencer_name || '').toLowerCase();
       const phone = (inf.phone_number || dispatch?.phone_number || '').toLowerCase();
       const state = normalizeStateName(inf.state || dispatch?.state || '');
-      const city = (inf.city || '').toLowerCase();
+      const city = (inf.city || '').trim();
       const courierPartner = (dispatch?.courier_partner || '').trim();
 
       // 1. Search Query
@@ -308,28 +339,28 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         username.includes(term) ||
         name.includes(term) ||
         phone.includes(term) ||
-        city.includes(term) ||
+        city.toLowerCase().includes(term) ||
         state.toLowerCase().includes(term) ||
         courierPartner.toLowerCase().includes(term);
 
       if (!matchesSearch) return false;
 
-      // 2. State Filter
+      // 2. State Filter (case-insensitive & whitespace-safe)
       if (selectedState) {
-        if (normalizeStateName(selectedState) !== state) return false;
+        if (!areFilterValuesEqual(selectedState, state)) return false;
       }
 
-      // 3. City Filter
+      // 3. City Filter (case-insensitive & whitespace-safe)
       if (selectedCity) {
-        if (selectedCity.toLowerCase() !== city) return false;
+        if (!areFilterValuesEqual(selectedCity, city)) return false;
       }
 
-      // 4. Courier Filter
+      // 4. Courier Filter (case-insensitive & whitespace-safe)
       if (selectedCourier !== 'all') {
         if (selectedCourier === 'Not Dispatched') {
           if (isInfluencerDispatched(inf, dispatchRecords)) return false;
         } else {
-          if (courierPartner.toLowerCase() !== selectedCourier.toLowerCase()) return false;
+          if (!areFilterValuesEqual(selectedCourier, courierPartner)) return false;
         }
       }
 
@@ -487,7 +518,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
             {selectedDispatchStatus !== 'all' && (
               <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-                Status: {selectedDispatchStatus === 'dispatched' ? 'Dispatched Only' : 'Pending Only'}
+                Status: {selectedDispatchStatus === 'dispatched' ? 'Dispatched' : 'Not Dispatched'}
                 <button onClick={() => setSelectedDispatchStatus('all')} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
               </span>
             )}
@@ -549,10 +580,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 <label className="block text-xs font-medium text-slate-400 mb-1">State</label>
                 <select
                   value={draftState}
-                  onChange={(e) => {
-                    setDraftState(e.target.value);
-                    setDraftCity('');
-                  }}
+                  onChange={(e) => handleDraftStateChange(e.target.value)}
                   className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
                 >
                   <option value="">All States</option>
@@ -627,7 +655,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               {availableCouriers.map(c => (
                 <option key={c} value={c}>{c}</option>
               ))}
-              {draftCourier !== 'all' && draftCourier !== 'Not Dispatched' && !availableCouriers.includes(draftCourier) && (
+              {draftCourier !== 'all' && 
+               draftCourier !== 'Not Dispatched' && 
+               !availableCouriers.some(c => areFilterValuesEqual(c, draftCourier)) && (
                 <option value={draftCourier}>{draftCourier} (Custom)</option>
               )}
             </select>
@@ -671,8 +701,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             <div className="grid grid-cols-3 gap-2">
               {[
                 { id: 'all', label: 'All Statuses' },
-                { id: 'dispatched', label: 'Dispatched Only' },
-                { id: 'pending', label: 'Pending Only' }
+                { id: 'dispatched', label: 'Dispatched' },
+                { id: 'pending', label: 'Not Dispatched' }
               ].map(item => {
                 const active = draftDispatchStatus === item.id;
                 return (
