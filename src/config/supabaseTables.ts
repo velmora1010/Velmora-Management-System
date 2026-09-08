@@ -14,6 +14,8 @@ export const SUPABASE_TABLES = {
   influencerBrandPerformance: "influencer_brand_performance_rows",
   influencerCreate: "influencer_create_rows",
   influencerDispatch: "influencer_dispatch_details_rows",
+  influencerDispatchBatches: "influencer_dispatch_batches",
+  influencerDispatchBatchMembers: "influencer_dispatch_batch_members",
   influencerPlatform: "influencer_platforms_details_rows",
   influencerPostDates: "influencer_post_dates_rows",
   influencerPricing: "influencer_pricing_rows",

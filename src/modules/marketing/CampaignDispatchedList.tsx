@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { 
   Search, 
@@ -13,7 +13,13 @@ import {
   Scale,
   MapPin,
   Building,
-  RotateCcw
+  RotateCcw,
+  CheckSquare,
+  Square,
+  Users,
+  Layers,
+  AlertCircle,
+  Check
 } from 'lucide-react';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
@@ -29,6 +35,9 @@ import {
   MASTER_LOCATIONS, 
   STATE_ALIASES 
 } from '../../data/indiaLocations';
+import { parseInfluencerCodeRanges, type RangeParseResult } from '../../utils/influencerRangeParser';
+import { dispatchBatchService, type DispatchBatch } from '../../services/dispatchBatchService';
+import { PrepareDispatchModal } from './PrepareDispatchModal';
 
 interface CampaignDispatchedListProps {
   campaign: Campaign;
@@ -381,8 +390,65 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     }).sort(compareInfluencerCodesAsc);
   }, [activeOnly, searchTerm, selectedState, selectedCity, selectedCourier, selectedWeightRange, selectedDispatchStatus, dispatchRecords]);
 
+  // Bulk Selection & Prepare Dispatch State
+  const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
+  const [selectedInfluencerIds, setSelectedInfluencerIds] = useState<string[]>([]);
+  const [rangeInput, setRangeInput] = useState('');
+  const [rangeFeedback, setRangeFeedback] = useState<RangeParseResult | null>(null);
+  const [isPrepareModalOpen, setIsPrepareModalOpen] = useState(false);
+  const [savedBatches, setSavedBatches] = useState<DispatchBatch[]>([]);
+
+  // Load saved batches from persistent storage
+  const loadSavedBatches = useCallback(async () => {
+    try {
+      const b = await dispatchBatchService.getBatches(campaign.id);
+      setSavedBatches(b);
+    } catch (e) {
+      console.warn('Failed to load batches in CampaignDispatchedList:', e);
+    }
+  }, [campaign.id]);
+
+  useEffect(() => {
+    loadSavedBatches();
+  }, [loadSavedBatches]);
+
+  // Selected influencer objects (strictly active)
+  const selectedInfluencerObjects = useMemo(() => {
+    const idSet = new Set(selectedInfluencerIds);
+    return activeOnly.filter(inf => idSet.has(String(inf.id)));
+  }, [selectedInfluencerIds, activeOnly]);
+
+  const toggleSelectInfluencer = (id: string) => {
+    setSelectedInfluencerIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleClearSelection = () => {
+    setSelectedInfluencerIds([]);
+    setRangeInput('');
+    setRangeFeedback(null);
+  };
+
+  // Range input submission
+  const handleApplyRange = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!rangeInput.trim()) return;
+
+    // Parse against active influencers (and all influencers to detect inactive/eliminated)
+    const result = parseInfluencerCodeRanges(rangeInput, activeOnly, baseInfluencers);
+    setRangeFeedback(result);
+
+    if (result.selectedInfluencerIds.length > 0) {
+      setSelectedInfluencerIds(prev => {
+        const combined = new Set([...prev, ...result.selectedInfluencerIds]);
+        return Array.from(combined);
+      });
+    }
+  };
+
   const handleRefresh = async () => {
-    await Promise.all([refreshDispatch(), refreshInfluencers()]);
+    await Promise.all([refreshDispatch(), refreshInfluencers(), loadSavedBatches()]);
   };
 
   const isLoading = (isInfluencersLoading || isDispatchLoading) && baseInfluencers.length === 0;
@@ -402,10 +468,15 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </button>
           
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <Package className="text-purple-400" size={22} />
-              <h2 className="text-lg font-bold text-slate-100">
-                Influencer Logistics ({activeOnly.length} Active Influencers)
+              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2 flex-wrap">
+                <span>Influencer Logistics ({activeOnly.length} Active Influencers)</span>
+                {isBulkSelectMode && (
+                  <span className="px-2.5 py-0.5 rounded-full bg-purple-600/30 border border-purple-500/50 text-purple-300 text-xs font-bold font-mono">
+                    Selected: {selectedInfluencerObjects.length}
+                  </span>
+                )}
               </h2>
             </div>
             
@@ -431,13 +502,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         {/* Right Search and Filter Controls */}
         <div className="flex items-center gap-2.5 w-full md:w-auto flex-wrap">
           {/* Search Box */}
-          <div className="relative flex-1 md:w-64">
+          <div className="relative flex-1 md:w-56">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input 
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search code, user, phone, city..."
+              placeholder="Search code, user..."
               className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
             />
           </div>
@@ -462,6 +533,42 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
+          {/* Bulk Select Button */}
+          <button
+            type="button"
+            onClick={() => setIsBulkSelectMode(prev => !prev)}
+            className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition-all border flex items-center gap-2 cursor-pointer ${
+              isBulkSelectMode
+                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
+            }`}
+            title="Bulk Select Influencers"
+          >
+            <CheckSquare size={16} />
+            <span>Bulk Select</span>
+            {selectedInfluencerObjects.length > 0 && (
+              <span className="bg-white text-purple-900 text-[10px] font-extrabold rounded-full px-1.5 py-0.2">
+                {selectedInfluencerObjects.length}
+              </span>
+            )}
+          </button>
+
+          {/* Batches Button */}
+          <button
+            type="button"
+            onClick={() => setIsPrepareModalOpen(true)}
+            className="px-3.5 py-2 rounded-xl text-sm font-medium transition-colors border bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300 flex items-center gap-1.5 cursor-pointer"
+            title="View Prepared Dispatch Batches"
+          >
+            <Truck size={15} className="text-purple-400" />
+            <span>Batches</span>
+            {savedBatches.length > 0 && (
+              <span className="bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-bold rounded-full px-1.5 py-0.2">
+                {savedBatches.length}
+              </span>
+            )}
+          </button>
+
           {/* Refresh Button */}
           <button
             type="button"
@@ -474,6 +581,113 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Bulk Selection Mode Toolbar */}
+      {isBulkSelectMode && (
+        <div className="bg-[#141a29] border border-purple-800/40 rounded-2xl p-4 sm:p-5 space-y-3 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-purple-600/20 text-purple-400 rounded-lg border border-purple-500/30">
+                <Users size={18} />
+              </div>
+              <div>
+                <div className="text-sm sm:text-base font-bold text-slate-100 flex items-center gap-2">
+                  <span>Selected:</span>
+                  <span className="text-purple-300 font-mono font-extrabold text-base sm:text-lg">
+                    {selectedInfluencerObjects.length}
+                  </span>
+                  <span>Influencer{selectedInfluencerObjects.length === 1 ? '' : 's'}</span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Click cards below or enter code ranges (e.g. HIS1-HIS5, HIS7, TNS20-TNS25)
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {selectedInfluencerObjects.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="px-3 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                >
+                  Clear Selection
+                </button>
+              )}
+
+              <button
+                type="button"
+                disabled={selectedInfluencerObjects.length === 0}
+                onClick={() => setIsPrepareModalOpen(true)}
+                className={`px-5 py-2 text-xs font-bold rounded-xl shadow-lg transition-all flex items-center gap-2 ${
+                  selectedInfluencerObjects.length === 0
+                    ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed shadow-none'
+                    : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30 cursor-pointer'
+                }`}
+              >
+                <Truck size={15} />
+                <span>Prepare Dispatch ({selectedInfluencerObjects.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Range Input Box */}
+          <form onSubmit={handleApplyRange} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={rangeInput}
+                onChange={(e) => {
+                  setRangeInput(e.target.value);
+                  if (rangeFeedback) setRangeFeedback(null);
+                }}
+                placeholder="Enter codes or ranges (e.g. HIS1 - HIS5, HIS7, TNS20 - TNS25)"
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500 font-mono"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!rangeInput.trim()}
+              className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer shrink-0"
+            >
+              Select Codes
+            </button>
+          </form>
+
+          {/* Validation Feedback */}
+          {rangeFeedback && (
+            <div className="space-y-1.5 text-xs pt-1">
+              {rangeFeedback.invalidRanges.map((err, idx) => (
+                <div key={idx} className="px-3.5 py-2 rounded-xl bg-rose-950/40 border border-rose-800/50 text-rose-300 flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0 text-rose-400" />
+                  <span>{err}</span>
+                </div>
+              ))}
+
+              {rangeFeedback.inactiveCodes.map((msg, idx) => (
+                <div key={idx} className="px-3.5 py-2 rounded-xl bg-amber-950/40 border border-amber-800/50 text-amber-300 flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0 text-amber-400" />
+                  <span>{msg}</span>
+                </div>
+              ))}
+
+              {rangeFeedback.notFoundCodes.map((msg, idx) => (
+                <div key={idx} className="px-3.5 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0 text-slate-400" />
+                  <span>{msg}</span>
+                </div>
+              ))}
+
+              {rangeFeedback.selectedInfluencers.length > 0 && (
+                <div className="px-3.5 py-2 rounded-xl bg-emerald-950/40 border border-emerald-800/40 text-emerald-300 flex items-center gap-2">
+                  <Check size={15} className="shrink-0 text-emerald-400" />
+                  <span>Selected {rangeFeedback.selectedInfluencers.length} active influencer{rangeFeedback.selectedInfluencers.length === 1 ? '' : 's'} from range.</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Active Filters Bar */}
       {(activeFilterCount > 0 || searchTerm.trim()) && (
@@ -774,16 +988,42 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         /* Compact 3-column Grid Cards */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
           {filteredInfluencers.map((inf) => {
-            const isDispatched = isInfluencerDispatched(inf, dispatchRecords);
+            const isSelected = selectedInfluencerIds.includes(String(inf.id));
             const username = getInfluencerUsername(inf);
 
             return (
               <div 
                 key={inf.id}
-                className="bg-[#0e1626]/80 hover:bg-[#111a2e] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3 transition-colors shadow-sm"
+                onClick={() => {
+                  if (isBulkSelectMode) {
+                    toggleSelectInfluencer(String(inf.id));
+                  }
+                }}
+                className={`bg-[#0e1626]/80 hover:bg-[#111a2e] border rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3 transition-colors shadow-sm ${
+                  isSelected && isBulkSelectMode
+                    ? 'border-purple-500 bg-purple-950/20 shadow-purple-500/10' 
+                    : 'border-slate-800/90 hover:border-slate-700/80'
+                } ${isBulkSelectMode ? 'cursor-pointer select-none' : ''}`}
               >
-                {/* Left: Profile Photo & Influencer Info */}
+                {/* Left: Checkbox (in Bulk Select mode) + Profile Photo + Username */}
                 <div className="flex items-center gap-3 min-w-0 flex-1">
+                  {isBulkSelectMode && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelectInfluencer(String(inf.id));
+                      }}
+                      className="text-purple-400 hover:text-purple-300 focus:outline-none shrink-0 cursor-pointer"
+                    >
+                      {isSelected ? (
+                        <CheckSquare size={19} className="text-purple-500" />
+                      ) : (
+                        <Square size={19} className="text-slate-500 hover:text-slate-300" />
+                      )}
+                    </button>
+                  )}
+
                   <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-sm sm:text-base border-2 border-purple-500/30 shrink-0 shadow-sm">
                     {inf.profile_file_url ? (
                       <img 
@@ -803,56 +1043,38 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 
-                        className="font-bold text-slate-100 text-sm sm:text-base truncate hover:text-purple-300 transition-colors"
-                        title={username}
-                      >
-                        {username}
-                      </h3>
-                      {inf.code && (
-                        <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
-                          {inf.code}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Dispatched Badge (Subtle, green, strictly no active online dot) */}
-                    {isDispatched && (
-                      <div className="mt-1 flex items-center">
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
-                          Dispatched
-                        </span>
-                      </div>
-                    )}
+                    <h3 
+                      className="font-bold text-slate-100 text-sm sm:text-base truncate hover:text-purple-300 transition-colors"
+                      title={username}
+                    >
+                      {username}
+                    </h3>
                   </div>
                 </div>
 
-                {/* Right: Action Button */}
-                <div className="shrink-0">
-                  {isDispatched ? (
-                    <button 
-                      type="button"
-                      onClick={() => onDispatch?.(inf)} 
-                      className="px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shrink-0 shadow-sm cursor-pointer flex items-center gap-1.5"
-                    >
-                      View Dispatch
-                    </button>
-                  ) : (
-                    <button 
-                      type="button"
-                      onClick={() => onDispatch?.(inf)} 
-                      className="px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-colors shrink-0 shadow-sm cursor-pointer flex items-center gap-1.5"
-                    >
-                      Dispatch
-                    </button>
-                  )}
-                </div>
+                {/* Right: Influencer Code */}
+                {inf.code && (
+                  <span className="px-2.5 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
+                    {inf.code}
+                  </span>
+                )}
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Prepare Dispatch Modal */}
+      {isPrepareModalOpen && (
+        <PrepareDispatchModal
+          campaign={campaign}
+          selectedInfluencers={selectedInfluencerObjects}
+          allActiveInfluencers={activeOnly}
+          onClose={() => setIsPrepareModalOpen(false)}
+          onBatchesUpdated={async () => {
+            await Promise.all([loadSavedBatches(), refreshDispatch()]);
+          }}
+        />
       )}
     </div>
   );
