@@ -1,6 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { X, Package, Truck, UploadCloud, Image as ImageIcon } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
+import { 
+  X, 
+  Package, 
+  Truck, 
+  UploadCloud, 
+  Image as ImageIcon,
+  User,
+  Hash,
+  Phone,
+  MapPin,
+  Building,
+  Map as MapIcon,
+  LayoutGrid,
+  Languages,
+  Folder,
+  Calendar,
+  Coins,
+  Weight
+} from 'lucide-react';
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
 import { getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
@@ -206,200 +224,275 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] my-auto animate-fade-in overflow-hidden">
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
+      <div className="bg-[#0b101b] border border-slate-800/90 rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col max-h-[92vh] my-auto animate-fade-in overflow-hidden">
         
         {/* Header - Fixed/Sticky at top, X close button always visible and interactive */}
-        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-700 bg-slate-800 shrink-0 sticky top-0 z-20">
-          <h2 className="text-lg sm:text-xl font-bold text-slate-100 flex items-center gap-2">
-            <Package className="text-emerald-400" size={22} /> Dispatch Influencer: {influencer.influencer_name || influencer.name}
-          </h2>
+        <div className="flex justify-between items-center px-6 py-4 sm:py-5 border-b border-slate-800/80 bg-[#0c121e] shrink-0 sticky top-0 z-20">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+              <Package size={22} />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                Dispatch Influencer: {influencer.influencer_name || influencer.name}
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Manage product dispatch, shipment tracking and logistics details for this influencer.
+              </p>
+            </div>
+          </div>
           <button 
             type="button"
             onClick={onClose} 
             aria-label="Close"
-            className="text-slate-400 hover:text-white transition-colors p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-600 hover:border-slate-500 cursor-pointer shrink-0"
+            className="text-slate-400 hover:text-white transition-colors p-2 bg-[#151c2c] hover:bg-[#1c263a] rounded-xl border border-slate-700/80 cursor-pointer shrink-0"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
         {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="overflow-y-auto p-6 flex-1 custom-scrollbar">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <form onSubmit={handleSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 custom-scrollbar">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
             
             {/* Left Column */}
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6 flex flex-col">
               
               {/* Influencer Basic Info */}
-              <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
-                  <Truck size={16} className="text-blue-400"/> Influencer Basic Info
-                </h3>
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="text-purple-400 mt-0.5">
+                    <User size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Influencer Basic Info</h3>
+                    <p className="text-xs text-slate-400">Basic details of the influencer for dispatch.</p>
+                  </div>
+                </div>
                 
-                <div className="space-y-3">
+                <div className="space-y-3.5">
                   {/* Row 1: Creator Name | Influencer Code */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Creator Name</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <User size={13} className="text-slate-400 shrink-0" />
+                        <span>Creator Name</span>
+                      </label>
                       <input 
                         type="text" 
                         value={influencer.influencer_name || influencer.name || ''} 
                         readOnly 
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400 cursor-not-allowed" 
+                        className="w-full bg-[#0b101b] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-300 font-medium cursor-not-allowed" 
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Influencer Code</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Hash size={13} className="text-slate-400 shrink-0" />
+                        <span>Influencer Code</span>
+                      </label>
                       <input 
                         type="text" 
                         value={influencer.code || ''} 
                         readOnly 
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-purple-400 font-mono font-bold cursor-not-allowed select-all" 
+                        className="w-full bg-[#0b101b] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-300 font-medium cursor-not-allowed select-all" 
                       />
                     </div>
                   </div>
 
                   {/* Row 2: Phone Number | Alt Phone */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Phone Number</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Phone size={13} className="text-slate-400 shrink-0" />
+                        <span>Phone Number</span>
+                      </label>
                       <input 
                         type="text" 
                         value={phone} 
                         onChange={e => setPhone(e.target.value)} 
-                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" 
+                        placeholder="Phone Number"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Alt Phone</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Phone size={13} className="text-slate-400 shrink-0" />
+                        <span>Alt Phone</span>
+                      </label>
                       <input 
                         type="text" 
                         value={altPhone} 
                         onChange={e => setAltPhone(e.target.value)} 
-                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" 
+                        placeholder="Alt Phone"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
                     </div>
                   </div>
 
                   {/* Row 3: Address (Complete address / street / locality) */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Address</label>
+                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                      <MapPin size={13} className="text-slate-400 shrink-0" />
+                      <span>Address</span>
+                    </label>
                     <textarea 
                       value={address} 
                       onChange={e => setAddress(e.target.value)} 
                       rows={2} 
                       placeholder="Complete address / street / locality"
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"
+                      className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none leading-relaxed"
                     />
                   </div>
 
                   {/* Row 4: City | State */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">City</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Building size={13} className="text-slate-400 shrink-0" />
+                        <span>City</span>
+                      </label>
                       <input 
                         type="text" 
                         value={city} 
                         onChange={e => setCity(e.target.value)} 
                         placeholder="City"
-                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">State</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <MapIcon size={13} className="text-slate-400 shrink-0" />
+                        <span>State</span>
+                      </label>
                       <input 
                         type="text" 
                         value={state} 
                         onChange={e => setState(e.target.value)} 
                         placeholder="State"
-                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
                     </div>
                   </div>
 
                   {/* Row 5: Pincode | Language */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Pincode</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <LayoutGrid size={13} className="text-slate-400 shrink-0" />
+                        <span>Pincode</span>
+                      </label>
                       <input 
                         type="text" 
                         value={pincode} 
                         onChange={e => setPincode(e.target.value)} 
                         placeholder="Pincode"
-                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Language</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Languages size={13} className="text-slate-400 shrink-0" />
+                        <span>Language</span>
+                      </label>
                       <input 
                         type="text" 
                         value={language} 
                         onChange={e => setLanguage(e.target.value)} 
                         placeholder="e.g. Hindi, Tamil"
-                        className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
                     </div>
                   </div>
 
                   {/* Row 6: Campaign Name */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Campaign Name</label>
+                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                      <Folder size={13} className="text-slate-400 shrink-0" />
+                      <span>Campaign Name</span>
+                    </label>
                     <input 
                       type="text" 
                       value={campaign.campaign_name || ''} 
                       readOnly 
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400 cursor-not-allowed" 
+                      className="w-full bg-[#0b101b] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-300 font-medium cursor-not-allowed" 
                     />
                   </div>
                 </div>
               </div>
 
               {/* Campaign Products */}
-              <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
-                  <Package size={16} className="text-purple-400"/> Campaign Products
-                </h3>
-                <div className="space-y-4">
-                  <div className="bg-slate-900 rounded-lg p-3 border border-slate-700 min-h-[100px] max-h-[200px] overflow-y-auto">
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="text-purple-400 mt-0.5">
+                    <Package size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Campaign Products</h3>
+                    <p className="text-xs text-slate-400">Products assigned to this influencer.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar">
                     {selectedProducts.length > 0 ? (
-                      <ul className="space-y-2">
-                        {selectedProducts.map((p: any, idx: number) => {
-                          const unitPrice = getProductPrice(p.product_name);
-                          return (
-                            <li key={idx} className="flex justify-between items-center text-sm border-b border-slate-800 pb-2 last:border-0 last:pb-0">
-                              <div className="flex flex-col">
-                                <span className="text-slate-300 font-medium">{p.product_name}</span>
-                                <span className="text-[10px] text-slate-500">₹{(unitPrice ?? 0).toLocaleString('en-IN')} / unit</span>
+                      selectedProducts.map((p: any, idx: number) => {
+                        const unitPrice = getProductPrice(p.product_name);
+                        return (
+                          <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-[#0b101b]/60 border border-slate-800/80">
+                            <div className="flex items-center gap-3">
+                              <Package size={16} className="text-slate-400 shrink-0" />
+                              <div>
+                                <div className="text-xs font-semibold text-slate-200 leading-tight">{p.product_name}</div>
+                                <div className="text-[11px] text-slate-500 mt-0.5">₹{(unitPrice ?? 0).toLocaleString('en-IN')} / unit</div>
                               </div>
-                              <span className="bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono border border-slate-700/50 text-xs">Qty: {p.quantity}</span>
-                            </li>
-                          );
-                        })}
-                      </ul>
+                            </div>
+                            <span className="bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 px-2.5 py-1 rounded-lg text-xs font-mono font-medium shrink-0">
+                              Qty: {p.quantity}
+                            </span>
+                          </div>
+                        );
+                      })
                     ) : (
-                      <p className="text-slate-500 text-sm text-center italic py-4">No products selected for this influencer.</p>
+                      <p className="text-slate-500 text-xs text-center italic py-4">No products selected for this influencer.</p>
                     )}
                   </div>
                   
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Total Products</label>
-                      <input type="number" value={totalProducts} readOnly className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400 cursor-not-allowed font-medium" />
+                  {/* Summary Boxes */}
+                  <div className="grid grid-cols-3 gap-3 pt-1">
+                    <div className="bg-[#0b101b]/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                      <div className="flex items-center gap-1.5 text-purple-400 mb-1">
+                        <Package size={14} />
+                        <span className="text-[11px] font-medium text-slate-400">Total Products</span>
+                      </div>
+                      <div className="text-base font-bold text-white">{totalProducts}</div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Total Value (₹)</label>
+
+                    <div className="bg-[#0b101b]/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                      <div className="flex items-center gap-1.5 text-purple-400 mb-1">
+                        <Coins size={14} />
+                        <span className="text-[11px] font-medium text-slate-400">Total Value (₹)</span>
+                      </div>
+                      <div>
+                        <div className="text-base font-bold text-white">
+                          {totalValue ? `₹${(Number(totalValue) || 0).toLocaleString('en-IN')}` : '₹0'}
+                        </div>
+                        <span className="text-[9px] text-slate-500 leading-tight block mt-0.5">Auto calculated from campaign products</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#0b101b]/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                      <div className="flex items-center gap-1.5 text-purple-400 mb-1">
+                        <Weight size={14} />
+                        <span className="text-[11px] font-medium text-slate-400">Total Weight</span>
+                      </div>
                       <input 
                         type="text" 
-                        value={totalValue ? `₹${(Number(totalValue) || 0).toLocaleString('en-IN')}` : '₹0'} 
-                        readOnly 
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400 cursor-not-allowed font-semibold" 
+                        value={totalWeight} 
+                        onChange={e => setTotalWeight(e.target.value)} 
+                        placeholder="e.g. 500g" 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-lg px-2.5 py-1 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
-                      <span className="text-[9px] text-slate-500 mt-1 block leading-tight">Auto calculated from campaign products</span>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Total Weight</label>
-                      <input type="text" value={totalWeight} onChange={e => setTotalWeight(e.target.value)} placeholder="e.g. 500g" className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
                     </div>
                   </div>
                 </div>
@@ -408,62 +501,91 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
             </div>
 
             {/* Right Column */}
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6 flex flex-col">
               
               {/* Product Shipment (Photos) */}
-              <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                 <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
-                   <ImageIcon size={16} className="text-yellow-400"/> Photos
-                 </h3>
-                 <div className="grid grid-cols-2 gap-4">
-                    {/* Pack Photo */}
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-2">Product Photo</label>
-                      <div className="border-2 border-dashed border-slate-600 rounded-lg p-2 text-center relative hover:border-emerald-500 transition-colors bg-slate-900">
-                        {productPhotoPreview ? (
-                          <div className="relative aspect-video">
-                            <img src={productPhotoPreview} alt="Product" className="w-full h-full object-contain rounded" />
-                          </div>
-                        ) : (
-                          <div className="py-6 flex flex-col items-center">
-                            <UploadCloud className="text-slate-500 mb-2" size={24} />
-                            <span className="text-xs text-slate-400">Click to upload</span>
-                          </div>
-                        )}
-                        <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'product')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                      </div>
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="text-purple-400 mt-0.5">
+                    <ImageIcon size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Photos</h3>
+                    <p className="text-xs text-slate-400">Upload product and dispatch photos.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3.5">
+                  {/* Pack Photo */}
+                  <div>
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-purple-400 mb-2">
+                      <ImageIcon size={13} />
+                      <span className="text-slate-300 font-medium">Product Photo</span>
                     </div>
-                    
-                    {/* Final Photo */}
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-2">Dispatch Photo</label>
-                      <div className="border-2 border-dashed border-slate-600 rounded-lg p-2 text-center relative hover:border-emerald-500 transition-colors bg-slate-900">
-                        {dispatchPhotoPreview ? (
-                          <div className="relative aspect-video">
-                            <img src={dispatchPhotoPreview} alt="Dispatch" className="w-full h-full object-contain rounded" />
-                          </div>
-                        ) : (
-                          <div className="py-6 flex flex-col items-center">
-                            <UploadCloud className="text-slate-500 mb-2" size={24} />
-                            <span className="text-xs text-slate-400">Click to upload</span>
-                          </div>
-                        )}
-                        <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'dispatch')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                      </div>
+                    <div className="border border-dashed border-slate-700/80 hover:border-purple-500/70 bg-[#0b101b]/60 rounded-xl p-3 text-center relative transition-colors group cursor-pointer min-h-[140px] flex items-center justify-center">
+                      {productPhotoPreview ? (
+                        <div className="relative w-full h-28">
+                          <img src={productPhotoPreview} alt="Product" className="w-full h-full object-contain rounded-lg" />
+                        </div>
+                      ) : (
+                        <div className="py-3 flex flex-col items-center justify-center">
+                          <UploadCloud className="text-purple-400/80 mb-2 group-hover:text-purple-300 transition-colors" size={26} />
+                          <span className="text-xs font-semibold text-slate-300">Click to upload</span>
+                          <span className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, WEBP (Max 5MB)</span>
+                        </div>
+                      )}
+                      <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'product')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                     </div>
-                 </div>
+                  </div>
+                  
+                  {/* Final Photo */}
+                  <div>
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-purple-400 mb-2">
+                      <ImageIcon size={13} />
+                      <span className="text-slate-300 font-medium">Dispatch Photo</span>
+                    </div>
+                    <div className="border border-dashed border-slate-700/80 hover:border-purple-500/70 bg-[#0b101b]/60 rounded-xl p-3 text-center relative transition-colors group cursor-pointer min-h-[140px] flex items-center justify-center">
+                      {dispatchPhotoPreview ? (
+                        <div className="relative w-full h-28">
+                          <img src={dispatchPhotoPreview} alt="Dispatch" className="w-full h-full object-contain rounded-lg" />
+                        </div>
+                      ) : (
+                        <div className="py-3 flex flex-col items-center justify-center">
+                          <UploadCloud className="text-purple-400/80 mb-2 group-hover:text-purple-300 transition-colors" size={26} />
+                          <span className="text-xs font-semibold text-slate-300">Click to upload</span>
+                          <span className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, WEBP (Max 5MB)</span>
+                        </div>
+                      )}
+                      <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'dispatch')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              {/* Dispatch Details */}
-              <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
-                  <Truck size={16} className="text-emerald-400"/> Dispatch Logistics
-                </h3>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
+              {/* Dispatch Logistics */}
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="text-purple-400 mt-0.5">
+                    <Truck size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Dispatch Logistics</h3>
+                    <p className="text-xs text-slate-400">Add courier and tracking details.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Courier Partner</label>
-                      <select value={courierPartner} onChange={e => setCourierPartner(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500">
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Truck size={13} className="text-slate-400 shrink-0" />
+                        <span>Courier Partner</span>
+                      </label>
+                      <select 
+                        value={courierPartner} 
+                        onChange={e => setCourierPartner(e.target.value)} 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer"
+                      >
                         <option value="">Select Partner</option>
                         <option value="ST Courier">ST Courier</option>
                         <option value="India Post">India Post</option>
@@ -475,18 +597,44 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Tracking ID</label>
-                      <input type="text" value={trackingId} onChange={e => setTrackingId(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Hash size={13} className="text-slate-400 shrink-0" />
+                        <span>Tracking ID</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={trackingId} 
+                        onChange={e => setTrackingId(e.target.value)} 
+                        placeholder="Tracking ID"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
+                      />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Dispatch Date</label>
-                      <input type="date" value={dispatchDate} onChange={e => setDispatchDate(e.target.value)} required className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 [color-scheme:dark]" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Calendar size={13} className="text-slate-400 shrink-0" />
+                        <span>Dispatch Date</span>
+                      </label>
+                      <input 
+                        type="date" 
+                        value={dispatchDate} 
+                        onChange={e => setDispatchDate(e.target.value)} 
+                        required 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark] transition-colors" 
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Expected Delivery</label>
-                      <input type="date" value={expectedDeliveryDate} onChange={e => setExpectedDeliveryDate(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 [color-scheme:dark]" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Calendar size={13} className="text-slate-400 shrink-0" />
+                        <span>Expected Delivery</span>
+                      </label>
+                      <input 
+                        type="date" 
+                        value={expectedDeliveryDate} 
+                        onChange={e => setExpectedDeliveryDate(e.target.value)} 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark] transition-colors" 
+                      />
                     </div>
                   </div>
                 </div>
@@ -495,15 +643,27 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
           </div>
 
           {/* Footer Actions */}
-          <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-slate-700">
-            <button type="button" onClick={onClose} disabled={isSubmitting} className="px-6 py-2 bg-slate-800 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors disabled:opacity-50 cursor-pointer">
+          <div className="mt-6 flex justify-end items-center gap-3 pt-4">
+            <button 
+              type="button" 
+              onClick={onClose} 
+              disabled={isSubmitting} 
+              className="px-5 py-2.5 bg-[#151c2c] hover:bg-[#1e273d] text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={isSubmitting || selectedProducts.length === 0} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium shadow-lg shadow-emerald-500/20 transition-colors disabled:opacity-50 flex items-center gap-2 cursor-pointer">
+            <button 
+              type="submit" 
+              disabled={isSubmitting || selectedProducts.length === 0} 
+              className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+            >
               {isSubmitting ? (
-                 <>Saving...</>
+                <>Saving...</>
               ) : (
-                 <>Confirm Dispatch <Truck size={18} /></>
+                <>
+                  <Truck size={16} />
+                  Dispatch
+                </>
               )}
             </button>
           </div>
