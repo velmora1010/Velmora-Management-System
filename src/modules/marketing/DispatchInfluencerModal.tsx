@@ -253,7 +253,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
         </div>
 
         {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 custom-scrollbar">
+        <form onSubmit={handleSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/60 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
             
             {/* Left Column */}
@@ -422,8 +422,9 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
               </div>
 
               {/* Campaign Products */}
-              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
-                <div className="flex items-start gap-3 mb-4">
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm flex flex-col">
+                {/* Fixed Card Header */}
+                <div className="flex items-start gap-3 mb-4 shrink-0">
                   <div className="text-purple-400 mt-0.5">
                     <Package size={20} />
                   </div>
@@ -433,17 +434,18 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                   </div>
                 </div>
 
-                <div className="space-y-3.5">
-                  <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar">
+                <div className="space-y-3.5 flex-1 flex flex-col min-h-0">
+                  {/* Dedicated Scrollable Container ONLY around individual product rows */}
+                  <div className="space-y-2 max-h-[210px] overflow-y-auto pr-1.5 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-900/40 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-700/80 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600 transition-colors">
                     {selectedProducts.length > 0 ? (
                       selectedProducts.map((p: any, idx: number) => {
                         const unitPrice = getProductPrice(p.product_name);
                         return (
                           <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-[#0b101b]/60 border border-slate-800/80">
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 min-w-0 pr-2">
                               <Package size={16} className="text-slate-400 shrink-0" />
-                              <div>
-                                <div className="text-xs font-semibold text-slate-200 leading-tight">{p.product_name}</div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-slate-200 leading-tight truncate">{p.product_name}</div>
                                 <div className="text-[11px] text-slate-500 mt-0.5">₹{(unitPrice ?? 0).toLocaleString('en-IN')} / unit</div>
                               </div>
                             </div>
@@ -458,8 +460,8 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                     )}
                   </div>
                   
-                  {/* Summary Boxes */}
-                  <div className="grid grid-cols-3 gap-3 pt-1">
+                  {/* Fixed Summary Boxes at bottom of card */}
+                  <div className="grid grid-cols-3 gap-3 pt-1 shrink-0 mt-auto">
                     <div className="bg-[#0b101b]/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
                       <div className="flex items-center gap-1.5 text-purple-400 mb-1">
                         <Package size={14} />
