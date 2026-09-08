@@ -1,17 +1,22 @@
 import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer, Campaign } from '../types';
+import { 
+  dispatchBatchService, 
+  formatBatchDateTime, 
+  type DispatchBatch 
+} from './dispatchBatchService';
 
 export const logisticsWorkflowService = {
   /**
-   * Moves selected active influencers to 'prepare_dispatch' stage.
-   * Persists their status in influencer_dispatch_details_rows in Supabase.
-   * Uses existing influencer_id foreign key (does NOT reference non-existent influencer_code).
+   * Moves selected active influencers to 'prepare_dispatch' stage and groups them into ONE newly created Batch.
+   * - Persists individual influencer dispatch status in influencer_dispatch_details_rows.
+   * - Persists the batch in Supabase system_settings and localStorage.
    */
   async moveToPrepareDispatch(
     campaign: Campaign,
     selectedInfluencers: CampaignInfluencer[]
-  ): Promise<{ success: boolean; count: number; error?: string }> {
+  ): Promise<{ success: boolean; count: number; batch?: DispatchBatch; error?: string }> {
     if (!campaign?.id || selectedInfluencers.length === 0) {
       return { success: true, count: 0 };
     }
@@ -20,8 +25,10 @@ export const logisticsWorkflowService = {
       const campaignId = String(campaign.id);
       const influencerIds = selectedInfluencers.map(inf => String(inf.id));
       const numericCampaignId = isNaN(Number(campaignId)) ? campaignId : Number(campaignId);
+      const now = new Date();
+      const { displayDate, displayTime } = formatBatchDateTime(now);
 
-      // 1. Fetch existing rows for this campaign and selected influencers
+      // 1. Fetch existing rows for this campaign and selected influencers in influencer_dispatch_details_rows
       const { data: existingRows, error: fetchErr } = await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
         .select('id, influencer_id, dispatch_status')
@@ -98,7 +105,7 @@ export const logisticsWorkflowService = {
             dispatch_date: new Date().toISOString().split('T')[0],
             expected_delivery_date: null,
             dispatch_status: 'prepare_dispatch',
-            created_at: new Date().toISOString()
+            created_at: now.toISOString()
           };
           return row;
         });
@@ -113,7 +120,37 @@ export const logisticsWorkflowService = {
         }
       }
 
-      return { success: true, count: selectedInfluencers.length };
+      // 4. Create ONE Prepare Dispatch Batch for this single action
+      const existingBatches = await dispatchBatchService.getBatches(campaign.id);
+      const batchNumber = existingBatches.length + 1;
+      const batchCode = `BATCH-${String(batchNumber).padStart(3, '0')}`;
+
+      const newBatch: DispatchBatch = {
+        id: `batch-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+        campaign_id: campaignId,
+        batch_name: batchCode,
+        dispatch_date: displayDate,
+        dispatch_time: displayTime,
+        status: 'Preparing',
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+        members: selectedInfluencers.map(inf => ({
+          influencer_id: String(inf.id),
+          influencer_code: inf.code || '',
+          creator_name: inf.influencer_name || inf.name || '',
+          profile_file_url: inf.profile_file_url,
+          dispatch_status: 'Pending'
+        }))
+      };
+
+      const updatedBatches = [...existingBatches, newBatch];
+      await dispatchBatchService.saveBatches(campaign.id, updatedBatches);
+
+      return { 
+        success: true, 
+        count: selectedInfluencers.length, 
+        batch: newBatch 
+      };
     } catch (err: any) {
       console.error('Error moving influencers to prepare dispatch:', err);
       return { 
@@ -126,6 +163,7 @@ export const logisticsWorkflowService = {
 
   /**
    * Returns an influencer from 'prepare_dispatch' back to 'pending' (Logistics).
+   * Also removes them from their batch in Supabase.
    */
   async returnToLogistics(
     campaignId: string,
@@ -135,6 +173,7 @@ export const logisticsWorkflowService = {
       const numericCampaignId = isNaN(Number(campaignId)) ? campaignId : Number(campaignId);
       const numericInfId = isNaN(Number(influencerId)) ? influencerId : Number(influencerId);
 
+      // 1. Update status in influencer_dispatch_details_rows
       const { error } = await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
         .update({ dispatch_status: 'pending' })
@@ -142,6 +181,16 @@ export const logisticsWorkflowService = {
         .eq('influencer_id', numericInfId);
 
       if (error) throw error;
+
+      // 2. Remove influencer from existing batches
+      const batches = await dispatchBatchService.getBatches(campaignId);
+      const updatedBatches = batches.map(batch => ({
+        ...batch,
+        members: batch.members.filter(m => String(m.influencer_id) !== String(influencerId))
+      })).filter(batch => batch.members.length > 0);
+
+      await dispatchBatchService.saveBatches(campaignId, updatedBatches);
+
       return { success: true };
     } catch (err: any) {
       console.error('Error returning influencer to logistics:', err);

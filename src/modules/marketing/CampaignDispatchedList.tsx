@@ -18,7 +18,11 @@ import {
   AlertCircle, 
   Check, 
   ArrowRight,
-  Eye
+  Eye,
+  ChevronDown,
+  Clock,
+  Calendar,
+  Layers
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
@@ -36,6 +40,11 @@ import {
 } from '../../data/indiaLocations';
 import { parseInfluencerCodeRanges, type RangeParseResult } from '../../utils/influencerRangeParser';
 import { logisticsWorkflowService } from '../../services/logisticsWorkflowService';
+import { 
+  dispatchBatchService, 
+  formatBatchDateTime, 
+  type DispatchBatch 
+} from '../../services/dispatchBatchService';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
 
 export type LogisticsTab = 'logistics' | 'prepare_dispatch' | 'dispatched';
@@ -76,14 +85,12 @@ export const normalizeStateName = (stateStr?: string | null): string => {
   if (clean === 'telanagana' || clean === 'telangana') return 'Telangana';
   if (clean === 'tamilnadu' || clean === 'tamil nadu') return 'Tamil Nadu';
   
-  // Check direct master location match
   for (const [key, stateObj] of Object.entries(MASTER_LOCATIONS)) {
     if (key === clean || stateObj.name.toLowerCase().replace(/[^a-z0-9]/g, '') === clean) {
       return stateObj.name;
     }
   }
 
-  // Check alias match
   const aliasKey = STATE_ALIASES[clean];
   if (aliasKey && MASTER_LOCATIONS[aliasKey]) {
     return MASTER_LOCATIONS[aliasKey].name;
@@ -110,7 +117,6 @@ export const parseWeightInGrams = (raw?: string | number | null): number | null 
   const num = parseFloat(str.replace(/[^0-9.]/g, ''));
   if (isNaN(num)) return null;
 
-  // Numbers under 25 in shipping context represent kilograms (e.g. 0.5, 3.5, 4.5)
   if (num < 25) {
     return num * 1000;
   }
@@ -189,8 +195,30 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const [rangeFeedback, setRangeFeedback] = useState<RangeParseResult | null>(null);
   const [isMovingToPrepare, setIsMovingToPrepare] = useState(false);
 
+  // Batch-based Prepare Dispatch State
+  const [savedBatches, setSavedBatches] = useState<DispatchBatch[]>([]);
+  const [openBatchIds, setOpenBatchIds] = useState<string[]>([]);
+
   // Local fallback for dispatch modal (when clicking Dispatch or View Dispatch)
   const [localDispatchInfluencer, setLocalDispatchInfluencer] = useState<CampaignInfluencer | null>(null);
+
+  // Load saved batches from persistent storage
+  const loadSavedBatches = useCallback(async () => {
+    try {
+      const b = await dispatchBatchService.getBatches(campaign.id);
+      setSavedBatches(b);
+      // Default first batch to open if available and none opened yet
+      if (b.length > 0 && openBatchIds.length === 0) {
+        setOpenBatchIds([b[0].id]);
+      }
+    } catch (e) {
+      console.warn('Failed to load batches in CampaignDispatchedList:', e);
+    }
+  }, [campaign.id, openBatchIds.length]);
+
+  useEffect(() => {
+    loadSavedBatches();
+  }, [loadSavedBatches]);
 
   // Sync draft filters when drawer opens
   useEffect(() => {
@@ -216,6 +244,15 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return baseInfluencers.filter(inf => isActiveStatus(inf.is_archived));
   }, [baseInfluencers]);
 
+  // Active influencer lookup map by ID
+  const activeInfluencersMap = useMemo(() => {
+    const map = new Map<string, CampaignInfluencer>();
+    activeOnly.forEach(inf => {
+      map.set(String(inf.id), inf);
+    });
+    return map;
+  }, [activeOnly]);
+
   const getDispatchData = useCallback((inf: CampaignInfluencer) => {
     return inf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === String(inf.id));
   }, [dispatchRecords]);
@@ -228,7 +265,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return `@${clean}`;
   };
 
-  // Master Indian States + active campaign influencer states (normalized & deduplicated)
+  // Master Indian States + active campaign influencer states
   const availableStates = useMemo(() => {
     const rawList: string[] = [...getAllIndianStates()];
     activeOnly.forEach(inf => {
@@ -242,7 +279,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return getUniqueFilterOptions(rawList);
   }, [activeOnly, getDispatchData]);
 
-  // Master Indian Cities scoped to draftState + influencer cities (normalized & deduplicated)
+  // Master Indian Cities scoped to draftState + influencer cities
   const draftAvailableCities = useMemo(() => {
     const rawList: string[] = [...getIndianCitiesForState(draftState)];
     activeOnly.forEach(inf => {
@@ -285,6 +322,34 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const logisticsInfluencers = useMemo(() => {
     return activeOnly.filter(inf => !isInfluencerDispatched(inf, dispatchRecords) && !isInfluencerInPrepareDispatch(inf, dispatchRecords));
   }, [activeOnly, dispatchRecords]);
+
+  // Auto-synthesize an initial batch for any influencers already in prepare_dispatch without a batch
+  useEffect(() => {
+    if (prepareDispatchInfluencers.length > 0 && savedBatches.length === 0) {
+      const now = new Date();
+      const { displayDate, displayTime } = formatBatchDateTime(now);
+      const initialBatch: DispatchBatch = {
+        id: `batch-${Date.now()}`,
+        campaign_id: String(campaign.id),
+        batch_name: 'BATCH-001',
+        dispatch_date: displayDate,
+        dispatch_time: displayTime,
+        status: 'Preparing',
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
+        members: prepareDispatchInfluencers.map(inf => ({
+          influencer_id: String(inf.id),
+          influencer_code: inf.code || '',
+          creator_name: inf.influencer_name || inf.name || '',
+          profile_file_url: inf.profile_file_url,
+          dispatch_status: 'Pending'
+        }))
+      };
+      setSavedBatches([initialBatch]);
+      setOpenBatchIds([initialBatch.id]);
+      dispatchBatchService.saveBatches(campaign.id, [initialBatch]);
+    }
+  }, [prepareDispatchInfluencers, savedBatches, campaign.id]);
 
   // Counts for summary pills
   const activeCount = activeOnly.length;
@@ -378,86 +443,72 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     setIsAddingCustomCourier(false);
   };
 
-  // 2. Select the influencers for the currently active tab
-  const currentSectionInfluencers = useMemo(() => {
-    if (currentTab === 'prepare_dispatch') return prepareDispatchInfluencers;
-    if (currentTab === 'dispatched') return dispatchedInfluencers;
-    return logisticsInfluencers;
-  }, [currentTab, prepareDispatchInfluencers, dispatchedInfluencers, logisticsInfluencers]);
-
-  // 3. Filter current section based on Search + Active Filters
-  const filteredCurrentSection = useMemo(() => {
+  // Helper filter function for an influencer against search & active filters
+  const matchesFilterCriteria = useCallback((inf: CampaignInfluencer): boolean => {
     const term = searchTerm.trim().toLowerCase();
+    const dispatch = getDispatchData(inf);
+    const username = getInfluencerUsername(inf).toLowerCase();
+    const code = (inf.code || '').toLowerCase();
+    const name = (inf.name || inf.influencer_name || '').toLowerCase();
+    const phone = (inf.phone_number || dispatch?.phone_number || '').toLowerCase();
+    const state = normalizeStateName(inf.state || dispatch?.state || '');
+    const city = (inf.city || '').trim();
+    const courierPartner = (dispatch?.courier_partner || '').trim();
 
-    return currentSectionInfluencers.filter(inf => {
-      const dispatch = getDispatchData(inf);
-      const username = getInfluencerUsername(inf).toLowerCase();
-      const code = (inf.code || '').toLowerCase();
-      const name = (inf.name || inf.influencer_name || '').toLowerCase();
-      const phone = (inf.phone_number || dispatch?.phone_number || '').toLowerCase();
-      const state = normalizeStateName(inf.state || dispatch?.state || '');
-      const city = (inf.city || '').trim();
-      const courierPartner = (dispatch?.courier_partner || '').trim();
+    // Search query
+    const matchesSearch = !term || 
+      code.includes(term) ||
+      username.includes(term) ||
+      name.includes(term) ||
+      phone.includes(term) ||
+      city.toLowerCase().includes(term) ||
+      state.toLowerCase().includes(term) ||
+      courierPartner.toLowerCase().includes(term);
 
-      // 1. Search Query (scoped strictly to current section)
-      const matchesSearch = !term || 
-        code.includes(term) ||
-        username.includes(term) ||
-        name.includes(term) ||
-        phone.includes(term) ||
-        city.toLowerCase().includes(term) ||
-        state.toLowerCase().includes(term) ||
-        courierPartner.toLowerCase().includes(term);
+    if (!matchesSearch) return false;
 
-      if (!matchesSearch) return false;
+    // State filter
+    if (selectedState && !areFilterValuesEqual(selectedState, state)) return false;
 
-      // 2. State Filter
-      if (selectedState) {
-        if (!areFilterValuesEqual(selectedState, state)) return false;
+    // City filter
+    if (selectedCity && !areFilterValuesEqual(selectedCity, city)) return false;
+
+    // Courier filter
+    if (selectedCourier !== 'all') {
+      if (selectedCourier === 'Not Dispatched') {
+        if (isInfluencerDispatched(inf, dispatchRecords)) return false;
+      } else {
+        if (!areFilterValuesEqual(selectedCourier, courierPartner)) return false;
       }
+    }
 
-      // 3. City Filter
-      if (selectedCity) {
-        if (!areFilterValuesEqual(selectedCity, city)) return false;
-      }
+    // Weight filter
+    if (selectedWeightRange !== 'all') {
+      const grams = parseWeightInGrams(dispatch?.total_weight);
+      if (!matchesWeightRange(grams, selectedWeightRange)) return false;
+    }
 
-      // 4. Courier Filter
-      if (selectedCourier !== 'all') {
-        if (selectedCourier === 'Not Dispatched') {
-          if (isInfluencerDispatched(inf, dispatchRecords)) return false;
-        } else {
-          if (!areFilterValuesEqual(selectedCourier, courierPartner)) return false;
-        }
-      }
+    // Dispatch status filter
+    if (selectedDispatchStatus !== 'all') {
+      const isDispatched = isInfluencerDispatched(inf, dispatchRecords);
+      if (selectedDispatchStatus === 'dispatched' && !isDispatched) return false;
+      if (selectedDispatchStatus === 'pending' && isDispatched) return false;
+    }
 
-      // 5. Weight Filter
-      if (selectedWeightRange !== 'all') {
-        const grams = parseWeightInGrams(dispatch?.total_weight);
-        if (!matchesWeightRange(grams, selectedWeightRange)) return false;
-      }
+    return true;
+  }, [searchTerm, selectedState, selectedCity, selectedCourier, selectedWeightRange, selectedDispatchStatus, getDispatchData, dispatchRecords]);
 
-      // 6. Dispatch Status Filter
-      if (selectedDispatchStatus !== 'all') {
-        const isDispatched = isInfluencerDispatched(inf, dispatchRecords);
-        if (selectedDispatchStatus === 'dispatched' && !isDispatched) return false;
-        if (selectedDispatchStatus === 'pending' && isDispatched) return false;
-      }
+  // Filtered logistics list
+  const filteredLogisticsList = useMemo(() => {
+    return logisticsInfluencers.filter(matchesFilterCriteria);
+  }, [logisticsInfluencers, matchesFilterCriteria]);
 
-      return true;
-    });
-  }, [
-    currentSectionInfluencers, 
-    searchTerm, 
-    selectedState, 
-    selectedCity, 
-    selectedCourier, 
-    selectedWeightRange, 
-    selectedDispatchStatus, 
-    getDispatchData, 
-    dispatchRecords
-  ]);
+  // Filtered dispatched list
+  const filteredDispatchedList = useMemo(() => {
+    return dispatchedInfluencers.filter(matchesFilterCriteria);
+  }, [dispatchedInfluencers, matchesFilterCriteria]);
 
-  // 4. Selection sorting behavior for Logistics:
+  // Selection sorting behavior for Logistics:
   // When selection is active, selected influencers automatically appear FIRST!
   // When selection is cleared, normal ascending order is restored.
   const selectedLogisticsList = useMemo(() => {
@@ -465,20 +516,20 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       return [];
     }
     const idSet = new Set(selectedInfluencerIds);
-    return filteredCurrentSection
+    return filteredLogisticsList
       .filter(inf => idSet.has(String(inf.id)))
       .sort(compareInfluencerCodesAsc);
-  }, [currentTab, isBulkSelectMode, selectedInfluencerIds, filteredCurrentSection]);
+  }, [currentTab, isBulkSelectMode, selectedInfluencerIds, filteredLogisticsList]);
 
   const unselectedLogisticsList = useMemo(() => {
     if (currentTab !== 'logistics' || !isBulkSelectMode || selectedInfluencerIds.length === 0) {
-      return filteredCurrentSection.slice().sort(compareInfluencerCodesAsc);
+      return filteredLogisticsList.slice().sort(compareInfluencerCodesAsc);
     }
     const idSet = new Set(selectedInfluencerIds);
-    return filteredCurrentSection
+    return filteredLogisticsList
       .filter(inf => !idSet.has(String(inf.id)))
       .sort(compareInfluencerCodesAsc);
-  }, [currentTab, isBulkSelectMode, selectedInfluencerIds, filteredCurrentSection]);
+  }, [currentTab, isBulkSelectMode, selectedInfluencerIds, filteredLogisticsList]);
 
   // Selection toggles
   const toggleSelectInfluencer = (id: string) => {
@@ -510,19 +561,23 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     }
   };
 
-  // Action: Move Selected Influencers to Prepare Dispatch
+  // Action: Move Selected Influencers to Prepare Dispatch (Creates ONE Batch)
   const handleMoveToPrepareDispatch = async () => {
     if (selectedInfluencerObjects.length === 0) return;
     setIsMovingToPrepare(true);
     try {
       const res = await logisticsWorkflowService.moveToPrepareDispatch(campaign, selectedInfluencerObjects);
       if (res.success) {
-        toast.success(`Successfully moved ${res.count} influencer${res.count === 1 ? '' : 's'} to Prepare Dispatch`);
+        const batchName = res.batch?.batch_name || 'New Batch';
+        toast.success(`Created ${batchName} with ${res.count} influencer${res.count === 1 ? '' : 's'}`);
         setSelectedInfluencerIds([]);
         setRangeInput('');
         setRangeFeedback(null);
         setIsBulkSelectMode(false);
-        await Promise.all([refreshDispatch(), refreshInfluencers()]);
+        await Promise.all([refreshDispatch(), refreshInfluencers(), loadSavedBatches()]);
+        if (res.batch?.id) {
+          setOpenBatchIds([res.batch.id]);
+        }
         setCurrentTab('prepare_dispatch');
       } else {
         toast.error(res.error || 'Failed to move influencers to Prepare Dispatch');
@@ -540,7 +595,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       const res = await logisticsWorkflowService.returnToLogistics(String(campaign.id), influencerId);
       if (res.success) {
         toast.success('Influencer returned to Logistics');
-        await Promise.all([refreshDispatch(), refreshInfluencers()]);
+        await Promise.all([refreshDispatch(), refreshInfluencers(), loadSavedBatches()]);
       } else {
         toast.error(res.error || 'Failed to return influencer to Logistics');
       }
@@ -559,8 +614,70 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   };
 
   const handleRefresh = async () => {
-    await Promise.all([refreshDispatch(), refreshInfluencers()]);
+    await Promise.all([refreshDispatch(), refreshInfluencers(), loadSavedBatches()]);
   };
+
+  const toggleBatchOpen = (batchId: string) => {
+    setOpenBatchIds(prev => 
+      prev.includes(batchId) ? prev.filter(id => id !== batchId) : [...prev, batchId]
+    );
+  };
+
+  // Batches processed with active-only filter
+  const processedBatches = useMemo(() => {
+    return savedBatches.map(batch => {
+      // Filter members to only those currently active in the campaign
+      const activeMembers = batch.members
+        .map(m => activeInfluencersMap.get(String(m.influencer_id)))
+        .filter((inf): inf is CampaignInfluencer => Boolean(inf))
+        .filter(matchesFilterCriteria);
+
+      // Total count in batch (active)
+      const allActiveMembersInBatch = batch.members
+        .map(m => activeInfluencersMap.get(String(m.influencer_id)))
+        .filter((inf): inf is CampaignInfluencer => Boolean(inf));
+
+      const totalMembers = allActiveMembersInBatch.length;
+      const dispatchedInBatch = allActiveMembersInBatch.filter(inf => isInfluencerDispatched(inf, dispatchRecords)).length;
+      const isBatchDispatched = totalMembers > 0 && dispatchedInBatch === totalMembers;
+
+      // Codes list for summary
+      const codes = allActiveMembersInBatch
+        .map(inf => inf.code)
+        .filter(Boolean) as string[];
+
+      let codesSummary = '';
+      if (codes.length > 0) {
+        if (codes.length <= 6) {
+          codesSummary = codes.join(' · ');
+        } else {
+          codesSummary = `${codes.slice(0, 6).join(' · ')} + ${codes.length - 6} more`;
+        }
+      }
+
+      return {
+        batch,
+        activeMembers,
+        totalMembers,
+        dispatchedInBatch,
+        isBatchDispatched,
+        codesSummary,
+      };
+    }).filter(b => b.totalMembers > 0); // Exclude empty batches
+  }, [savedBatches, activeInfluencersMap, matchesFilterCriteria, dispatchRecords]);
+
+  // Total influencers across all batches in Prepare Dispatch
+  const totalInfluencersInBatches = useMemo(() => {
+    const idSet = new Set<string>();
+    processedBatches.forEach(b => {
+      b.batch.members.forEach(m => {
+        if (activeInfluencersMap.has(String(m.influencer_id))) {
+          idSet.add(String(m.influencer_id));
+        }
+      });
+    });
+    return idSet.size;
+  }, [processedBatches, activeInfluencersMap]);
 
   const isLoading = (isInfluencersLoading || isDispatchLoading) && baseInfluencers.length === 0;
 
@@ -613,7 +730,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
         {/* Right Header Controls: [ Search ] [ Filter Icon ] [ Bulk Select ] [ Prepare Dispatch ] [ Dispatched ] [ Refresh Icon ] */}
         <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-          {/* Search Box (scoped to current tab) */}
+          {/* Search Box */}
           <div className="relative flex-1 md:w-48">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
             <input 
@@ -692,7 +809,6 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           >
             <Truck size={15} className={currentTab === 'prepare_dispatch' ? 'text-white' : 'text-purple-400'} />
             <span>Prepare Dispatch</span>
-            {/* Dynamic Count: If on logistics and items selected, show selected count; else show prepareDispatch items count */}
             {selectedInfluencerObjects.length > 0 && currentTab === 'logistics' ? (
               <span className="bg-purple-500 text-white text-[11px] font-extrabold rounded-full px-1.5 py-0.2 ml-0.5">
                 {selectedInfluencerObjects.length}
@@ -730,7 +846,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* Refresh Button (Icon only with hover tooltip) */}
+          {/* Refresh Button */}
           <button
             type="button"
             onClick={handleRefresh}
@@ -749,7 +865,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             <div className="flex items-center gap-2.5">
               <span className="px-2.5 py-0.5 rounded bg-purple-600/20 border border-purple-500/30 text-purple-300 font-bold uppercase tracking-wider text-[10px] flex items-center gap-1.5">
                 <Truck size={12} className="text-purple-400" />
-                PREPARE DISPATCH
+                PREPARE DISPATCH BATCH
               </span>
               <button
                 type="button"
@@ -762,7 +878,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
             <div className="pt-0.5">
               <h3 className="text-lg sm:text-xl font-bold text-slate-100">
-                {selectedInfluencerObjects.length} {selectedInfluencerObjects.length === 1 ? 'influencer' : 'influencers'} selected
+                {selectedInfluencerObjects.length} {selectedInfluencerObjects.length === 1 ? 'influencer' : 'influencers'} selected for Batch
               </h3>
             </div>
 
@@ -773,7 +889,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
 
             <p className="text-xs text-slate-400 pt-0.5">
-              Move selected influencers to Prepare Dispatch. They will disappear from Logistics and appear in Prepare Dispatch.
+              Clicking "Move to Prepare Dispatch" will create ONE new batch for this selection. They will disappear from Logistics and appear in Prepare Dispatch.
             </p>
           </div>
 
@@ -788,7 +904,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               {isMovingToPrepare ? (
                 <>
                   <RefreshCcw size={16} className="animate-spin" />
-                  <span>Moving to Prepare...</span>
+                  <span>Creating Batch...</span>
                 </>
               ) : (
                 <>
@@ -807,16 +923,16 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded bg-purple-600/20 border border-purple-500/30 text-purple-300 font-bold uppercase tracking-wider text-[10px] flex items-center gap-1.5">
-                <Truck size={12} className="text-purple-400" />
+                <Layers size={12} className="text-purple-400" />
                 PREPARE DISPATCH
               </span>
-              <span className="text-xs text-purple-300 font-semibold">
-                {filteredCurrentSection.length} {filteredCurrentSection.length === 1 ? 'influencer' : 'influencers'} in preparation
+              <span className="text-xs text-purple-300 font-bold">
+                {processedBatches.length} {processedBatches.length === 1 ? 'Batch' : 'Batches'} · {totalInfluencersInBatches} {totalInfluencersInBatches === 1 ? 'Influencer' : 'Influencers'}
               </span>
             </div>
-            <h3 className="text-base sm:text-lg font-bold text-slate-100 mt-1">Dispatch Preparation Workflow</h3>
+            <h3 className="text-base sm:text-lg font-bold text-slate-100 mt-1">Dispatch Preparation Batches</h3>
             <p className="text-xs text-slate-400">
-              Complete dispatch details and confirm dispatch for each influencer. Click Dispatch on any card to proceed.
+              Influencers grouped into dispatch batches. Click "Open Batch" to view influencers and complete individual dispatches.
             </p>
           </div>
           <button
@@ -840,7 +956,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 DISPATCHED
               </span>
               <span className="text-xs text-emerald-300 font-semibold">
-                {filteredCurrentSection.length} {filteredCurrentSection.length === 1 ? 'influencer' : 'influencers'} dispatched
+                {filteredDispatchedList.length} {filteredDispatchedList.length === 1 ? 'influencer' : 'influencers'} confirmed
               </span>
             </div>
             <h3 className="text-base sm:text-lg font-bold text-slate-100 mt-1">Dispatched Shipments</h3>
@@ -1221,26 +1337,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <RefreshCcw className="animate-spin mx-auto mb-3 text-purple-400" size={32} />
           <p>Loading influencer logistics...</p>
         </div>
-      ) : filteredCurrentSection.length === 0 ? (
-        <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
-          <Package className="mx-auto mb-3 text-slate-600" size={40} />
-          <h3 className="text-base font-semibold text-slate-300 mb-1">
-            {currentTab === 'prepare_dispatch' 
-              ? 'No Influencers in Prepare Dispatch' 
-              : currentTab === 'dispatched' 
-              ? 'No Dispatched Influencers' 
-              : 'No Influencers Found'}
-          </h3>
-          <p className="text-sm text-slate-500 max-w-md mx-auto">
-            {searchTerm || activeFilterCount > 0
-              ? 'No active influencers in this section matched your filter criteria.'
-              : currentTab === 'prepare_dispatch'
-              ? 'Select influencers from the Logistics section and click "Move to Prepare Dispatch" to begin preparing batches.'
-              : currentTab === 'dispatched'
-              ? 'No influencers have been dispatched yet for this campaign.'
-              : 'All active influencers in this campaign have been dispatched or moved to preparation.'}
-          </p>
-          {currentTab !== 'logistics' && (
+      ) : currentTab === 'prepare_dispatch' ? (
+        /* ==================== PREPARE DISPATCH BATCH-BASED VIEW ==================== */
+        processedBatches.length === 0 ? (
+          <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
+            <Layers className="mx-auto mb-3 text-purple-400/50" size={42} />
+            <h3 className="text-base font-semibold text-slate-200 mb-1">No Prepare Dispatch Batches</h3>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
+              {searchTerm || activeFilterCount > 0
+                ? 'No batches match your filter criteria.'
+                : 'Select active influencers from the Logistics section and click "Move to Prepare Dispatch" to create a new batch.'}
+            </p>
             <button
               type="button"
               onClick={() => setCurrentTab('logistics')}
@@ -1249,52 +1356,189 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               <ArrowLeft size={14} />
               <span>Go to Active Logistics</span>
             </button>
-          )}
-        </div>
-      ) : currentTab === 'logistics' && isBulkSelectMode && selectedInfluencerIds.length > 0 ? (
-        /* TEMPORARY TOP-SORTING DURING SELECTION MODE: SELECTED FIRST, THEN UNSELECTED */
-        <div className="space-y-6">
-          {/* Selected Section */}
-          {selectedLogisticsList.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-purple-400">
-                <CheckSquare size={14} className="text-purple-400" />
-                <span>Selected ({selectedLogisticsList.length})</span>
-                <div className="h-px flex-1 bg-purple-900/40" />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-                {selectedLogisticsList.map((inf) => renderLogisticsCard(inf, true))}
-              </div>
-            </div>
-          )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {processedBatches.map(({ batch, activeMembers, totalMembers, dispatchedInBatch, isBatchDispatched, codesSummary }) => {
+              const isOpen = openBatchIds.includes(batch.id);
 
-          {/* Unselected Section */}
-          {unselectedLogisticsList.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
-                <Square size={14} className="text-slate-500" />
-                <span>Unselected ({unselectedLogisticsList.length})</span>
-                <div className="h-px flex-1 bg-slate-800" />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-                {unselectedLogisticsList.map((inf) => renderLogisticsCard(inf, false))}
-              </div>
-            </div>
-          )}
-        </div>
+              return (
+                <div 
+                  key={batch.id} 
+                  className={`bg-[#0e1626]/90 border rounded-2xl p-5 shadow-sm transition-all space-y-4 ${
+                    isOpen ? 'border-purple-600/60 bg-[#0f172a]' : 'border-slate-800/90 hover:border-slate-700'
+                  }`}
+                >
+                  {/* Batch Card Header */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="space-y-1.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="px-2.5 py-1 rounded-md bg-purple-600 text-white font-extrabold font-mono text-xs tracking-wider shadow-sm">
+                          {batch.batch_name}
+                        </span>
+                        
+                        <span className="text-sm font-bold text-slate-100">
+                          {totalMembers} {totalMembers === 1 ? 'Influencer' : 'Influencers'}
+                        </span>
+
+                        {/* Dynamic Status Pill */}
+                        {isBatchDispatched ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                            <Check size={12} /> Dispatched
+                          </span>
+                        ) : dispatchedInBatch > 0 ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                            {dispatchedInBatch} / {totalMembers} Dispatched · {totalMembers - dispatchedInBatch} Pending
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-950/80 text-purple-300 border border-purple-800/50 flex items-center gap-1">
+                            <Clock size={11} /> Preparing
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Created Date and Time */}
+                      <div className="flex items-center gap-2 text-xs text-slate-400 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Calendar size={13} className="text-slate-500" />
+                          Created: <strong className="text-slate-300 font-medium">{batch.dispatch_date}</strong>
+                        </span>
+                        <span>·</span>
+                        <span className="flex items-center gap-1">
+                          <Clock size={13} className="text-slate-500" />
+                          Time: <strong className="text-slate-300 font-medium">{batch.dispatch_time}</strong>
+                        </span>
+                      </div>
+
+                      {/* Secondary Codes Preview */}
+                      {codesSummary && (
+                        <p className="text-xs font-mono font-medium text-purple-300/85 pt-0.5 break-words">
+                          Codes: {codesSummary}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Open/Close Batch Button */}
+                    <div className="shrink-0 self-start sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => toggleBatchOpen(batch.id)}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          isOpen
+                            ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                            : 'bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/30'
+                        }`}
+                      >
+                        <span>{isOpen ? 'Close Batch' : 'Open Batch'}</span>
+                        <ChevronDown size={14} className={`transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expanded Batch Influencers Grid */}
+                  {isOpen && (
+                    <div className="pt-4 border-t border-slate-800/80 space-y-3.5 animate-fade-in">
+                      <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span className="font-semibold text-slate-300">
+                          Influencers in {batch.batch_name} ({activeMembers.length})
+                        </span>
+                        <span className="text-[11px] text-slate-500 hidden sm:inline">
+                          Click Dispatch on any influencer card to complete dispatch
+                        </span>
+                      </div>
+
+                      {activeMembers.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-3 text-center">
+                          No active influencers in this batch match the current filter.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
+                          {activeMembers.map(inf => renderPrepareDispatchCard(inf))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : currentTab === 'dispatched' ? (
+        /* ==================== DISPATCHED SECTION ==================== */
+        filteredDispatchedList.length === 0 ? (
+          <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
+            <Package className="mx-auto mb-3 text-slate-600" size={40} />
+            <h3 className="text-base font-semibold text-slate-300 mb-1">No Dispatched Influencers</h3>
+            <p className="text-sm text-slate-500 max-w-md mx-auto">
+              {searchTerm || activeFilterCount > 0
+                ? 'No dispatched influencers matched your filter criteria.'
+                : 'No influencers have been dispatched yet for this campaign.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setCurrentTab('logistics')}
+              className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-purple-400 text-xs font-semibold rounded-xl border border-slate-700 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <ArrowLeft size={14} />
+              <span>Go to Active Logistics</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
+            {filteredDispatchedList.slice().sort(compareInfluencerCodesAsc).map((inf) => renderDispatchedCard(inf))}
+          </div>
+        )
       ) : (
-        /* STANDARD 3-COLUMN GRID */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-          {filteredCurrentSection.slice().sort(compareInfluencerCodesAsc).map((inf) => {
-            if (currentTab === 'prepare_dispatch') {
-              return renderPrepareDispatchCard(inf);
-            }
-            if (currentTab === 'dispatched') {
-              return renderDispatchedCard(inf);
-            }
-            return renderLogisticsCard(inf, selectedInfluencerIds.includes(String(inf.id)));
-          })}
-        </div>
+        /* ==================== MAIN LOGISTICS VIEW ==================== */
+        filteredLogisticsList.length === 0 ? (
+          <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
+            <Package className="mx-auto mb-3 text-slate-600" size={40} />
+            <h3 className="text-base font-semibold text-slate-300 mb-1">No Influencers in Logistics</h3>
+            <p className="text-sm text-slate-500 max-w-md mx-auto">
+              {searchTerm || activeFilterCount > 0
+                ? 'No active influencers in Logistics matched your filter criteria.'
+                : 'All active influencers in this campaign have been moved to Prepare Dispatch batches or dispatched.'}
+            </p>
+          </div>
+        ) : isBulkSelectMode && selectedInfluencerIds.length > 0 ? (
+          /* TEMPORARY TOP-SORTING DURING SELECTION MODE: SELECTED FIRST, THEN UNSELECTED */
+          <div className="space-y-6">
+            {/* Selected Section */}
+            {selectedLogisticsList.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-purple-400">
+                  <CheckSquare size={14} className="text-purple-400" />
+                  <span>Selected ({selectedLogisticsList.length})</span>
+                  <div className="h-px flex-1 bg-purple-900/40" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
+                  {selectedLogisticsList.map((inf) => renderLogisticsCard(inf, true))}
+                </div>
+              </div>
+            )}
+
+            {/* Unselected Section */}
+            {unselectedLogisticsList.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <Square size={14} className="text-slate-500" />
+                  <span>Unselected ({unselectedLogisticsList.length})</span>
+                  <div className="h-px flex-1 bg-slate-800" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
+                  {unselectedLogisticsList.map((inf) => renderLogisticsCard(inf, false))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* STANDARD 3-COLUMN GRID */
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
+            {filteredLogisticsList.slice().sort(compareInfluencerCodesAsc).map((inf) => (
+              renderLogisticsCard(inf, selectedInfluencerIds.includes(String(inf.id)))
+            ))}
+          </div>
+        )
       )}
 
       {/* Local Fallback Dispatch Influencer Modal */}
@@ -1305,7 +1549,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           onClose={() => setLocalDispatchInfluencer(null)} 
           onSuccess={async () => {
             setLocalDispatchInfluencer(null);
-            await Promise.all([refreshDispatch(), refreshInfluencers()]);
+            await Promise.all([refreshDispatch(), refreshInfluencers(), loadSavedBatches()]);
           }} 
         />
       )}
@@ -1387,18 +1631,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     );
   }
 
-  /* Helper to render Prepare Dispatch card: [Profile Photo] @username [Code] [Dispatch Button] */
+  /* Helper to render Prepare Dispatch card inside a batch: [Profile Photo] @username [Code] [Dispatch / View Button] */
   function renderPrepareDispatchCard(inf: CampaignInfluencer) {
     const username = getInfluencerUsername(inf);
+    const isDispatched = isInfluencerDispatched(inf, dispatchRecords);
 
     return (
       <div 
         key={inf.id}
-        className="bg-[#0e1626]/90 border border-purple-800/50 hover:border-purple-600/70 rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3 transition-colors shadow-sm"
+        className={`bg-[#0b1220]/90 border rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3 transition-colors shadow-sm ${
+          isDispatched 
+            ? 'border-emerald-900/60 hover:border-emerald-700/60' 
+            : 'border-purple-800/50 hover:border-purple-600/70'
+        }`}
       >
         {/* Left: Profile Photo + Username */}
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-sm sm:text-base border-2 border-purple-500/30 shrink-0 shadow-sm">
+          <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden flex items-center justify-center text-white font-bold text-sm sm:text-base border-2 shrink-0 shadow-sm ${
+            isDispatched 
+              ? 'bg-emerald-600 border-emerald-500/30' 
+              : 'bg-purple-600 border-purple-500/30'
+          }`}>
             {inf.profile_file_url ? (
               <img 
                 src={inf.profile_file_url} 
@@ -1418,15 +1671,23 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
           <div className="min-w-0 flex-1">
             <h3 
-              className="font-bold text-slate-100 text-sm sm:text-base truncate hover:text-purple-300 transition-colors"
+              className={`font-bold text-sm sm:text-base truncate transition-colors ${
+                isDispatched ? 'text-emerald-100 hover:text-emerald-300' : 'text-slate-100 hover:text-purple-300'
+              }`}
               title={username}
             >
               {username}
             </h3>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[10px] text-purple-300 bg-purple-950/80 px-1.5 py-0.2 rounded border border-purple-800/40">
-                Ready to Dispatch
-              </span>
+              {isDispatched ? (
+                <span className="text-[10px] text-emerald-300 bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-800/40 flex items-center gap-1 font-medium">
+                  <Check size={10} /> Dispatched
+                </span>
+              ) : (
+                <span className="text-[10px] text-purple-300 bg-purple-950/80 px-1.5 py-0.2 rounded border border-purple-800/40 font-medium">
+                  Ready to Dispatch
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -1439,24 +1700,38 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             </span>
           )}
 
-          <button
-            type="button"
-            onClick={() => handleDispatchClick(inf)}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
-            title="Dispatch this influencer"
-          >
-            <Package size={14} />
-            <span>Dispatch</span>
-          </button>
+          {isDispatched ? (
+            <button
+              type="button"
+              onClick={() => handleDispatchClick(inf)}
+              className="px-3 py-1.5 bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/60 hover:border-emerald-700 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+              title="View saved dispatch details"
+            >
+              <Eye size={14} />
+              <span>View</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => handleDispatchClick(inf)}
+              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Dispatch this influencer"
+            >
+              <Package size={14} />
+              <span>Dispatch</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => handleReturnToLogistics(String(inf.id))}
-            className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition-colors cursor-pointer"
-            title="Return to Logistics"
-          >
-            <RotateCcw size={14} />
-          </button>
+          {!isDispatched && (
+            <button
+              type="button"
+              onClick={() => handleReturnToLogistics(String(inf.id))}
+              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition-colors cursor-pointer"
+              title="Return to Logistics"
+            >
+              <RotateCcw size={14} />
+            </button>
+          )}
         </div>
       </div>
     );

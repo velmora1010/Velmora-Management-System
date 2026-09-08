@@ -4,7 +4,7 @@ import { logActivity } from './activityService';
 import type { CampaignInfluencer } from '../types';
 import { isActiveStatus } from '../utils/marketingUtils';
 
-export type BatchStatus = 'Pending' | 'Ready to Dispatch' | 'Dispatched';
+export type BatchStatus = 'Pending' | 'Ready to Dispatch' | 'Dispatched' | 'Preparing';
 
 export interface DispatchBatchMember {
   id?: string;
@@ -27,125 +27,126 @@ export interface DispatchBatch {
   updated_at: string;
 }
 
-const getStorageKey = (campaignId: string | number) => `velmora_dispatch_batches_${campaignId}`;
+const getStorageKey = (campaignId: string | number) => `influencer_dispatch_batches_${campaignId}`;
+
+/**
+ * Format a Date or ISO timestamp into readable Date and Time:
+ * Date: "08 Sep 2026"
+ * Time: "03:54 PM"
+ */
+export const formatBatchDateTime = (dateStrOrObj?: string | Date) => {
+  const d = dateStrOrObj ? new Date(dateStrOrObj) : new Date();
+  if (isNaN(d.getTime())) {
+    return { displayDate: '—', displayTime: '—' };
+  }
+
+  const day = String(d.getDate()).padStart(2, '0');
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = monthNames[d.getMonth()];
+  const year = d.getFullYear();
+  const displayDate = `${day} ${month} ${year}`;
+
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const displayTime = `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
+
+  return { displayDate, displayTime };
+};
 
 export const dispatchBatchService = {
   /**
-   * Load all batches for a campaign from Supabase and/or localStorage.
-   * Ensures data survives browser refresh.
+   * Load all batches for a campaign from Supabase system_settings and/or localStorage.
+   * Ensures batches survive browser refresh and device reloads.
    */
   async getBatches(campaignId: string | number): Promise<DispatchBatch[]> {
     const cId = String(campaignId);
-    let batches: DispatchBatch[] = [];
+    const settingKey = getStorageKey(cId);
 
-    // 1. Try local storage first for fast instant response
+    // 1. Try fetching from Supabase system_settings
     try {
-      const cached = localStorage.getItem(getStorageKey(cId));
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('setting_value')
+        .eq('setting_key', settingKey)
+        .maybeSingle();
+
+      if (!error && data?.setting_value && Array.isArray(data.setting_value)) {
+        const batches = data.setting_value as DispatchBatch[];
+        // Keep local cache synced
+        try {
+          localStorage.setItem(settingKey, JSON.stringify(batches));
+        } catch (e) {}
+        return batches;
+      }
+    } catch (err) {
+      console.warn('Failed to query batches from Supabase system_settings:', err);
+    }
+
+    // 2. Fallback to localStorage
+    try {
+      const cached = localStorage.getItem(settingKey);
       if (cached) {
-        batches = JSON.parse(cached);
+        return JSON.parse(cached) as DispatchBatch[];
       }
     } catch (e) {
       console.warn('Failed to parse local batches cache:', e);
     }
 
-    // 2. Try fetching from Supabase
-    try {
-      const { data: batchRows, error: batchError } = await supabase
-        .from(SUPABASE_TABLES.influencerDispatchBatches || 'influencer_dispatch_batches')
-        .select('*')
-        .eq('campaign_id', cId)
-        .order('created_at', { ascending: true });
-
-      if (!batchError && batchRows && batchRows.length > 0) {
-        // Fetch members
-        const batchIds = batchRows.map(b => b.id);
-        const { data: memberRows } = await supabase
-          .from(SUPABASE_TABLES.influencerDispatchBatchMembers || 'influencer_dispatch_batch_members')
-          .select('*')
-          .in('batch_id', batchIds);
-
-        const memberMap: Record<string, DispatchBatchMember[]> = {};
-        (memberRows || []).forEach((m: any) => {
-          if (!memberMap[m.batch_id]) memberMap[m.batch_id] = [];
-          memberMap[m.batch_id].push({
-            id: m.id,
-            influencer_id: String(m.influencer_id),
-            influencer_code: m.influencer_code,
-            dispatch_status: (m.dispatch_status as BatchStatus) || 'Pending',
-          });
-        });
-
-        const remoteBatches: DispatchBatch[] = batchRows.map(b => ({
-          id: b.id,
-          campaign_id: String(b.campaign_id),
-          batch_name: b.batch_name,
-          dispatch_date: b.dispatch_date,
-          dispatch_time: b.dispatch_time,
-          status: (b.status as BatchStatus) || 'Pending',
-          members: memberMap[b.id] || [],
-          created_at: b.created_at,
-          updated_at: b.updated_at,
-        }));
-
-        batches = remoteBatches;
-        // Keep local cache synced
-        localStorage.setItem(getStorageKey(cId), JSON.stringify(batches));
-      }
-    } catch (err) {
-      // Supabase table may not exist yet; gracefully fallback to local cache
-      console.warn('Supabase batch table query skipped or failed, using local storage cache:', err);
-    }
-
-    return batches;
+    return [];
   },
 
   /**
-   * Saves batches to localStorage and attempts to persist to Supabase tables.
+   * Saves batches to Supabase system_settings and localStorage.
    */
-  async saveBatches(campaignId: string | number, batches: DispatchBatch[]): Promise<void> {
+  async saveBatches(campaignId: string | number, batches: DispatchBatch[]): Promise<boolean> {
     const cId = String(campaignId);
+    const settingKey = getStorageKey(cId);
 
-    // 1. Immediately persist to localStorage
+    // 1. Immediately persist to localStorage for instant UI response
     try {
-      localStorage.setItem(getStorageKey(cId), JSON.stringify(batches));
+      localStorage.setItem(settingKey, JSON.stringify(batches));
     } catch (e) {
       console.warn('Failed to persist batches to localStorage:', e);
     }
 
-    // 2. Persist to Supabase if tables exist
+    // 2. Persist to Supabase system_settings
     try {
-      for (const batch of batches) {
-        const batchPayload = {
-          id: batch.id,
-          campaign_id: cId,
-          batch_name: batch.batch_name,
-          dispatch_date: batch.dispatch_date,
-          dispatch_time: batch.dispatch_time,
-          status: batch.status,
-          updated_at: new Date().toISOString(),
-        };
+      const { data: existing } = await supabase
+        .from('system_settings')
+        .select('id')
+        .eq('setting_key', settingKey)
+        .maybeSingle();
 
-        const { error: upsertBatchErr } = await supabase
-          .from(SUPABASE_TABLES.influencerDispatchBatches || 'influencer_dispatch_batches')
-          .upsert(batchPayload, { onConflict: 'id' });
+      if (existing?.id) {
+        const { error: updateErr } = await supabase
+          .from('system_settings')
+          .update({
+            setting_value: batches,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existing.id);
 
-        if (!upsertBatchErr && batch.members.length > 0) {
-          const membersPayload = batch.members.map(m => ({
-            batch_id: batch.id,
-            campaign_id: cId,
-            influencer_id: String(m.influencer_id),
-            influencer_code: m.influencer_code || '',
-            dispatch_status: batch.status === 'Dispatched' ? 'Dispatched' : (m.dispatch_status || 'Pending'),
-          }));
+        if (updateErr) throw updateErr;
+      } else {
+        const { error: insertErr } = await supabase
+          .from('system_settings')
+          .insert([{
+            setting_key: settingKey,
+            setting_value: batches,
+            description: `Dispatch batches for campaign ${cId}`,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
 
-          // Upsert members
-          await supabase
-            .from(SUPABASE_TABLES.influencerDispatchBatchMembers || 'influencer_dispatch_batch_members')
-            .upsert(membersPayload, { onConflict: 'batch_id,influencer_id' });
-        }
+        if (insertErr) throw insertErr;
       }
+      return true;
     } catch (err) {
-      console.warn('Supabase batch upsert skipped or failed:', err);
+      console.error('Failed to persist batches to Supabase system_settings:', err);
+      return false;
     }
   },
 
@@ -164,6 +165,7 @@ export const dispatchBatchService = {
     activeInfluencers: CampaignInfluencer[]
   ): Promise<DispatchBatch[]> {
     const cId = String(campaignId);
+    const numericCampaignId = isNaN(Number(cId)) ? cId : Number(cId);
     const targetBatch = allBatches.find(b => b.id === batchId);
     if (!targetBatch) {
       throw new Error(`Batch with ID ${batchId} not found`);
@@ -191,13 +193,14 @@ export const dispatchBatchService = {
       try {
         const inf = influencerMap.get(String(member.influencer_id));
         const creatorName = inf?.name || inf?.influencer_name || member.creator_name || 'Influencer';
+        const numericInfId = isNaN(Number(member.influencer_id)) ? member.influencer_id : Number(member.influencer_id);
 
         // Check if dispatch record exists
         const { data: existing } = await supabase
           .from(SUPABASE_TABLES.influencerDispatch)
           .select('id')
-          .eq('influencer_id', member.influencer_id)
-          .eq('campaign_id', cId)
+          .eq('influencer_id', numericInfId)
+          .eq('campaign_id', numericCampaignId)
           .maybeSingle();
 
         if (existing && existing.id) {
@@ -213,7 +216,6 @@ export const dispatchBatchService = {
           const { data: maxData } = await supabase
             .from(SUPABASE_TABLES.influencerDispatch)
             .select('id')
-            .not('id', 'is', null)
             .order('id', { ascending: false })
             .limit(1);
 
@@ -224,8 +226,8 @@ export const dispatchBatchService = {
             .from(SUPABASE_TABLES.influencerDispatch)
             .insert([{
               id: nextId,
-              influencer_id: member.influencer_id,
-              campaign_id: cId,
+              influencer_id: numericInfId,
+              campaign_id: numericCampaignId,
               creator_name: creatorName,
               dispatch_date: updatedBatch.dispatch_date,
               dispatch_status: 'Dispatched',
@@ -251,45 +253,32 @@ export const dispatchBatchService = {
   },
 
   /**
-   * Filters out eliminated/recycled influencers from non-dispatched (Pending/Ready) batches
-   * to ensure that eliminated influencers are never dispatched, while preserving
-   * historical dispatched records.
+   * Filter out eliminated or recycle bin influencers from all batches.
    */
   pruneInactiveMembers(
     batches: DispatchBatch[],
-    allCampaignInfluencers: CampaignInfluencer[]
-  ): { updatedBatches: DispatchBatch[]; prunedCount: number } {
-    const influencerMap = new Map<string, CampaignInfluencer>();
-    allCampaignInfluencers.forEach(inf => {
-      influencerMap.set(String(inf.id), inf);
-    });
+    activeInfluencers: CampaignInfluencer[]
+  ): { updatedBatches: DispatchBatch[]; removedCount: number } {
+    const activeIdSet = new Set(
+      activeInfluencers
+        .filter(inf => isActiveStatus(inf.is_archived))
+        .map(inf => String(inf.id))
+    );
 
-    let prunedCount = 0;
-
+    let removedCount = 0;
     const updatedBatches = batches.map(batch => {
-      // Historical dispatched batches are never pruned
-      if (batch.status === 'Dispatched') {
-        return batch;
-      }
-
-      // Pending / Ready batches: prune members that are eliminated or recycled
-      const validMembers = batch.members.filter(member => {
-        const inf = influencerMap.get(String(member.influencer_id));
-        if (!inf) return false;
-        const isActive = isActiveStatus(inf.is_archived);
-        if (!isActive) {
-          prunedCount++;
-          return false;
-        }
-        return true;
+      const filteredMembers = batch.members.filter(m => {
+        const isAct = activeIdSet.has(String(m.influencer_id));
+        if (!isAct) removedCount++;
+        return isAct;
       });
 
       return {
         ...batch,
-        members: validMembers,
+        members: filteredMembers,
       };
-    });
+    }).filter(batch => batch.members.length > 0);
 
-    return { updatedBatches, prunedCount };
+    return { updatedBatches, removedCount };
   }
 };
