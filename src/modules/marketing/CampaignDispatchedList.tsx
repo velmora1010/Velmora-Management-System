@@ -626,8 +626,21 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return savedBatches.map(batch => {
       // All members currently active in the campaign
       const allActiveMembersInBatch = batch.members
-        .map(m => activeInfluencersMap.get(String(m.influencer_id)))
-        .filter((inf): inf is CampaignInfluencer => Boolean(inf));
+        .map(m => {
+          const found = activeInfluencersMap.get(String(m.influencer_id));
+          if (found) return found;
+          // Fallback if activeInfluencersMap is loading or member is in batch
+          return {
+            id: isNaN(Number(m.influencer_id)) ? m.influencer_id : Number(m.influencer_id),
+            campaign_id: isNaN(Number(campaign.id)) ? campaign.id : Number(campaign.id),
+            code: m.influencer_code || '',
+            name: m.creator_name || 'Influencer',
+            influencer_name: m.creator_name || 'Influencer',
+            profile_file_url: m.profile_file_url || '',
+            is_archived: 'false',
+          } as CampaignInfluencer;
+        })
+        .filter((inf): inf is CampaignInfluencer => Boolean(inf) && isActiveStatus(inf.is_archived));
 
       // Filtered active members matching search / filters
       const activeMembers = allActiveMembersInBatch.filter(matchesFilterCriteria);
@@ -669,7 +682,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       if (timeB !== timeA) return timeB - timeA;
       return b.batch.batch_name.localeCompare(a.batch.batch_name);
     });
-  }, [savedBatches, activeInfluencersMap, matchesFilterCriteria, dispatchRecords]);
+  }, [savedBatches, activeInfluencersMap, matchesFilterCriteria, dispatchRecords, campaign.id]);
 
   // Total influencers across all batches in Prepare Dispatch
   const totalInfluencersInBatches = useMemo(() => {
@@ -704,14 +717,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       return;
     }
     try {
-      for (const member of batch.members) {
-        const inf = activeInfluencersMap.get(String(member.influencer_id));
-        if (inf && !isInfluencerDispatched(inf, dispatchRecords)) {
-          await logisticsWorkflowService.returnToLogistics(String(campaign.id), String(member.influencer_id));
-        }
+      const res = await logisticsWorkflowService.returnBatchToLogistics(campaign.id, batch.id);
+      if (res.success) {
+        toast.success(`Returned pending influencers in ${batch.batch_name} to Logistics`);
+        await Promise.all([refreshDispatch(), refreshInfluencers(), loadSavedBatches()]);
+      } else {
+        toast.error(res.error || 'Failed to return batch to logistics');
       }
-      await Promise.all([refreshDispatch(), refreshInfluencers(), loadSavedBatches()]);
-      toast.success(`Returned pending influencers in ${batch.batch_name} to Logistics`);
     } catch (err) {
       console.error('Failed to return batch to logistics:', err);
       toast.error('Failed to return batch to logistics');

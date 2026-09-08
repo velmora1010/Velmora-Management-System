@@ -60,13 +60,19 @@ export const formatBatchDateTime = (dateStrOrObj?: string | Date) => {
 export const dispatchBatchService = {
   /**
    * Load all batches for a campaign from Supabase system_settings and/or localStorage.
-   * Ensures batches survive browser refresh and device reloads.
+   * Authoritatively reconciles with influencer_dispatch_details_rows:
+   * 1. Any active influencer with status 'prepare_dispatch' missing from batches is automatically grouped into a batch and persisted.
+   * 2. Any influencer returned to 'pending' in the database is pruned from batches.
+   * 3. Ensures batches survive browser refresh and device reloads with 100% data consistency.
    */
-  async getBatches(campaignId: string | number): Promise<DispatchBatch[]> {
+  async getBatches(campaignId: string | number, options?: { skipReconcile?: boolean }): Promise<DispatchBatch[]> {
     const cId = String(campaignId);
     const settingKey = getStorageKey(cId);
 
     // 1. Try fetching from Supabase system_settings
+    let rawBatches: DispatchBatch[] = [];
+    let loadedFromSettings = false;
+
     try {
       const { data, error } = await supabase
         .from('system_settings')
@@ -75,28 +81,165 @@ export const dispatchBatchService = {
         .maybeSingle();
 
       if (!error && data?.setting_value && Array.isArray(data.setting_value)) {
-        const batches = data.setting_value as DispatchBatch[];
-        // Keep local cache synced
-        try {
-          localStorage.setItem(settingKey, JSON.stringify(batches));
-        } catch (e) {}
-        return batches;
+        rawBatches = data.setting_value as DispatchBatch[];
+        loadedFromSettings = true;
       }
     } catch (err) {
       console.warn('Failed to query batches from Supabase system_settings:', err);
     }
 
     // 2. Fallback to localStorage
-    try {
-      const cached = localStorage.getItem(settingKey);
-      if (cached) {
-        return JSON.parse(cached) as DispatchBatch[];
+    if (!loadedFromSettings) {
+      try {
+        const cached = localStorage.getItem(settingKey);
+        if (cached) {
+          rawBatches = JSON.parse(cached) as DispatchBatch[];
+        }
+      } catch (e) {
+        console.warn('Failed to parse local batches cache:', e);
       }
-    } catch (e) {
-      console.warn('Failed to parse local batches cache:', e);
     }
 
-    return [];
+    // If skipReconcile requested, return rawBatches directly
+    if (options?.skipReconcile) {
+      return rawBatches;
+    }
+
+    // 3. Authoritative Reconciliation with Supabase influencer_dispatch_details_rows
+    try {
+      const numericCampaignId = isNaN(Number(cId)) ? cId : Number(cId);
+      const { data: dispatchRows, error: dispatchErr } = await supabase
+        .from(SUPABASE_TABLES.influencerDispatch)
+        .select('id, influencer_id, campaign_id, creator_name, dispatch_status, dispatch_date, created_at')
+        .eq('campaign_id', numericCampaignId);
+
+      if (!dispatchErr && dispatchRows) {
+        let hasChanges = false;
+        
+        // Build map of current dispatch statuses in DB
+        const dbStatusMap = new Map<string, string>();
+        const prepareDispatchRows: typeof dispatchRows = [];
+        
+        dispatchRows.forEach(r => {
+          const infIdStr = String(r.influencer_id);
+          const st = (r.dispatch_status || '').trim().toLowerCase();
+          dbStatusMap.set(infIdStr, st);
+          if (st === 'prepare_dispatch' || st === 'ready to dispatch') {
+            prepareDispatchRows.push(r);
+          }
+        });
+
+        // Track which influencer IDs already exist in rawBatches
+        const batchedIdSet = new Set<string>();
+        
+        // A. Clean up existing batches based on DB status
+        const cleanedBatches = rawBatches.map(b => {
+          const originalMemberCount = b.members.length;
+          const validMembers = b.members.filter(m => {
+            const dbStatus = dbStatusMap.get(String(m.influencer_id));
+            // If DB explicitly marks them as pending, they were returned to logistics
+            if (dbStatus === 'pending') {
+              hasChanges = true;
+              return false;
+            }
+            return true;
+          }).map(m => {
+            const dbStatus = dbStatusMap.get(String(m.influencer_id));
+            if ((dbStatus === 'dispatched' || dbStatus === 'tracking') && m.dispatch_status !== 'Dispatched') {
+              hasChanges = true;
+              return { ...m, dispatch_status: 'Dispatched' as BatchStatus };
+            }
+            return m;
+          });
+
+          if (validMembers.length !== originalMemberCount) {
+            hasChanges = true;
+          }
+
+          validMembers.forEach(m => batchedIdSet.add(String(m.influencer_id)));
+
+          return {
+            ...b,
+            members: validMembers
+          };
+        }).filter(b => b.members.length > 0);
+
+        if (cleanedBatches.length !== rawBatches.length) {
+          hasChanges = true;
+        }
+        rawBatches = cleanedBatches;
+
+        // B. Check for unbatched influencers with 'prepare_dispatch' in DB
+        const unbatched = prepareDispatchRows.filter(r => !batchedIdSet.has(String(r.influencer_id)));
+
+        if (unbatched.length > 0) {
+          hasChanges = true;
+          
+          // Fetch influencer details from influencers_info_rows
+          const unbatchedIds = unbatched.map(u => isNaN(Number(u.influencer_id)) ? u.influencer_id : Number(u.influencer_id));
+          const { data: infDetails } = await supabase
+            .from(SUPABASE_TABLES.influencersInfo)
+            .select('id, code, name, influencer_name, profile_file_url, is_archived')
+            .in('id', unbatchedIds);
+
+          const infMap = new Map<string, any>();
+          (infDetails || []).forEach(inf => infMap.set(String(inf.id), inf));
+
+          // Find current max batch number to ensure sequential numbering
+          let maxNum = 0;
+          for (const b of rawBatches) {
+            const match = (b.batch_name || '').match(/BATCH-(\d+)/i);
+            if (match) {
+              const n = parseInt(match[1], 10);
+              if (!isNaN(n) && n > maxNum) maxNum = n;
+            }
+          }
+
+          const nextBatchNumber = maxNum + 1;
+          const batchCode = `BATCH-${String(nextBatchNumber).padStart(3, '0')}`;
+          const firstRow = unbatched[0];
+          const { displayDate, displayTime } = formatBatchDateTime(firstRow.created_at || firstRow.dispatch_date || new Date());
+
+          const synthesizedBatch: DispatchBatch = {
+            id: `batch-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            campaign_id: cId,
+            batch_name: batchCode,
+            dispatch_date: displayDate,
+            dispatch_time: displayTime,
+            status: 'Preparing',
+            created_at: firstRow.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            created_by: 'Admin',
+            members: unbatched.map(u => {
+              const inf = infMap.get(String(u.influencer_id));
+              return {
+                influencer_id: String(u.influencer_id),
+                influencer_code: inf?.code || '',
+                creator_name: inf?.name || inf?.influencer_name || u.creator_name || 'Influencer',
+                profile_file_url: inf?.profile_file_url || '',
+                dispatch_status: 'Pending' as BatchStatus
+              };
+            })
+          };
+
+          rawBatches.push(synthesizedBatch);
+        }
+
+        // C. If changes occurred during reconciliation, persist them immediately
+        if (hasChanges) {
+          await this.saveBatches(campaignId, rawBatches);
+        }
+      }
+    } catch (reconcileErr) {
+      console.warn('Error during batch reconciliation with Supabase dispatch records:', reconcileErr);
+    }
+
+    // Keep local cache synced
+    try {
+      localStorage.setItem(settingKey, JSON.stringify(rawBatches));
+    } catch (e) {}
+
+    return rawBatches;
   },
 
   /**

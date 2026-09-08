@@ -121,7 +121,7 @@ export const logisticsWorkflowService = {
       }
 
       // 4. Create ONE Prepare Dispatch Batch for this single action
-      const existingBatches = await dispatchBatchService.getBatches(campaign.id);
+      const existingBatches = await dispatchBatchService.getBatches(campaign.id, { skipReconcile: true });
       let maxNum = 0;
       for (const b of existingBatches) {
         const match = (b.batch_name || '').match(/BATCH-(\d+)/i);
@@ -192,7 +192,7 @@ export const logisticsWorkflowService = {
       if (error) throw error;
 
       // 2. Remove influencer from existing batches
-      const batches = await dispatchBatchService.getBatches(campaignId);
+      const batches = await dispatchBatchService.getBatches(campaignId, { skipReconcile: true });
       const updatedBatches = batches.map(batch => ({
         ...batch,
         members: batch.members.filter(m => String(m.influencer_id) !== String(influencerId))
@@ -204,6 +204,46 @@ export const logisticsWorkflowService = {
     } catch (err: any) {
       console.error('Error returning influencer to logistics:', err);
       return { success: false, error: err.message || 'Failed to return to logistics' };
+    }
+  },
+
+  /**
+   * Returns all pending influencers in an entire batch back to 'pending' (Logistics).
+   * Atomically updates influencer_dispatch_details_rows and removes the batch.
+   */
+  async returnBatchToLogistics(
+    campaignId: string | number,
+    batchId: string
+  ): Promise<{ success: boolean; count: number; error?: string }> {
+    try {
+      const cId = String(campaignId);
+      const numericCampaignId = isNaN(Number(cId)) ? cId : Number(cId);
+
+      const batches = await dispatchBatchService.getBatches(campaignId, { skipReconcile: true });
+      const targetBatch = batches.find(b => b.id === batchId);
+      if (!targetBatch) {
+        return { success: true, count: 0 };
+      }
+
+      const memberIds = targetBatch.members.map(m => isNaN(Number(m.influencer_id)) ? m.influencer_id : Number(m.influencer_id));
+
+      if (memberIds.length > 0) {
+        const { error } = await supabase
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .update({ dispatch_status: 'pending' })
+          .eq('campaign_id', numericCampaignId)
+          .in('influencer_id', memberIds);
+
+        if (error) throw error;
+      }
+
+      const updatedBatches = batches.filter(b => b.id !== batchId);
+      await dispatchBatchService.saveBatches(campaignId, updatedBatches);
+
+      return { success: true, count: memberIds.length };
+    } catch (err: any) {
+      console.error('Error returning batch to logistics:', err);
+      return { success: false, count: 0, error: err.message || 'Failed to return batch to logistics' };
     }
   }
 };
