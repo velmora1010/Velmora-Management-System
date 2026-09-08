@@ -3,19 +3,9 @@ import type { Campaign, CampaignInfluencer } from '../../types';
 import { 
   Search, 
   Package, 
-  ExternalLink, 
   RefreshCcw, 
-  ChevronRight, 
   ArrowLeft, 
-  Phone, 
-  MapPin, 
-  Truck, 
-  Calendar, 
-  Clock, 
-  Hash, 
-  User,
-  ChevronDown,
-  ChevronUp
+  ChevronDown 
 } from 'lucide-react';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
@@ -26,7 +16,7 @@ interface CampaignDispatchedListProps {
   influencers?: CampaignInfluencer[];
   onBack: () => void;
   onDispatch?: (influencer: CampaignInfluencer) => void;
-  onMoveToStatus: (record: any) => void;
+  onMoveToStatus?: (record: any) => void;
 }
 
 const KNOWN_COURIERS = [
@@ -51,18 +41,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   influencers,
   onBack, 
   onDispatch,
-  onMoveToStatus 
+  onMoveToStatus: _onMoveToStatus 
 }) => {
   const { influencers: hookInfluencers, isLoading: isInfluencersLoading, refresh: refreshInfluencers } = useCampaignInfluencers(campaign.id);
   const { dispatchRecords, isLoading: isDispatchLoading, refresh: refreshDispatch } = useCampaignDispatch(campaign.id);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [courierFilter, setCourierFilter] = useState<string>('all');
-  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
-
-  const toggleCardExpand = (id: string) => {
-    setExpandedCards(prev => ({ ...prev, [id]: !prev[id] }));
-  };
 
   const baseInfluencers = useMemo(() => {
     if (influencers && influencers.length > 0) return influencers;
@@ -81,23 +66,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     const platformUser = inf.platforms?.find(p => p.username && p.username.trim())?.username?.trim();
     const raw = platformUser || inf.influencer_name?.trim() || (inf as any).username?.trim() || inf.name?.trim() || '';
     if (!raw) return '—';
-    return raw.startsWith('@') ? raw : `@${raw}`;
-  };
-
-  const formatDate = (dateStr?: string | null): string => {
-    if (!dateStr || dateStr === '—' || dateStr === '-') return '—';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const safeVal = (val: any): string => {
-    if (val === undefined || val === null || val === '') return '—';
-    return String(val);
+    const clean = raw.replace(/^@+/, '');
+    return `@${clean}`;
   };
 
   const filteredInfluencers = useMemo(() => {
@@ -220,191 +190,57 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
           {filteredInfluencers.map((inf) => {
-            const dispatch = getDispatchData(inf);
-            const isDispatched = Boolean(dispatch);
             const username = getInfluencerUsername(inf);
 
             return (
               <div 
                 key={inf.id}
-                className="bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-600 rounded-xl p-5 flex flex-col justify-between transition-all duration-200 shadow-sm"
+                className="bg-slate-800/90 hover:bg-slate-800 border border-slate-700/80 hover:border-slate-600 rounded-xl px-4 py-3 flex items-center justify-between gap-3 transition-colors shadow-sm"
               >
-                <div>
-                  <div className="flex items-start gap-3.5 mb-4">
-                    <div className="relative flex-shrink-0">
-                      {inf.profile_file_url ? (
-                        <img
-                          src={inf.profile_file_url}
-                          alt={inf.name || 'Influencer'}
-                          className="w-13 h-13 sm:w-14 sm:h-14 rounded-full object-cover border-2 border-slate-700 bg-slate-900"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLElement).style.display = 'none';
-                            e.currentTarget.parentElement?.querySelector('.fallback-avatar')?.classList.remove('hidden');
-                          }}
-                        />
-                      ) : null}
-                      <div className={`fallback-avatar w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-gradient-to-br from-purple-900/60 to-indigo-950/80 border-2 border-purple-600/30 flex items-center justify-center text-purple-300 font-bold text-sm ${inf.profile_file_url ? 'hidden' : ''}`}>
-                        {inf.name ? inf.name.substring(0, 2).toUpperCase() : <User size={20} />}
-                      </div>
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="px-2 py-0.5 rounded text-xs font-mono font-semibold bg-purple-900/40 text-purple-300 border border-purple-700/40">
-                          {safeVal(inf.code)}
-                        </span>
-                        {isDispatched ? (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-700/50">
-                            {dispatch?.dispatch_status || 'Dispatched'}
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-700/60 text-slate-400 border border-slate-600/50">
-                            Not Dispatched
-                          </span>
-                        )}
-                      </div>
-
-                      <h3 className="text-base font-semibold text-slate-100 truncate" title={username}>
-                        {username}
-                      </h3>
-                      <p className="text-xs text-slate-400 truncate" title={inf.name || inf.influencer_name || '—'}>
-                        {inf.name || inf.influencer_name || '—'}
-                      </p>
-                    </div>
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-sm sm:text-base border-2 border-purple-500/30 shrink-0 shadow-sm">
+                    {inf.profile_file_url ? (
+                      <img 
+                        src={inf.profile_file_url} 
+                        alt={inf.name || 'Influencer'} 
+                        className="w-full h-full object-cover" 
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = 'none';
+                          const fallback = e.currentTarget.parentElement?.querySelector('.fallback-initial');
+                          if (fallback) fallback.classList.remove('hidden');
+                        }}
+                      />
+                    ) : null}
+                    <span className={`fallback-initial ${inf.profile_file_url ? 'hidden' : ''}`}>
+                      {(inf.influencer_name || inf.name || 'A').charAt(0).toUpperCase()}
+                    </span>
                   </div>
 
-                  <div className="space-y-2 text-xs text-slate-300 bg-slate-900/50 rounded-lg p-3 border border-slate-800/80 mb-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-400 flex items-center gap-1.5 flex-shrink-0">
-                        <Phone size={13} className="text-slate-500" /> Phone:
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <h3 
+                      className="font-bold text-slate-100 text-sm sm:text-base truncate hover:text-purple-300 transition-colors"
+                      title={username}
+                    >
+                      {username}
+                    </h3>
+                    {inf.code && (
+                      <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
+                        {inf.code}
                       </span>
-                      <span className="font-medium text-slate-200 truncate" title={inf.phone_number || dispatch?.phone_number || ''}>
-                        {safeVal(inf.phone_number || dispatch?.phone_number)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-400 flex items-center gap-1.5 flex-shrink-0">
-                        <MapPin size={13} className="text-slate-500" /> State:
-                      </span>
-                      <span className="font-medium text-slate-200 truncate" title={inf.state || dispatch?.state || ''}>
-                        {safeVal(inf.state || dispatch?.state)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-400 flex items-center gap-1.5 flex-shrink-0">
-                        <Truck size={13} className="text-slate-500" /> Courier:
-                      </span>
-                      <span className="font-medium text-slate-200 truncate" title={dispatch?.courier_partner || ''}>
-                        {safeVal(dispatch?.courier_partner)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-400 flex items-center gap-1.5 flex-shrink-0">
-                        <Calendar size={13} className="text-slate-500" /> Dispatch Date:
-                      </span>
-                      <span className="font-medium text-slate-200 truncate">
-                        {formatDate(dispatch?.dispatch_date)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-400 flex items-center gap-1.5 flex-shrink-0">
-                        <Clock size={13} className="text-slate-500" /> Expected Delivery:
-                      </span>
-                      <span className="font-medium text-slate-200 truncate">
-                        {formatDate(dispatch?.expected_delivery_date)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-400 flex items-center gap-1.5 flex-shrink-0">
-                        <Hash size={13} className="text-slate-500" /> Tracking ID:
-                      </span>
-                      <span className="font-medium text-purple-300 font-mono text-[11px] truncate" title={dispatch?.tracking_id || ''}>
-                        {safeVal(dispatch?.tracking_id)}
-                      </span>
-                    </div>
+                    )}
                   </div>
-
-                  {Boolean(dispatch && (dispatch.selected_products?.length > 0 || dispatch.product_photo_url || dispatch.dispatch_photo_url)) && (
-                    <div className="mb-4">
-                      <button
-                        type="button"
-                        onClick={() => toggleCardExpand(inf.id)}
-                        className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 py-1 transition-colors"
-                      >
-                        <span>{expandedCards[inf.id] ? 'Hide Dispatch Items & Media' : 'View Dispatch Items & Media'}</span>
-                        {expandedCards[inf.id] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                      </button>
-
-                      {expandedCards[inf.id] && (
-                        <div className="mt-2 pt-2 border-t border-slate-700/60 space-y-3">
-                          {dispatch.selected_products && dispatch.selected_products.length > 0 && (
-                            <div>
-                              <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold block mb-1">Products</span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {dispatch.selected_products.map((p: any, i: number) => (
-                                  <span key={i} className="text-[11px] bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-slate-300">
-                                    {p.product_name} {p.quantity ? `(x${p.quantity})` : ''}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {(dispatch.product_photo_url || dispatch.dispatch_photo_url) && (
-                            <div className="grid grid-cols-2 gap-2 pt-1">
-                              {dispatch.product_photo_url && (
-                                <div className="bg-slate-900 border border-slate-700 rounded p-1.5 text-center">
-                                  <span className="text-[10px] text-slate-400 block mb-1">Product</span>
-                                  <img src={dispatch.product_photo_url} alt="Product" className="w-full h-16 object-cover rounded mb-1" />
-                                  <a href={dispatch.product_photo_url} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 hover:underline flex items-center justify-center gap-1">
-                                    View <ExternalLink size={10} />
-                                  </a>
-                                </div>
-                              )}
-                              {dispatch.dispatch_photo_url && (
-                                <div className="bg-slate-900 border border-slate-700 rounded p-1.5 text-center">
-                                  <span className="text-[10px] text-slate-400 block mb-1">Dispatch</span>
-                                  <img src={dispatch.dispatch_photo_url} alt="Dispatch" className="w-full h-16 object-cover rounded mb-1" />
-                                  <a href={dispatch.dispatch_photo_url} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 hover:underline flex items-center justify-center gap-1">
-                                    View <ExternalLink size={10} />
-                                  </a>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
 
-                <div className="mt-auto pt-2">
-                  {isDispatched ? (
-                    <button
-                      type="button"
-                      onClick={() => onMoveToStatus(dispatch)}
-                      className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-                    >
-                      <span>Move To Status</span>
-                      <ChevronRight size={15} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onDispatch?.(inf)}
-                      className="w-full py-2 px-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
-                    >
-                      <Package size={15} />
-                      <span>Dispatch</span>
-                    </button>
-                  )}
+                <div className="shrink-0">
+                  <button 
+                    type="button"
+                    onClick={() => onDispatch?.(inf)} 
+                    className="px-3.5 py-1.5 text-xs font-semibold rounded-md bg-purple-600 hover:bg-purple-500 text-white transition-colors shrink-0 shadow-sm cursor-pointer"
+                  >
+                    Dispatch
+                  </button>
                 </div>
               </div>
             );
