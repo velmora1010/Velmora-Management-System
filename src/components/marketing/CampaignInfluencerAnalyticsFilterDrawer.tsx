@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { SlidersHorizontal, X, RotateCcw, Check, Search, MapPin, Award, Globe, Users, Share2, CreditCard, Package } from 'lucide-react';
 import type { CampaignInfluencer } from '../../types';
 import { normalizeStateName, CREATOR_CATEGORIES, FOLLOWER_RANGES, PLATFORM_COMBOS, PRICE_RANGES } from './InfluencerFilterDrawer';
+import { getAllIndianStates, getIndianCitiesForState } from '../../data/indiaLocations';
 import { PRODUCT_LIST, formatDisplayProductName } from '../../modules/marketing/AddCampaignInfluencer';
 import { MultiSelectDropdown, OptionItem } from '../../modules/sales/website/components/MultiSelectDropdown';
 
@@ -55,19 +56,27 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
     setDraft(filterState);
   }, [filterState, isOpen]);
 
-  // Options for State MultiSelectDropdown
+  // Options for State MultiSelectDropdown (All Indian states + campaign influencer states)
   const stateOptions = useMemo<OptionItem[]>(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(getAllIndianStates());
     influencers.forEach(inf => {
       const st = normalizeStateName(inf.state);
       if (st) set.add(st);
     });
-    return Array.from(set).sort().map(st => ({ label: st, value: st }));
+    return Array.from(set).sort((a, b) => a.localeCompare(b)).map(st => ({ label: st, value: st }));
   }, [influencers]);
 
-  // Options for City MultiSelectDropdown
+  // Options for City MultiSelectDropdown (All Indian cities scoped to selected states + influencer cities)
   const cityOptions = useMemo<OptionItem[]>(() => {
     const set = new Set<string>();
+    if (draft.states.length > 0) {
+      draft.states.forEach(st => {
+        getIndianCitiesForState(st).forEach(ct => set.add(ct));
+      });
+    } else {
+      getIndianCitiesForState().forEach(ct => set.add(ct));
+    }
+
     influencers.forEach(inf => {
       if (draft.states.length > 0) {
         const infStateNorm = normalizeStateName(inf.state).toLowerCase();
@@ -78,7 +87,7 @@ export const CampaignInfluencerAnalyticsFilterDrawer: React.FC<CampaignInfluence
         set.add(inf.city.trim());
       }
     });
-    return Array.from(set).sort().map(ct => ({ label: ct, value: ct }));
+    return Array.from(set).sort((a, b) => a.localeCompare(b)).map(ct => ({ label: ct, value: ct }));
   }, [influencers, draft.states]);
 
   // Options for Creator Category

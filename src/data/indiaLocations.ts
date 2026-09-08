@@ -4533,3 +4533,59 @@ export const STATE_ALIASES: { [rawNormalized: string]: string } = {
   "damananddiu": "dadranagarhavelianddamandiu",
   "damandiu": "dadranagarhavelianddamandiu"
 };
+
+/**
+ * Returns all canonical Indian states and union territories sorted alphabetically
+ */
+export const getAllIndianStates = (): string[] => {
+  return Object.values(MASTER_LOCATIONS)
+    .map(s => s.name)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+};
+
+/**
+ * Returns all canonical Indian cities for a given state,
+ * or all canonical Indian cities across all states if no state is specified.
+ */
+export const getIndianCitiesForState = (stateName?: string | null): string[] => {
+  if (!stateName || !stateName.trim()) {
+    const allCities = new Set<string>();
+    for (const stateObj of Object.values(MASTER_LOCATIONS)) {
+      if (stateObj.cities) {
+        for (const cityObj of Object.values(stateObj.cities)) {
+          if (cityObj.name && cityObj.name.trim()) {
+            allCities.add(cityObj.name.trim());
+          }
+        }
+      }
+    }
+    return Array.from(allCities).sort((a, b) => a.localeCompare(b));
+  }
+
+  const clean = stateName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  
+  // Try direct match against state keys or state display names
+  for (const [key, stateObj] of Object.entries(MASTER_LOCATIONS)) {
+    const keyClean = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const nameClean = stateObj.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (keyClean === clean || nameClean === clean) {
+      return Object.values(stateObj.cities)
+        .map(c => c.name.trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+    }
+  }
+
+  // Check state aliases (e.g., "tn" -> "tamilnadu")
+  const aliasKey = STATE_ALIASES[clean];
+  if (aliasKey && MASTER_LOCATIONS[aliasKey]) {
+    return Object.values(MASTER_LOCATIONS[aliasKey].cities)
+      .map(c => c.name.trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  return [];
+};
+

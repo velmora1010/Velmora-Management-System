@@ -1,6 +1,12 @@
 import React from 'react';
 import { SlidersHorizontal, X, RotateCcw, Check } from 'lucide-react';
 import type { CampaignInfluencer } from '../../types';
+import { 
+  getAllIndianStates, 
+  getIndianCitiesForState, 
+  MASTER_LOCATIONS, 
+  STATE_ALIASES 
+} from '../../data/indiaLocations';
 
 export const normalizeStateName = (stateStr?: string | null): string => {
   if (!stateStr) return '';
@@ -8,6 +14,20 @@ export const normalizeStateName = (stateStr?: string | null): string => {
   const clean = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (clean === 'telanagana' || clean === 'telangana') return 'Telangana';
   if (clean === 'tamilnadu' || clean === 'tamil nadu') return 'Tamil Nadu';
+  
+  // Check direct master location match
+  for (const [key, stateObj] of Object.entries(MASTER_LOCATIONS)) {
+    if (key === clean || stateObj.name.toLowerCase().replace(/[^a-z0-9]/g, '') === clean) {
+      return stateObj.name;
+    }
+  }
+
+  // Check alias match
+  const aliasKey = STATE_ALIASES[clean];
+  if (aliasKey && MASTER_LOCATIONS[aliasKey]) {
+    return MASTER_LOCATIONS[aliasKey].name;
+  }
+
   return trimmed;
 };
 
@@ -131,20 +151,22 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
     setDraft(filterState);
   }, [filterState, isOpen]);
 
-  // Dynamically extract unique states, cities, categories, languages, products
+  // Include ALL Indian states and UTs + any custom state from campaign influencers
   const availableStates = React.useMemo(() => {
-    const states = new Set<string>();
+    const states = new Set<string>(getAllIndianStates());
     influencers.forEach(inf => {
       if (inf.state && inf.state.trim()) {
         const norm = normalizeStateName(inf.state);
         if (norm) states.add(norm);
       }
     });
-    return Array.from(states).sort();
+    return Array.from(states).sort((a, b) => a.localeCompare(b));
   }, [influencers]);
 
+  // Include ALL Indian cities (scoped to draft.state if selected) + any custom city from influencers
   const availableCities = React.useMemo(() => {
-    const cities = new Set<string>();
+    const masterCities = getIndianCitiesForState(draft.state);
+    const cities = new Set<string>(masterCities);
     influencers.forEach(inf => {
       if (draft.state) {
         const infStateNorm = normalizeStateName(inf.state);
@@ -156,7 +178,7 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
         if (inf.city && inf.city.trim()) cities.add(inf.city.trim());
       }
     });
-    return Array.from(cities).sort();
+    return Array.from(cities).sort((a, b) => a.localeCompare(b));
   }, [influencers, draft.state]);
 
   const availableCategories = React.useMemo(() => {

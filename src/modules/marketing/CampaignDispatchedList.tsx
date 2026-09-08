@@ -18,6 +18,12 @@ import {
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
 import { isActiveStatus } from '../../utils/marketingUtils';
+import { 
+  getAllIndianStates, 
+  getIndianCitiesForState, 
+  MASTER_LOCATIONS, 
+  STATE_ALIASES 
+} from '../../data/indiaLocations';
 
 interface CampaignDispatchedListProps {
   campaign: Campaign;
@@ -54,14 +60,20 @@ export const normalizeStateName = (stateStr?: string | null): string => {
   const clean = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (clean === 'telanagana' || clean === 'telangana') return 'Telangana';
   if (clean === 'tamilnadu' || clean === 'tamil nadu') return 'Tamil Nadu';
-  if (clean === 'karnataka') return 'Karnataka';
-  if (clean === 'andhrapradesh' || clean === 'andrapradesh' || clean === 'andhra pradesh') return 'Andhra Pradesh';
-  if (clean === 'madhyapradesh' || clean === 'madhya pradesh') return 'Madhya Pradesh';
-  if (clean === 'uttarpradesh' || clean === 'uttar pradesh') return 'Uttar Pradesh';
-  if (clean === 'maharashtra') return 'Maharashtra';
-  if (clean === 'gujarat') return 'Gujarat';
-  if (clean === 'rajasthan') return 'Rajasthan';
-  if (clean === 'kerala') return 'Kerala';
+  
+  // Check direct master location match
+  for (const [key, stateObj] of Object.entries(MASTER_LOCATIONS)) {
+    if (key === clean || stateObj.name.toLowerCase().replace(/[^a-z0-9]/g, '') === clean) {
+      return stateObj.name;
+    }
+  }
+
+  // Check alias match
+  const aliasKey = STATE_ALIASES[clean];
+  if (aliasKey && MASTER_LOCATIONS[aliasKey]) {
+    return MASTER_LOCATIONS[aliasKey].name;
+  }
+
   return trimmed;
 };
 
@@ -135,25 +147,28 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const [customCourierInput, setCustomCourierInput] = useState('');
   const [isAddingCustomCourier, setIsAddingCustomCourier] = useState(false);
   const [selectedWeightRange, setSelectedWeightRange] = useState('all');
+  const [selectedDispatchStatus, setSelectedDispatchStatus] = useState('all');
   
-  // Filter Dropdown Visibility
-  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
-  const filterDropdownRef = useRef<HTMLDivElement>(null);
+  // Slide-over Filter Drawer State (matches Image 1)
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [draftState, setDraftState] = useState('');
+  const [draftCity, setDraftCity] = useState('');
+  const [draftCourier, setDraftCourier] = useState('all');
+  const [draftWeightRange, setDraftWeightRange] = useState('all');
+  const [draftDispatchStatus, setDraftDispatchStatus] = useState('all');
 
-  // Close dropdown on outside click
+  // Sync draft filters when drawer opens
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (filterDropdownRef.current && !filterDropdownRef.current.contains(event.target as Node)) {
-        setIsFilterDropdownOpen(false);
-      }
-    };
-    if (isFilterDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+    if (isFilterDrawerOpen) {
+      setDraftState(selectedState);
+      setDraftCity(selectedCity);
+      setDraftCourier(selectedCourier);
+      setDraftWeightRange(selectedWeightRange);
+      setDraftDispatchStatus(selectedDispatchStatus);
+      setIsAddingCustomCourier(false);
+      setCustomCourierInput('');
     }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isFilterDropdownOpen]);
+  }, [isFilterDrawerOpen, selectedState, selectedCity, selectedCourier, selectedWeightRange, selectedDispatchStatus]);
 
   // Active influencers only (single authoritative source of truth)
   const baseInfluencers = useMemo(() => {
@@ -177,9 +192,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return `@${clean}`;
   };
 
-  // Dynamic Options derived strictly from active influencers/dispatch data
+  // Master Indian States + active campaign influencer states
   const availableStates = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(getAllIndianStates());
     activeOnly.forEach(inf => {
       const dispatch = getDispatchData(inf);
       const st = normalizeStateName(inf.state || dispatch?.state || '');
@@ -188,14 +203,15 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [activeOnly, dispatchRecords]);
 
-  const availableCities = useMemo(() => {
-    const set = new Set<string>();
+  // Master Indian Cities scoped to draftState (or all Indian cities) + influencer cities
+  const draftAvailableCities = useMemo(() => {
+    const masterCities = getIndianCitiesForState(draftState);
+    const set = new Set<string>(masterCities);
     activeOnly.forEach(inf => {
       const dispatch = getDispatchData(inf);
       const st = normalizeStateName(inf.state || dispatch?.state || '');
       
-      // If a state is selected, scope cities strictly to that state
-      if (selectedState && normalizeStateName(selectedState) !== st) {
+      if (draftState && normalizeStateName(draftState) !== st) {
         return;
       }
 
@@ -203,7 +219,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       if (ct) set.add(ct);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [activeOnly, dispatchRecords, selectedState]);
+  }, [activeOnly, dispatchRecords, draftState]);
 
   const availableCouriers = useMemo(() => {
     const couriers = new Set<string>(KNOWN_COURIERS);
@@ -231,8 +247,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     if (selectedCity) count++;
     if (selectedCourier !== 'all') count++;
     if (selectedWeightRange !== 'all') count++;
+    if (selectedDispatchStatus !== 'all') count++;
     return count;
-  }, [selectedState, selectedCity, selectedCourier, selectedWeightRange]);
+  }, [selectedState, selectedCity, selectedCourier, selectedWeightRange, selectedDispatchStatus]);
 
   const handleClearAllFilters = () => {
     setSelectedState('');
@@ -241,6 +258,34 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     setCustomCourierInput('');
     setIsAddingCustomCourier(false);
     setSelectedWeightRange('all');
+    setSelectedDispatchStatus('all');
+  };
+
+  const handleResetDraftFilters = () => {
+    setDraftState('');
+    setDraftCity('');
+    setDraftCourier('all');
+    setDraftWeightRange('all');
+    setDraftDispatchStatus('all');
+    setCustomCourierInput('');
+    setIsAddingCustomCourier(false);
+  };
+
+  const handleApplyDrawerFilters = () => {
+    setSelectedState(draftState);
+    setSelectedCity(draftCity);
+    setSelectedCourier(draftCourier);
+    setSelectedWeightRange(draftWeightRange);
+    setSelectedDispatchStatus(draftDispatchStatus);
+    setIsFilterDrawerOpen(false);
+  };
+
+  const handleApplyCustomCourier = () => {
+    if (!customCourierInput.trim()) return;
+    const val = customCourierInput.trim();
+    setDraftCourier(val);
+    setCustomCourierInput('');
+    setIsAddingCustomCourier(false);
   };
 
   // Filtered influencers based on Search + ALL active filters
@@ -294,19 +339,19 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         if (!matchesWeightRange(grams, selectedWeightRange)) return false;
       }
 
+      // 6. Dispatch Status Filter
+      if (selectedDispatchStatus !== 'all') {
+        const isDispatched = isInfluencerDispatched(inf, dispatchRecords);
+        if (selectedDispatchStatus === 'dispatched' && !isDispatched) return false;
+        if (selectedDispatchStatus === 'pending' && isDispatched) return false;
+      }
+
       return true;
     }).sort(compareInfluencerCodesAsc);
-  }, [activeOnly, searchTerm, selectedState, selectedCity, selectedCourier, selectedWeightRange, dispatchRecords]);
+  }, [activeOnly, searchTerm, selectedState, selectedCity, selectedCourier, selectedWeightRange, selectedDispatchStatus, dispatchRecords]);
 
   const handleRefresh = async () => {
     await Promise.all([refreshDispatch(), refreshInfluencers()]);
-  };
-
-  const handleApplyCustomCourier = () => {
-    if (customCourierInput.trim()) {
-      setSelectedCourier(customCourierInput.trim());
-      setIsAddingCustomCourier(false);
-    }
   };
 
   const isLoading = (isInfluencersLoading || isDispatchLoading) && baseInfluencers.length === 0;
@@ -319,18 +364,19 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <button 
             type="button"
             onClick={onBack}
-            className="p-2 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-slate-200 transition-colors cursor-pointer shrink-0"
-            title="Back to Overview"
+            className="p-2 hover:bg-slate-700/80 rounded-xl transition-colors text-slate-400 hover:text-slate-200 cursor-pointer"
+            title="Back to Campaign"
           >
             <ArrowLeft size={20} />
           </button>
+          
           <div>
-            <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-              Influencer Logistics
-              <span className="text-sm font-normal text-slate-400">
-                ({activeOnly.length} Active Influencers)
-              </span>
-            </h2>
+            <div className="flex items-center gap-2.5">
+              <Package className="text-purple-400" size={22} />
+              <h2 className="text-lg font-bold text-slate-100">
+                Influencer Logistics ({activeOnly.length} Active Influencers)
+              </h2>
+            </div>
             
             {/* Summary Pills */}
             <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -352,7 +398,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         </div>
 
         {/* Right Search and Filter Controls */}
-        <div className="flex items-center gap-2.5 w-full md:w-auto flex-wrap relative">
+        <div className="flex items-center gap-2.5 w-full md:w-auto flex-wrap">
           {/* Search Box */}
           <div className="relative flex-1 md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -365,179 +411,25 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             />
           </div>
 
-          {/* Filters Button & Popover */}
-          <div className="relative" ref={filterDropdownRef}>
-            <button
-              type="button"
-              onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
-              className={`px-3.5 py-2 rounded-xl text-sm font-medium transition-colors border flex items-center gap-2 cursor-pointer ${
-                activeFilterCount > 0 
-                  ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold' 
-                  : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
-              }`}
-              title="Filter Logistics"
-            >
-              <SlidersHorizontal size={15} />
-              <span>Filters</span>
-              {activeFilterCount > 0 && (
-                <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
-                  {activeFilterCount}
-                </span>
-              )}
-              <ChevronDown size={14} className={`transition-transform duration-200 ${isFilterDropdownOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {/* Filter Dropdown Popover */}
-            {isFilterDropdownOpen && (
-              <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-[#0c121e] border border-slate-700/90 rounded-2xl shadow-2xl p-4 z-40 animate-fade-in space-y-4">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <SlidersHorizontal size={15} className="text-purple-400" />
-                    <span className="text-sm font-bold text-white">Logistics Filters</span>
-                  </div>
-                  {activeFilterCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleClearAllFilters}
-                      className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer"
-                    >
-                      <RotateCcw size={12} /> Clear all
-                    </button>
-                  )}
-                </div>
-
-                {/* 1. State Filter */}
-                <div>
-                  <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mb-1.5">
-                    <MapPin size={13} className="text-purple-400" /> State
-                  </label>
-                  <select
-                    value={selectedState}
-                    onChange={(e) => {
-                      setSelectedState(e.target.value);
-                      setSelectedCity(''); // Reset city when state changes
-                    }}
-                    className="w-full bg-[#0b101b] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-                  >
-                    <option value="">All States ({availableStates.length})</option>
-                    {availableStates.map(st => (
-                      <option key={st} value={st}>{st}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 2. City Filter (Dynamically scoped to selected state) */}
-                <div>
-                  <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mb-1.5">
-                    <Building size={13} className="text-purple-400" /> City
-                  </label>
-                  <select
-                    value={selectedCity}
-                    onChange={(e) => setSelectedCity(e.target.value)}
-                    className="w-full bg-[#0b101b] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-                  >
-                    <option value="">All Cities ({availableCities.length})</option>
-                    {availableCities.map(ct => (
-                      <option key={ct} value={ct}>{ct}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 3. Courier Partner Filter */}
-                <div>
-                  <label className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-1.5">
-                    <span className="flex items-center gap-1.5">
-                      <Truck size={13} className="text-purple-400" /> Courier Partner
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingCustomCourier(!isAddingCustomCourier)}
-                      className="text-[11px] text-purple-400 hover:text-purple-300 flex items-center gap-0.5 cursor-pointer"
-                    >
-                      <Plus size={12} /> Add +
-                    </button>
-                  </label>
-
-                  {isAddingCustomCourier ? (
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <input
-                        type="text"
-                        value={customCourierInput}
-                        onChange={(e) => setCustomCourierInput(e.target.value)}
-                        placeholder="Enter custom courier..."
-                        className="flex-1 bg-[#0b101b] border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleApplyCustomCourier();
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleApplyCustomCourier}
-                        className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold cursor-pointer"
-                      >
-                        Apply
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingCustomCourier(false)}
-                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl text-xs cursor-pointer"
-                      >
-                        &times;
-                      </button>
-                    </div>
-                  ) : null}
-
-                  <select
-                    value={selectedCourier}
-                    onChange={(e) => setSelectedCourier(e.target.value)}
-                    className="w-full bg-[#0b101b] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-                  >
-                    <option value="all">All Couriers</option>
-                    <option value="Not Dispatched">Not Dispatched</option>
-                    {availableCouriers.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                    {selectedCourier !== 'all' && selectedCourier !== 'Not Dispatched' && !availableCouriers.includes(selectedCourier) && (
-                      <option value={selectedCourier}>{selectedCourier} (Custom)</option>
-                    )}
-                  </select>
-                </div>
-
-                {/* 4. Total Weight Filter */}
-                <div>
-                  <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mb-1.5">
-                    <Scale size={13} className="text-purple-400" /> Total Weight
-                  </label>
-                  <select
-                    value={selectedWeightRange}
-                    onChange={(e) => setSelectedWeightRange(e.target.value)}
-                    className="w-full bg-[#0b101b] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-                  >
-                    {WEIGHT_RANGES.map(w => (
-                      <option key={w.id} value={w.id}>{w.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Popover Footer */}
-                <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
-                  <span className="text-[11px] text-slate-400">
-                    Showing {filteredInfluencers.length} of {activeOnly.length}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setIsFilterDropdownOpen(false)}
-                    className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-semibold cursor-pointer"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
+          {/* Filters Button (Opens slide-over drawer matching Image 1) */}
+          <button
+            type="button"
+            onClick={() => setIsFilterDrawerOpen(true)}
+            className={`px-3.5 py-2 rounded-xl text-sm font-medium transition-colors border flex items-center gap-2 cursor-pointer ${
+              activeFilterCount > 0 
+                ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold' 
+                : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
+            }`}
+            title="Filter Logistics"
+          >
+            <SlidersHorizontal size={15} />
+            <span>Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
+                {activeFilterCount}
+              </span>
             )}
-          </div>
+          </button>
 
           {/* Refresh Button */}
           <button
@@ -567,29 +459,36 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
             {selectedState && (
               <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-                State: {selectedState}
+                <MapPin size={11} /> State: {selectedState}
                 <button onClick={() => { setSelectedState(''); setSelectedCity(''); }} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
               </span>
             )}
 
             {selectedCity && (
               <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-                City: {selectedCity}
+                <Building size={11} /> City: {selectedCity}
                 <button onClick={() => setSelectedCity('')} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
               </span>
             )}
 
             {selectedCourier !== 'all' && (
               <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-                Courier: {selectedCourier}
+                <Truck size={11} /> Courier: {selectedCourier}
                 <button onClick={() => setSelectedCourier('all')} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
               </span>
             )}
 
             {selectedWeightRange !== 'all' && (
               <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
-                Weight: {WEIGHT_RANGES.find(w => w.id === selectedWeightRange)?.label || selectedWeightRange}
+                <Scale size={11} /> Weight: {WEIGHT_RANGES.find(w => w.id === selectedWeightRange)?.label || selectedWeightRange}
                 <button onClick={() => setSelectedWeightRange('all')} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
+              </span>
+            )}
+
+            {selectedDispatchStatus !== 'all' && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Status: {selectedDispatchStatus === 'dispatched' ? 'Dispatched Only' : 'Pending Only'}
+                <button onClick={() => setSelectedDispatchStatus('all')} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
               </span>
             )}
           </div>
@@ -597,12 +496,233 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <button 
             type="button"
             onClick={handleClearAllFilters} 
-            className="text-purple-400 hover:text-purple-300 underline font-semibold ml-2 text-xs cursor-pointer"
+            className="text-purple-400 hover:text-purple-300 underline font-semibold ml-2 text-xs cursor-pointer flex items-center gap-1"
           >
-            Clear all
+            <RotateCcw size={12} /> Clear all
           </button>
         </div>
       )}
+
+      {/* Slide-over Filter Drawer (Exact layout as Image 1) */}
+      {isFilterDrawerOpen && (
+        <div 
+          onClick={() => setIsFilterDrawerOpen(false)}
+          className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-40 transition-opacity animate-fade-in" 
+        />
+      )}
+
+      <aside 
+        className={`fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-[#141a29] text-slate-200 shadow-2xl border-l border-slate-700/80 flex flex-col transform transition-transform duration-300 ease-in-out ${
+          isFilterDrawerOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {/* Header */}
+        <div className="p-5 border-b border-slate-700/80 flex items-center justify-between bg-[#1e2638]">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-purple-500/20 rounded-lg text-purple-400 border border-purple-500/30">
+              <SlidersHorizontal size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-slate-100">Filter Influencers</h2>
+              <p className="text-xs text-slate-400">Refine your influencer list by multiple criteria</p>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={() => setIsFilterDrawerOpen(false)}
+            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-lg transition-colors cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Scrollable Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-6 [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
+          
+          {/* LOCATION */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400">
+              Location
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">State</label>
+                <select
+                  value={draftState}
+                  onChange={(e) => {
+                    setDraftState(e.target.value);
+                    setDraftCity('');
+                  }}
+                  className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+                >
+                  <option value="">All States</option>
+                  {availableStates.map(st => (
+                    <option key={st} value={st}>{st}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">City</label>
+                <select
+                  value={draftCity}
+                  onChange={(e) => setDraftCity(e.target.value)}
+                  className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+                >
+                  <option value="">All Cities</option>
+                  {draftAvailableCities.map(ct => (
+                    <option key={ct} value={ct}>{ct}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <hr className="border-slate-800" />
+
+          {/* COURIER PARTNER */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-purple-400">Courier Partner</span>
+              <button
+                type="button"
+                onClick={() => setIsAddingCustomCourier(!isAddingCustomCourier)}
+                className="text-[11px] text-purple-400 hover:text-purple-300 flex items-center gap-0.5 cursor-pointer"
+              >
+                <Plus size={12} /> Add Custom Courier
+              </button>
+            </div>
+
+            {isAddingCustomCourier && (
+              <div className="flex items-center gap-1.5 p-2 bg-slate-900/90 border border-slate-800 rounded-xl">
+                <input
+                  type="text"
+                  value={customCourierInput}
+                  onChange={(e) => setCustomCourierInput(e.target.value)}
+                  placeholder="Enter courier partner name..."
+                  className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleApplyCustomCourier();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyCustomCourier}
+                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+                >
+                  Add
+                </button>
+              </div>
+            )}
+
+            <select
+              value={draftCourier}
+              onChange={(e) => setDraftCourier(e.target.value)}
+              className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+            >
+              <option value="all">All Couriers</option>
+              <option value="Not Dispatched">Not Dispatched</option>
+              {availableCouriers.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+              {draftCourier !== 'all' && draftCourier !== 'Not Dispatched' && !availableCouriers.includes(draftCourier) && (
+                <option value={draftCourier}>{draftCourier} (Custom)</option>
+              )}
+            </select>
+          </div>
+
+          <hr className="border-slate-800" />
+
+          {/* TOTAL WEIGHT (WEIGHT BASED) */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400">
+              Total Weight
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {WEIGHT_RANGES.map(range => {
+                const active = draftWeightRange === range.id;
+                return (
+                  <button
+                    type="button"
+                    key={range.id}
+                    onClick={() => setDraftWeightRange(range.id)}
+                    className={`p-2.5 text-xs rounded-xl font-medium transition-all text-center border cursor-pointer ${
+                      active 
+                        ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30 font-semibold' 
+                        : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:bg-slate-800'
+                    }`}
+                  >
+                    {range.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <hr className="border-slate-800" />
+
+          {/* DISPATCH STATUS */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400">
+              Dispatch Status
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'all', label: 'All Statuses' },
+                { id: 'dispatched', label: 'Dispatched Only' },
+                { id: 'pending', label: 'Pending Only' }
+              ].map(item => {
+                const active = draftDispatchStatus === item.id;
+                return (
+                  <button
+                    type="button"
+                    key={item.id}
+                    onClick={() => setDraftDispatchStatus(item.id)}
+                    className={`p-2.5 text-xs rounded-xl font-medium transition-all text-center border cursor-pointer ${
+                      active 
+                        ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30 font-semibold' 
+                        : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:bg-slate-800'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-slate-700/80 bg-[#1e2638] flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleResetDraftFilters}
+            className="px-3.5 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <RotateCcw size={14} />
+            Reset All
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsFilterDrawerOpen(false)}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyDrawerFilters}
+              className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
+            >
+              Apply Filters
+            </button>
+          </div>
+        </div>
+      </aside>
 
       {/* Content Section */}
       {isLoading ? (
