@@ -25,6 +25,7 @@ export interface DispatchBatch {
   members: DispatchBatchMember[];
   created_at: string;
   updated_at: string;
+  created_by?: string;
 }
 
 const getStorageKey = (campaignId: string | number) => `influencer_dispatch_batches_${campaignId}`;

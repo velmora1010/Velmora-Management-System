@@ -19,7 +19,8 @@ import {
   Coins,
   Weight,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Layers
 } from 'lucide-react';
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
@@ -69,9 +70,16 @@ interface DispatchInfluencerModalProps {
   campaign: Campaign;
   onClose: () => void;
   onSuccess: () => void;
+  batchInfo?: { batchName: string; current: number; total: number };
 }
 
-export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = ({ influencer, campaign, onClose, onSuccess }) => {
+export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = ({ 
+  influencer, 
+  campaign, 
+  onClose, 
+  onSuccess,
+  batchInfo
+}) => {
   const { dispatchInfluencer, isSubmitting } = useDispatch();
   
   const dispatchDetails = influencer.dispatchDetails;
@@ -270,6 +278,12 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
                   Dispatch Influencer: {influencer.influencer_name || influencer.name}
                 </h2>
+                {batchInfo && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1 shadow-sm">
+                    <Layers size={11} />
+                    {batchInfo.batchName} · Influencer {batchInfo.current} of {batchInfo.total}
+                  </span>
+                )}
                 {isAlreadyDispatched && (
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 uppercase tracking-wider">
                     <CheckCircle size={12} /> Dispatched

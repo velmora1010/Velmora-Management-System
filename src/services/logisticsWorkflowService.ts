@@ -134,6 +134,7 @@ export const logisticsWorkflowService = {
         status: 'Preparing',
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
+        created_by: 'Admin',
         members: selectedInfluencers.map(inf => ({
           influencer_id: String(inf.id),
           influencer_code: inf.code || '',
