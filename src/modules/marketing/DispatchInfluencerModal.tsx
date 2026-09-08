@@ -1,9 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { X, Package, Truck, UploadCloud, Image as ImageIcon } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { useDispatch } from '../../hooks/marketing/useDispatch';
+import { 
+  X, 
+  Package, 
+  Truck, 
+  UploadCloud, 
+  Image as ImageIcon,
+  User,
+  Hash,
+  Phone,
+  MapPin,
+  Building,
+  Map as MapIcon,
+  LayoutGrid,
+  Languages,
+  Folder,
+  Calendar,
+  Coins,
+  Weight,
+  CheckCircle,
+  AlertCircle
+} from 'lucide-react';
+import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
-import { calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
+import { getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
 
 // Central Price Config Rules
 export const PRODUCT_PRICES: Record<string, number> = {
@@ -31,6 +51,19 @@ export const getProductPrice = (name: string): number => {
   return DEFAULT_PRODUCT_PRICE;
 };
 
+// Helper to extract language string from canonical influencer data
+const getInitialLanguage = (inf: CampaignInfluencer): string => {
+  const raw: any = inf.languages;
+  if (!raw) return '';
+  if (Array.isArray(raw)) {
+    return raw.filter(l => typeof l === 'string' && !l.startsWith('views_data:')).join(', ');
+  }
+  if (typeof raw === 'string') {
+    return raw.trim();
+  }
+  return '';
+};
+
 interface DispatchInfluencerModalProps {
   influencer: CampaignInfluencer;
   campaign: Campaign;
@@ -41,12 +74,16 @@ interface DispatchInfluencerModalProps {
 export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = ({ influencer, campaign, onClose, onSuccess }) => {
   const { dispatchInfluencer, isSubmitting } = useDispatch();
   
+  const dispatchDetails = influencer.dispatchDetails;
+
   // Form State
-  const [phone, setPhone] = useState(influencer.phone_number || '');
-  const [altPhone, setAltPhone] = useState(influencer.alternative_number || '');
-  const [address, setAddress] = useState(influencer.complete_address || '');
-  const [state, setState] = useState(influencer.state || '');
-  const [productName, setProductName] = useState('');
+  const [phone, setPhone] = useState(influencer.phone_number || dispatchDetails?.phone_number || '');
+  const [altPhone, setAltPhone] = useState(influencer.alternative_number || dispatchDetails?.alternative_phone_number || '');
+  const [address, setAddress] = useState(influencer.complete_address || (influencer as any).address || dispatchDetails?.address || '');
+  const [city, setCity] = useState(influencer.city || '');
+  const [state, setState] = useState(influencer.state || dispatchDetails?.state || '');
+  const [pincode, setPincode] = useState(influencer.pincode || '');
+  const [language, setLanguage] = useState(getInitialLanguage(influencer));
   
   // Products State - resolve from canonical Pricing Info source of truth first
   const initialProducts = (() => {
@@ -78,19 +115,41 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   const [selectedProducts] = useState(initialProducts);
   const [totalProducts, setTotalProducts] = useState(0);
   const [totalValue, setTotalValue] = useState('0');
-  const [totalWeight, setTotalWeight] = useState('');
+  const [totalWeight, setTotalWeight] = useState(dispatchDetails?.total_weight || '');
   
   // Dispatch Details
-  const [courierPartner, setCourierPartner] = useState('');
-  const [trackingId, setTrackingId] = useState('');
-  const [dispatchDate, setDispatchDate] = useState(new Date().toISOString().split('T')[0]);
-  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
+  const [courierPartner, setCourierPartner] = useState(dispatchDetails?.courier_partner || '');
+  const [trackingId, setTrackingId] = useState(dispatchDetails?.tracking_id || '');
+  const [dispatchDate, setDispatchDate] = useState(dispatchDetails?.dispatch_date || new Date().toISOString().split('T')[0]);
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(dispatchDetails?.expected_delivery_date || '');
   
   // Photos
   const [productPhotoFile, setProductPhotoFile] = useState<File | null>(null);
-  const [productPhotoPreview, setProductPhotoPreview] = useState<string | null>(null);
+  const [productPhotoPreview, setProductPhotoPreview] = useState<string | null>(dispatchDetails?.product_photo_url || null);
   const [dispatchPhotoFile, setDispatchPhotoFile] = useState<File | null>(null);
-  const [dispatchPhotoPreview, setDispatchPhotoPreview] = useState<string | null>(null);
+  const [dispatchPhotoPreview, setDispatchPhotoPreview] = useState<string | null>(dispatchDetails?.dispatch_photo_url || null);
+
+  // Sync state if influencer prop changes (prevents stale data across different influencers)
+  useEffect(() => {
+    const d = influencer.dispatchDetails;
+    setPhone(influencer.phone_number || d?.phone_number || '');
+    setAltPhone(influencer.alternative_number || d?.alternative_phone_number || '');
+    setAddress(influencer.complete_address || (influencer as any).address || d?.address || '');
+    setCity(influencer.city || '');
+    setState(influencer.state || d?.state || '');
+    setPincode(influencer.pincode || '');
+    setLanguage(getInitialLanguage(influencer));
+
+    if (d) {
+      if (d.courier_partner) setCourierPartner(d.courier_partner);
+      if (d.tracking_id) setTrackingId(d.tracking_id);
+      if (d.dispatch_date) setDispatchDate(d.dispatch_date);
+      if (d.expected_delivery_date) setExpectedDeliveryDate(d.expected_delivery_date);
+      if (d.total_weight) setTotalWeight(d.total_weight);
+      if (d.product_photo_url) setProductPhotoPreview(d.product_photo_url);
+      if (d.dispatch_photo_url) setDispatchPhotoPreview(d.dispatch_photo_url);
+    }
+  }, [influencer]);
 
   // Recalculate total products and total value automatically when selectedProducts changes
   useEffect(() => {
@@ -119,9 +178,16 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!influencer.influencer_name || !dispatchDate) {
+  const isAlreadyDispatched = Boolean(
+    (influencer.dispatchDetails?.dispatch_status || '').trim().toLowerCase() === 'dispatched' ||
+    (influencer.dispatchDetails?.dispatch_status || '').trim().toLowerCase() === 'tracking'
+  );
+
+  const [showConfirmStep, setShowConfirmStep] = useState(false);
+
+  const executeDispatch = async (status: 'Dispatched' | 'Pending Confirmation') => {
+    const creatorName = influencer.influencer_name || influencer.name;
+    if (!creatorName || !dispatchDate) {
       toast.error('Please fill in Creator Name and Dispatch Date.');
       return;
     }
@@ -131,215 +197,343 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       return;
     }
 
-    const payload = {
-      influencer_id: influencer.id,
-      campaign_id: campaign.id,
-      creator_name: influencer.influencer_name,
-      phone_number: phone,
-      alternative_phone_number: altPhone,
-      address,
-      state,
+    const payload: DispatchPayload = {
+      influencer_id: String(influencer.id),
+      campaign_id: String(campaign.id),
+      creator_name: creatorName,
+      phone_number: phone || null,
+      alternative_phone_number: altPhone || null,
+      address: address || null,
+      city: city || null,
+      state: state || null,
+      pincode: pincode || null,
+      languages: language || null,
       campaign_name: campaign.campaign_name,
-      product_name: productName,
+      product_name: selectedProducts.map((p: any) => p.product_name).join(', ') || null,
       selected_products: selectedProducts,
       total_products: totalProducts,
       total_product_value: totalValue ? parseFloat(totalValue) : null,
-      total_weight: totalWeight,
-      product_photo_url: null,
-      courier_partner: courierPartner,
-      dispatch_photo_url: null,
-      tracking_id: trackingId,
+      total_weight: totalWeight || null,
+      product_photo_url: productPhotoPreview?.startsWith('http') ? productPhotoPreview : null,
+      courier_partner: courierPartner || null,
+      dispatch_photo_url: dispatchPhotoPreview?.startsWith('http') ? dispatchPhotoPreview : null,
+      tracking_id: trackingId || null,
       dispatch_date: dispatchDate,
       expected_delivery_date: expectedDeliveryDate || null,
-      dispatch_status: 'Dispatched',
+      dispatch_status: status,
       influencer_code: influencer.code || null
     };
 
     const success = await dispatchInfluencer(payload, productPhotoFile, dispatchPhotoFile);
     if (success) {
+      if (status === 'Dispatched') {
+        toast.success('Influencer marked as Dispatched successfully!');
+      } else {
+        toast.success('Dispatch details saved successfully.');
+      }
       onSuccess();
+    } else {
+      toast.error('Failed to save dispatch details. Please check and try again.');
     }
   };
 
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isAlreadyDispatched) {
+      executeDispatch('Dispatched');
+      return;
+    }
+    const creatorName = influencer.influencer_name || influencer.name;
+    if (!creatorName || !dispatchDate) {
+      toast.error('Please fill in Creator Name and Dispatch Date.');
+      return;
+    }
+    if (selectedProducts.length === 0) {
+      toast.error('No selected products found for this influencer.');
+      return;
+    }
+    setShowConfirmStep(true);
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden my-8 animate-fade-in">
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto">
+      <div className="bg-[#0b101b] border border-slate-800/90 rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col max-h-[92vh] my-auto animate-fade-in overflow-hidden">
         
-        {/* Header */}
-        <div className="flex justify-between items-center p-6 border-b border-slate-700 bg-slate-800/50">
-          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            <Package className="text-emerald-400" /> Dispatch Influencer: {influencer.influencer_name}
-          </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 transition-colors p-1 bg-slate-800 rounded-lg border border-slate-600 hover:border-slate-500">
-            <X size={20} />
+        {/* Header - Fixed/Sticky at top, X close button always visible and interactive */}
+        <div className="flex justify-between items-center px-6 py-4 sm:py-5 border-b border-slate-800/80 bg-[#0c121e] shrink-0 sticky top-0 z-20">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+              <Package size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                  Dispatch Influencer: {influencer.influencer_name || influencer.name}
+                </h2>
+                {isAlreadyDispatched && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 uppercase tracking-wider">
+                    <CheckCircle size={12} /> Dispatched
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Manage product dispatch, shipment tracking and logistics details for this influencer.
+              </p>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={onClose} 
+            aria-label="Close"
+            className="text-slate-400 hover:text-white transition-colors p-2 bg-[#151c2c] hover:bg-[#1c263a] rounded-xl border border-slate-700/80 cursor-pointer shrink-0"
+          >
+            <X size={18} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Scrollable Form Body */}
+        <form onSubmit={handleFormSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/60 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
             
             {/* Left Column */}
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6 flex flex-col">
               
-              {/* Campaign & Influencer Info */}
-              <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><Truck size={16} className="text-blue-400"/> Campaign & Influencer</h3>
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-2">
+              {/* Influencer Basic Info */}
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="text-purple-400 mt-0.5">
+                    <User size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Influencer Basic Info</h3>
+                    <p className="text-xs text-slate-400">Basic details of the influencer for dispatch.</p>
+                  </div>
+                </div>
+                
+                <div className="space-y-3.5">
+                  {/* Row 1: Creator Name | Influencer Code */}
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Creator Name</label>
-                      <input type="text" value={influencer.influencer_name || ''} readOnly className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-500 cursor-not-allowed" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <User size={13} className="text-slate-400 shrink-0" />
+                        <span>Creator Name</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={influencer.influencer_name || influencer.name || ''} 
+                        readOnly 
+                        className="w-full bg-[#0b101b] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-300 font-medium cursor-not-allowed" 
+                      />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Influencer Code</label>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Hash size={13} className="text-slate-400 shrink-0" />
+                        <span>Influencer Code</span>
+                      </label>
                       <input 
                         type="text" 
                         value={influencer.code || ''} 
                         readOnly 
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-purple-450 font-mono font-bold cursor-not-allowed select-all" 
+                        className="w-full bg-[#0b101b] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-300 font-medium cursor-not-allowed select-all" 
                       />
-                      <span className="text-[9px] text-slate-500 mt-1 block leading-none">Assigned influencer code</span>
                     </div>
                   </div>
-
-                  {(() => {
-                    const getDisplayViewCode = (platformName: string): string => {
-                      if (platformName === 'Instagram') {
-                        return influencer.instagram_view_code || '—';
-                      }
-                      if (platformName === 'Facebook') {
-                        return influencer.facebook_view_code || '—';
-                      }
-                      if (platformName === 'Youtube') {
-                        return influencer.youtube_view_code || '—';
-                      }
-                      return '—';
-                    };
-
-                    const displayInsta = getDisplayViewCode('Instagram');
-                    const displayFb = getDisplayViewCode('Facebook');
-                    const displayYt = getDisplayViewCode('Youtube');
-
-                    return (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-950/30 p-2.5 rounded-lg border border-slate-800 mb-3">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Instagram</label>
-                          <span className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded border inline-block w-full text-center ${
-                            displayInsta !== '—'
-                              ? 'bg-purple-900/30 text-purple-400 border-purple-800/30'
-                              : 'bg-slate-900/40 text-slate-500 border-slate-800/30'
-                          }`}>
-                            {displayInsta}
-                          </span>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Facebook</label>
-                          <span className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded border inline-block w-full text-center ${
-                            displayFb !== '—'
-                              ? 'bg-purple-900/30 text-purple-400 border-purple-800/30'
-                              : 'bg-slate-900/40 text-slate-500 border-slate-800/30'
-                          }`}>
-                            {displayFb}
-                          </span>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">YouTube</label>
-                          <span className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded border inline-block w-full text-center ${
-                            displayYt !== '—'
-                              ? 'bg-purple-900/30 text-purple-400 border-purple-800/30'
-                              : 'bg-slate-900/40 text-slate-500 border-slate-800/30'
-                          }`}>
-                            {displayYt}
-                          </span>
-                        </div>
-                        <div className="col-span-1 sm:col-span-3 text-center">
-                          <span className="text-[9px] text-slate-500 block leading-tight">Automatically calculated from platform views</span>
-                        </div>
-                      </div>
-                    );
-                  })()}
 
                   {/* Row 2: Phone Number | Alt Phone */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Phone Number</label>
-                      <input type="text" value={phone} onChange={e => setPhone(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Phone size={13} className="text-slate-400 shrink-0" />
+                        <span>Phone Number</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={phone} 
+                        onChange={e => setPhone(e.target.value)} 
+                        placeholder="Phone Number"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Alt Phone</label>
-                      <input type="text" value={altPhone} onChange={e => setAltPhone(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Phone size={13} className="text-slate-400 shrink-0" />
+                        <span>Alt Phone</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={altPhone} 
+                        onChange={e => setAltPhone(e.target.value)} 
+                        placeholder="Alt Phone"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
+                      />
                     </div>
                   </div>
 
-                  {/* Row 3: Address (full width) */}
+                  {/* Row 3: Address (Complete address / street / locality) */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Address</label>
-                    <textarea value={address} onChange={e => setAddress(e.target.value)} rows={2} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500"></textarea>
+                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                      <MapPin size={13} className="text-slate-400 shrink-0" />
+                      <span>Address</span>
+                    </label>
+                    <textarea 
+                      value={address} 
+                      onChange={e => setAddress(e.target.value)} 
+                      rows={2} 
+                      placeholder="Complete address / street / locality"
+                      className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none leading-relaxed"
+                    />
                   </div>
 
-                  {/* Row 4: State | Campaign Name */}
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* Row 4: City | State */}
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">State</label>
-                      <input type="text" value={state} onChange={e => setState(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Building size={13} className="text-slate-400 shrink-0" />
+                        <span>City</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={city} 
+                        onChange={e => setCity(e.target.value)} 
+                        placeholder="City"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Campaign Name</label>
-                      <input type="text" value={campaign.campaign_name || ''} readOnly className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-500 cursor-not-allowed" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <MapIcon size={13} className="text-slate-400 shrink-0" />
+                        <span>State</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={state} 
+                        onChange={e => setState(e.target.value)} 
+                        placeholder="State"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
+                      />
                     </div>
                   </div>
 
-                  {/* Row 5: Product Name (General) (full width) */}
+                  {/* Row 5: Pincode | Language */}
+                  <div className="grid grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <LayoutGrid size={13} className="text-slate-400 shrink-0" />
+                        <span>Pincode</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={pincode} 
+                        onChange={e => setPincode(e.target.value)} 
+                        placeholder="Pincode"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
+                      />
+                    </div>
+                    <div>
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Languages size={13} className="text-slate-400 shrink-0" />
+                        <span>Language</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={language} 
+                        onChange={e => setLanguage(e.target.value)} 
+                        placeholder="e.g. Hindi, Tamil"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 6: Campaign Name */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-400 mb-1">Product Name (General)</label>
-                    <input type="text" value={productName} onChange={e => setProductName(e.target.value)} placeholder="e.g. Skin Care Kit" className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
+                    <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                      <Folder size={13} className="text-slate-400 shrink-0" />
+                      <span>Campaign Name</span>
+                    </label>
+                    <input 
+                      type="text" 
+                      value={campaign.campaign_name || ''} 
+                      readOnly 
+                      className="w-full bg-[#0b101b] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-300 font-medium cursor-not-allowed" 
+                    />
                   </div>
                 </div>
               </div>
 
               {/* Campaign Products */}
-              <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><Package size={16} className="text-purple-400"/> Campaign Products</h3>
-                <div className="space-y-4">
-                  <div className="bg-slate-900 rounded-lg p-3 border border-slate-700 min-h-[100px] max-h-[200px] overflow-y-auto">
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm flex flex-col">
+                {/* Fixed Card Header */}
+                <div className="flex items-start gap-3 mb-4 shrink-0">
+                  <div className="text-purple-400 mt-0.5">
+                    <Package size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Campaign Products</h3>
+                    <p className="text-xs text-slate-400">Products assigned to this influencer.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3.5 flex-1 flex flex-col min-h-0">
+                  {/* Dedicated Scrollable Container ONLY around individual product rows */}
+                  <div className="space-y-2 max-h-[210px] overflow-y-auto pr-1.5 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-900/40 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-700/80 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600 transition-colors">
                     {selectedProducts.length > 0 ? (
-                      <ul className="space-y-2">
-                        {selectedProducts.map((p: any, idx: number) => {
-                          const unitPrice = getProductPrice(p.product_name);
-                          return (
-                            <li key={idx} className="flex justify-between items-center text-sm border-b border-slate-800 pb-2 last:border-0 last:pb-0">
-                              <div className="flex flex-col">
-                                <span className="text-slate-300 font-medium">{p.product_name}</span>
-                                <span className="text-[10px] text-slate-500">₹{(unitPrice ?? 0).toLocaleString('en-IN')} / unit</span>
+                      selectedProducts.map((p: any, idx: number) => {
+                        const unitPrice = getProductPrice(p.product_name);
+                        return (
+                          <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-[#0b101b]/60 border border-slate-800/80">
+                            <div className="flex items-center gap-3 min-w-0 pr-2">
+                              <Package size={16} className="text-slate-400 shrink-0" />
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-slate-200 leading-tight truncate">{p.product_name}</div>
+                                <div className="text-[11px] text-slate-500 mt-0.5">₹{(unitPrice ?? 0).toLocaleString('en-IN')} / unit</div>
                               </div>
-                              <span className="bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono border border-slate-700/50 text-xs">Qty: {p.quantity}</span>
-                            </li>
-                          );
-                        })}
-                      </ul>
+                            </div>
+                            <span className="bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 px-2.5 py-1 rounded-lg text-xs font-mono font-medium shrink-0">
+                              Qty: {p.quantity}
+                            </span>
+                          </div>
+                        );
+                      })
                     ) : (
-                      <p className="text-slate-500 text-sm text-center italic py-4">No products selected for this influencer.</p>
+                      <p className="text-slate-500 text-xs text-center italic py-4">No products selected for this influencer.</p>
                     )}
                   </div>
                   
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Total Products</label>
-                      <input type="number" value={totalProducts} readOnly className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-450 cursor-not-allowed font-medium" />
+                  {/* Fixed Summary Boxes at bottom of card */}
+                  <div className="grid grid-cols-3 gap-3 pt-1 shrink-0 mt-auto">
+                    <div className="bg-[#0b101b]/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                      <div className="flex items-center gap-1.5 text-purple-400 mb-1">
+                        <Package size={14} />
+                        <span className="text-[11px] font-medium text-slate-400">Total Products</span>
+                      </div>
+                      <div className="text-base font-bold text-white">{totalProducts}</div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Total Value (₹)</label>
+
+                    <div className="bg-[#0b101b]/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                      <div className="flex items-center gap-1.5 text-purple-400 mb-1">
+                        <Coins size={14} />
+                        <span className="text-[11px] font-medium text-slate-400">Total Value (₹)</span>
+                      </div>
+                      <div>
+                        <div className="text-base font-bold text-white">
+                          {totalValue ? `₹${(Number(totalValue) || 0).toLocaleString('en-IN')}` : '₹0'}
+                        </div>
+                        <span className="text-[9px] text-slate-500 leading-tight block mt-0.5">Auto calculated from campaign products</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#0b101b]/60 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                      <div className="flex items-center gap-1.5 text-purple-400 mb-1">
+                        <Weight size={14} />
+                        <span className="text-[11px] font-medium text-slate-400">Total Weight</span>
+                      </div>
                       <input 
                         type="text" 
-                        value={totalValue ? `₹${(Number(totalValue) || 0).toLocaleString('en-IN')}` : '₹0'} 
-                        readOnly 
-                        className="w-full bg-slate-900 border border-slate-705 rounded-lg px-3 py-2 text-sm text-slate-450 cursor-not-allowed font-semibold" 
+                        value={totalWeight} 
+                        onChange={e => setTotalWeight(e.target.value)} 
+                        placeholder="e.g. 500g" 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-lg px-2.5 py-1 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
-                      <span className="text-[9px] text-slate-500 mt-1 block leading-tight">Auto calculated from campaign products</span>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Total Weight</label>
-                      <input type="text" value={totalWeight} onChange={e => setTotalWeight(e.target.value)} placeholder="e.g. 500g" className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
                     </div>
                   </div>
                 </div>
@@ -348,58 +542,91 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
             </div>
 
             {/* Right Column */}
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6 flex flex-col">
               
               {/* Product Shipment (Photos) */}
-              <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                 <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><ImageIcon size={16} className="text-yellow-400"/> Photos</h3>
-                 <div className="grid grid-cols-2 gap-4">
-                    {/* Pack Photo */}
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-2">Product Photo</label>
-                      <div className="border-2 border-dashed border-slate-600 rounded-lg p-2 text-center relative hover:border-emerald-500 transition-colors bg-slate-900">
-                        {productPhotoPreview ? (
-                          <div className="relative aspect-video">
-                            <img src={productPhotoPreview} alt="Product" className="w-full h-full object-contain rounded" />
-                          </div>
-                        ) : (
-                          <div className="py-6 flex flex-col items-center">
-                            <UploadCloud className="text-slate-500 mb-2" size={24} />
-                            <span className="text-xs text-slate-400">Click to upload</span>
-                          </div>
-                        )}
-                        <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'product')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                      </div>
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="text-purple-400 mt-0.5">
+                    <ImageIcon size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Photos</h3>
+                    <p className="text-xs text-slate-400">Upload product and dispatch photos.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3.5">
+                  {/* Pack Photo */}
+                  <div>
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-purple-400 mb-2">
+                      <ImageIcon size={13} />
+                      <span className="text-slate-300 font-medium">Product Photo</span>
                     </div>
-                    
-                    {/* Final Photo */}
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-2">Dispatch Photo</label>
-                      <div className="border-2 border-dashed border-slate-600 rounded-lg p-2 text-center relative hover:border-emerald-500 transition-colors bg-slate-900">
-                        {dispatchPhotoPreview ? (
-                          <div className="relative aspect-video">
-                            <img src={dispatchPhotoPreview} alt="Dispatch" className="w-full h-full object-contain rounded" />
-                          </div>
-                        ) : (
-                          <div className="py-6 flex flex-col items-center">
-                            <UploadCloud className="text-slate-500 mb-2" size={24} />
-                            <span className="text-xs text-slate-400">Click to upload</span>
-                          </div>
-                        )}
-                        <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'dispatch')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                      </div>
+                    <div className="border border-dashed border-slate-700/80 hover:border-purple-500/70 bg-[#0b101b]/60 rounded-xl p-3 text-center relative transition-colors group cursor-pointer min-h-[140px] flex items-center justify-center">
+                      {productPhotoPreview ? (
+                        <div className="relative w-full h-28">
+                          <img src={productPhotoPreview} alt="Product" className="w-full h-full object-contain rounded-lg" />
+                        </div>
+                      ) : (
+                        <div className="py-3 flex flex-col items-center justify-center">
+                          <UploadCloud className="text-purple-400/80 mb-2 group-hover:text-purple-300 transition-colors" size={26} />
+                          <span className="text-xs font-semibold text-slate-300">Click to upload</span>
+                          <span className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, WEBP (Max 5MB)</span>
+                        </div>
+                      )}
+                      <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'product')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                     </div>
-                 </div>
+                  </div>
+                  
+                  {/* Final Photo */}
+                  <div>
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-purple-400 mb-2">
+                      <ImageIcon size={13} />
+                      <span className="text-slate-300 font-medium">Dispatch Photo</span>
+                    </div>
+                    <div className="border border-dashed border-slate-700/80 hover:border-purple-500/70 bg-[#0b101b]/60 rounded-xl p-3 text-center relative transition-colors group cursor-pointer min-h-[140px] flex items-center justify-center">
+                      {dispatchPhotoPreview ? (
+                        <div className="relative w-full h-28">
+                          <img src={dispatchPhotoPreview} alt="Dispatch" className="w-full h-full object-contain rounded-lg" />
+                        </div>
+                      ) : (
+                        <div className="py-3 flex flex-col items-center justify-center">
+                          <UploadCloud className="text-purple-400/80 mb-2 group-hover:text-purple-300 transition-colors" size={26} />
+                          <span className="text-xs font-semibold text-slate-300">Click to upload</span>
+                          <span className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, WEBP (Max 5MB)</span>
+                        </div>
+                      )}
+                      <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'dispatch')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              {/* Dispatch Details */}
-              <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2"><Truck size={16} className="text-emerald-400"/> Dispatch Logistics</h3>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
+              {/* Dispatch Logistics */}
+              <div className="bg-[#0e1626]/70 border border-slate-800/80 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="text-purple-400 mt-0.5">
+                    <Truck size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Dispatch Logistics</h3>
+                    <p className="text-xs text-slate-400">Add courier and tracking details.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Courier Partner</label>
-                      <select value={courierPartner} onChange={e => setCourierPartner(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500">
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Truck size={13} className="text-slate-400 shrink-0" />
+                        <span>Courier Partner</span>
+                      </label>
+                      <select 
+                        value={courierPartner} 
+                        onChange={e => setCourierPartner(e.target.value)} 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer"
+                      >
                         <option value="">Select Partner</option>
                         <option value="ST Courier">ST Courier</option>
                         <option value="India Post">India Post</option>
@@ -411,18 +638,44 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Tracking ID</label>
-                      <input type="text" value={trackingId} onChange={e => setTrackingId(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Hash size={13} className="text-slate-400 shrink-0" />
+                        <span>Tracking ID</span>
+                      </label>
+                      <input 
+                        type="text" 
+                        value={trackingId} 
+                        onChange={e => setTrackingId(e.target.value)} 
+                        placeholder="Tracking ID"
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
+                      />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3.5">
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Dispatch Date</label>
-                      <input type="date" value={dispatchDate} onChange={e => setDispatchDate(e.target.value)} required className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 [color-scheme:dark]" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Calendar size={13} className="text-slate-400 shrink-0" />
+                        <span>Dispatch Date</span>
+                      </label>
+                      <input 
+                        type="date" 
+                        value={dispatchDate} 
+                        onChange={e => setDispatchDate(e.target.value)} 
+                        required 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark] transition-colors" 
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Expected Delivery</label>
-                      <input type="date" value={expectedDeliveryDate} onChange={e => setExpectedDeliveryDate(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 [color-scheme:dark]" />
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
+                        <Calendar size={13} className="text-slate-400 shrink-0" />
+                        <span>Expected Delivery</span>
+                      </label>
+                      <input 
+                        type="date" 
+                        value={expectedDeliveryDate} 
+                        onChange={e => setExpectedDeliveryDate(e.target.value)} 
+                        className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark] transition-colors" 
+                      />
                     </div>
                   </div>
                 </div>
@@ -430,21 +683,110 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
             </div>
           </div>
 
+          {/* Two-step Confirmation Banner */}
+          {showConfirmStep && !isAlreadyDispatched && (
+            <div className="mt-5 p-4 rounded-xl bg-purple-950/40 border border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="text-purple-400 shrink-0 mt-0.5" size={18} />
+                <div>
+                  <h4 className="text-sm font-bold text-white">Confirm Official Shipment Dispatch?</h4>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    This will officially mark <span className="text-white font-semibold">{influencer.influencer_name || influencer.name}</span> as <strong className="text-emerald-400">Dispatched</strong> with {totalProducts} product(s) via {courierPartner || 'selected courier'}.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmStep(false)}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer border border-slate-700 transition-colors"
+                >
+                  Back to Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => executeDispatch('Dispatched')}
+                  disabled={isSubmitting}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer disabled:opacity-50 transition-all"
+                >
+                  {isSubmitting ? (
+                    <>Confirming...</>
+                  ) : (
+                    <>
+                      <CheckCircle size={14} />
+                      Yes, Confirm Dispatch
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Footer Actions */}
-          <div className="mt-8 flex justify-end gap-3 pt-4 border-t border-slate-700">
-            <button type="button" onClick={onClose} disabled={isSubmitting} className="px-6 py-2 bg-slate-800 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg font-medium transition-colors disabled:opacity-50">
-              Cancel
-            </button>
-            <button type="submit" disabled={isSubmitting || selectedProducts.length === 0} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium shadow-lg shadow-emerald-500/20 transition-colors disabled:opacity-50 flex items-center gap-2">
-              {isSubmitting ? (
-                 <>Saving...</>
-              ) : (
-                 <>Confirm Dispatch <Truck size={18} /></>
+          <div className="mt-6 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 pt-4 border-t border-slate-800/80">
+            <div>
+              {!isAlreadyDispatched && !showConfirmStep && (
+                <button 
+                  type="button" 
+                  onClick={() => executeDispatch('Pending Confirmation')}
+                  disabled={isSubmitting}
+                  className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                  title="Save entered dispatch information as draft without marking as officially dispatched"
+                >
+                  Save Details (Draft)
+                </button>
               )}
-            </button>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button 
+                type="button" 
+                onClick={onClose} 
+                disabled={isSubmitting} 
+                className="px-5 py-2.5 bg-[#151c2c] hover:bg-[#1e273d] text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {isAlreadyDispatched ? 'Close' : 'Cancel'}
+              </button>
+
+              {isAlreadyDispatched ? (
+                <button 
+                  type="button" 
+                  onClick={() => executeDispatch('Dispatched')}
+                  disabled={isSubmitting || selectedProducts.length === 0} 
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>Saving...</>
+                  ) : (
+                    <>
+                      <Truck size={16} />
+                      Update Dispatch
+                    </>
+                  )}
+                </button>
+              ) : (
+                !showConfirmStep && (
+                  <button 
+                    type="submit" 
+                    disabled={isSubmitting || selectedProducts.length === 0} 
+                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <>Saving...</>
+                    ) : (
+                      <>
+                        <Truck size={16} />
+                        Confirm Dispatch
+                      </>
+                    )}
+                  </button>
+                )
+              )}
+            </div>
           </div>
         </form>
       </div>
     </div>
   );
 };
+

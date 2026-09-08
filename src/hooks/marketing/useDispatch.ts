@@ -10,7 +10,10 @@ export interface DispatchPayload {
   phone_number: string | null;
   alternative_phone_number: string | null;
   address: string | null;
+  city?: string | null;
   state: string | null;
+  pincode?: string | null;
+  languages?: string | string[] | null;
   campaign_name: string | null;
   product_name: string | null;
   selected_products: any[];
@@ -72,33 +75,91 @@ export const useDispatch = () => {
         dispatch_photo_url = await uploadPhoto(dispatchPhotoFile);
       }
 
-      // Generate manual ID since the table has no auto-increment sequence
-      const { data: maxData } = await supabase
-        .from(SUPABASE_TABLES.influencerDispatch)
-        .select('id')
-        .not('id', 'is', null)
-        .order('id', { ascending: false })
-        .limit(1);
-
-      const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
-      const nextId = isNaN(maxId) ? 1 : maxId + 1;
-
-      const finalPayload = {
-        ...payload,
-        id: nextId,
+      // Fields belonging to influencer_dispatch_details_rows table
+      const dispatchDbFields = {
+        influencer_id: payload.influencer_id,
+        campaign_id: payload.campaign_id,
+        creator_name: payload.creator_name,
+        phone_number: payload.phone_number,
+        alternative_phone_number: payload.alternative_phone_number,
+        address: payload.address,
+        state: payload.state,
+        campaign_name: payload.campaign_name,
+        product_name: payload.product_name,
+        selected_products: payload.selected_products,
+        total_products: payload.total_products,
+        total_product_value: payload.total_product_value,
+        total_weight: payload.total_weight,
         product_photo_url,
+        courier_partner: payload.courier_partner,
         dispatch_photo_url,
-        dispatch_status: 'Dispatched',
-        created_at: new Date().toISOString()
+        tracking_id: payload.tracking_id,
+        dispatch_date: payload.dispatch_date,
+        expected_delivery_date: payload.expected_delivery_date,
+        dispatch_status: payload.dispatch_status || 'Dispatched'
       };
 
-      const { influencer_code, ...dbPayload } = finalPayload;
-
-      const { error: dispatchError } = await supabase
+      // Check if dispatch record already exists for this influencer and campaign
+      const { data: existingDispatch } = await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
-        .insert([dbPayload]);
+        .select('id')
+        .eq('influencer_id', payload.influencer_id)
+        .eq('campaign_id', payload.campaign_id)
+        .maybeSingle();
 
-      if (dispatchError) throw dispatchError;
+      if (existingDispatch && existingDispatch.id) {
+        // Update existing dispatch record
+        const { error: updateError } = await supabase
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .update(dispatchDbFields)
+          .eq('id', existingDispatch.id);
+
+        if (updateError) throw updateError;
+      } else {
+        // Insert new record with manual incremented ID
+        const { data: maxData } = await supabase
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .select('id')
+          .not('id', 'is', null)
+          .order('id', { ascending: false })
+          .limit(1);
+
+        const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
+        const nextId = isNaN(maxId) ? 1 : maxId + 1;
+
+        const { error: insertError } = await supabase
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .insert([{
+            ...dispatchDbFields,
+            id: nextId,
+            created_at: new Date().toISOString()
+          }]);
+
+        if (insertError) throw insertError;
+      }
+
+      // Canonical influencer info sync: address, city, state, pincode, phone, altPhone, languages
+      const influencerUpdates: Record<string, any> = {};
+      if (payload.address !== undefined) influencerUpdates.complete_address = payload.address;
+      if (payload.city !== undefined) influencerUpdates.city = payload.city;
+      if (payload.state !== undefined) influencerUpdates.state = payload.state;
+      if (payload.pincode !== undefined) influencerUpdates.pincode = payload.pincode;
+      if (payload.phone_number !== undefined) influencerUpdates.phone_number = payload.phone_number;
+      if (payload.alternative_phone_number !== undefined) influencerUpdates.alternative_number = payload.alternative_phone_number;
+      if (payload.languages !== undefined) {
+        influencerUpdates.languages = Array.isArray(payload.languages)
+          ? payload.languages
+          : typeof payload.languages === 'string'
+          ? payload.languages.split(',').map(s => s.trim()).filter(Boolean)
+          : null;
+      }
+
+      if (Object.keys(influencerUpdates).length > 0) {
+        await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .update(influencerUpdates)
+          .eq('id', payload.influencer_id);
+      }
 
       // Non-blocking activity logging
       logActivity(
@@ -123,3 +184,4 @@ export const useDispatch = () => {
     error
   };
 };
+

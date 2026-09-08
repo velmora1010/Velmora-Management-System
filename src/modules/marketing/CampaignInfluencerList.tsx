@@ -14,6 +14,7 @@ import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookVie
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
+import { areFilterValuesEqual } from '../../utils/filterUtils';
 import { CampaignInfluencerAnalytics } from './CampaignInfluencerAnalytics';
 import { CampaignInfluencerAnalyticsFilterDrawer, CampaignAnalyticsFilterState, initialAnalyticsFilterState } from '../../components/marketing/CampaignInfluencerAnalyticsFilterDrawer';
 import { buildPickListRecords, PickListInfluencerRecord } from '../../config/skuMapping';
@@ -842,16 +843,17 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
 
     // 2. State Filter
     if (filterState.state) {
-      const infStateNorm = normalizeStateName(influencer.state);
-      const filterStateNorm = normalizeStateName(filterState.state);
-      if (infStateNorm.toLowerCase() !== filterStateNorm.toLowerCase()) {
+      const infState = normalizeStateName(influencer.state);
+      if (!areFilterValuesEqual(filterState.state, infState)) {
         return false;
       }
     }
 
     // 3. City Filter
-    if (filterState.city && (influencer.city || '').trim().toLowerCase() !== filterState.city.trim().toLowerCase()) {
-      return false;
+    if (filterState.city) {
+      if (!areFilterValuesEqual(filterState.city, influencer.city)) {
+        return false;
+      }
     }
 
     // 4. Creator Category Filter

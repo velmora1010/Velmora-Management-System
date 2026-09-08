@@ -1,6 +1,16 @@
 import React from 'react';
 import { SlidersHorizontal, X, RotateCcw, Check } from 'lucide-react';
 import type { CampaignInfluencer } from '../../types';
+import { 
+  getAllIndianStates, 
+  getIndianCitiesForState, 
+  MASTER_LOCATIONS, 
+  STATE_ALIASES 
+} from '../../data/indiaLocations';
+import { 
+  getUniqueFilterOptions, 
+  areFilterValuesEqual 
+} from '../../utils/filterUtils';
 
 export const normalizeStateName = (stateStr?: string | null): string => {
   if (!stateStr) return '';
@@ -8,6 +18,20 @@ export const normalizeStateName = (stateStr?: string | null): string => {
   const clean = trimmed.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (clean === 'telanagana' || clean === 'telangana') return 'Telangana';
   if (clean === 'tamilnadu' || clean === 'tamil nadu') return 'Tamil Nadu';
+  
+  // Check direct master location match
+  for (const [key, stateObj] of Object.entries(MASTER_LOCATIONS)) {
+    if (key === clean || stateObj.name.toLowerCase().replace(/[^a-z0-9]/g, '') === clean) {
+      return stateObj.name;
+    }
+  }
+
+  // Check alias match
+  const aliasKey = STATE_ALIASES[clean];
+  if (aliasKey && MASTER_LOCATIONS[aliasKey]) {
+    return MASTER_LOCATIONS[aliasKey].name;
+  }
+
   return trimmed;
 };
 
@@ -131,32 +155,33 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
     setDraft(filterState);
   }, [filterState, isOpen]);
 
-  // Dynamically extract unique states, cities, categories, languages, products
+  // Include ALL Indian states and UTs + any custom state from campaign influencers (normalized & deduplicated)
   const availableStates = React.useMemo(() => {
-    const states = new Set<string>();
+    const rawList: string[] = [...getAllIndianStates()];
     influencers.forEach(inf => {
       if (inf.state && inf.state.trim()) {
         const norm = normalizeStateName(inf.state);
-        if (norm) states.add(norm);
+        rawList.push(norm || inf.state);
       }
     });
-    return Array.from(states).sort();
+    return getUniqueFilterOptions(rawList);
   }, [influencers]);
 
+  // Include ALL Indian cities (scoped to draft.state if selected) + any custom city from influencers (normalized & deduplicated)
   const availableCities = React.useMemo(() => {
-    const cities = new Set<string>();
+    const rawList: string[] = [...getIndianCitiesForState(draft.state)];
     influencers.forEach(inf => {
       if (draft.state) {
-        const infStateNorm = normalizeStateName(inf.state);
-        const draftStateNorm = normalizeStateName(draft.state);
-        if (infStateNorm.toLowerCase() === draftStateNorm.toLowerCase()) {
-          if (inf.city && inf.city.trim()) cities.add(inf.city.trim());
+        const infState = normalizeStateName(inf.state);
+        if (!areFilterValuesEqual(infState, draft.state)) {
+          return;
         }
-      } else {
-        if (inf.city && inf.city.trim()) cities.add(inf.city.trim());
+      }
+      if (inf.city && inf.city.trim()) {
+        rawList.push(inf.city.trim());
       }
     });
-    return Array.from(cities).sort();
+    return getUniqueFilterOptions(rawList);
   }, [influencers, draft.state]);
 
   const availableCategories = React.useMemo(() => {
@@ -268,7 +293,22 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
                 <label className="block text-xs font-medium text-slate-400 mb-1">State</label>
                 <select
                   value={draft.state}
-                  onChange={(e) => setDraft(prev => ({ ...prev, state: e.target.value, city: '' }))}
+                  onChange={(e) => {
+                    const newState = e.target.value;
+                    setDraft(prev => {
+                      let nextCity = prev.city;
+                      if (nextCity && newState) {
+                        const validCities = getIndianCitiesForState(newState);
+                        const isStillValid = validCities.some(c => areFilterValuesEqual(c, nextCity)) ||
+                          influencers.some(inf => {
+                            const st = normalizeStateName(inf.state);
+                            return areFilterValuesEqual(st, newState) && areFilterValuesEqual(inf.city, nextCity);
+                          });
+                        if (!isStillValid) nextCity = '';
+                      }
+                      return { ...prev, state: newState, city: nextCity };
+                    });
+                  }}
                   className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
                 >
                   <option value="">All States</option>
