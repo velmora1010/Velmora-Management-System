@@ -101,7 +101,7 @@ export const PrepareDispatchModal: React.FC<PrepareDispatchModalProps> = ({
               batch_name: `Batch ${batchNumber}`,
               dispatch_date: getDefaultDate(),
               dispatch_time: getDefaultTime(),
-              status: 'Pending',
+              status: 'Ready to Dispatch',
               members: unassignedSelected.map(inf => ({
                 id: `member_${inf.id}_${Date.now()}`,
                 influencer_id: String(inf.id),
@@ -172,7 +172,7 @@ export const PrepareDispatchModal: React.FC<PrepareDispatchModalProps> = ({
       batch_name: `Batch ${batchNumber}`,
       dispatch_date: getDefaultDate(),
       dispatch_time: getDefaultTime(),
-      status: 'Pending',
+      status: 'Ready to Dispatch',
       members: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -255,7 +255,7 @@ export const PrepareDispatchModal: React.FC<PrepareDispatchModalProps> = ({
         batch_name: `Batch ${batchNum}`,
         dispatch_date: getDefaultDate(),
         dispatch_time: getDefaultTime(),
-        status: 'Pending',
+        status: 'Ready to Dispatch',
         members: chunk,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -455,10 +455,12 @@ export const PrepareDispatchModal: React.FC<PrepareDispatchModalProps> = ({
                             <select
                               value={batch.status}
                               onChange={(e) => updateBatchField(batch.id, 'status', e.target.value as BatchStatus)}
-                              className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md text-xs font-medium text-amber-300 focus:outline-none cursor-pointer"
+                              className={`px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-md text-xs font-medium focus:outline-none cursor-pointer ${
+                                batch.status === 'Ready to Dispatch' ? 'text-purple-300 font-semibold' : 'text-amber-300'
+                              }`}
                             >
-                              <option value="Pending">Pending</option>
                               <option value="Ready to Dispatch">Ready to Dispatch</option>
+                              <option value="Pending">Pending</option>
                             </select>
                           )}
 

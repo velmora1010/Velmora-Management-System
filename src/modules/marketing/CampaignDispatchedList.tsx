@@ -19,7 +19,8 @@ import {
   Users,
   Layers,
   AlertCircle,
-  Check
+  Check,
+  ArrowRight
 } from 'lucide-react';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
@@ -418,6 +419,22 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return activeOnly.filter(inf => idSet.has(String(inf.id)));
   }, [selectedInfluencerIds, activeOnly]);
 
+  // Compact code summary formatted with dots (e.g. HIS1 · HIS2 · HIS3 · HIS4 · HIS5 · HIS7)
+  const selectedCodesSummary = useMemo(() => {
+    const codes = selectedInfluencerObjects
+      .map(inf => inf.code)
+      .filter(Boolean) as string[];
+
+    if (codes.length === 0) return '';
+    const maxDisplay = 8;
+    if (codes.length <= maxDisplay) {
+      return codes.join(' · ');
+    }
+    const slice = codes.slice(0, maxDisplay);
+    const remaining = codes.length - maxDisplay;
+    return `${slice.join(' · ')} + ${remaining} more`;
+  }, [selectedInfluencerObjects]);
+
   const toggleSelectInfluencer = (id: string) => {
     setSelectedInfluencerIds(prev => 
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
@@ -470,13 +487,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <div>
             <div className="flex items-center gap-2.5 flex-wrap">
               <Package className="text-purple-400" size={22} />
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2 flex-wrap">
-                <span>Influencer Logistics ({activeOnly.length} Active Influencers)</span>
-                {isBulkSelectMode && (
-                  <span className="px-2.5 py-0.5 rounded-full bg-purple-600/30 border border-purple-500/50 text-purple-300 text-xs font-bold font-mono">
-                    Selected: {selectedInfluencerObjects.length}
-                  </span>
-                )}
+              <h2 className="text-lg font-bold text-slate-100">
+                Influencer Logistics ({activeOnly.length} Active Influencers)
               </h2>
             </div>
             
@@ -500,34 +512,33 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         </div>
 
         {/* Right Search and Filter Controls */}
-        <div className="flex items-center gap-2.5 w-full md:w-auto flex-wrap">
+        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
           {/* Search Box */}
-          <div className="relative flex-1 md:w-56">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+          <div className="relative flex-1 md:w-52">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
             <input 
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search code, user..."
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-3.5 py-2 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
             />
           </div>
 
-          {/* Filters Button (Opens slide-over drawer matching Image 1) */}
+          {/* Filter Button (Icon only) */}
           <button
             type="button"
             onClick={() => setIsFilterDrawerOpen(true)}
-            className={`px-3.5 py-2 rounded-xl text-sm font-medium transition-colors border flex items-center gap-2 cursor-pointer ${
+            className={`p-2.5 rounded-xl text-sm font-medium transition-colors border flex items-center justify-center relative cursor-pointer ${
               activeFilterCount > 0 
                 ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold' 
                 : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
             }`}
-            title="Filter Logistics"
+            title="Filters"
           >
-            <SlidersHorizontal size={15} />
-            <span>Filters</span>
+            <SlidersHorizontal size={17} />
             {activeFilterCount > 0 && (
-              <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
+              <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
                 {activeFilterCount}
               </span>
             )}
@@ -537,17 +548,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <button
             type="button"
             onClick={() => setIsBulkSelectMode(prev => !prev)}
-            className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition-all border flex items-center gap-2 cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 sm:gap-2 cursor-pointer ${
               isBulkSelectMode
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
                 : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
             }`}
-            title="Bulk Select Influencers"
+            title="Bulk Select"
           >
-            <CheckSquare size={16} />
+            {isBulkSelectMode ? <Check size={16} className="text-white" /> : <CheckSquare size={16} />}
             <span>Bulk Select</span>
             {selectedInfluencerObjects.length > 0 && (
-              <span className="bg-white text-purple-900 text-[10px] font-extrabold rounded-full px-1.5 py-0.2">
+              <span className="bg-white text-purple-900 text-[11px] font-extrabold rounded-full px-1.5 py-0.2 ml-0.5">
                 {selectedInfluencerObjects.length}
               </span>
             )}
@@ -557,10 +568,10 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <button
             type="button"
             onClick={() => setIsPrepareModalOpen(true)}
-            className="px-3.5 py-2 rounded-xl text-sm font-medium transition-colors border bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300 flex items-center gap-1.5 cursor-pointer"
-            title="View Prepared Dispatch Batches"
+            className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium transition-colors border bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300 flex items-center gap-1.5 cursor-pointer"
+            title="Batches"
           >
-            <Truck size={15} className="text-purple-400" />
+            <Truck size={16} className="text-purple-400" />
             <span>Batches</span>
             {savedBatches.length > 0 && (
               <span className="bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-bold rounded-full px-1.5 py-0.2">
@@ -569,70 +580,81 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* Refresh Button */}
+          {/* Refresh Button (Icon only with hover tooltip) */}
           <button
             type="button"
             onClick={handleRefresh}
-            className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl transition-colors border border-slate-700 flex items-center gap-1.5 text-sm cursor-pointer"
-            title="Refresh logistics"
+            className="p-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl transition-colors border border-slate-700 flex items-center justify-center cursor-pointer"
+            title="Refresh"
           >
-            <RefreshCcw size={16} className={(isDispatchLoading || isInfluencersLoading) ? 'animate-spin' : ''} />
-            <span className="hidden sm:inline">Refresh</span>
+            <RefreshCcw size={17} className={(isDispatchLoading || isInfluencersLoading) ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
-      {/* Bulk Selection Mode Toolbar */}
-      {isBulkSelectMode && (
-        <div className="bg-[#141a29] border border-purple-800/40 rounded-2xl p-4 sm:p-5 space-y-3 shadow-lg">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-purple-600/20 text-purple-400 rounded-lg border border-purple-500/30">
-                <Users size={18} />
-              </div>
-              <div>
-                <div className="text-sm sm:text-base font-bold text-slate-100 flex items-center gap-2">
-                  <span>Selected:</span>
-                  <span className="text-purple-300 font-mono font-extrabold text-base sm:text-lg">
-                    {selectedInfluencerObjects.length}
-                  </span>
-                  <span>Influencer{selectedInfluencerObjects.length === 1 ? '' : 's'}</span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Click cards below or enter code ranges (e.g. HIS1-HIS5, HIS7, TNS20-TNS25)
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {selectedInfluencerObjects.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClearSelection}
-                  className="px-3 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-                >
-                  Clear Selection
-                </button>
-              )}
-
+      {/* DEDICATED PREPARE DISPATCH SECTION (Visible when influencers are selected) */}
+      {selectedInfluencerObjects.length > 0 && (
+        <div className="bg-[#121929] border border-purple-600/40 rounded-2xl p-5 sm:p-6 shadow-xl shadow-purple-950/20 animate-fade-in flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
+          <div className="space-y-1.5 min-w-0 flex-1">
+            <div className="flex items-center gap-2.5">
+              <span className="px-2.5 py-0.5 rounded bg-purple-600/20 border border-purple-500/30 text-purple-300 font-bold uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                <Truck size={12} className="text-purple-400" />
+                PREPARE DISPATCH
+              </span>
               <button
                 type="button"
-                disabled={selectedInfluencerObjects.length === 0}
-                onClick={() => setIsPrepareModalOpen(true)}
-                className={`px-5 py-2 text-xs font-bold rounded-xl shadow-lg transition-all flex items-center gap-2 ${
-                  selectedInfluencerObjects.length === 0
-                    ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed shadow-none'
-                    : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30 cursor-pointer'
-                }`}
+                onClick={handleClearSelection}
+                className="text-xs text-slate-400 hover:text-slate-200 underline font-medium cursor-pointer transition-colors"
               >
-                <Truck size={15} />
-                <span>Prepare Dispatch ({selectedInfluencerObjects.length})</span>
+                Clear Selection
               </button>
             </div>
+
+            <div className="pt-0.5">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-100">
+                {selectedInfluencerObjects.length} {selectedInfluencerObjects.length === 1 ? 'influencer' : 'influencers'} selected
+              </h3>
+            </div>
+
+            {selectedCodesSummary && (
+              <p className="text-xs sm:text-sm font-mono font-semibold text-purple-300 break-words pt-0.5 tracking-wide">
+                {selectedCodesSummary}
+              </p>
+            )}
+
+            <p className="text-xs text-slate-400 pt-0.5">
+              Review the selected influencers and organize them into dispatch batches.
+            </p>
           </div>
 
-          {/* Range Input Box */}
-          <form onSubmit={handleApplyRange} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+          {/* Main CTA */}
+          <div className="shrink-0 w-full md:w-auto flex justify-end">
+            <button
+              type="button"
+              onClick={() => setIsPrepareModalOpen(true)}
+              className="w-full md:w-auto px-6 py-3.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-purple-600/30 transition-all hover:scale-[1.02] flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span>Prepare Dispatch</span>
+              <ArrowRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Code & Range Input Bar (When Bulk Select is active) */}
+      {isBulkSelectMode && (
+        <div className="bg-[#141a29] border border-slate-800 rounded-2xl p-4 sm:p-4.5 space-y-2.5 shadow-sm">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-slate-300 font-medium">
+              <Users size={15} className="text-purple-400" />
+              <span>Range & Code Selection:</span>
+            </div>
+            <span className="text-[11px] text-slate-500 hidden sm:inline">
+              Enter single codes or ranges separated by commas
+            </span>
+          </div>
+
+          <form onSubmit={handleApplyRange} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
             <div className="relative flex-1">
               <input
                 type="text"
