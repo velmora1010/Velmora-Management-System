@@ -96,7 +96,7 @@ export const useDispatch = () => {
         tracking_id: payload.tracking_id,
         dispatch_date: payload.dispatch_date,
         expected_delivery_date: payload.expected_delivery_date,
-        dispatch_status: 'Dispatched'
+        dispatch_status: payload.dispatch_status || 'Dispatched'
       };
 
       // Check if dispatch record already exists for this influencer and campaign

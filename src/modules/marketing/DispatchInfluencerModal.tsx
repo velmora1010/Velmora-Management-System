@@ -17,7 +17,9 @@ import {
   Folder,
   Calendar,
   Coins,
-  Weight
+  Weight,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react';
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
@@ -176,8 +178,14 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const isAlreadyDispatched = Boolean(
+    (influencer.dispatchDetails?.dispatch_status || '').trim().toLowerCase() === 'dispatched' ||
+    (influencer.dispatchDetails?.dispatch_status || '').trim().toLowerCase() === 'tracking'
+  );
+
+  const [showConfirmStep, setShowConfirmStep] = useState(false);
+
+  const executeDispatch = async (status: 'Dispatched' | 'Pending Confirmation') => {
     const creatorName = influencer.influencer_name || influencer.name;
     if (!creatorName || !dispatchDate) {
       toast.error('Please fill in Creator Name and Dispatch Date.');
@@ -212,15 +220,39 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       tracking_id: trackingId || null,
       dispatch_date: dispatchDate,
       expected_delivery_date: expectedDeliveryDate || null,
-      dispatch_status: 'Dispatched',
+      dispatch_status: status,
       influencer_code: influencer.code || null
     };
 
     const success = await dispatchInfluencer(payload, productPhotoFile, dispatchPhotoFile);
     if (success) {
-      toast.success('Influencer dispatch recorded successfully!');
+      if (status === 'Dispatched') {
+        toast.success('Influencer marked as Dispatched successfully!');
+      } else {
+        toast.success('Dispatch details saved successfully.');
+      }
       onSuccess();
+    } else {
+      toast.error('Failed to save dispatch details. Please check and try again.');
     }
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isAlreadyDispatched) {
+      executeDispatch('Dispatched');
+      return;
+    }
+    const creatorName = influencer.influencer_name || influencer.name;
+    if (!creatorName || !dispatchDate) {
+      toast.error('Please fill in Creator Name and Dispatch Date.');
+      return;
+    }
+    if (selectedProducts.length === 0) {
+      toast.error('No selected products found for this influencer.');
+      return;
+    }
+    setShowConfirmStep(true);
   };
 
   return (
@@ -234,9 +266,16 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
               <Package size={22} />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
-                Dispatch Influencer: {influencer.influencer_name || influencer.name}
-              </h2>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
+                  Dispatch Influencer: {influencer.influencer_name || influencer.name}
+                </h2>
+                {isAlreadyDispatched && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 uppercase tracking-wider">
+                    <CheckCircle size={12} /> Dispatched
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 Manage product dispatch, shipment tracking and logistics details for this influencer.
               </p>
@@ -253,7 +292,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
         </div>
 
         {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/60 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600">
+        <form onSubmit={handleFormSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/60 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
             
             {/* Left Column */}
@@ -644,30 +683,106 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
             </div>
           </div>
 
+          {/* Two-step Confirmation Banner */}
+          {showConfirmStep && !isAlreadyDispatched && (
+            <div className="mt-5 p-4 rounded-xl bg-purple-950/40 border border-purple-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="text-purple-400 shrink-0 mt-0.5" size={18} />
+                <div>
+                  <h4 className="text-sm font-bold text-white">Confirm Official Shipment Dispatch?</h4>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    This will officially mark <span className="text-white font-semibold">{influencer.influencer_name || influencer.name}</span> as <strong className="text-emerald-400">Dispatched</strong> with {totalProducts} product(s) via {courierPartner || 'selected courier'}.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmStep(false)}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer border border-slate-700 transition-colors"
+                >
+                  Back to Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => executeDispatch('Dispatched')}
+                  disabled={isSubmitting}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer disabled:opacity-50 transition-all"
+                >
+                  {isSubmitting ? (
+                    <>Confirming...</>
+                  ) : (
+                    <>
+                      <CheckCircle size={14} />
+                      Yes, Confirm Dispatch
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Footer Actions */}
-          <div className="mt-6 flex justify-end items-center gap-3 pt-4">
-            <button 
-              type="button" 
-              onClick={onClose} 
-              disabled={isSubmitting} 
-              className="px-5 py-2.5 bg-[#151c2c] hover:bg-[#1e273d] text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button 
-              type="submit" 
-              disabled={isSubmitting || selectedProducts.length === 0} 
-              className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
-            >
-              {isSubmitting ? (
-                <>Saving...</>
-              ) : (
-                <>
-                  <Truck size={16} />
-                  Dispatch
-                </>
+          <div className="mt-6 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 pt-4 border-t border-slate-800/80">
+            <div>
+              {!isAlreadyDispatched && !showConfirmStep && (
+                <button 
+                  type="button" 
+                  onClick={() => executeDispatch('Pending Confirmation')}
+                  disabled={isSubmitting}
+                  className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                  title="Save entered dispatch information as draft without marking as officially dispatched"
+                >
+                  Save Details (Draft)
+                </button>
               )}
-            </button>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button 
+                type="button" 
+                onClick={onClose} 
+                disabled={isSubmitting} 
+                className="px-5 py-2.5 bg-[#151c2c] hover:bg-[#1e273d] text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {isAlreadyDispatched ? 'Close' : 'Cancel'}
+              </button>
+
+              {isAlreadyDispatched ? (
+                <button 
+                  type="button" 
+                  onClick={() => executeDispatch('Dispatched')}
+                  disabled={isSubmitting || selectedProducts.length === 0} 
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmitting ? (
+                    <>Saving...</>
+                  ) : (
+                    <>
+                      <Truck size={16} />
+                      Update Dispatch
+                    </>
+                  )}
+                </button>
+              ) : (
+                !showConfirmStep && (
+                  <button 
+                    type="submit" 
+                    disabled={isSubmitting || selectedProducts.length === 0} 
+                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <>Saving...</>
+                    ) : (
+                      <>
+                        <Truck size={16} />
+                        Confirm Dispatch
+                      </>
+                    )}
+                  </button>
+                )
+              )}
+            </div>
           </div>
         </form>
       </div>
