@@ -373,6 +373,10 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
       case 'dispatched-list':
         return <CampaignDispatchedList 
                  campaign={campaign} 
+                 influencers={activeInfluencers}
+                 onDispatch={(inf) => {
+                   setDispatchingInfluencer(inf);
+                 }}
                  onBack={() => handleViewChange('overview')} 
                  onMoveToStatus={handleMoveToStatus} 
                />;
