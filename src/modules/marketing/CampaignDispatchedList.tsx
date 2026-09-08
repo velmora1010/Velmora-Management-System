@@ -966,55 +966,43 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         </div>
       )}
 
-      {/* Prepare Dispatch Tab Header Banner & KPI Cards */}
+      {/* Compact Prepare Dispatch Summary Bar */}
       {currentTab === 'prepare_dispatch' && (
-        <div className="bg-[#0b1220] border border-slate-800 rounded-2xl p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 shadow-sm animate-fade-in">
-          <div className="space-y-1.5 max-w-xl">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-950/80 border border-purple-800/60 text-purple-300 text-[10px] font-extrabold uppercase tracking-wider">
-                <Layers size={12} className="text-purple-400" />
-                <span>PREPARE DISPATCH</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setCurrentTab('logistics')}
-                className="px-3 py-1 bg-[#141b2c] hover:bg-[#1a253d] text-purple-300 hover:text-white text-xs font-bold rounded-lg border border-purple-800/60 hover:border-purple-600 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                title="Return to Influencer Logistics"
-              >
-                <ArrowLeft size={14} />
-                <span>Back to Logistics</span>
-              </button>
-            </div>
-            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              Dispatch Preparation Batches
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-400">
-              Influencers grouped into dispatch batches. Click on a batch to view influencers and complete dispatch.
-            </p>
+        <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-sm animate-fade-in">
+          {/* Left: Compact Back to Logistics control */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentTab('logistics')}
+              className="px-3 py-2 bg-[#121929] hover:bg-[#1a253d] text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-slate-700/80 hover:border-purple-500/60 transition-all flex items-center gap-2 cursor-pointer shadow-sm group"
+              title="Return to Influencer Logistics"
+            >
+              <ArrowLeft size={14} className="text-purple-400 group-hover:-translate-x-0.5 transition-transform" />
+              <span>Back to Logistics</span>
+            </button>
           </div>
 
-          {/* Two compact KPI cards on the right */}
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          {/* Right: Two compact KPI cards side-by-side */}
+          <div className="flex items-center gap-2.5 sm:gap-3">
             {/* Total Batches KPI */}
-            <div className="flex-1 sm:flex-initial sm:min-w-[150px] bg-[#121929] border border-slate-800/90 rounded-xl p-3.5 sm:p-4 flex items-center gap-3.5 shadow-sm">
-              <div className="w-10 h-10 rounded-lg bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 shrink-0">
-                <Package size={20} />
+            <div className="flex-1 sm:flex-initial sm:min-w-[140px] bg-[#121929] border border-slate-800/90 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
+              <div className="w-8 h-8 rounded-lg bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 shrink-0">
+                <Package size={16} />
               </div>
-              <div>
-                <div className="text-[11px] font-medium text-slate-400">Total Batches</div>
-                <div className="text-xl font-bold text-white leading-tight mt-0.5">{processedBatches.length}</div>
+              <div className="min-w-0">
+                <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Batches</div>
+                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{processedBatches.length}</div>
               </div>
             </div>
 
             {/* Total Influencers KPI */}
-            <div className="flex-1 sm:flex-initial sm:min-w-[150px] bg-[#121929] border border-slate-800/90 rounded-xl p-3.5 sm:p-4 flex items-center gap-3.5 shadow-sm">
-              <div className="w-10 h-10 rounded-lg bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 shrink-0">
-                <Users size={20} />
+            <div className="flex-1 sm:flex-initial sm:min-w-[140px] bg-[#121929] border border-slate-800/90 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
+              <div className="w-8 h-8 rounded-lg bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 shrink-0">
+                <Users size={16} />
               </div>
-              <div>
-                <div className="text-[11px] font-medium text-slate-400">Total Influencers</div>
-                <div className="text-xl font-bold text-white leading-tight mt-0.5">{totalInfluencersInBatches}</div>
+              <div className="min-w-0">
+                <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Influencers</div>
+                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{totalInfluencersInBatches}</div>
               </div>
             </div>
           </div>
