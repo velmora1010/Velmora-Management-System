@@ -6,6 +6,7 @@ export const logisticsWorkflowService = {
   /**
    * Moves selected active influencers to 'prepare_dispatch' stage.
    * Persists their status in influencer_dispatch_details_rows in Supabase.
+   * Uses existing influencer_id foreign key (does NOT reference non-existent influencer_code).
    */
   async moveToPrepareDispatch(
     campaign: Campaign,
@@ -18,22 +19,26 @@ export const logisticsWorkflowService = {
     try {
       const campaignId = String(campaign.id);
       const influencerIds = selectedInfluencers.map(inf => String(inf.id));
+      const numericCampaignId = isNaN(Number(campaignId)) ? campaignId : Number(campaignId);
 
       // 1. Fetch existing rows for this campaign and selected influencers
       const { data: existingRows, error: fetchErr } = await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
         .select('id, influencer_id, dispatch_status')
-        .eq('campaign_id', campaignId)
-        .in('influencer_id', influencerIds);
+        .eq('campaign_id', numericCampaignId)
+        .in('influencer_id', influencerIds.map(id => isNaN(Number(id)) ? id : Number(id)));
 
-      if (fetchErr) throw fetchErr;
+      if (fetchErr) {
+        console.error('Error fetching existing dispatch rows:', fetchErr);
+        throw fetchErr;
+      }
 
       const existingMap = new Map<string, any>();
       (existingRows || []).forEach(r => {
         existingMap.set(String(r.influencer_id), r);
       });
 
-      // Rows to update to 'prepare_dispatch' (skip those already Dispatched or Tracking)
+      // 2. Rows to update to 'prepare_dispatch' (skip those already Dispatched or Tracking)
       const toUpdate = (existingRows || [])
         .filter(r => {
           const st = (r.dispatch_status || '').toLowerCase();
@@ -49,18 +54,20 @@ export const logisticsWorkflowService = {
           })
           .in('id', toUpdate);
 
-        if (updateErr) throw updateErr;
+        if (updateErr) {
+          console.error('Error updating existing dispatch rows to prepare_dispatch:', updateErr);
+          throw updateErr;
+        }
       }
 
-      // Influencers needing a new row in influencer_dispatch_details_rows
+      // 3. Influencers needing a new row in influencer_dispatch_details_rows
       const toInsertInfluencers = selectedInfluencers.filter(inf => !existingMap.has(String(inf.id)));
 
       if (toInsertInfluencers.length > 0) {
-        // Query current max id
+        // Query current max id in influencer_dispatch_details_rows
         const { data: maxData } = await supabase
           .from(SUPABASE_TABLES.influencerDispatch)
           .select('id')
-          .not('id', 'is', null)
           .order('id', { ascending: false })
           .limit(1);
 
@@ -68,12 +75,12 @@ export const logisticsWorkflowService = {
         let nextId = isNaN(maxId) ? 1 : maxId + 1;
 
         const newRows = toInsertInfluencers.map(inf => {
+          const numericInfId = isNaN(Number(inf.id)) ? inf.id : Number(inf.id);
           const row = {
             id: nextId++,
-            influencer_id: String(inf.id),
-            campaign_id: campaignId,
+            influencer_id: numericInfId,
+            campaign_id: numericCampaignId,
             creator_name: inf.influencer_name || inf.name || '',
-            influencer_code: inf.code || '',
             phone_number: inf.phone_number || '',
             alternative_phone_number: inf.alternative_number || '',
             address: inf.complete_address || (inf as any).address || '',
@@ -84,7 +91,9 @@ export const logisticsWorkflowService = {
             total_products: 0,
             total_product_value: null,
             total_weight: null,
+            product_photo_url: null,
             courier_partner: '',
+            dispatch_photo_url: null,
             tracking_id: '',
             dispatch_date: new Date().toISOString().split('T')[0],
             expected_delivery_date: null,
@@ -98,13 +107,20 @@ export const logisticsWorkflowService = {
           .from(SUPABASE_TABLES.influencerDispatch)
           .insert(newRows);
 
-        if (insertErr) throw insertErr;
+        if (insertErr) {
+          console.error('Error inserting new dispatch rows for prepare_dispatch:', insertErr);
+          throw insertErr;
+        }
       }
 
       return { success: true, count: selectedInfluencers.length };
     } catch (err: any) {
       console.error('Error moving influencers to prepare dispatch:', err);
-      return { success: false, count: 0, error: err.message || 'Failed to move influencers' };
+      return { 
+        success: false, 
+        count: 0, 
+        error: err.message || 'Failed to move influencers to Prepare Dispatch' 
+      };
     }
   },
 
@@ -116,11 +132,14 @@ export const logisticsWorkflowService = {
     influencerId: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      const numericCampaignId = isNaN(Number(campaignId)) ? campaignId : Number(campaignId);
+      const numericInfId = isNaN(Number(influencerId)) ? influencerId : Number(influencerId);
+
       const { error } = await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
         .update({ dispatch_status: 'pending' })
-        .eq('campaign_id', campaignId)
-        .eq('influencer_id', influencerId);
+        .eq('campaign_id', numericCampaignId)
+        .eq('influencer_id', numericInfId);
 
       if (error) throw error;
       return { success: true };
