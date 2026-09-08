@@ -318,46 +318,36 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return getUniqueFilterOptions(rawList);
   }, [dispatchRecords]);
 
+  // Set of influencer IDs currently belonging to ANY batch in Prepare Dispatch
+  const batchedInfluencerIdSet = useMemo(() => {
+    const idSet = new Set<string>();
+    savedBatches.forEach(b => {
+      b.members.forEach(m => {
+        idSet.add(String(m.influencer_id));
+      });
+    });
+    return idSet;
+  }, [savedBatches]);
+
   // 1. Partition active influencers into the 3 workflow stages
   const dispatchedInfluencers = useMemo(() => {
     return activeOnly.filter(inf => isInfluencerDispatched(inf, dispatchRecords));
   }, [activeOnly, dispatchRecords]);
 
   const prepareDispatchInfluencers = useMemo(() => {
-    return activeOnly.filter(inf => !isInfluencerDispatched(inf, dispatchRecords) && isInfluencerInPrepareDispatch(inf, dispatchRecords));
-  }, [activeOnly, dispatchRecords]);
+    return activeOnly.filter(inf => 
+      !isInfluencerDispatched(inf, dispatchRecords) && 
+      (batchedInfluencerIdSet.has(String(inf.id)) || isInfluencerInPrepareDispatch(inf, dispatchRecords))
+    );
+  }, [activeOnly, dispatchRecords, batchedInfluencerIdSet]);
 
   const logisticsInfluencers = useMemo(() => {
-    return activeOnly.filter(inf => !isInfluencerDispatched(inf, dispatchRecords) && !isInfluencerInPrepareDispatch(inf, dispatchRecords));
-  }, [activeOnly, dispatchRecords]);
-
-  // Auto-synthesize an initial batch for any influencers already in prepare_dispatch without a batch
-  useEffect(() => {
-    if (prepareDispatchInfluencers.length > 0 && savedBatches.length === 0) {
-      const now = new Date();
-      const { displayDate, displayTime } = formatBatchDateTime(now);
-      const initialBatch: DispatchBatch = {
-        id: `batch-${Date.now()}`,
-        campaign_id: String(campaign.id),
-        batch_name: 'BATCH-001',
-        dispatch_date: displayDate,
-        dispatch_time: displayTime,
-        status: 'Preparing',
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-        created_by: 'Admin',
-        members: prepareDispatchInfluencers.map(inf => ({
-          influencer_id: String(inf.id),
-          influencer_code: inf.code || '',
-          creator_name: inf.influencer_name || inf.name || '',
-          profile_file_url: inf.profile_file_url,
-          dispatch_status: 'Pending'
-        }))
-      };
-      setSavedBatches([initialBatch]);
-      dispatchBatchService.saveBatches(campaign.id, [initialBatch]);
-    }
-  }, [prepareDispatchInfluencers, savedBatches, campaign.id]);
+    return activeOnly.filter(inf => 
+      !isInfluencerDispatched(inf, dispatchRecords) && 
+      !batchedInfluencerIdSet.has(String(inf.id)) && 
+      !isInfluencerInPrepareDispatch(inf, dispatchRecords)
+    );
+  }, [activeOnly, dispatchRecords, batchedInfluencerIdSet]);
 
   // Counts for summary pills
   const activeCount = activeOnly.length;
@@ -671,7 +661,14 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         dispatchPercentage,
         codesSummary,
       };
-    }).filter(b => b.totalMembers > 0); // Exclude empty batches
+    })
+    .filter(b => b.totalMembers > 0)
+    .sort((a, b) => {
+      const timeA = new Date(a.batch.created_at).getTime() || 0;
+      const timeB = new Date(b.batch.created_at).getTime() || 0;
+      if (timeB !== timeA) return timeB - timeA;
+      return b.batch.batch_name.localeCompare(a.batch.batch_name);
+    });
   }, [savedBatches, activeInfluencersMap, matchesFilterCriteria, dispatchRecords]);
 
   // Total influencers across all batches in Prepare Dispatch
@@ -961,9 +958,21 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       {currentTab === 'prepare_dispatch' && (
         <div className="bg-[#0b1220] border border-slate-800 rounded-2xl p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 shadow-sm animate-fade-in">
           <div className="space-y-1.5 max-w-xl">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-950/80 border border-purple-800/60 text-purple-300 text-[10px] font-extrabold uppercase tracking-wider">
-              <Layers size={12} className="text-purple-400" />
-              <span>PREPARE DISPATCH</span>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-950/80 border border-purple-800/60 text-purple-300 text-[10px] font-extrabold uppercase tracking-wider">
+                <Layers size={12} className="text-purple-400" />
+                <span>PREPARE DISPATCH</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCurrentTab('logistics')}
+                className="px-3 py-1 bg-[#141b2c] hover:bg-[#1a253d] text-purple-300 hover:text-white text-xs font-bold rounded-lg border border-purple-800/60 hover:border-purple-600 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                title="Return to Influencer Logistics"
+              >
+                <ArrowLeft size={14} />
+                <span>Back to Logistics</span>
+              </button>
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
               Dispatch Preparation Batches

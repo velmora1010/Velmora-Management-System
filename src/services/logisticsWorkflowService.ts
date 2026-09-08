@@ -122,8 +122,16 @@ export const logisticsWorkflowService = {
 
       // 4. Create ONE Prepare Dispatch Batch for this single action
       const existingBatches = await dispatchBatchService.getBatches(campaign.id);
-      const batchNumber = existingBatches.length + 1;
-      const batchCode = `BATCH-${String(batchNumber).padStart(3, '0')}`;
+      let maxNum = 0;
+      for (const b of existingBatches) {
+        const match = (b.batch_name || '').match(/BATCH-(\d+)/i);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (!isNaN(n) && n > maxNum) maxNum = n;
+        }
+      }
+      const nextBatchNumber = maxNum + 1;
+      const batchCode = `BATCH-${String(nextBatchNumber).padStart(3, '0')}`;
 
       const newBatch: DispatchBatch = {
         id: `batch-${Date.now()}-${Math.random().toString(36).substring(7)}`,
