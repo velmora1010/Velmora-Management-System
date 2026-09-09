@@ -25,7 +25,7 @@ import {
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
 import { getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
-import { isInfluencerDispatched } from '../../utils/marketingUtils';
+import { isInfluencerDispatched, getLocalDateKey } from '../../utils/marketingUtils';
 
 // Central Price Config Rules
 export const PRODUCT_PRICES: Record<string, number> = {
@@ -129,7 +129,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   // Dispatch Details
   const [courierPartner, setCourierPartner] = useState(dispatchDetails?.courier_partner || '');
   const [trackingId, setTrackingId] = useState(dispatchDetails?.tracking_id || '');
-  const [dispatchDate, setDispatchDate] = useState(dispatchDetails?.dispatch_date || new Date().toISOString().split('T')[0]);
+  const [dispatchDate, setDispatchDate] = useState(dispatchDetails?.dispatch_date || getLocalDateKey());
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(dispatchDetails?.expected_delivery_date || '');
   
   // Photos
@@ -152,11 +152,17 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     if (d) {
       if (d.courier_partner) setCourierPartner(d.courier_partner);
       if (d.tracking_id) setTrackingId(d.tracking_id);
-      if (d.dispatch_date) setDispatchDate(d.dispatch_date);
+      if (d.dispatch_date) {
+        setDispatchDate(d.dispatch_date);
+      } else {
+        setDispatchDate(getLocalDateKey());
+      }
       if (d.expected_delivery_date) setExpectedDeliveryDate(d.expected_delivery_date);
       if (d.total_weight) setTotalWeight(d.total_weight);
       if (d.product_photo_url) setProductPhotoPreview(d.product_photo_url);
       if (d.dispatch_photo_url) setDispatchPhotoPreview(d.dispatch_photo_url);
+    } else {
+      setDispatchDate(getLocalDateKey());
     }
   }, [influencer]);
 

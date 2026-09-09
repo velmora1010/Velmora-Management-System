@@ -6,6 +6,7 @@ import {
   formatBatchDateTime, 
   type DispatchBatch 
 } from './dispatchBatchService';
+import { getLocalDateKey } from '../utils/marketingUtils';
 
 export const logisticsWorkflowService = {
   /**
@@ -102,7 +103,7 @@ export const logisticsWorkflowService = {
             courier_partner: '',
             dispatch_photo_url: null,
             tracking_id: '',
-            dispatch_date: new Date().toISOString().split('T')[0],
+            dispatch_date: getLocalDateKey(),
             expected_delivery_date: null,
             dispatch_status: 'prepare_dispatch',
             created_at: now.toISOString()
