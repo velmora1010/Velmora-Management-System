@@ -54,6 +54,7 @@ import {
   type DispatchBatch 
 } from '../../services/dispatchBatchService';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
+import { InfluencerQuickViewModal } from './InfluencerQuickViewModal';
 
 export type LogisticsTab = 'logistics' | 'prepare_dispatch' | 'dispatched';
 
@@ -205,6 +206,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   // Local fallback for dispatch modal (when clicking Dispatch or View Dispatch)
   const [localDispatchInfluencer, setLocalDispatchInfluencer] = useState<CampaignInfluencer | null>(null);
+
+  // Quick View Influencer Info Modal State (Read-only)
+  const [viewInfluencerTarget, setViewInfluencerTarget] = useState<CampaignInfluencer | null>(null);
 
   // Compact Calendar Popover State
   const calendarRef = useRef<HTMLDivElement>(null);
@@ -363,6 +367,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       !isInfluencerInPrepareDispatch(inf, dispatchRecords)
     );
   }, [activeOnly, dispatchRecords, batchedInfluencerIdSet]);
+
+  // Helper to determine exact logistics status for any influencer
+  const getInfluencerStatus = useCallback((inf: CampaignInfluencer): 'Active' | 'Preparing' | 'Dispatched' => {
+    if (isInfluencerDispatched(inf, dispatchRecords)) {
+      return 'Dispatched';
+    }
+    if (batchedInfluencerIdSet.has(String(inf.id)) || isInfluencerInPrepareDispatch(inf, dispatchRecords)) {
+      return 'Preparing';
+    }
+    return 'Active';
+  }, [dispatchRecords, batchedInfluencerIdSet]);
 
   // Counts for summary pills
   const activeCount = activeOnly.length;
@@ -1994,6 +2009,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           }} 
         />
       )}
+
+      {/* Read-only Quick View Influencer Info Modal */}
+      {viewInfluencerTarget && (
+        <InfluencerQuickViewModal
+          influencer={viewInfluencerTarget}
+          campaign={campaign}
+          status={getInfluencerStatus(viewInfluencerTarget)}
+          dispatchRecord={getDispatchData(viewInfluencerTarget)}
+          onClose={() => setViewInfluencerTarget(null)}
+        />
+      )}
     </div>
   );
 
@@ -2468,12 +2494,26 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         </div>
 
-        {/* Right: Influencer Code */}
-        {inf.code && (
-          <span className="px-2.5 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
-            {inf.code}
-          </span>
-        )}
+        {/* Right: Influencer Code + View (eye) Button */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {inf.code && (
+            <span className="px-2.5 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shadow-sm">
+              {inf.code}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setViewInfluencerTarget(inf);
+            }}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-purple-950/60 border border-slate-800/60 hover:border-purple-800/50 transition-all cursor-pointer flex items-center justify-center"
+            title="View Influencer"
+            aria-label="View Influencer"
+          >
+            <Eye size={15} />
+          </button>
+        </div>
       </div>
     );
   }
@@ -2539,13 +2579,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         </div>
 
-        {/* Right: Code + Dispatch CTA + Return Button */}
+        {/* Right: Code + View Info + Dispatch CTA + Return Button */}
         <div className="flex items-center gap-2 shrink-0">
-          {inf.code && (
-            <span className="px-2 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
-              {inf.code}
-            </span>
-          )}
+          <div className="flex items-center gap-1">
+            {inf.code && (
+              <span className="px-2 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
+                {inf.code}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewInfluencerTarget(inf);
+              }}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-purple-950/60 border border-transparent hover:border-purple-800/40 transition-colors cursor-pointer flex items-center justify-center"
+              title="View Influencer"
+              aria-label="View Influencer"
+            >
+              <Eye size={14} />
+            </button>
+          </div>
 
           {isDispatched ? (
             <button
@@ -2630,13 +2684,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         </div>
 
-        {/* Right: Code + View Dispatch Button */}
+        {/* Right: Code + View Info + View Dispatch Button */}
         <div className="flex items-center gap-2 shrink-0">
-          {inf.code && (
-            <span className="px-2 py-1 bg-emerald-950/60 border border-emerald-800/40 text-emerald-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
-              {inf.code}
-            </span>
-          )}
+          <div className="flex items-center gap-1">
+            {inf.code && (
+              <span className="px-2 py-1 bg-emerald-950/60 border border-emerald-800/40 text-emerald-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
+                {inf.code}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewInfluencerTarget(inf);
+              }}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-emerald-950/60 border border-transparent hover:border-emerald-800/40 transition-colors cursor-pointer flex items-center justify-center"
+              title="View Influencer"
+              aria-label="View Influencer"
+            >
+              <Eye size={14} />
+            </button>
+          </div>
 
           <button
             type="button"
@@ -2644,7 +2712,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             className="px-3 py-1.5 bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/60 hover:border-emerald-700 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
             title="View saved dispatch details"
           >
-            <Eye size={14} />
+            <Package size={14} />
             <span>View Dispatch</span>
           </button>
         </div>
