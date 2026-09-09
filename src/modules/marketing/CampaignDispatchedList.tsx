@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { 
   Search, 
@@ -20,6 +20,8 @@ import {
   ArrowRight,
   Eye,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Calendar,
   Layers,
@@ -47,6 +49,8 @@ import { logisticsWorkflowService } from '../../services/logisticsWorkflowServic
 import { 
   dispatchBatchService, 
   formatBatchDateTime, 
+  getBatchLocalDateKey,
+  getTodayDateKey,
   type DispatchBatch 
 } from '../../services/dispatchBatchService';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
@@ -201,6 +205,29 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   // Local fallback for dispatch modal (when clicking Dispatch or View Dispatch)
   const [localDispatchInfluencer, setLocalDispatchInfluencer] = useState<CampaignInfluencer | null>(null);
+
+  // Compact Calendar Popover State
+  const calendarRef = useRef<HTMLDivElement>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
+  const [hoveredDateKey, setHoveredDateKey] = useState<string | null>(null);
+
+  // Close calendar popover on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (calendarRef.current && !calendarRef.current.contains(event.target as Node)) {
+        setIsCalendarOpen(false);
+      }
+    };
+    if (isCalendarOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isCalendarOpen]);
 
   // Load saved batches from persistent storage
   const loadSavedBatches = useCallback(async () => {
@@ -372,8 +399,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     if (selectedCourier !== 'all') count++;
     if (selectedWeightRange !== 'all') count++;
     if (selectedDispatchStatus !== 'all') count++;
+    if (selectedCalendarDate) count++;
     return count;
-  }, [selectedState, selectedCity, selectedCourier, selectedWeightRange, selectedDispatchStatus]);
+  }, [selectedState, selectedCity, selectedCourier, selectedWeightRange, selectedDispatchStatus, selectedCalendarDate]);
 
   const handleClearAllFilters = () => {
     setSelectedState('');
@@ -383,6 +411,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     setIsAddingCustomCourier(false);
     setSelectedWeightRange('all');
     setSelectedDispatchStatus('all');
+    setSelectedCalendarDate(null);
   };
 
   const handleResetDraftFilters = () => {
@@ -710,6 +739,148 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return dispatchedInfluencers.length;
   }, [dispatchedInfluencers]);
 
+  // Map of local date string (YYYY-MM-DD) -> Prepare Dispatch Batches created on that date
+  const batchDateMap = useMemo(() => {
+    const map = new Map<string, DispatchBatch[]>();
+    prepareDispatchBatches.forEach(b => {
+      const key = getBatchLocalDateKey(b.batch);
+      if (key) {
+        const list = map.get(key) || [];
+        list.push(b.batch);
+        map.set(key, list);
+      }
+    });
+    return map;
+  }, [prepareDispatchBatches]);
+
+  // Selected date formatted for display (e.g. "08 Sep 2026")
+  const selectedCalendarDisplayDate = useMemo(() => {
+    if (!selectedCalendarDate) return '';
+    const parts = selectedCalendarDate.split('-');
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      const dateObj = new Date(y, m, d);
+      if (!isNaN(dateObj.getTime())) {
+        const day = String(d).padStart(2, '0');
+        const monthStr = dateObj.toLocaleString('en-US', { month: 'short' });
+        return `${day} ${monthStr} ${y}`;
+      }
+    }
+    return selectedCalendarDate;
+  }, [selectedCalendarDate]);
+
+  // Filter Prepare Dispatch batches by selected calendar date (if any)
+  const displayedPrepareDispatchBatches = useMemo(() => {
+    if (!selectedCalendarDate) {
+      return prepareDispatchBatches;
+    }
+    return prepareDispatchBatches.filter(b => {
+      const key = getBatchLocalDateKey(b.batch);
+      return key === selectedCalendarDate;
+    });
+  }, [prepareDispatchBatches, selectedCalendarDate]);
+
+  const MONTH_NAMES = useMemo(() => [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ], []);
+
+  const currentMonthName = MONTH_NAMES[viewMonth];
+
+  const handlePrevMonth = () => {
+    setViewMonth(prev => {
+      if (prev === 0) {
+        setViewYear(y => y - 1);
+        return 11;
+      }
+      return prev - 1;
+    });
+  };
+
+  const handleNextMonth = () => {
+    setViewMonth(prev => {
+      if (prev === 11) {
+        setViewYear(y => y + 1);
+        return 0;
+      }
+      return prev + 1;
+    });
+  };
+
+  const calendarDays = useMemo(() => {
+    const days: {
+      year: number;
+      month: number;
+      date: number;
+      dateKey: string;
+      isCurrentMonth: boolean;
+      isToday: boolean;
+      isSelected: boolean;
+      batches: DispatchBatch[];
+    }[] = [];
+    const todayKey = getTodayDateKey();
+
+    const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
+
+    // 1. Trailing days from previous month
+    for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+      const d = daysInPrevMonth - i;
+      const prevM = viewMonth === 0 ? 11 : viewMonth - 1;
+      const prevY = viewMonth === 0 ? viewYear - 1 : viewYear;
+      const key = `${prevY}-${String(prevM + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({
+        year: prevY,
+        month: prevM,
+        date: d,
+        dateKey: key,
+        isCurrentMonth: false,
+        isToday: key === todayKey,
+        isSelected: selectedCalendarDate === key,
+        batches: batchDateMap.get(key) || []
+      });
+    }
+
+    // 2. Current month days
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({
+        year: viewYear,
+        month: viewMonth,
+        date: d,
+        dateKey: key,
+        isCurrentMonth: true,
+        isToday: key === todayKey,
+        isSelected: selectedCalendarDate === key,
+        batches: batchDateMap.get(key) || []
+      });
+    }
+
+    // 3. Leading days for next month to fill grid (35 or 42 cells)
+    const totalCells = days.length <= 35 ? 35 : 42;
+    const remaining = totalCells - days.length;
+    for (let d = 1; d <= remaining; d++) {
+      const nextM = viewMonth === 11 ? 0 : viewMonth + 1;
+      const nextY = viewMonth === 11 ? viewYear + 1 : viewYear;
+      const key = `${nextY}-${String(nextM + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({
+        year: nextY,
+        month: nextM,
+        date: d,
+        dateKey: key,
+        isCurrentMonth: false,
+        isToday: key === todayKey,
+        isSelected: selectedCalendarDate === key,
+        batches: batchDateMap.get(key) || []
+      });
+    }
+
+    return days;
+  }, [viewYear, viewMonth, selectedCalendarDate, batchDateMap]);
+
   // Handler to start batch dispatch workflow
   const handleStartBatchDispatch = (batch: DispatchBatch, allMembers: CampaignInfluencer[]) => {
     const pendingMembers = allMembers.filter(inf => !isInfluencerDispatched(inf, dispatchRecords));
@@ -897,6 +1068,148 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               </span>
             )}
           </button>
+
+          {/* Compact Calendar Popover Trigger Button */}
+          <div className="relative" ref={calendarRef}>
+            <button
+              type="button"
+              onClick={() => setIsCalendarOpen(prev => !prev)}
+              className={`p-2.5 rounded-xl text-sm font-medium transition-colors border flex items-center justify-center relative cursor-pointer ${
+                isCalendarOpen || selectedCalendarDate
+                  ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold shadow-md shadow-purple-600/20'
+                  : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
+              }`}
+              title="View batches by date"
+            >
+              <Calendar size={17} />
+              {selectedCalendarDate && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-purple-500 rounded-full ring-2 ring-slate-900" />
+              )}
+            </button>
+
+            {/* Calendar Popover (Matches Reference Image) */}
+            {isCalendarOpen && (
+              <div className="absolute right-0 top-full mt-2.5 z-50 w-[295px] sm:w-[325px] max-w-[95vw] bg-[#0c1424] border border-slate-700/90 rounded-2xl shadow-2xl shadow-purple-950/40 p-4 space-y-3.5 backdrop-blur-md animate-fade-in text-slate-200 select-none">
+                {/* Calendar Header: [ 📅 ]  <  Month Year  > */}
+                <div className="flex items-center justify-between pb-1">
+                  <div className="w-8 h-8 rounded-lg bg-purple-950/70 border border-purple-500/50 flex items-center justify-center text-purple-300 shadow-sm shadow-purple-600/20">
+                    <Calendar size={15} />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handlePrevMonth}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-100 rounded-lg transition-colors cursor-pointer"
+                      title="Previous month"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="text-xs sm:text-sm font-bold text-slate-100 min-w-[115px] text-center">
+                      {currentMonthName} {viewYear}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleNextMonth}
+                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-100 rounded-lg transition-colors cursor-pointer"
+                      title="Next month"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Days of week */}
+                <div className="grid grid-cols-7 gap-1 text-center">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                    <div key={d} className="text-[11px] font-semibold text-slate-400 py-0.5">
+                      {d}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Dates Grid */}
+                <div className="grid grid-cols-7 gap-1 place-items-center">
+                  {calendarDays.map(cell => {
+                    const hasBatch = cell.batches.length > 0;
+
+                    return (
+                      <div
+                        key={cell.dateKey}
+                        onClick={() => {
+                          if (!cell.isCurrentMonth) return;
+                          setSelectedCalendarDate(prev => prev === cell.dateKey ? null : cell.dateKey);
+                          if (currentTab !== 'prepare_dispatch') {
+                            setCurrentTab('prepare_dispatch');
+                          }
+                        }}
+                        onMouseEnter={() => hasBatch ? setHoveredDateKey(cell.dateKey) : undefined}
+                        onMouseLeave={() => setHoveredDateKey(null)}
+                        className={`w-8 h-8 sm:w-8.5 sm:h-8.5 flex flex-col items-center justify-center relative transition-all rounded-full ${
+                          !cell.isCurrentMonth
+                            ? 'text-slate-600 opacity-40 cursor-default pointer-events-none'
+                            : cell.isSelected
+                              ? 'bg-purple-600 text-white font-bold shadow-md shadow-purple-600/50 cursor-pointer'
+                              : cell.isToday
+                                ? 'border-2 border-purple-500 text-purple-300 font-bold hover:bg-purple-950/40 cursor-pointer'
+                                : 'text-slate-300 hover:bg-slate-800/80 hover:text-white cursor-pointer'
+                        }`}
+                      >
+                        <span className="text-xs leading-none">{cell.date}</span>
+                        {hasBatch ? (
+                          <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${cell.isSelected ? 'bg-white' : 'bg-purple-400'}`} />
+                        ) : (
+                          <span className="w-1.5 h-1.5 mt-0.5 opacity-0" />
+                        )}
+
+                        {/* Hover Tooltip for Batch Details */}
+                        {hoveredDateKey === cell.dateKey && hasBatch && (
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-[60] px-2.5 py-1.5 bg-[#141b2d] border border-purple-500/60 rounded-xl shadow-2xl text-left whitespace-nowrap pointer-events-none animate-fade-in">
+                            <div className="text-[11px] font-bold text-purple-300">
+                              {cell.batches.length} {cell.batches.length === 1 ? 'batch' : 'batches'} created
+                            </div>
+                            <div className="space-y-0.5 mt-1">
+                              {cell.batches.map(b => (
+                                <div key={b.id} className="text-[10px] font-mono text-slate-200 flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                                  <span>{b.batch_name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Legend & Today Button */}
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                    <span>Has batch(es)</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      setViewYear(now.getFullYear());
+                      setViewMonth(now.getMonth());
+                      const todayKey = getTodayDateKey();
+                      setSelectedCalendarDate(todayKey);
+                      if (currentTab !== 'prepare_dispatch') {
+                        setCurrentTab('prepare_dispatch');
+                      }
+                    }}
+                    className="px-3 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                  >
+                    Today
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Refresh Button */}
           <button
@@ -1172,6 +1485,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 <button onClick={() => setSelectedDispatchStatus('all')} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
               </span>
             )}
+
+            {selectedCalendarDate && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                <Calendar size={11} /> Batch Date: {selectedCalendarDisplayDate}
+                <button onClick={() => setSelectedCalendarDate(null)} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
+              </span>
+            )}
           </div>
 
           <button 
@@ -1419,27 +1739,45 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         </div>
       ) : currentTab === 'prepare_dispatch' ? (
         /* ==================== PREPARE DISPATCH BATCH-BASED VIEW ==================== */
-        prepareDispatchBatches.length === 0 ? (
+        displayedPrepareDispatchBatches.length === 0 ? (
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
-            <Layers className="mx-auto mb-3 text-purple-400/50" size={42} />
-            <h3 className="text-base font-semibold text-slate-200 mb-1">No Prepare Dispatch Batches</h3>
+            {selectedCalendarDate ? (
+              <Calendar className="mx-auto mb-3 text-purple-400/50" size={42} />
+            ) : (
+              <Layers className="mx-auto mb-3 text-purple-400/50" size={42} />
+            )}
+            <h3 className="text-base font-semibold text-slate-200 mb-1">
+              {selectedCalendarDate ? 'No Batches on Selected Date' : 'No Prepare Dispatch Batches'}
+            </h3>
             <p className="text-sm text-slate-400 max-w-md mx-auto">
-              {searchTerm || activeFilterCount > 0
-                ? 'No batches match your filter criteria.'
-                : 'Select active influencers from the Logistics section and click "Move to Prepare Dispatch" to create a new batch.'}
+              {selectedCalendarDate
+                ? `No Prepare Dispatch batches were created on ${selectedCalendarDisplayDate}.`
+                : searchTerm || activeFilterCount > 0
+                  ? 'No batches match your filter criteria.'
+                  : 'Select active influencers from the Logistics section and click "Move to Prepare Dispatch" to create a new batch.'}
             </p>
-            <button
-              type="button"
-              onClick={() => setCurrentTab('logistics')}
-              className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-purple-400 text-xs font-semibold rounded-xl border border-slate-700 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <ArrowLeft size={14} />
-              <span>Go to Active Logistics</span>
-            </button>
+            {selectedCalendarDate ? (
+              <button
+                type="button"
+                onClick={() => setSelectedCalendarDate(null)}
+                className="mt-4 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 transition-all inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>View All Batches</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCurrentTab('logistics')}
+                className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-purple-400 text-xs font-semibold rounded-xl border border-slate-700 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <ArrowLeft size={14} />
+                <span>Go to Active Logistics</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-5">
-            {prepareDispatchBatches.map(batchItem => renderBatchCard(batchItem, 'prepare_dispatch'))}
+            {displayedPrepareDispatchBatches.map(batchItem => renderBatchCard(batchItem, 'prepare_dispatch'))}
           </div>
         )
       ) : currentTab === 'dispatched' ? (
