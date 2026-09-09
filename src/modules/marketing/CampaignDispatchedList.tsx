@@ -1027,7 +1027,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* 5. Prepare Dispatch (Primary Action - Purple gradient / glow) */}
+          {/* 5. Prepare Dispatch (Active only when currentTab === 'prepare_dispatch') */}
           <button
             type="button"
             onClick={() => {
@@ -1038,27 +1038,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setCurrentTab('prepare_dispatch');
               }
             }}
-            className={`h-9 px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 shrink-0 cursor-pointer shadow-md ${
+            className={`h-9 px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 shrink-0 cursor-pointer ${
               currentTab === 'prepare_dispatch'
-                ? 'bg-purple-600 text-white border-purple-400 shadow-purple-600/50'
-                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border-purple-400/40 shadow-purple-600/30'
+                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/40'
+                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
             }`}
             title="Prepare Dispatch"
           >
-            <Truck size={15} className="text-white" />
+            <Truck size={15} className={currentTab === 'prepare_dispatch' ? 'text-white' : 'text-purple-400'} />
             <span>Prepare Dispatch</span>
             {prepareDispatchInfluencers.length > 0 && (
               <span className={`text-[11px] font-extrabold rounded-full px-2 py-0.5 leading-none ${
                 currentTab === 'prepare_dispatch'
                   ? 'bg-purple-950 text-white border border-purple-400/30 shadow-inner'
-                  : 'bg-purple-950/90 text-purple-200 border border-purple-400/30'
+                  : 'bg-purple-950/90 text-purple-300 border border-purple-800/60'
               }`}>
                 {prepareDispatchInfluencers.length}
               </span>
             )}
           </button>
 
-          {/* 6. Dispatched Navigation Button */}
+          {/* 6. Dispatched Navigation Button (Active only when currentTab === 'dispatched') */}
           <button
             type="button"
             onClick={() => {
@@ -1071,14 +1071,18 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             className={`h-9 px-3.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               currentTab === 'dispatched'
                 ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30'
-                : 'bg-emerald-950/30 border-emerald-800/70 hover:border-emerald-600/70 text-emerald-300 hover:text-emerald-200'
+                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
             }`}
             title="Dispatched"
           >
             <Check size={14} className={currentTab === 'dispatched' ? 'text-white' : 'text-emerald-400'} />
             <span>Dispatched</span>
             {dispatchedInfluencers.length > 0 && (
-              <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold rounded-full px-1.5 py-0.2">
+              <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.2 ${
+                currentTab === 'dispatched'
+                  ? 'bg-emerald-950 text-white border border-emerald-400/30 shadow-inner'
+                  : 'bg-emerald-950/90 text-emerald-300 border border-emerald-800/60'
+              }`}>
                 {dispatchedInfluencers.length}
               </span>
             )}
