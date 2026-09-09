@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Save, ArrowLeft, Trash2, Image as ImageIcon, RefreshCw, X } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
-import type { CustomerTicket, TicketStatus, IssueType, TicketPriority, CustomIssueTypeRecord } from '../../types/customer-tickets';
+import type { CustomerTicket, TicketStatus, IssueType, TicketPriority, TicketPlatform, CustomIssueTypeRecord } from '../../types/customer-tickets';
 import { DEFAULT_ISSUE_TYPES, getSubOptionsForIssueType, hasSubOptions, getSubIssueLabel } from '../../config/ticketConfig';
 import { AddCategoryModal } from './AddCategoryModal';
 import toast from 'react-hot-toast';
@@ -13,6 +13,7 @@ export const TicketDetails = () => {
   const navigate = useNavigate();
   const [ticket, setTicket] = useState<CustomerTicket | null>(null);
   const [status, setStatus] = useState<TicketStatus>('Open');
+  const [platform, setPlatform] = useState<TicketPlatform | string>('');
   const [issueType, setIssueType] = useState<IssueType>('Transport Issue');
   const [subIssue, setSubIssue] = useState<string>('');
   const [priority, setPriority] = useState<TicketPriority>('Low');
@@ -111,6 +112,7 @@ export const TicketDetails = () => {
     if (data) {
       setTicket(data);
       setStatus(data.status);
+      setPlatform(data.platform || '');
       setIssueType(data.issueType || DEFAULT_ISSUE_TYPES[0]);
       setSubIssue(data.subIssue || '');
       setPriority(data.priority || 'Low');
@@ -227,6 +229,7 @@ export const TicketDetails = () => {
 
       await customerTicketsService.updateTicket(ticket.id!, {
         status,
+        platform: platform ? platform : null,
         issueType,
         subIssue,
         priority,
@@ -236,6 +239,7 @@ export const TicketDetails = () => {
         qrImageUrl: finalQrUrl,
         resolvedAt: status === 'Resolved' && ticket.status !== 'Resolved' ? new Date().toISOString() : ticket.resolvedAt
       });
+      setTicket(prev => prev ? ({ ...prev, platform: platform ? platform : undefined }) : null);
       toast.success('Ticket updated successfully');
       navigate(status === 'Resolved' ? '/tickets/resolved' : '/tickets/open');
     } catch (err: any) {
@@ -277,6 +281,10 @@ export const TicketDetails = () => {
               <div>
                 <p className="text-muted">Phone Number</p>
                 <p className="text-white font-medium">{ticket.phoneNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-muted">Platform</p>
+                <p className="text-white font-medium">{ticket.platform || 'Not specified'}</p>
               </div>
               <div>
                 <p className="text-muted">Location</p>
@@ -377,6 +385,21 @@ export const TicketDetails = () => {
                   <option value="Replacement Processing">Replacement Processing</option>
                   <option value="Refund Processing">Refund Processing</option>
                   <option value="Resolved">Resolved</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted mb-1">Platform</label>
+                <select 
+                  value={platform}
+                  onChange={(e) => setPlatform(e.target.value as TicketPlatform)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary outline-none cursor-pointer"
+                >
+                  <option value="">Select Platform</option>
+                  <option value="Zoko WhatsApp">Zoko WhatsApp</option>
+                  <option value="Mobile WhatsApp">Mobile WhatsApp</option>
+                  <option value="Email">Email</option>
+                  <option value="Instagram">Instagram</option>
                 </select>
               </div>
 

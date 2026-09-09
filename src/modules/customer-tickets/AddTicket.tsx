@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Save, X, AlertTriangle, Image as ImageIcon, Trash2, RefreshCw } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import { customerTicketsService } from '../../services/customerTicketsService';
-import type { CustomerTicket, IssueType, TicketPriority, CustomIssueTypeRecord, CustomCourierPartnerRecord } from '../../types/customer-tickets';
+import type { CustomerTicket, IssueType, TicketPriority, TicketPlatform, CustomIssueTypeRecord, CustomCourierPartnerRecord } from '../../types/customer-tickets';
 import { DEFAULT_ISSUE_TYPES, DEFAULT_COURIER_PARTNERS, getSubOptionsForIssueType, hasSubOptions, getSubIssueLabel } from '../../config/ticketConfig';
 import { AddCategoryModal } from './AddCategoryModal';
 import toast from 'react-hot-toast';
@@ -25,6 +25,7 @@ export const AddTicket = () => {
   const [formData, setFormData] = useState({
     customerName: '',
     phoneNumber: '',
+    platform: '' as TicketPlatform | '',
     orderId: '',
     orderDate: '',
     courierPartner: '',
@@ -37,6 +38,7 @@ export const AddTicket = () => {
   });
 
   const [orderIdError, setOrderIdError] = useState<string | null>(null);
+  const [platformError, setPlatformError] = useState<string | null>(null);
   const [isCheckingOrderId, setIsCheckingOrderId] = useState(false);
 
   const loadCategories = async () => {
@@ -131,6 +133,9 @@ export const AddTicket = () => {
       if (value === '__ADD_COURIER__') { setModalCategoryType('courierPartner'); setShowAddCategoryModal(true); return; }
       setFormData(prev => ({ ...prev, courierPartner: value })); return;
     }
+    if (name === 'platform') {
+      if (value) setPlatformError(null);
+    }
     if (name === 'amount') {
       const cleanVal = value.trim();
       if (cleanVal === '' || /^\d*\.?\d*$/.test(cleanVal)) {
@@ -176,6 +181,11 @@ export const AddTicket = () => {
     const trimmedOrderId = formData.orderId.trim();
     if (orderIdError) { toast.error(orderIdError); return; }
     if (!trimmedOrderId) { toast.error('Order ID is required.'); return; }
+    if (!formData.platform || !formData.platform.trim()) {
+      setPlatformError('Platform is required. Please select a platform.');
+      toast.error('Platform is required. Please select a platform.');
+      return;
+    }
     if (hasSubOptions(formData.issueType, customSubIssuesMap) && !formData.subIssue.trim()) {
       toast.error(`Please select a ${getSubIssueLabel(formData.issueType).replace('*', '').trim()} option.`); return;
     }
@@ -216,6 +226,7 @@ export const AddTicket = () => {
       const { ticketId } = await customerTicketsService.createTicket({
         customerName: formData.customerName,
         phoneNumber: formData.phoneNumber,
+        platform: formData.platform,
         orderId: trimmedOrderId,
         orderDate: formData.orderDate,
         amount: parsedAmount,
@@ -284,6 +295,28 @@ export const AddTicket = () => {
                 <input type="text" name="phoneNumber" value={formData.phoneNumber} onChange={handleChange}
                   className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-white focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all text-sm"
                   placeholder="e.g. 9876543210" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-muted mb-1">Platform *</label>
+                <select 
+                  required 
+                  name="platform" 
+                  value={formData.platform} 
+                  onChange={handleChange}
+                  className={`w-full bg-background border ${platformError ? 'border-rose-500 text-rose-200 focus:border-rose-500 focus:ring-rose-500' : 'border-border focus:border-primary focus:ring-primary'} rounded-xl px-4 py-2.5 text-white focus:ring-1 outline-none transition-all text-sm cursor-pointer`}
+                >
+                  <option value="">Select Platform</option>
+                  <option value="Zoko WhatsApp">Zoko WhatsApp</option>
+                  <option value="Mobile WhatsApp">Mobile WhatsApp</option>
+                  <option value="Email">Email</option>
+                  <option value="Instagram">Instagram</option>
+                </select>
+                {platformError && (
+                  <p className="text-rose-400 text-xs mt-1.5 font-medium flex items-center gap-1.5">
+                    <AlertTriangle size={14} className="shrink-0 text-rose-400" />
+                    <span>{platformError}</span>
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-muted mb-1">State</label>
