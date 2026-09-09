@@ -950,10 +950,10 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in text-slate-200">
-      {/* Header Container - Single Horizontal Status & Action Toolbar */}
-      <div className="bg-[#0c1424] px-3.5 py-2.5 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-700/80 shadow-lg shadow-purple-950/20 flex items-center justify-between gap-2.5 sm:gap-3 flex-wrap xl:flex-nowrap">
-        {/* Left + Center Group */}
-        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+      {/* Header Container - Single Horizontal Status & Action Toolbar (Strictly 1 Row) */}
+      <div className="bg-[#0c1424] px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-700/80 shadow-lg shadow-purple-950/20 flex items-center flex-nowrap gap-2 sm:gap-2.5 w-full min-w-0 overflow-x-auto">
+        {/* LEFT GROUP: Back + Status Chips */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
           {/* 1. Back Button */}
           <button 
             type="button"
@@ -971,32 +971,35 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </button>
           
           {/* 2. Status Group: Active, Pending, Dispatched */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
             {/* Active (Blue) */}
-            <div className="h-9 px-3 bg-blue-950/40 text-blue-300 border border-blue-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
-              <Users size={13} className="text-blue-400" />
+            <div className="h-9 px-2.5 sm:px-3 bg-blue-950/40 text-blue-300 border border-blue-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
+              <Users size={13} className="text-blue-400 shrink-0" />
               <span>Active:</span>
               <strong className="text-white font-bold">{activeCount}</strong>
             </div>
 
             {/* Pending (Purple) */}
-            <div className="h-9 px-3 bg-purple-950/40 text-purple-300 border border-purple-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
-              <Clock size={13} className="text-purple-400" />
+            <div className="h-9 px-2.5 sm:px-3 bg-purple-950/40 text-purple-300 border border-purple-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
+              <Clock size={13} className="text-purple-400 shrink-0" />
               <span>Pending:</span>
               <strong className="text-white font-bold">{pendingCount}</strong>
             </div>
 
             {/* Dispatched (Green) */}
-            <div className="h-9 px-3 bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
-              <Check size={13} className="text-emerald-400" />
+            <div className="h-9 px-2.5 sm:px-3 bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
+              <Check size={13} className="text-emerald-400 shrink-0" />
               <span>Dispatched:</span>
               <strong className="text-white font-bold">{dispatchedCount}</strong>
             </div>
           </div>
+        </div>
 
-          {/* 3. Vertical Divider */}
-          <div className="h-6 w-px bg-slate-700/80 mx-0.5 hidden sm:block shrink-0" />
+        {/* Vertical Divider between Left and Center */}
+        <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0" />
 
+        {/* CENTER GROUP: Bulk Select + Prepare Dispatch + Dispatched */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
           {/* 4. Bulk Select */}
           <button
             type="button"
@@ -1008,7 +1011,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setIsBulkSelectMode(prev => !prev);
               }
             }}
-            className={`h-9 px-3.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 shrink-0 cursor-pointer ${
+            className={`h-9 px-3.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               isBulkSelectMode && currentTab === 'logistics'
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
                 : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200'
@@ -1035,7 +1038,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setCurrentTab('prepare_dispatch');
               }
             }}
-            className={`h-9 px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 shrink-0 cursor-pointer shadow-md ${
+            className={`h-9 px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 shrink-0 cursor-pointer shadow-md ${
               currentTab === 'prepare_dispatch'
                 ? 'bg-purple-600 text-white border-purple-400 shadow-purple-600/50'
                 : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border-purple-400/40 shadow-purple-600/30'
@@ -1082,13 +1085,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </button>
         </div>
 
-        {/* Right Section: [ Divider ] [ Search ] [ Filter ] [ Calendar ] [ Refresh ] */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* 7. Vertical Divider */}
-          <div className="h-6 w-px bg-slate-700/80 mx-0.5 hidden xl:block shrink-0" />
+        {/* RIGHT GROUP: [ Divider ] [ Search ] [ Filter ] [ Calendar ] [ Refresh ] (Pushed to far right with ml-auto) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 ml-auto shrink-0 flex-nowrap">
+          {/* 7. Vertical Divider before Search */}
+          <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0" />
 
           {/* 8. Search Box */}
-          <div className="relative w-44 sm:w-52 md:w-56">
+          <div className="relative w-36 sm:w-44 md:w-52 shrink-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
             <input 
               type="text"
