@@ -1120,7 +1120,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
             {/* Calendar Popover (Matches Reference Image) */}
             {isCalendarOpen && (
-              <div className="absolute right-0 top-full mt-2.5 z-50 w-[295px] sm:w-[325px] max-w-[95vw] bg-[#0c1424] border border-slate-700/90 rounded-2xl shadow-2xl shadow-purple-950/40 p-4 space-y-3.5 backdrop-blur-md animate-fade-in text-slate-200 select-none">
+              <div className="absolute right-0 top-full mt-2.5 z-50 w-[330px] sm:w-[360px] max-w-[95vw] bg-[#0c1424] border border-slate-700/90 rounded-2xl shadow-2xl shadow-purple-950/40 p-4 space-y-3.5 backdrop-blur-md animate-fade-in text-slate-200 select-none">
                 {/* Calendar Header: [ 📅 ]  <  Month Year  > */}
                 <div className="flex items-center justify-between pb-1">
                   <div className="w-8 h-8 rounded-lg bg-purple-950/70 border border-purple-500/50 flex items-center justify-center text-purple-300 shadow-sm shadow-purple-600/20">
@@ -1164,6 +1164,22 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                   {calendarDays.map(cell => {
                     const hasPending = (cell.pendingBatches || []).length > 0;
 
+                    let cellClasses = 'w-8.5 h-8.5 sm:w-9 sm:h-9 flex items-center justify-center relative transition-all rounded-xl ';
+
+                    if (!cell.isCurrentMonth) {
+                      cellClasses += 'text-slate-600 opacity-40 cursor-default pointer-events-none';
+                    } else if (cell.isSelected) {
+                      cellClasses += 'bg-purple-600 text-white font-bold border border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.55)] cursor-pointer';
+                    } else if (hasPending && cell.isToday) {
+                      cellClasses += 'bg-[#6b21a8] border-2 border-purple-400 text-white font-bold shadow-sm shadow-purple-600/30 hover:bg-purple-700 cursor-pointer';
+                    } else if (hasPending) {
+                      cellClasses += 'bg-[#6b21a8] text-white font-semibold shadow-sm shadow-purple-600/30 hover:bg-purple-700 cursor-pointer';
+                    } else if (cell.isToday) {
+                      cellClasses += 'border-2 border-purple-500 text-white font-semibold hover:bg-purple-950/40 cursor-pointer';
+                    } else {
+                      cellClasses += 'text-slate-200 hover:bg-slate-800/80 hover:text-white cursor-pointer';
+                    }
+
                     return (
                       <div
                         key={cell.dateKey}
@@ -1176,22 +1192,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                         }}
                         onMouseEnter={() => hasPending ? setHoveredDateKey(cell.dateKey) : undefined}
                         onMouseLeave={() => setHoveredDateKey(null)}
-                        className={`w-8 h-8 sm:w-8.5 sm:h-8.5 flex flex-col items-center justify-center relative transition-all rounded-full ${
-                          !cell.isCurrentMonth
-                            ? 'text-slate-600 opacity-40 cursor-default pointer-events-none'
-                            : cell.isSelected
-                              ? 'bg-purple-600 text-white font-bold shadow-md shadow-purple-600/50 cursor-pointer'
-                              : cell.isToday
-                                ? 'border-2 border-purple-500 text-purple-300 font-bold hover:bg-purple-950/40 cursor-pointer'
-                                : 'text-slate-300 hover:bg-slate-800/80 hover:text-white cursor-pointer'
-                        }`}
+                        className={cellClasses}
                       >
-                        <span className="text-xs leading-none">{cell.date}</span>
-                        {hasPending ? (
-                          <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${cell.isSelected ? 'bg-white' : 'bg-purple-400'}`} />
-                        ) : (
-                          <span className="w-1.5 h-1.5 mt-0.5 opacity-0" />
-                        )}
+                        <span className="text-xs sm:text-sm leading-none">{cell.date}</span>
 
                         {/* Hover Tooltip for Batch Details */}
                         {hoveredDateKey === cell.dateKey && hasPending && (
@@ -1216,10 +1219,25 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 </div>
 
                 {/* Legend & Today Button */}
-                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                    <span>Pending batch(es)</span>
+                <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px]">
+                  <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                    {/* Date with batch(es) */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3.5 h-3.5 rounded-md bg-[#6b21a8] shadow-sm shadow-purple-600/30 shrink-0" />
+                      <span className="text-slate-300 whitespace-nowrap">Date with batch(es)</span>
+                    </div>
+
+                    {/* Today */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3.5 h-3.5 rounded-md border-2 border-purple-500 bg-transparent shrink-0" />
+                      <span className="text-slate-300 whitespace-nowrap">Today</span>
+                    </div>
+
+                    {/* Selected date */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3.5 h-3.5 rounded-md bg-purple-600 border border-purple-300 shadow-[0_0_8px_rgba(168,85,247,0.5)] shrink-0" />
+                      <span className="text-slate-300 whitespace-nowrap">Selected date</span>
+                    </div>
                   </div>
 
                   <button
@@ -1234,7 +1252,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                         setCurrentTab('prepare_dispatch');
                       }
                     }}
-                    className="px-3 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                    className="px-3 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition-colors cursor-pointer shrink-0"
                   >
                     Today
                   </button>
