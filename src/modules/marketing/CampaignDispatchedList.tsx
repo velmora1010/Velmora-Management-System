@@ -209,7 +209,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   // Compact Calendar Popover State
   const calendarRef = useRef<HTMLDivElement>(null);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>(() => getTodayDateKey());
   const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
   const [hoveredDateKey, setHoveredDateKey] = useState<string | null>(null);
@@ -399,7 +399,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     if (selectedCourier !== 'all') count++;
     if (selectedWeightRange !== 'all') count++;
     if (selectedDispatchStatus !== 'all') count++;
-    if (selectedCalendarDate) count++;
+    if (selectedCalendarDate && selectedCalendarDate !== getTodayDateKey()) count++;
     return count;
   }, [selectedState, selectedCity, selectedCourier, selectedWeightRange, selectedDispatchStatus, selectedCalendarDate]);
 
@@ -411,7 +411,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     setIsAddingCustomCourier(false);
     setSelectedWeightRange('all');
     setSelectedDispatchStatus('all');
-    setSelectedCalendarDate(null);
+    setSelectedCalendarDate(getTodayDateKey());
   };
 
   const handleResetDraftFilters = () => {
@@ -593,6 +593,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         if (res.batch?.id) {
           setOpenBatchIds([res.batch.id]);
         }
+        setSelectedCalendarDate(getTodayDateKey());
         setCurrentTab('prepare_dispatch');
       } else {
         toast.error(res.error || 'Failed to move influencers to Prepare Dispatch');
@@ -778,10 +779,10 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return map;
   }, [prepareDispatchBatches]);
 
-  // Selected date formatted for display (e.g. "08 Sep 2026")
+  // Selected date formatted for display (e.g. "09 Sep 2026")
   const selectedCalendarDisplayDate = useMemo(() => {
-    if (!selectedCalendarDate) return '';
-    const parts = selectedCalendarDate.split('-');
+    const keyToFormat = selectedCalendarDate || getTodayDateKey();
+    const parts = keyToFormat.split('-');
     if (parts.length === 3) {
       const y = parseInt(parts[0], 10);
       const m = parseInt(parts[1], 10) - 1;
@@ -789,23 +790,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       const dateObj = new Date(y, m, d);
       if (!isNaN(dateObj.getTime())) {
         const day = String(d).padStart(2, '0');
-        const monthStr = dateObj.toLocaleString('en-US', { month: 'short' });
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthStr = monthNames[dateObj.getMonth()] || dateObj.toLocaleString('en-US', { month: 'short' });
         return `${day} ${monthStr} ${y}`;
       }
     }
-    return selectedCalendarDate;
+    return keyToFormat;
   }, [selectedCalendarDate]);
 
-  // Filter Prepare Dispatch batches by selected calendar date (if any)
+  // Filter Prepare Dispatch batches strictly by selected calendar date (matching local YYYY-MM-DD)
   const displayedPrepareDispatchBatches = useMemo(() => {
-    if (!selectedCalendarDate) {
-      return prepareDispatchBatches;
-    }
+    const activeDateKey = selectedCalendarDate || getTodayDateKey();
     return prepareDispatchBatches.filter(b => {
       const key = getBatchLocalDateKey(b.batch);
-      return key === selectedCalendarDate;
+      return key === activeDateKey;
     });
   }, [prepareDispatchBatches, selectedCalendarDate]);
+
+  // Scoped count of pending influencers waiting in the displayed Prepare Dispatch batches for the selected date
+  const displayedPreparePendingInfluencersCount = useMemo(() => {
+    return displayedPrepareDispatchBatches.reduce((acc, b) => acc + b.pendingCount, 0);
+  }, [displayedPrepareDispatchBatches]);
 
   const MONTH_NAMES = useMemo(() => [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -1045,6 +1050,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               if (currentTab === 'prepare_dispatch') {
                 setCurrentTab('logistics');
               } else {
+                setSelectedCalendarDate(getTodayDateKey());
                 setCurrentTab('prepare_dispatch');
               }
             }}
@@ -1100,14 +1106,14 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               type="button"
               onClick={() => setIsCalendarOpen(prev => !prev)}
               className={`p-2.5 rounded-xl text-sm font-medium transition-colors border flex items-center justify-center relative cursor-pointer ${
-                isCalendarOpen || selectedCalendarDate
+                isCalendarOpen || (selectedCalendarDate && selectedCalendarDate !== getTodayDateKey())
                   ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold shadow-md shadow-purple-600/20'
                   : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
               }`}
               title="View batches by date"
             >
               <Calendar size={17} />
-              {(selectedCalendarDate || pendingBatchDateMap.size > 0) && (
+              {(pendingBatchDateMap.size > 0 || (selectedCalendarDate && selectedCalendarDate !== getTodayDateKey())) && (
                 <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-purple-500 rounded-full ring-2 ring-slate-900" />
               )}
             </button>
@@ -1163,7 +1169,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                         key={cell.dateKey}
                         onClick={() => {
                           if (!cell.isCurrentMonth) return;
-                          setSelectedCalendarDate(prev => prev === cell.dateKey ? null : cell.dateKey);
+                          setSelectedCalendarDate(cell.dateKey);
                           if (currentTab !== 'prepare_dispatch') {
                             setCurrentTab('prepare_dispatch');
                           }
@@ -1311,8 +1317,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       {/* Compact Prepare Dispatch Summary Bar */}
       {currentTab === 'prepare_dispatch' && (
         <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-sm animate-fade-in">
-          {/* Left: Compact Back to Logistics control */}
-          <div className="flex items-center gap-2">
+          {/* Left: Compact Back to Logistics control + Selected Date Display */}
+          <div className="flex items-center gap-2.5 flex-wrap">
             <button
               type="button"
               onClick={() => setCurrentTab('logistics')}
@@ -1322,9 +1328,19 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               <ArrowLeft size={14} className="text-purple-400 group-hover:-translate-x-0.5 transition-transform" />
               <span>Back to Logistics</span>
             </button>
+
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#121929] border border-slate-800/90 rounded-xl text-xs font-medium text-slate-300">
+              <Calendar size={13} className="text-purple-400" />
+              <span>{selectedCalendarDisplayDate}</span>
+              {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey() && (
+                <span className="text-[10px] font-bold text-purple-400 bg-purple-950/80 px-1.5 py-0.2 rounded-md border border-purple-800/60 ml-0.5">
+                  Today
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Right: Two compact KPI cards side-by-side */}
+          {/* Right: Two compact KPI cards side-by-side (Scoped to Selected Date) */}
           <div className="flex items-center gap-2.5 sm:gap-3">
             {/* Total Batches KPI */}
             <div className="flex-1 sm:flex-initial sm:min-w-[140px] bg-[#121929] border border-slate-800/90 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
@@ -1333,7 +1349,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               </div>
               <div className="min-w-0">
                 <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Batches</div>
-                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{prepareDispatchBatches.length}</div>
+                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{displayedPrepareDispatchBatches.length}</div>
               </div>
             </div>
 
@@ -1344,7 +1360,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               </div>
               <div className="min-w-0">
                 <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Influencers</div>
-                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{totalPendingInPrepareBatches}</div>
+                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{displayedPreparePendingInfluencersCount}</div>
               </div>
             </div>
           </div>
@@ -1512,10 +1528,10 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               </span>
             )}
 
-            {selectedCalendarDate && (
+            {selectedCalendarDate && selectedCalendarDate !== getTodayDateKey() && (
               <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
                 <Calendar size={11} /> Batch Date: {selectedCalendarDisplayDate}
-                <button onClick={() => setSelectedCalendarDate(null)} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
+                <button onClick={() => setSelectedCalendarDate(getTodayDateKey())} className="hover:text-white text-slate-400 cursor-pointer">&times;</button>
               </span>
             )}
           </div>
@@ -1767,39 +1783,52 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         /* ==================== PREPARE DISPATCH BATCH-BASED VIEW ==================== */
         displayedPrepareDispatchBatches.length === 0 ? (
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
-            {selectedCalendarDate ? (
-              <Calendar className="mx-auto mb-3 text-purple-400/50" size={42} />
-            ) : (
-              <Layers className="mx-auto mb-3 text-purple-400/50" size={42} />
-            )}
+            <Calendar className="mx-auto mb-3 text-purple-400/50" size={42} />
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-950/60 border border-purple-800/50 rounded-full text-xs font-semibold text-purple-300 mb-3">
+              <Calendar size={13} />
+              <span>{selectedCalendarDisplayDate}</span>
+              {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey() && (
+                <span className="text-[10px] bg-purple-900 text-purple-200 px-1.5 py-0.2 rounded-md font-bold">
+                  Today
+                </span>
+              )}
+            </div>
             <h3 className="text-base font-semibold text-slate-200 mb-1">
-              {selectedCalendarDate ? 'No Batches on Selected Date' : 'No Prepare Dispatch Batches'}
+              {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey()
+                ? 'No Prepare Dispatch Batches for Today'
+                : 'No Batches on Selected Date'}
             </h3>
             <p className="text-sm text-slate-400 max-w-md mx-auto">
-              {selectedCalendarDate
-                ? `No Prepare Dispatch batches were created on ${selectedCalendarDisplayDate}.`
-                : searchTerm || activeFilterCount > 0
-                  ? 'No batches match your filter criteria.'
-                  : 'Select active influencers from the Logistics section and click "Move to Prepare Dispatch" to create a new batch.'}
+              {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey()
+                ? 'New batches created today will appear here.'
+                : `No Prepare Dispatch batches were created on ${selectedCalendarDisplayDate}.`}
             </p>
-            {selectedCalendarDate ? (
-              <button
-                type="button"
-                onClick={() => setSelectedCalendarDate(null)}
-                className="mt-4 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 transition-all inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <span>View All Batches</span>
-              </button>
-            ) : (
+            <div className="mt-5 flex items-center justify-center gap-3">
+              {(selectedCalendarDate || getTodayDateKey()) !== getTodayDateKey() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const todayKey = getTodayDateKey();
+                    setSelectedCalendarDate(todayKey);
+                    const now = new Date();
+                    setViewYear(now.getFullYear());
+                    setViewMonth(now.getMonth());
+                  }}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Calendar size={14} />
+                  <span>Go to Today</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setCurrentTab('logistics')}
-                className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-purple-400 text-xs font-semibold rounded-xl border border-slate-700 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-purple-400 text-xs font-semibold rounded-xl border border-slate-700 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <ArrowLeft size={14} />
                 <span>Go to Active Logistics</span>
               </button>
-            )}
+            </div>
           </div>
         ) : (
           <div className="space-y-5">
