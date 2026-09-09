@@ -19,11 +19,13 @@ import {
   Coins,
   Weight,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Layers
 } from 'lucide-react';
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
 import { getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
+import { isInfluencerDispatched, getLocalDateKey } from '../../utils/marketingUtils';
 
 // Central Price Config Rules
 export const PRODUCT_PRICES: Record<string, number> = {
@@ -69,9 +71,16 @@ interface DispatchInfluencerModalProps {
   campaign: Campaign;
   onClose: () => void;
   onSuccess: () => void;
+  batchInfo?: { batchName: string; current: number; total: number };
 }
 
-export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = ({ influencer, campaign, onClose, onSuccess }) => {
+export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = ({ 
+  influencer, 
+  campaign, 
+  onClose, 
+  onSuccess,
+  batchInfo
+}) => {
   const { dispatchInfluencer, isSubmitting } = useDispatch();
   
   const dispatchDetails = influencer.dispatchDetails;
@@ -120,7 +129,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   // Dispatch Details
   const [courierPartner, setCourierPartner] = useState(dispatchDetails?.courier_partner || '');
   const [trackingId, setTrackingId] = useState(dispatchDetails?.tracking_id || '');
-  const [dispatchDate, setDispatchDate] = useState(dispatchDetails?.dispatch_date || new Date().toISOString().split('T')[0]);
+  const [dispatchDate, setDispatchDate] = useState(dispatchDetails?.dispatch_date || getLocalDateKey());
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(dispatchDetails?.expected_delivery_date || '');
   
   // Photos
@@ -143,11 +152,17 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     if (d) {
       if (d.courier_partner) setCourierPartner(d.courier_partner);
       if (d.tracking_id) setTrackingId(d.tracking_id);
-      if (d.dispatch_date) setDispatchDate(d.dispatch_date);
+      if (d.dispatch_date) {
+        setDispatchDate(d.dispatch_date);
+      } else {
+        setDispatchDate(getLocalDateKey());
+      }
       if (d.expected_delivery_date) setExpectedDeliveryDate(d.expected_delivery_date);
       if (d.total_weight) setTotalWeight(d.total_weight);
       if (d.product_photo_url) setProductPhotoPreview(d.product_photo_url);
       if (d.dispatch_photo_url) setDispatchPhotoPreview(d.dispatch_photo_url);
+    } else {
+      setDispatchDate(getLocalDateKey());
     }
   }, [influencer]);
 
@@ -178,10 +193,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     }
   };
 
-  const isAlreadyDispatched = Boolean(
-    (influencer.dispatchDetails?.dispatch_status || '').trim().toLowerCase() === 'dispatched' ||
-    (influencer.dispatchDetails?.dispatch_status || '').trim().toLowerCase() === 'tracking'
-  );
+  const isAlreadyDispatched = isInfluencerDispatched(influencer);
 
   const [showConfirmStep, setShowConfirmStep] = useState(false);
 
@@ -270,6 +282,12 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
                   Dispatch Influencer: {influencer.influencer_name || influencer.name}
                 </h2>
+                {batchInfo && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1 shadow-sm">
+                    <Layers size={11} />
+                    {batchInfo.batchName} · Influencer {batchInfo.current} of {batchInfo.total}
+                  </span>
+                )}
                 {isAlreadyDispatched && (
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 uppercase tracking-wider">
                     <CheckCircle size={12} /> Dispatched
