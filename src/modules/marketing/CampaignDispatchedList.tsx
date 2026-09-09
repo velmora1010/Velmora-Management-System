@@ -734,9 +734,10 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in text-slate-200">
-      {/* Header Container */}
-      <div className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      {/* Header Container - Compact Status Bar */}
+      <div className="bg-slate-800/80 px-4 py-3 sm:px-5 sm:py-3.5 rounded-2xl border border-slate-700 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        {/* Left: Back button + 3 Status Counts */}
+        <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap">
           <button 
             type="button"
             onClick={() => {
@@ -746,36 +747,23 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 onBack();
               }
             }}
-            className="p-2 hover:bg-slate-700/80 rounded-xl transition-colors text-slate-400 hover:text-slate-200 cursor-pointer"
+            className="p-2 hover:bg-slate-700/80 rounded-xl transition-colors text-slate-400 hover:text-slate-200 cursor-pointer border border-slate-700/60 bg-slate-900/60"
             title={currentTab !== 'logistics' ? 'Back to Logistics' : 'Back to Campaign'}
           >
-            <ArrowLeft size={20} />
+            <ArrowLeft size={18} />
           </button>
           
-          <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <Package className="text-purple-400" size={22} />
-              <h2 className="text-lg font-bold text-slate-100">
-                Influencer Logistics ({activeCount} Active Influencers)
-              </h2>
-            </div>
-            
-            {/* Summary Pills: Active, Dispatched, Pending */}
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="px-2 py-0.5 bg-slate-900/90 text-slate-300 border border-slate-700/80 rounded-md text-[11px] font-medium">
-                Active: <strong className="text-slate-100">{activeCount}</strong>
-              </span>
-              <span className="px-2 py-0.5 bg-emerald-950/50 text-emerald-300 border border-emerald-800/50 rounded-md text-[11px] font-medium">
-                Dispatched: <strong className="text-emerald-200">{dispatchedCount}</strong>
-              </span>
-              <span className="px-2 py-0.5 bg-purple-950/50 text-purple-300 border border-purple-800/50 rounded-md text-[11px] font-medium">
-                Pending: <strong className="text-purple-200">{pendingCount}</strong>
-              </span>
-            </div>
-            
-            <p className="text-xs text-slate-400 mt-1">
-              Manage dispatch, shipment tracking, and logistics for active influencers in {campaign.campaign_name}
-            </p>
+          {/* Summary Pills: Active, Dispatched, Pending */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            <span className="px-2.5 py-1 bg-slate-900/90 text-slate-300 border border-slate-700/80 rounded-lg text-xs font-medium">
+              Active: <strong className="text-slate-100 font-bold">{activeCount}</strong>
+            </span>
+            <span className="px-2.5 py-1 bg-emerald-950/50 text-emerald-300 border border-emerald-800/50 rounded-lg text-xs font-medium">
+              Dispatched: <strong className="text-emerald-200 font-bold">{dispatchedCount}</strong>
+            </span>
+            <span className="px-2.5 py-1 bg-purple-950/50 text-purple-300 border border-purple-800/50 rounded-lg text-xs font-medium">
+              Pending: <strong className="text-purple-200 font-bold">{pendingCount}</strong>
+            </span>
           </div>
         </div>
 
