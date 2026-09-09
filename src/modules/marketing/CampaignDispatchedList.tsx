@@ -663,8 +663,29 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       const activeMembers = allActiveMembersInBatch.filter(matchesFilterCriteria);
 
       const totalMembers = allActiveMembersInBatch.length;
-      const dispatchedInBatch = allActiveMembersInBatch.filter(inf => isInfluencerDispatched(inf, dispatchRecords)).length;
-      const isBatchDispatched = totalMembers > 0 && dispatchedInBatch === totalMembers;
+
+      // An influencer is confirmed dispatched if:
+      // 1. The batch status is 'Dispatched'
+      // 2. The member's status in batch.members is 'Dispatched'
+      // 3. Or DB dispatch record has 'dispatched' or 'tracking'
+      const dispatchedInBatch = allActiveMembersInBatch.filter(inf => {
+        if (batch.status === 'Dispatched' || String(batch.status).trim().toLowerCase() === 'dispatched') {
+          return true;
+        }
+        const m = batch.members.find(bm => String(bm.influencer_id) === String(inf.id));
+        if (m && (m.dispatch_status === 'Dispatched' || String(m.dispatch_status).trim().toLowerCase() === 'dispatched')) {
+          return true;
+        }
+        return isInfluencerDispatched(inf, dispatchRecords);
+      }).length;
+
+      // Fully dispatched when batch.status is Dispatched OR all active members are dispatched
+      const isBatchDispatched = (batch.status === 'Dispatched' || String(batch.status).trim().toLowerCase() === 'dispatched') || 
+        (totalMembers > 0 && dispatchedInBatch === totalMembers);
+
+      // Pending action required ONLY while batch is NOT fully dispatched and has pending members
+      const isPendingAction = !isBatchDispatched && (totalMembers - dispatchedInBatch > 0);
+      const pendingCount = isBatchDispatched ? 0 : Math.max(0, totalMembers - dispatchedInBatch);
       const dispatchPercentage = totalMembers > 0 ? Math.round((dispatchedInBatch / totalMembers) * 100) : 0;
 
       // Resolve dispatched completion date & time
@@ -703,6 +724,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         totalMembers,
         dispatchedInBatch,
         isBatchDispatched,
+        isPendingAction,
+        pendingCount,
         dispatchPercentage,
         codesSummary,
         resolvedDispatchedDate,
@@ -718,15 +741,15 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     });
   }, [savedBatches, activeInfluencersMap, matchesFilterCriteria, dispatchRecords, campaign.id]);
 
-  // 1. Prepare Dispatch Batches: ONLY batches with pending (undispatched) active influencers.
+  // 1. Prepare Dispatch Batches: ONLY batches with pending action (undispatched active influencers).
   // When 100% dispatched, the batch is removed from Prepare Dispatch.
   const prepareDispatchBatches = useMemo(() => {
-    return processedBatches.filter(b => b.dispatchedInBatch < b.totalMembers);
+    return processedBatches.filter(b => b.isPendingAction);
   }, [processedBatches]);
 
-  // 2. Dispatched Batches: ONLY batches with confirmed dispatched active influencers.
+  // 2. Dispatched Batches: ONLY batches with confirmed dispatched active influencers or Dispatched status.
   const dispatchedBatches = useMemo(() => {
-    return processedBatches.filter(b => b.dispatchedInBatch > 0);
+    return processedBatches.filter(b => b.isBatchDispatched || b.dispatchedInBatch > 0);
   }, [processedBatches]);
 
   // Total pending influencers waiting in Prepare Dispatch batches
@@ -739,15 +762,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     return dispatchedInfluencers.length;
   }, [dispatchedInfluencers]);
 
-  // Map of local date string (YYYY-MM-DD) -> Prepare Dispatch Batches created on that date
-  const batchDateMap = useMemo(() => {
-    const map = new Map<string, DispatchBatch[]>();
+  // Map of local date string (YYYY-MM-DD) -> Pending Prepare Dispatch Batches created on that date
+  const pendingBatchDateMap = useMemo(() => {
+    const map = new Map<string, typeof processedBatches>();
     prepareDispatchBatches.forEach(b => {
-      const key = getBatchLocalDateKey(b.batch);
-      if (key) {
-        const list = map.get(key) || [];
-        list.push(b.batch);
-        map.set(key, list);
+      if (b.isPendingAction) {
+        const key = getBatchLocalDateKey(b.batch);
+        if (key) {
+          const list = map.get(key) || [];
+          list.push(b);
+          map.set(key, list);
+        }
       }
     });
     return map;
@@ -818,7 +843,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       isCurrentMonth: boolean;
       isToday: boolean;
       isSelected: boolean;
-      batches: DispatchBatch[];
+      pendingBatches: typeof processedBatches;
     }[] = [];
     const todayKey = getTodayDateKey();
 
@@ -840,7 +865,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         isCurrentMonth: false,
         isToday: key === todayKey,
         isSelected: selectedCalendarDate === key,
-        batches: batchDateMap.get(key) || []
+        pendingBatches: pendingBatchDateMap.get(key) || []
       });
     }
 
@@ -855,7 +880,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         isCurrentMonth: true,
         isToday: key === todayKey,
         isSelected: selectedCalendarDate === key,
-        batches: batchDateMap.get(key) || []
+        pendingBatches: pendingBatchDateMap.get(key) || []
       });
     }
 
@@ -874,12 +899,12 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         isCurrentMonth: false,
         isToday: key === todayKey,
         isSelected: selectedCalendarDate === key,
-        batches: batchDateMap.get(key) || []
+        pendingBatches: pendingBatchDateMap.get(key) || []
       });
     }
 
     return days;
-  }, [viewYear, viewMonth, selectedCalendarDate, batchDateMap]);
+  }, [viewYear, viewMonth, selectedCalendarDate, pendingBatchDateMap]);
 
   // Handler to start batch dispatch workflow
   const handleStartBatchDispatch = (batch: DispatchBatch, allMembers: CampaignInfluencer[]) => {
@@ -1082,7 +1107,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               title="View batches by date"
             >
               <Calendar size={17} />
-              {selectedCalendarDate && (
+              {(selectedCalendarDate || pendingBatchDateMap.size > 0) && (
                 <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-purple-500 rounded-full ring-2 ring-slate-900" />
               )}
             </button>
@@ -1131,7 +1156,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 {/* Dates Grid */}
                 <div className="grid grid-cols-7 gap-1 place-items-center">
                   {calendarDays.map(cell => {
-                    const hasBatch = cell.batches.length > 0;
+                    const hasPending = (cell.pendingBatches || []).length > 0;
 
                     return (
                       <div
@@ -1143,7 +1168,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                             setCurrentTab('prepare_dispatch');
                           }
                         }}
-                        onMouseEnter={() => hasBatch ? setHoveredDateKey(cell.dateKey) : undefined}
+                        onMouseEnter={() => hasPending ? setHoveredDateKey(cell.dateKey) : undefined}
                         onMouseLeave={() => setHoveredDateKey(null)}
                         className={`w-8 h-8 sm:w-8.5 sm:h-8.5 flex flex-col items-center justify-center relative transition-all rounded-full ${
                           !cell.isCurrentMonth
@@ -1156,23 +1181,24 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                         }`}
                       >
                         <span className="text-xs leading-none">{cell.date}</span>
-                        {hasBatch ? (
+                        {hasPending ? (
                           <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${cell.isSelected ? 'bg-white' : 'bg-purple-400'}`} />
                         ) : (
                           <span className="w-1.5 h-1.5 mt-0.5 opacity-0" />
                         )}
 
                         {/* Hover Tooltip for Batch Details */}
-                        {hoveredDateKey === cell.dateKey && hasBatch && (
+                        {hoveredDateKey === cell.dateKey && hasPending && (
                           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-[60] px-2.5 py-1.5 bg-[#141b2d] border border-purple-500/60 rounded-xl shadow-2xl text-left whitespace-nowrap pointer-events-none animate-fade-in">
                             <div className="text-[11px] font-bold text-purple-300">
-                              {cell.batches.length} {cell.batches.length === 1 ? 'batch' : 'batches'} created
+                              {cell.pendingBatches.length} {cell.pendingBatches.length === 1 ? 'batch' : 'batches'} pending
                             </div>
                             <div className="space-y-0.5 mt-1">
-                              {cell.batches.map(b => (
-                                <div key={b.id} className="text-[10px] font-mono text-slate-200 flex items-center gap-1.5">
+                              {cell.pendingBatches.map(b => (
+                                <div key={b.batch.id} className="text-[10px] font-mono text-slate-200 flex items-center gap-1.5">
                                   <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-                                  <span>{b.batch_name}</span>
+                                  <span>{b.batch.batch_name}</span>
+                                  <span className="text-slate-400">({b.dispatchedInBatch}/{b.totalMembers} dispatched)</span>
                                 </div>
                               ))}
                             </div>
@@ -1187,7 +1213,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
                     <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                    <span>Has batch(es)</span>
+                    <span>Pending batch(es)</span>
                   </div>
 
                   <button
