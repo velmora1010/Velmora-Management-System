@@ -24,6 +24,19 @@ export type IssueType = DefaultIssueType | string;
 
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
+export type TicketPlatform = 
+  | 'Zoko WhatsApp'
+  | 'Mobile WhatsApp'
+  | 'Email'
+  | 'Instagram';
+
+export const TICKET_PLATFORMS: TicketPlatform[] = [
+  'Zoko WhatsApp',
+  'Mobile WhatsApp',
+  'Email',
+  'Instagram'
+];
+
 export type TicketStatus = 
   | 'Open'
   | 'In Progress'
@@ -38,6 +51,7 @@ export interface CustomerTicket {
   ticketId: string;
   customerName: string;
   phoneNumber: string;
+  platform?: TicketPlatform | string | null;
   orderId: string;
   orderDate: string;
   awbNumber: string;

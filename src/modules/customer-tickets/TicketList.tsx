@@ -64,6 +64,7 @@ export const TicketList: React.FC<TicketListProps> = ({
       ticket.orderId.toLowerCase().includes(searchTerm.toLowerCase()) ||
       ticket.awbNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       ticket.phoneNumber.includes(searchTerm) ||
+      (ticket.platform && ticket.platform.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (ticket.subIssue && ticket.subIssue.toLowerCase().includes(searchTerm.toLowerCase()));
       
     const matchesStatus = statusFilter ? ticket.status === statusFilter : true;
@@ -315,6 +316,9 @@ export const TicketList: React.FC<TicketListProps> = ({
                     <div>
                       <p className="text-muted text-xs lg:text-right">Courier: <span className="text-white font-medium">{ticket.courierPartner || 'N/A'}</span></p>
                     </div>
+                    <div>
+                      <p className="text-muted text-xs lg:text-right">Platform: <span className="text-white font-medium">{ticket.platform || 'Not specified'}</span></p>
+                    </div>
                   </div>
 
                   {/* Action Buttons */}
@@ -402,6 +406,10 @@ export const TicketList: React.FC<TicketListProps> = ({
                   <div>
                     <p className="text-xs text-muted">Phone Number</p>
                     <p className="text-white font-medium">{viewingTicket.phoneNumber || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted">Platform</p>
+                    <p className="text-white font-medium">{viewingTicket.platform || 'Not specified'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted">Order ID</p>

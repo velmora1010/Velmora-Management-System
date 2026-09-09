@@ -33,6 +33,9 @@ const mapToDb = (ticket: Partial<CustomerTicket>) => {
   if (ticket.amount !== undefined) {
     dbObj.amount = ticket.amount !== null && !isNaN(Number(ticket.amount)) ? Number(ticket.amount) : null;
   }
+  if (ticket.platform !== undefined) {
+    dbObj.platform = ticket.platform?.trim() || null;
+  }
   return dbObj;
 };
 
@@ -42,6 +45,7 @@ const mapFromDb = (dbObj: any): CustomerTicket => {
     ticketId: dbObj.ticket_id,
     customerName: dbObj.customer_name,
     phoneNumber: dbObj.phone_number,
+    platform: dbObj.platform || undefined,
     orderId: dbObj.order_id,
     orderDate: dbObj.order_date || '',
     awbNumber: dbObj.awb_number,
