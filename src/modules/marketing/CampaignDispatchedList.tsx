@@ -233,6 +233,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     };
   }, [isCalendarOpen]);
 
+  // Close calendar popover when switching away from prepare_dispatch
+  useEffect(() => {
+    if (currentTab !== 'prepare_dispatch') {
+      setIsCalendarOpen(false);
+    }
+  }, [currentTab]);
+
   // Load saved batches from persistent storage
   const loadSavedBatches = useCallback(async () => {
     try {
@@ -1140,168 +1147,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* 10. Compact Calendar Popover Trigger Button */}
-          <div className="relative shrink-0" ref={calendarRef}>
-            <button
-              type="button"
-              onClick={() => setIsCalendarOpen(prev => !prev)}
-              className={`w-9 h-9 rounded-xl text-sm font-medium transition-colors border flex items-center justify-center relative cursor-pointer ${
-                isCalendarOpen || (selectedCalendarDate && selectedCalendarDate !== getTodayDateKey())
-                  ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold shadow-md shadow-purple-600/20'
-                  : 'bg-slate-900/90 border-slate-700/80 hover:bg-slate-800 text-slate-300'
-              }`}
-              title="View batches by date"
-            >
-              <Calendar size={15} />
-              {(pendingBatchDateMap.size > 0 || (selectedCalendarDate && selectedCalendarDate !== getTodayDateKey())) && (
-                <span className="absolute -top-1 -right-1 w-2 h-2 bg-purple-500 rounded-full ring-2 ring-slate-900" />
-              )}
-            </button>
-
-            {/* Calendar Popover (Matches Reference Image) */}
-            {isCalendarOpen && (
-              <div className="absolute right-0 top-full mt-2.5 z-50 w-[330px] sm:w-[360px] max-w-[95vw] bg-[#0c1424] border border-slate-700/90 rounded-2xl shadow-2xl shadow-purple-950/40 p-4 space-y-3.5 backdrop-blur-md animate-fade-in text-slate-200 select-none">
-                {/* Calendar Header: [ 📅 ]  <  Month Year  > */}
-                <div className="flex items-center justify-between pb-1">
-                  <div className="w-8 h-8 rounded-lg bg-purple-950/70 border border-purple-500/50 flex items-center justify-center text-purple-300 shadow-sm shadow-purple-600/20">
-                    <Calendar size={15} />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handlePrevMonth}
-                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-100 rounded-lg transition-colors cursor-pointer"
-                      title="Previous month"
-                    >
-                      <ChevronLeft size={16} />
-                    </button>
-                    <span className="text-xs sm:text-sm font-bold text-slate-100 min-w-[115px] text-center">
-                      {currentMonthName} {viewYear}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleNextMonth}
-                      className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-100 rounded-lg transition-colors cursor-pointer"
-                      title="Next month"
-                    >
-                      <ChevronRight size={16} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Days of week */}
-                <div className="grid grid-cols-7 gap-1 text-center">
-                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-                    <div key={d} className="text-[11px] font-semibold text-slate-400 py-0.5">
-                      {d}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Dates Grid */}
-                <div className="grid grid-cols-7 gap-1 place-items-center">
-                  {calendarDays.map(cell => {
-                    const hasPending = (cell.pendingBatches || []).length > 0;
-
-                    let cellClasses = 'w-8.5 h-8.5 sm:w-9 sm:h-9 flex items-center justify-center relative transition-all rounded-xl ';
-
-                    if (!cell.isCurrentMonth) {
-                      cellClasses += 'text-slate-600 opacity-40 cursor-default pointer-events-none';
-                    } else if (cell.isSelected) {
-                      cellClasses += 'bg-purple-600 text-white font-bold border border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.55)] cursor-pointer';
-                    } else if (hasPending && cell.isToday) {
-                      cellClasses += 'bg-[#6b21a8] border-2 border-purple-400 text-white font-bold shadow-sm shadow-purple-600/30 hover:bg-purple-700 cursor-pointer';
-                    } else if (hasPending) {
-                      cellClasses += 'bg-[#6b21a8] text-white font-semibold shadow-sm shadow-purple-600/30 hover:bg-purple-700 cursor-pointer';
-                    } else if (cell.isToday) {
-                      cellClasses += 'border-2 border-purple-500 text-white font-semibold hover:bg-purple-950/40 cursor-pointer';
-                    } else {
-                      cellClasses += 'text-slate-200 hover:bg-slate-800/80 hover:text-white cursor-pointer';
-                    }
-
-                    return (
-                      <div
-                        key={cell.dateKey}
-                        onClick={() => {
-                          if (!cell.isCurrentMonth) return;
-                          setSelectedCalendarDate(cell.dateKey);
-                          if (currentTab !== 'prepare_dispatch') {
-                            setCurrentTab('prepare_dispatch');
-                          }
-                        }}
-                        onMouseEnter={() => hasPending ? setHoveredDateKey(cell.dateKey) : undefined}
-                        onMouseLeave={() => setHoveredDateKey(null)}
-                        className={cellClasses}
-                      >
-                        <span className="text-xs sm:text-sm leading-none">{cell.date}</span>
-
-                        {/* Hover Tooltip for Batch Details */}
-                        {hoveredDateKey === cell.dateKey && hasPending && (
-                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-[60] px-2.5 py-1.5 bg-[#141b2d] border border-purple-500/60 rounded-xl shadow-2xl text-left whitespace-nowrap pointer-events-none animate-fade-in">
-                            <div className="text-[11px] font-bold text-purple-300">
-                              {cell.pendingBatches.length} {cell.pendingBatches.length === 1 ? 'batch' : 'batches'} pending
-                            </div>
-                            <div className="space-y-0.5 mt-1">
-                              {cell.pendingBatches.map(b => (
-                                <div key={b.batch.id} className="text-[10px] font-mono text-slate-200 flex items-center gap-1.5">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-                                  <span>{b.batch.batch_name}</span>
-                                  <span className="text-slate-400">({b.dispatchedInBatch}/{b.totalMembers} dispatched)</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Legend & Today Button */}
-                <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px]">
-                  <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                    {/* Date with batch(es) */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3.5 h-3.5 rounded-md bg-[#6b21a8] shadow-sm shadow-purple-600/30 shrink-0" />
-                      <span className="text-slate-300 whitespace-nowrap">Date with batch(es)</span>
-                    </div>
-
-                    {/* Today */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3.5 h-3.5 rounded-md border-2 border-purple-500 bg-transparent shrink-0" />
-                      <span className="text-slate-300 whitespace-nowrap">Today</span>
-                    </div>
-
-                    {/* Selected date */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3.5 h-3.5 rounded-md bg-purple-600 border border-purple-300 shadow-[0_0_8px_rgba(168,85,247,0.5)] shrink-0" />
-                      <span className="text-slate-300 whitespace-nowrap">Selected date</span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const now = new Date();
-                      setViewYear(now.getFullYear());
-                      setViewMonth(now.getMonth());
-                      const todayKey = getTodayDateKey();
-                      setSelectedCalendarDate(todayKey);
-                      if (currentTab !== 'prepare_dispatch') {
-                        setCurrentTab('prepare_dispatch');
-                      }
-                    }}
-                    className="px-3 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition-colors cursor-pointer shrink-0"
-                  >
-                    Today
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 11. Refresh Button */}
+          {/* 10. Refresh Button */}
           <button
             type="button"
             onClick={handleRefresh}
@@ -1374,7 +1220,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
       {/* Compact Prepare Dispatch Summary Bar */}
       {currentTab === 'prepare_dispatch' && (
-        <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-sm animate-fade-in">
+        <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-sm animate-fade-in relative z-30">
           {/* Left: Compact Back to Logistics control + Selected Date Display */}
           <div className="flex items-center gap-2.5 flex-wrap">
             <button
@@ -1387,21 +1233,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               <span>Back to Logistics</span>
             </button>
 
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#121929] border border-slate-800/90 rounded-xl text-xs font-medium text-slate-300">
+            {/* Clickable Date Display Pill */}
+            <button
+              type="button"
+              onClick={() => setIsCalendarOpen(prev => !prev)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-[#121929] hover:bg-[#1a253d] border border-slate-800/90 hover:border-purple-500/60 rounded-xl text-xs font-medium text-slate-300 transition-colors cursor-pointer shadow-sm"
+              title="Click to open calendar"
+            >
               <Calendar size={13} className="text-purple-400" />
-              <span>{selectedCalendarDisplayDate}</span>
+              <span className="font-semibold text-slate-200">{selectedCalendarDisplayDate}</span>
               {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey() && (
                 <span className="text-[10px] font-bold text-purple-400 bg-purple-950/80 px-1.5 py-0.2 rounded-md border border-purple-800/60 ml-0.5">
                   Today
                 </span>
               )}
-            </div>
+            </button>
           </div>
 
-          {/* Right: Two compact KPI cards side-by-side (Scoped to Selected Date) */}
-          <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* Right: Two compact KPI cards + Calendar Button Popover Trigger */}
+          <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap sm:flex-nowrap">
             {/* Total Batches KPI */}
-            <div className="flex-1 sm:flex-initial sm:min-w-[140px] bg-[#121929] border border-slate-800/90 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
+            <div className="flex-1 sm:flex-initial sm:min-w-[130px] bg-[#121929] border border-slate-800/90 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
               <div className="w-8 h-8 rounded-lg bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 shrink-0">
                 <Package size={16} />
               </div>
@@ -1412,7 +1264,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             </div>
 
             {/* Total Influencers KPI */}
-            <div className="flex-1 sm:flex-initial sm:min-w-[140px] bg-[#121929] border border-slate-800/90 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
+            <div className="flex-1 sm:flex-initial sm:min-w-[130px] bg-[#121929] border border-slate-800/90 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
               <div className="w-8 h-8 rounded-lg bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 shrink-0">
                 <Users size={16} />
               </div>
@@ -1420,6 +1272,162 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Influencers</div>
                 <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{displayedPreparePendingInfluencersCount}</div>
               </div>
+            </div>
+
+            {/* Calendar Popover Trigger Button (Top-Right of Prepare Dispatch) */}
+            <div className="relative shrink-0" ref={calendarRef}>
+              <button
+                type="button"
+                onClick={() => setIsCalendarOpen(prev => !prev)}
+                className={`h-10 sm:h-11 px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 cursor-pointer shadow-sm ${
+                  isCalendarOpen || (selectedCalendarDate && selectedCalendarDate !== getTodayDateKey())
+                    ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                    : 'bg-[#121929] hover:bg-[#1a253d] text-purple-300 border-purple-800/50 hover:border-purple-600/70'
+                }`}
+                title="Select date to view batches"
+              >
+                <Calendar size={15} />
+                <span className="hidden sm:inline">Calendar</span>
+                <ChevronDown size={14} className={`transition-transform duration-200 ${isCalendarOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Calendar Popover (Matches Reference Design) */}
+              {isCalendarOpen && (
+                <div className="absolute right-0 top-full mt-2.5 z-50 w-[320px] sm:w-[350px] max-w-[calc(100vw-2rem)] bg-[#0c1424] border border-slate-700/90 rounded-2xl shadow-2xl shadow-purple-950/50 p-4 space-y-3.5 backdrop-blur-md animate-fade-in text-slate-200 select-none">
+                  {/* Calendar Header: [ 📅 ]  <  Month Year  > */}
+                  <div className="flex items-center justify-between pb-1">
+                    <div className="w-8 h-8 rounded-lg bg-purple-950/70 border border-purple-500/50 flex items-center justify-center text-purple-300 shadow-sm shadow-purple-600/20">
+                      <Calendar size={15} />
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handlePrevMonth}
+                        className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-100 rounded-lg transition-colors cursor-pointer"
+                        title="Previous month"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <span className="text-xs sm:text-sm font-bold text-slate-100 min-w-[115px] text-center">
+                        {currentMonthName} {viewYear}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleNextMonth}
+                        className="p-1 hover:bg-slate-800 text-slate-400 hover:text-slate-100 rounded-lg transition-colors cursor-pointer"
+                        title="Next month"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Days of week */}
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                      <div key={d} className="text-[11px] font-semibold text-slate-400 py-0.5">
+                        {d}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Dates Grid */}
+                  <div className="grid grid-cols-7 gap-1 place-items-center">
+                    {calendarDays.map(cell => {
+                      const hasPending = (cell.pendingBatches || []).length > 0;
+
+                      let cellClasses = 'w-8.5 h-8.5 sm:w-9 sm:h-9 flex items-center justify-center relative transition-all rounded-xl ';
+
+                      if (!cell.isCurrentMonth) {
+                        cellClasses += 'text-slate-600 opacity-40 cursor-default pointer-events-none';
+                      } else if (cell.isSelected) {
+                        cellClasses += 'bg-purple-600 text-white font-bold border border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.55)] cursor-pointer';
+                      } else if (hasPending && cell.isToday) {
+                        cellClasses += 'bg-[#6b21a8] border-2 border-purple-400 text-white font-bold shadow-sm shadow-purple-600/30 hover:bg-purple-700 cursor-pointer';
+                      } else if (hasPending) {
+                        cellClasses += 'bg-[#6b21a8] text-white font-semibold shadow-sm shadow-purple-600/30 hover:bg-purple-700 cursor-pointer';
+                      } else if (cell.isToday) {
+                        cellClasses += 'border-2 border-purple-500 text-white font-semibold hover:bg-purple-950/40 cursor-pointer';
+                      } else {
+                        cellClasses += 'text-slate-200 hover:bg-slate-800/80 hover:text-white cursor-pointer';
+                      }
+
+                      return (
+                        <div
+                          key={cell.dateKey}
+                          onClick={() => {
+                            if (!cell.isCurrentMonth) return;
+                            setSelectedCalendarDate(cell.dateKey);
+                            setIsCalendarOpen(false);
+                          }}
+                          onMouseEnter={() => hasPending ? setHoveredDateKey(cell.dateKey) : undefined}
+                          onMouseLeave={() => setHoveredDateKey(null)}
+                          className={cellClasses}
+                        >
+                          <span className="text-xs sm:text-sm leading-none">{cell.date}</span>
+
+                          {/* Hover Tooltip for Batch Details */}
+                          {hoveredDateKey === cell.dateKey && hasPending && (
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-[60] px-2.5 py-1.5 bg-[#141b2d] border border-purple-500/60 rounded-xl shadow-2xl text-left whitespace-nowrap pointer-events-none animate-fade-in">
+                              <div className="text-[11px] font-bold text-purple-300">
+                                {cell.pendingBatches.length} {cell.pendingBatches.length === 1 ? 'batch' : 'batches'} pending
+                              </div>
+                              <div className="space-y-0.5 mt-1">
+                                {cell.pendingBatches.map(b => (
+                                  <div key={b.batch.id} className="text-[10px] font-mono text-slate-200 flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                                    <span>{b.batch.batch_name}</span>
+                                    <span className="text-slate-400">({b.dispatchedInBatch}/{b.totalMembers} dispatched)</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Legend & Today Button */}
+                  <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px]">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                      {/* Date with batch(es) */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 rounded-md bg-[#6b21a8] shadow-sm shadow-purple-600/30 shrink-0" />
+                        <span className="text-slate-300 whitespace-nowrap">Batch date</span>
+                      </div>
+
+                      {/* Today */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 rounded-md border-2 border-purple-500 bg-transparent shrink-0" />
+                        <span className="text-slate-300 whitespace-nowrap">Today</span>
+                      </div>
+
+                      {/* Selected date */}
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-3.5 h-3.5 rounded-md bg-purple-600 border border-purple-300 shadow-[0_0_8px_rgba(168,85,247,0.5)] shrink-0" />
+                        <span className="text-slate-300 whitespace-nowrap">Selected</span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const now = new Date();
+                        setViewYear(now.getFullYear());
+                        setViewMonth(now.getMonth());
+                        const todayKey = getTodayDateKey();
+                        setSelectedCalendarDate(todayKey);
+                        setIsCalendarOpen(false);
+                      }}
+                      className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg shadow-sm shadow-purple-600/30 transition-colors cursor-pointer shrink-0"
+                    >
+                      Today
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1842,7 +1850,12 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         displayedPrepareDispatchBatches.length === 0 ? (
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
             <Calendar className="mx-auto mb-3 text-purple-400/50" size={42} />
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-950/60 border border-purple-800/50 rounded-full text-xs font-semibold text-purple-300 mb-3">
+            <button 
+              type="button"
+              onClick={() => setIsCalendarOpen(prev => !prev)}
+              className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-950/60 hover:bg-purple-900/60 border border-purple-800/50 hover:border-purple-600/70 rounded-full text-xs font-semibold text-purple-300 mb-3 cursor-pointer transition-colors"
+              title="Click to open calendar"
+            >
               <Calendar size={13} />
               <span>{selectedCalendarDisplayDate}</span>
               {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey() && (
@@ -1850,7 +1863,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                   Today
                 </span>
               )}
-            </div>
+            </button>
             <h3 className="text-base font-semibold text-slate-200 mb-1">
               {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey()
                 ? 'No Prepare Dispatch Batches for Today'
@@ -1861,7 +1874,16 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 ? 'New batches created today will appear here.'
                 : `No Prepare Dispatch batches were created on ${selectedCalendarDisplayDate}.`}
             </p>
-            <div className="mt-5 flex items-center justify-center gap-3">
+            <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setIsCalendarOpen(true)}
+                className="px-4 py-2 bg-[#121929] hover:bg-[#1a253d] text-purple-300 text-xs font-semibold rounded-xl border border-purple-800/50 hover:border-purple-600/70 transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <Calendar size={14} />
+                <span>Choose Another Date</span>
+              </button>
+
               {(selectedCalendarDate || getTodayDateKey()) !== getTodayDateKey() && (
                 <button
                   type="button"
