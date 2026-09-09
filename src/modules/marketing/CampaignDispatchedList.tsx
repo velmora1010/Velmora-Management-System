@@ -214,7 +214,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   useEffect(() => {
     loadSavedBatches();
-  }, [loadSavedBatches]);
+  }, [loadSavedBatches, dispatchRecords]);
 
   // Sync draft filters when drawer opens
   useEffect(() => {
@@ -638,6 +638,21 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       const isBatchDispatched = totalMembers > 0 && dispatchedInBatch === totalMembers;
       const dispatchPercentage = totalMembers > 0 ? Math.round((dispatchedInBatch / totalMembers) * 100) : 0;
 
+      // Resolve dispatched completion date & time
+      let resolvedDispatchedDate = batch.dispatched_date || '';
+      let resolvedDispatchedTime = batch.dispatched_time || '';
+      if (!resolvedDispatchedDate && dispatchedInBatch > 0) {
+        const memberDates = allActiveMembersInBatch.map(m => {
+          const r = dispatchRecords.find(dr => String(dr.influencer_id) === String(m.id));
+          return r?.dispatch_date || r?.created_at;
+        }).filter(Boolean);
+        if (memberDates.length > 0) {
+          const formatted = formatBatchDateTime(memberDates[0]);
+          resolvedDispatchedDate = formatted.displayDate;
+          resolvedDispatchedTime = formatted.displayTime;
+        }
+      }
+
       // Codes list for summary formatted with bullet separator
       const codes = allActiveMembersInBatch
         .map(inf => inf.code)
@@ -661,6 +676,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         isBatchDispatched,
         dispatchPercentage,
         codesSummary,
+        resolvedDispatchedDate,
+        resolvedDispatchedTime,
       };
     })
     .filter(b => b.totalMembers > 0)
@@ -672,16 +689,26 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     });
   }, [savedBatches, activeInfluencersMap, matchesFilterCriteria, dispatchRecords, campaign.id]);
 
-  // Total influencers across all batches in Prepare Dispatch
-  const totalInfluencersInBatches = useMemo(() => {
-    const idSet = new Set<string>();
-    processedBatches.forEach(b => {
-      b.allActiveMembersInBatch.forEach(inf => {
-        idSet.add(String(inf.id));
-      });
-    });
-    return idSet.size;
+  // 1. Prepare Dispatch Batches: ONLY batches with pending (undispatched) active influencers.
+  // When 100% dispatched, the batch is removed from Prepare Dispatch.
+  const prepareDispatchBatches = useMemo(() => {
+    return processedBatches.filter(b => b.dispatchedInBatch < b.totalMembers);
   }, [processedBatches]);
+
+  // 2. Dispatched Batches: ONLY batches with confirmed dispatched active influencers.
+  const dispatchedBatches = useMemo(() => {
+    return processedBatches.filter(b => b.dispatchedInBatch > 0);
+  }, [processedBatches]);
+
+  // Total pending influencers waiting in Prepare Dispatch batches
+  const totalPendingInPrepareBatches = useMemo(() => {
+    return prepareDispatchInfluencers.length;
+  }, [prepareDispatchInfluencers]);
+
+  // Total dispatched influencers in Dispatched batches
+  const totalDispatchedInBatches = useMemo(() => {
+    return dispatchedInfluencers.length;
+  }, [dispatchedInfluencers]);
 
   // Handler to start batch dispatch workflow
   const handleStartBatchDispatch = (batch: DispatchBatch, allMembers: CampaignInfluencer[]) => {
@@ -834,13 +861,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           >
             <Truck size={16} className={currentTab === 'prepare_dispatch' ? 'text-white' : 'text-purple-400'} />
             <span>Prepare Dispatch</span>
-            {(totalInfluencersInBatches > 0 || prepareDispatchInfluencers.length > 0) && (
+            {prepareDispatchInfluencers.length > 0 && (
               <span className={`text-[11px] font-extrabold rounded-full px-2 py-0.5 leading-none ${
                 currentTab === 'prepare_dispatch'
                   ? 'bg-purple-950 text-white border border-purple-400/30 shadow-inner'
                   : 'bg-purple-950/90 text-purple-300 border border-purple-800/60'
               }`}>
-                {totalInfluencersInBatches > 0 ? totalInfluencersInBatches : prepareDispatchInfluencers.length}
+                {prepareDispatchInfluencers.length}
               </span>
             )}
           </button>
@@ -967,7 +994,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               </div>
               <div className="min-w-0">
                 <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Batches</div>
-                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{processedBatches.length}</div>
+                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{prepareDispatchBatches.length}</div>
               </div>
             </div>
 
@@ -978,39 +1005,53 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               </div>
               <div className="min-w-0">
                 <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Influencers</div>
-                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{totalInfluencersInBatches}</div>
+                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{totalPendingInPrepareBatches}</div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Dispatched Tab Header Banner */}
+      {/* Compact Dispatched Summary Bar */}
       {currentTab === 'dispatched' && (
-        <div className="bg-[#0f1d1c] border border-emerald-600/40 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in shadow-lg shadow-emerald-950/20">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 font-bold uppercase tracking-wider text-[10px] flex items-center gap-1.5">
-                <Check size={12} className="text-emerald-400" />
-                DISPATCHED
-              </span>
-              <span className="text-xs text-emerald-300 font-semibold">
-                {filteredDispatchedList.length} {filteredDispatchedList.length === 1 ? 'influencer' : 'influencers'} confirmed
-              </span>
-            </div>
-            <h3 className="text-base sm:text-lg font-bold text-slate-100 mt-1">Dispatched Shipments</h3>
-            <p className="text-xs text-slate-400">
-              Active campaign influencers with confirmed dispatch. View tracking, courier, and shipping information.
-            </p>
+        <div className="bg-[#091517] border border-emerald-900/80 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-sm animate-fade-in">
+          {/* Left: Compact Back to Logistics control */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentTab('logistics')}
+              className="px-3 py-2 bg-[#0d1d1f] hover:bg-[#122629] text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-emerald-800/60 hover:border-emerald-500/60 transition-all flex items-center gap-2 cursor-pointer shadow-sm group"
+              title="Return to Influencer Logistics"
+            >
+              <ArrowLeft size={14} className="text-emerald-400 group-hover:-translate-x-0.5 transition-transform" />
+              <span>Back to Logistics</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setCurrentTab('logistics')}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
-          >
-            <ArrowLeft size={14} />
-            <span>Back to Logistics</span>
-          </button>
+
+          {/* Right: Two compact KPI cards side-by-side */}
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            {/* Total Batches KPI */}
+            <div className="flex-1 sm:flex-initial sm:min-w-[140px] bg-[#0d1d1f] border border-emerald-900/60 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
+              <div className="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-800/50 flex items-center justify-center text-emerald-400 shrink-0">
+                <Package size={16} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Batches</div>
+                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{dispatchedBatches.length}</div>
+              </div>
+            </div>
+
+            {/* Total Influencers KPI */}
+            <div className="flex-1 sm:flex-initial sm:min-w-[140px] bg-[#0d1d1f] border border-emerald-900/60 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
+              <div className="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-800/50 flex items-center justify-center text-emerald-400 shrink-0">
+                <Users size={16} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Total Influencers</div>
+                <div className="text-base sm:text-lg font-bold text-white leading-none mt-0.5">{totalDispatchedInBatches}</div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1378,7 +1419,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         </div>
       ) : currentTab === 'prepare_dispatch' ? (
         /* ==================== PREPARE DISPATCH BATCH-BASED VIEW ==================== */
-        processedBatches.length === 0 ? (
+        prepareDispatchBatches.length === 0 ? (
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
             <Layers className="mx-auto mb-3 text-purple-400/50" size={42} />
             <h3 className="text-base font-semibold text-slate-200 mb-1">No Prepare Dispatch Batches</h3>
@@ -1398,333 +1439,19 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         ) : (
           <div className="space-y-5">
-            {processedBatches.map(({ 
-              batch, 
-              allActiveMembersInBatch, 
-              activeMembers, 
-              totalMembers, 
-              dispatchedInBatch, 
-              isBatchDispatched, 
-              dispatchPercentage, 
-              codesSummary 
-            }) => {
-              const isOpen = openBatchIds.includes(batch.id);
-              const createdBy = batch.created_by || 'Admin';
-
-              return (
-                <div 
-                  key={batch.id} 
-                  className={`bg-[#0c1322] border rounded-2xl p-5 sm:p-6 shadow-md transition-all space-y-4 ${
-                    isOpen ? 'border-purple-600/70 bg-[#0d1527]' : 'border-slate-800/90 hover:border-slate-700'
-                  }`}
-                >
-                  {/* Top Row: Batch ID, Status Pill, Three Dots Menu */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      {/* Batch Code Badge */}
-                      <span className="px-3 py-1 rounded-lg bg-purple-600 text-white font-extrabold font-mono text-xs sm:text-sm tracking-wider shadow-sm">
-                        {batch.batch_name}
-                      </span>
-
-                      {/* Dynamic Status Pill */}
-                      {isBatchDispatched ? (
-                        <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 flex items-center gap-1.5 shadow-sm">
-                          <Check size={13} className="text-emerald-400" />
-                          <span>Dispatched</span>
-                        </span>
-                      ) : dispatchedInBatch > 0 ? (
-                        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-950/60 text-blue-300 border border-blue-800/60 flex items-center gap-1.5 shadow-sm">
-                          <Clock size={13} className="text-blue-400" />
-                          <span>Partially Dispatched ({dispatchedInBatch}/{totalMembers})</span>
-                        </span>
-                      ) : (
-                        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-950/60 text-purple-300 border border-purple-800/60 flex items-center gap-1.5 shadow-sm">
-                          <Clock size={13} className="text-purple-400" />
-                          <span>Preparing</span>
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Three Dots Menu */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setActiveMenuBatchId(activeMenuBatchId === batch.id ? null : batch.id)}
-                        className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 rounded-lg transition-colors cursor-pointer"
-                        title="Batch options"
-                      >
-                        <MoreVertical size={18} />
-                      </button>
-
-                      {activeMenuBatchId === batch.id && (
-                        <div 
-                          className="absolute right-0 top-8 z-30 w-52 bg-[#141b2c] border border-slate-700/90 rounded-xl shadow-2xl py-1.5 text-xs text-slate-200 animate-fade-in"
-                          onMouseLeave={() => setActiveMenuBatchId(null)}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              toggleBatchOpen(batch.id);
-                              setActiveMenuBatchId(null);
-                            }}
-                            className="w-full text-left px-3.5 py-2 hover:bg-slate-800/80 flex items-center gap-2.5 cursor-pointer"
-                          >
-                            <Users size={14} className="text-slate-400" />
-                            <span>{isOpen ? 'Collapse Influencers' : 'View Influencers'}</span>
-                          </button>
-
-                          {!isBatchDispatched && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleStartBatchDispatch(batch, allActiveMembersInBatch);
-                                setActiveMenuBatchId(null);
-                              }}
-                              className="w-full text-left px-3.5 py-2 hover:bg-purple-900/30 text-purple-300 flex items-center gap-2.5 cursor-pointer"
-                            >
-                              <Truck size={14} className="text-purple-400" />
-                              <span>Dispatch Batch</span>
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const codesStr = allActiveMembersInBatch.map(m => m.code).filter(Boolean).join(', ');
-                              navigator.clipboard.writeText(codesStr);
-                              toast.success(`Copied ${allActiveMembersInBatch.length} codes to clipboard`);
-                              setActiveMenuBatchId(null);
-                            }}
-                            className="w-full text-left px-3.5 py-2 hover:bg-slate-800/80 flex items-center gap-2.5 cursor-pointer"
-                          >
-                            <Hash size={14} className="text-slate-400" />
-                            <span>Copy Codes ({allActiveMembersInBatch.length})</span>
-                          </button>
-
-                          <hr className="my-1 border-slate-800" />
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleReturnBatchToLogistics(batch);
-                              setActiveMenuBatchId(null);
-                            }}
-                            className="w-full text-left px-3.5 py-2 hover:bg-rose-950/40 text-rose-400 flex items-center gap-2.5 cursor-pointer"
-                          >
-                            <RotateCcw size={14} className="text-rose-400" />
-                            <span>Return All to Logistics</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Metadata Row: Created Date, Time, Created By, Codes */}
-                  <div className="flex items-center gap-x-4 gap-y-1.5 text-xs text-slate-400 flex-wrap pt-0.5">
-                    <span className="flex items-center gap-1.5">
-                      <Calendar size={13} className="text-slate-500" />
-                      <span>Created:</span>
-                      <strong className="text-slate-200 font-medium">{batch.dispatch_date}</strong>
-                    </span>
-
-                    <span className="flex items-center gap-1.5">
-                      <Clock size={13} className="text-slate-500" />
-                      <span>Time:</span>
-                      <strong className="text-slate-200 font-medium">{batch.dispatch_time}</strong>
-                    </span>
-
-                    <span className="flex items-center gap-1.5">
-                      <User size={13} className="text-slate-500" />
-                      <span>Created by:</span>
-                      <strong className="text-slate-200 font-medium">{createdBy}</strong>
-                    </span>
-
-                    {codesSummary && (
-                      <span className="flex items-center gap-1.5 font-mono text-purple-300/90 break-words">
-                        <Tag size={13} className="text-purple-400" />
-                        <span>Codes:</span>
-                        <strong className="text-purple-300 font-semibold">{codesSummary}</strong>
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Main Card Body: Left Column (Influencer Preview) & Right Column (Progress + Actions) */}
-                  <div className="pt-2 flex flex-col md:flex-row items-stretch justify-between gap-6">
-                    {/* LEFT COLUMN: Influencers Preview */}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2.5">
-                        Influencers ({totalMembers})
-                      </div>
-
-                      {totalMembers <= 4 ? (
-                        /* Small Batch Preview: Individual Cards */
-                        <div className="flex items-center gap-3 flex-wrap">
-                          {allActiveMembersInBatch.map(inf => {
-                            const username = getInfluencerUsername(inf);
-                            return (
-                              <div 
-                                key={inf.id}
-                                className="flex items-center gap-2 bg-[#121929]/80 border border-slate-800/80 rounded-xl px-2.5 py-1.5 shadow-sm"
-                              >
-                                <div className="w-10 h-10 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-xs border-2 border-purple-500/40 shrink-0">
-                                  {inf.profile_file_url ? (
-                                    <img src={inf.profile_file_url} alt={username} className="w-full h-full object-cover" />
-                                  ) : (
-                                    <span>{(inf.name || username).charAt(0).toUpperCase()}</span>
-                                  )}
-                                </div>
-                                <div className="min-w-0 max-w-[110px]">
-                                  <div className="text-xs font-bold text-slate-100 truncate" title={username}>
-                                    {username}
-                                  </div>
-                                  <span className="inline-block text-[10px] font-mono font-semibold text-purple-300 bg-purple-950/80 border border-purple-800/60 px-1.5 py-0.2 rounded mt-0.5">
-                                    {inf.code || '—'}
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
-
-                          {/* Total Pill */}
-                          <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium pl-1">
-                            <span className="w-8 h-8 rounded-full bg-slate-800/90 border border-slate-700/80 flex items-center justify-center text-[11px] font-bold text-slate-300">
-                              +0
-                            </span>
-                            <span>{totalMembers} total</span>
-                          </div>
-                        </div>
-                      ) : (
-                        /* Large Batch Preview: Overlapping Avatar Cluster + Badge */
-                        <div className="flex items-center gap-3 pt-1 flex-wrap">
-                          <div className="flex items-center -space-x-3 overflow-hidden py-1 pl-1">
-                            {allActiveMembersInBatch.slice(0, 7).map((inf, idx) => {
-                              const username = getInfluencerUsername(inf);
-                              return (
-                                <div 
-                                  key={inf.id} 
-                                  className="relative w-10 h-10 rounded-full border-2 border-[#0c1322] ring-2 ring-purple-600/40 overflow-hidden bg-purple-700 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm"
-                                  style={{ zIndex: 10 - idx }}
-                                  title={`${username} (${inf.code})`}
-                                >
-                                  {inf.profile_file_url ? (
-                                    <img src={inf.profile_file_url} alt={username} className="w-full h-full object-cover" />
-                                  ) : (
-                                    <span>{(inf.name || username).charAt(0).toUpperCase()}</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {totalMembers > 7 && (
-                              <div 
-                                className="relative w-10 h-10 rounded-full bg-slate-800 border-2 border-[#0c1322] ring-2 ring-slate-700 flex items-center justify-center text-xs font-bold text-slate-200 shrink-0 shadow-sm z-0"
-                              >
-                                +{totalMembers - 7}
-                              </div>
-                            )}
-                          </div>
-                          <span className="text-xs font-semibold text-slate-300">
-                            {totalMembers} total
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* RIGHT COLUMN: Progress + Action Buttons */}
-                    <div className="w-full md:w-80 lg:w-96 shrink-0 md:border-l md:border-slate-800/80 md:pl-6 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center justify-between text-xs font-bold text-slate-200">
-                          <span>{dispatchedInBatch} / {totalMembers} Dispatched</span>
-                          <span className="font-mono text-purple-300">{dispatchPercentage}%</span>
-                        </div>
-
-                        <div className="w-full bg-slate-800/90 h-2.5 rounded-full overflow-hidden my-2.5">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              isBatchDispatched 
-                                ? 'bg-gradient-to-r from-emerald-500 to-teal-400' 
-                                : 'bg-gradient-to-r from-purple-500 to-indigo-500'
-                            }`}
-                            style={{ width: `${dispatchPercentage}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Action Buttons: ONLY ONE "Dispatch Batch →" Button */}
-                      <div className="flex items-center gap-3 pt-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleBatchOpen(batch.id)}
-                          className="flex-1 px-3.5 py-2.5 bg-[#141c2e] hover:bg-[#1a253d] text-slate-200 text-xs font-bold rounded-xl border border-slate-700/80 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                        >
-                          <Users size={14} className="text-slate-400" />
-                          <span>{isOpen ? `Close (${totalMembers})` : `View Influencers (${totalMembers})`}</span>
-                          <ChevronDown size={14} className={`transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleStartBatchDispatch(batch, allActiveMembersInBatch)}
-                          disabled={isBatchDispatched}
-                          className={`flex-1 px-4 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer ${
-                            isBatchDispatched
-                              ? 'bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 cursor-default'
-                              : 'bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white shadow-purple-600/30'
-                          }`}
-                        >
-                          {isBatchDispatched ? (
-                            <>
-                              <Check size={14} />
-                              <span>Batch Dispatched</span>
-                            </>
-                          ) : (
-                            <>
-                              <Truck size={14} />
-                              <span>Dispatch Batch →</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* EXPANDED MEMBER GRID (Visible when "View Influencers" is clicked) */}
-                  {isOpen && (
-                    <div className="pt-4 border-t border-slate-800/80 space-y-3.5 animate-fade-in">
-                      <div className="flex items-center justify-between text-xs text-slate-400">
-                        <span className="font-semibold text-slate-300">
-                          Influencers in {batch.batch_name} ({activeMembers.length})
-                        </span>
-                        <span className="text-[11px] text-slate-500 hidden sm:inline">
-                          Process influencers individually or use "Dispatch Batch →" to step through
-                        </span>
-                      </div>
-
-                      {activeMembers.length === 0 ? (
-                        <p className="text-xs text-slate-500 py-3 text-center">
-                          No active influencers in this batch match the current filter.
-                        </p>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-                          {activeMembers.map(inf => renderPrepareDispatchCard(inf))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {prepareDispatchBatches.map(batchItem => renderBatchCard(batchItem, 'prepare_dispatch'))}
           </div>
         )
       ) : currentTab === 'dispatched' ? (
-        /* ==================== DISPATCHED SECTION ==================== */
-        filteredDispatchedList.length === 0 ? (
+        /* ==================== DISPATCHED BATCH-BASED VIEW ==================== */
+        dispatchedBatches.length === 0 ? (
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
-            <Package className="mx-auto mb-3 text-slate-600" size={40} />
-            <h3 className="text-base font-semibold text-slate-300 mb-1">No Dispatched Influencers</h3>
-            <p className="text-sm text-slate-500 max-w-md mx-auto">
+            <Package className="mx-auto mb-3 text-emerald-400/50" size={42} />
+            <h3 className="text-base font-semibold text-slate-200 mb-1">No Dispatched Batches</h3>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
               {searchTerm || activeFilterCount > 0
-                ? 'No dispatched influencers matched your filter criteria.'
-                : 'No influencers have been dispatched yet for this campaign.'}
+                ? 'No dispatched batches match your filter criteria.'
+                : 'No batches or influencers have been dispatched yet for this campaign.'}
             </p>
             <button
               type="button"
@@ -1736,8 +1463,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-            {filteredDispatchedList.slice().sort(compareInfluencerCodesAsc).map((inf) => renderDispatchedCard(inf))}
+          <div className="space-y-5">
+            {dispatchedBatches.map(batchItem => renderBatchCard(batchItem, 'dispatched'))}
           </div>
         )
       ) : (
@@ -1833,6 +1560,412 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       )}
     </div>
   );
+
+  /* Helper to render Grouped Batch Card for both Prepare Dispatch and Dispatched workflows */
+  function renderBatchCard(batchItem: typeof processedBatches[0], tabType: 'prepare_dispatch' | 'dispatched') {
+    const { 
+      batch, 
+      allActiveMembersInBatch, 
+      activeMembers, 
+      totalMembers, 
+      dispatchedInBatch, 
+      isBatchDispatched, 
+      dispatchPercentage, 
+      codesSummary,
+      resolvedDispatchedDate,
+      resolvedDispatchedTime
+    } = batchItem;
+
+    const isOpen = openBatchIds.includes(batch.id);
+    const createdBy = batch.created_by || 'Admin';
+    const isDispatchedTab = tabType === 'dispatched';
+
+    // In Dispatched tab, filter to only the dispatched members
+    const membersToDisplay = isDispatchedTab 
+      ? activeMembers.filter(inf => isInfluencerDispatched(inf, dispatchRecords))
+      : activeMembers;
+
+    const previewMembers = isDispatchedTab
+      ? allActiveMembersInBatch.filter(inf => isInfluencerDispatched(inf, dispatchRecords))
+      : allActiveMembersInBatch;
+
+    const displayCount = isDispatchedTab ? dispatchedInBatch : totalMembers;
+
+    return (
+      <div 
+        key={batch.id} 
+        className={`border rounded-2xl p-5 sm:p-6 shadow-md transition-all space-y-4 ${
+          isDispatchedTab
+            ? isOpen 
+              ? 'border-emerald-600/70 bg-[#0c181a]' 
+              : 'border-emerald-950/80 bg-[#091517] hover:border-emerald-800/80'
+            : isOpen 
+              ? 'border-purple-600/70 bg-[#0d1527]' 
+              : 'border-slate-800/90 bg-[#0c1322] hover:border-slate-700'
+        }`}
+      >
+        {/* Top Row: Batch ID, Status Pill, Three Dots Menu */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Batch Code Badge */}
+            <span className={`px-3 py-1 rounded-lg text-white font-extrabold font-mono text-xs sm:text-sm tracking-wider shadow-sm ${
+              isDispatchedTab ? 'bg-emerald-600' : 'bg-purple-600'
+            }`}>
+              {batch.batch_name}
+            </span>
+
+            {/* Dynamic Status Pill */}
+            {isDispatchedTab || isBatchDispatched ? (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 flex items-center gap-1.5 shadow-sm">
+                <Check size={13} className="text-emerald-400" />
+                <span>Dispatched</span>
+              </span>
+            ) : dispatchedInBatch > 0 ? (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-950/60 text-blue-300 border border-blue-800/60 flex items-center gap-1.5 shadow-sm">
+                <Clock size={13} className="text-blue-400" />
+                <span>Partially Dispatched ({dispatchedInBatch}/{totalMembers})</span>
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-950/60 text-purple-300 border border-purple-800/60 flex items-center gap-1.5 shadow-sm">
+                <Clock size={13} className="text-purple-400" />
+                <span>Preparing</span>
+              </span>
+            )}
+          </div>
+
+          {/* Three Dots Menu */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setActiveMenuBatchId(activeMenuBatchId === batch.id ? null : batch.id)}
+              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 rounded-lg transition-colors cursor-pointer"
+              title="Batch options"
+            >
+              <MoreVertical size={18} />
+            </button>
+
+            {activeMenuBatchId === batch.id && (
+              <div 
+                className="absolute right-0 top-8 z-30 w-52 bg-[#141b2c] border border-slate-700/90 rounded-xl shadow-2xl py-1.5 text-xs text-slate-200 animate-fade-in"
+                onMouseLeave={() => setActiveMenuBatchId(null)}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    toggleBatchOpen(batch.id);
+                    setActiveMenuBatchId(null);
+                  }}
+                  className="w-full text-left px-3.5 py-2 hover:bg-slate-800/80 flex items-center gap-2.5 cursor-pointer"
+                >
+                  <Users size={14} className={isDispatchedTab ? 'text-emerald-400' : 'text-slate-400'} />
+                  <span>{isOpen ? 'Collapse Influencers' : 'View Influencers'}</span>
+                </button>
+
+                {!isDispatchedTab && !isBatchDispatched && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleStartBatchDispatch(batch, allActiveMembersInBatch);
+                      setActiveMenuBatchId(null);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-purple-900/30 text-purple-300 flex items-center gap-2.5 cursor-pointer"
+                  >
+                    <Truck size={14} className="text-purple-400" />
+                    <span>Dispatch Batch</span>
+                  </button>
+                )}
+
+                {isDispatchedTab && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const firstDispatched = allActiveMembersInBatch.find(inf => isInfluencerDispatched(inf, dispatchRecords));
+                      if (firstDispatched) {
+                        handleDispatchClick(firstDispatched);
+                      }
+                      setActiveMenuBatchId(null);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-emerald-950/40 text-emerald-300 flex items-center gap-2.5 cursor-pointer"
+                  >
+                    <Eye size={14} className="text-emerald-400" />
+                    <span>View Dispatch</span>
+                  </button>
+                )}
+
+                {!isDispatchedTab && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleReturnBatchToLogistics(batch);
+                      setActiveMenuBatchId(null);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-rose-950/40 text-rose-400 flex items-center gap-2.5 cursor-pointer"
+                  >
+                    <RotateCcw size={14} className="text-rose-400" />
+                    <span>Return All to Logistics</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Metadata Row: Created Date, Time, Dispatched Date, Time, Created By, Codes */}
+        <div className="flex items-center gap-x-4 gap-y-1.5 text-xs text-slate-400 flex-wrap pt-0.5">
+          <span className="flex items-center gap-1.5">
+            <Calendar size={13} className="text-slate-500" />
+            <span>Created:</span>
+            <strong className="text-slate-200 font-medium">{batch.dispatch_date}</strong>
+          </span>
+
+          <span className="flex items-center gap-1.5">
+            <Clock size={13} className="text-slate-500" />
+            <span>Time:</span>
+            <strong className="text-slate-200 font-medium">{batch.dispatch_time}</strong>
+          </span>
+
+          {resolvedDispatchedDate && (
+            <span className="flex items-center gap-1.5">
+              <Check size={13} className="text-emerald-400" />
+              <span className="text-emerald-400/90">Dispatched:</span>
+              <strong className="text-emerald-200 font-medium">
+                {resolvedDispatchedDate} {resolvedDispatchedTime ? `at ${resolvedDispatchedTime}` : ''}
+              </strong>
+            </span>
+          )}
+
+          <span className="flex items-center gap-1.5">
+            <User size={13} className="text-slate-500" />
+            <span>Created by:</span>
+            <strong className="text-slate-200 font-medium">{createdBy}</strong>
+          </span>
+
+          {codesSummary && (
+            <span className={`flex items-center gap-1.5 font-mono break-words ${
+              isDispatchedTab ? 'text-emerald-300/90' : 'text-purple-300/90'
+            }`}>
+              <Tag size={13} className={isDispatchedTab ? 'text-emerald-400' : 'text-purple-400'} />
+              <span>Codes:</span>
+              <strong className={isDispatchedTab ? 'text-emerald-300 font-semibold' : 'text-purple-300 font-semibold'}>
+                {codesSummary}
+              </strong>
+            </span>
+          )}
+        </div>
+
+        {/* Main Card Body: Left Column (Influencers Preview) & Right Column (Progress + Actions) */}
+        <div className="pt-2 flex flex-col md:flex-row items-stretch justify-between gap-6">
+          {/* LEFT COLUMN: Influencers Preview */}
+          <div className="flex-1 min-w-0">
+            <div className={`text-xs font-bold uppercase tracking-wider mb-2.5 ${
+              isDispatchedTab ? 'text-emerald-300' : 'text-slate-300'
+            }`}>
+              Influencers ({displayCount})
+            </div>
+
+            {previewMembers.length <= 4 ? (
+              /* Small Batch Preview: Individual Mini Cards */
+              <div className="flex items-center gap-3 flex-wrap">
+                {previewMembers.map(inf => {
+                  const username = getInfluencerUsername(inf);
+                  return (
+                    <div 
+                      key={inf.id}
+                      className={`flex items-center gap-2 rounded-xl px-2.5 py-1.5 shadow-sm border ${
+                        isDispatchedTab 
+                          ? 'bg-[#0f1d1f] border-emerald-900/60' 
+                          : 'bg-[#121929]/80 border-slate-800/80'
+                      }`}
+                    >
+                      <div className={`w-10 h-10 rounded-full overflow-hidden flex items-center justify-center text-white font-bold text-xs border-2 shrink-0 ${
+                        isDispatchedTab 
+                          ? 'bg-emerald-600 border-emerald-500/40' 
+                          : 'bg-purple-600 border-purple-500/40'
+                      }`}>
+                        {inf.profile_file_url ? (
+                          <img src={inf.profile_file_url} alt={username} className="w-full h-full object-cover" />
+                        ) : (
+                          <span>{(inf.name || username).charAt(0).toUpperCase()}</span>
+                        )}
+                      </div>
+                      <div className="min-w-0 max-w-[110px]">
+                        <div className="text-xs font-bold text-slate-100 truncate" title={username}>
+                          {username}
+                        </div>
+                        <span className={`inline-block text-[10px] font-mono font-semibold px-1.5 py-0.2 rounded mt-0.5 border ${
+                          isDispatchedTab
+                            ? 'text-emerald-300 bg-emerald-950/80 border-emerald-800/60'
+                            : 'text-purple-300 bg-purple-950/80 border-purple-800/60'
+                        }`}>
+                          {inf.code || '—'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Total Pill */}
+                <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium pl-1">
+                  <span className="w-8 h-8 rounded-full bg-slate-800/90 border border-slate-700/80 flex items-center justify-center text-[11px] font-bold text-slate-300">
+                    +0
+                  </span>
+                  <span>{displayCount} total</span>
+                </div>
+              </div>
+            ) : (
+              /* Large Batch Preview: Overlapping Avatar Cluster + Badge */
+              <div className="flex items-center gap-3 pt-1 flex-wrap">
+                <div className="flex items-center -space-x-3 overflow-hidden py-1 pl-1">
+                  {previewMembers.slice(0, 7).map((inf, idx) => {
+                    const username = getInfluencerUsername(inf);
+                    return (
+                      <div 
+                        key={inf.id} 
+                        className={`relative w-10 h-10 rounded-full border-2 overflow-hidden flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm ${
+                          isDispatchedTab
+                            ? 'border-[#0a1518] ring-2 ring-emerald-500/40 bg-emerald-700'
+                            : 'border-[#0c1322] ring-2 ring-purple-600/40 bg-purple-700'
+                        }`}
+                        style={{ zIndex: 10 - idx }}
+                        title={`${username} (${inf.code})`}
+                      >
+                        {inf.profile_file_url ? (
+                          <img src={inf.profile_file_url} alt={username} className="w-full h-full object-cover" />
+                        ) : (
+                          <span>{(inf.name || username).charAt(0).toUpperCase()}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {previewMembers.length > 7 && (
+                    <div 
+                      className="relative w-10 h-10 rounded-full bg-slate-800 border-2 border-[#0c1322] ring-2 ring-slate-700 flex items-center justify-center text-xs font-bold text-slate-200 shrink-0 shadow-sm z-0"
+                    >
+                      +{previewMembers.length - 7}
+                    </div>
+                  )}
+                </div>
+                <span className="text-xs font-semibold text-slate-300">
+                  {displayCount} total
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT COLUMN: Progress + Action Buttons */}
+          <div className="w-full md:w-80 lg:w-96 shrink-0 md:border-l md:border-slate-800/80 md:pl-6 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-xs font-bold text-slate-200">
+                <span>{dispatchedInBatch} / {totalMembers} Dispatched</span>
+                <span className={`font-mono ${isDispatchedTab ? 'text-emerald-300' : 'text-purple-300'}`}>
+                  {dispatchPercentage}%
+                </span>
+              </div>
+
+              <div className="w-full bg-slate-800/90 h-2.5 rounded-full overflow-hidden my-2.5">
+                <div 
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    isDispatchedTab || isBatchDispatched 
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-400' 
+                      : 'bg-gradient-to-r from-purple-500 to-indigo-500'
+                  }`}
+                  style={{ width: `${dispatchPercentage}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => toggleBatchOpen(batch.id)}
+                className={`flex-1 px-3.5 py-2.5 text-slate-200 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm ${
+                  isDispatchedTab
+                    ? 'bg-[#0e1d20] hover:bg-[#13272b] border-emerald-900/60'
+                    : 'bg-[#141c2e] hover:bg-[#1a253d] border-slate-700/80'
+                }`}
+              >
+                <Users size={14} className={isDispatchedTab ? 'text-emerald-400' : 'text-slate-400'} />
+                <span>{isOpen ? `Close (${displayCount})` : `View Influencers (${displayCount})`}</span>
+                <ChevronDown size={14} className={`transform transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isDispatchedTab ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstDispatched = allActiveMembersInBatch.find(inf => isInfluencerDispatched(inf, dispatchRecords));
+                    if (firstDispatched) {
+                      handleDispatchClick(firstDispatched);
+                    }
+                  }}
+                  className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
+                >
+                  <Eye size={14} />
+                  <span>View Dispatch</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleStartBatchDispatch(batch, allActiveMembersInBatch)}
+                  disabled={isBatchDispatched}
+                  className={`flex-1 px-4 py-2.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer ${
+                    isBatchDispatched
+                      ? 'bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 cursor-default'
+                      : 'bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white shadow-purple-600/30'
+                  }`}
+                >
+                  {isBatchDispatched ? (
+                    <>
+                      <Check size={14} />
+                      <span>Batch Dispatched</span>
+                    </>
+                  ) : (
+                    <>
+                      <Truck size={14} />
+                      <span>Dispatch Batch →</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* EXPANDED MEMBER GRID (Visible when "View Influencers" is clicked) */}
+        {isOpen && (
+          <div className={`pt-4 border-t space-y-3.5 animate-fade-in ${
+            isDispatchedTab ? 'border-emerald-950/80' : 'border-slate-800/80'
+          }`}>
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span className={`font-semibold ${isDispatchedTab ? 'text-emerald-300' : 'text-slate-300'}`}>
+                {isDispatchedTab ? 'Dispatched Influencers' : 'Influencers'} in {batch.batch_name} ({membersToDisplay.length})
+              </span>
+              <span className="text-[11px] text-slate-500 hidden sm:inline">
+                {isDispatchedTab 
+                  ? 'Click "View Dispatch" on any influencer to see complete courier and tracking details'
+                  : 'Process influencers individually or use "Dispatch Batch →" to step through'}
+              </span>
+            </div>
+
+            {membersToDisplay.length === 0 ? (
+              <p className="text-xs text-slate-500 py-3 text-center">
+                {isDispatchedTab
+                  ? 'No dispatched influencers in this batch match the current filter.'
+                  : 'No active influencers in this batch match the current filter.'}
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
+                {membersToDisplay.map(inf => 
+                  isDispatchedTab ? renderDispatchedMemberCard(inf) : renderPrepareDispatchCard(inf)
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   /* Helper to render clean Logistics card: [Checkbox?] [Profile Photo] @username [Code] — NO DISPATCH BUTTON */
   function renderLogisticsCard(inf: CampaignInfluencer, isSelected: boolean) {
@@ -2015,8 +2148,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     );
   }
 
-  /* Helper to render Dispatched card: [Profile Photo] @username [Code] [View Dispatch Button] */
-  function renderDispatchedCard(inf: CampaignInfluencer) {
+  /* Helper to render Dispatched member card inside a batch: [Profile Photo] @username [Code] [View Dispatch Button] */
+  function renderDispatchedMemberCard(inf: CampaignInfluencer) {
     const username = getInfluencerUsername(inf);
     const dispatch = getDispatchData(inf);
 

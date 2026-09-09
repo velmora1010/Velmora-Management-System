@@ -26,6 +26,9 @@ export interface DispatchBatch {
   created_at: string;
   updated_at: string;
   created_by?: string;
+  dispatched_at?: string;
+  dispatched_date?: string;
+  dispatched_time?: string;
 }
 
 const getStorageKey = (campaignId: string | number) => `influencer_dispatch_batches_${campaignId}`;
@@ -158,8 +161,34 @@ export const dispatchBatchService = {
 
           validMembers.forEach(m => batchedIdSet.add(String(m.influencer_id)));
 
+          const allDispatched = validMembers.length > 0 && validMembers.every(m => m.dispatch_status === 'Dispatched');
+          let dispatchedDate = b.dispatched_date;
+          let dispatchedTime = b.dispatched_time;
+          let dispatchedAt = b.dispatched_at;
+
+          if (allDispatched && (!dispatchedDate || !dispatchedTime)) {
+            const memberDates = validMembers.map(m => {
+              const r = dispatchRows.find(dr => String(dr.influencer_id) === String(m.influencer_id));
+              return r?.dispatch_date || r?.created_at;
+            }).filter(Boolean);
+            const refDate = memberDates[0] || b.updated_at || new Date();
+            const formatted = formatBatchDateTime(refDate);
+            dispatchedDate = formatted.displayDate;
+            dispatchedTime = formatted.displayTime;
+            dispatchedAt = new Date(refDate).toISOString();
+            hasChanges = true;
+          }
+
+          if (allDispatched && b.status !== 'Dispatched') {
+            hasChanges = true;
+          }
+
           return {
             ...b,
+            status: allDispatched ? ('Dispatched' as BatchStatus) : b.status,
+            dispatched_at: dispatchedAt,
+            dispatched_date: dispatchedDate,
+            dispatched_time: dispatchedTime,
             members: validMembers
           };
         }).filter(b => b.members.length > 0);
@@ -225,7 +254,68 @@ export const dispatchBatchService = {
           rawBatches.push(synthesizedBatch);
         }
 
-        // C. If changes occurred during reconciliation, persist them immediately
+        // C. Check for unbatched influencers with 'dispatched' or 'tracking' in DB
+        const unbatchedDispatched = dispatchRows.filter(r => {
+          const st = (r.dispatch_status || '').trim().toLowerCase();
+          return (st === 'dispatched' || st === 'tracking') && !batchedIdSet.has(String(r.influencer_id));
+        });
+
+        if (unbatchedDispatched.length > 0) {
+          hasChanges = true;
+
+          const unbatchedIds = unbatchedDispatched.map(u => isNaN(Number(u.influencer_id)) ? u.influencer_id : Number(u.influencer_id));
+          const { data: infDetails } = await supabase
+            .from(SUPABASE_TABLES.influencersInfo)
+            .select('id, code, name, influencer_name, profile_file_url, is_archived')
+            .in('id', unbatchedIds);
+
+          const infMap = new Map<string, any>();
+          (infDetails || []).forEach(inf => infMap.set(String(inf.id), inf));
+
+          let maxNum = 0;
+          for (const b of rawBatches) {
+            const match = (b.batch_name || '').match(/BATCH-(\d+)/i);
+            if (match) {
+              const n = parseInt(match[1], 10);
+              if (!isNaN(n) && n > maxNum) maxNum = n;
+            }
+          }
+
+          const nextBatchNumber = maxNum + 1;
+          const batchCode = `BATCH-${String(nextBatchNumber).padStart(3, '0')}`;
+          const firstRow = unbatchedDispatched[0];
+          const createdDT = formatBatchDateTime(firstRow.created_at || firstRow.dispatch_date || new Date());
+          const dispatchedDT = formatBatchDateTime(firstRow.dispatch_date || firstRow.created_at || new Date());
+
+          const synthesizedDispatchedBatch: DispatchBatch = {
+            id: `batch-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            campaign_id: cId,
+            batch_name: batchCode,
+            dispatch_date: createdDT.displayDate,
+            dispatch_time: createdDT.displayTime,
+            status: 'Dispatched',
+            dispatched_at: firstRow.created_at || new Date().toISOString(),
+            dispatched_date: dispatchedDT.displayDate,
+            dispatched_time: dispatchedDT.displayTime,
+            created_at: firstRow.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            created_by: 'Admin',
+            members: unbatchedDispatched.map(u => {
+              const inf = infMap.get(String(u.influencer_id));
+              return {
+                influencer_id: String(u.influencer_id),
+                influencer_code: inf?.code || '',
+                creator_name: inf?.name || inf?.influencer_name || u.creator_name || 'Influencer',
+                profile_file_url: inf?.profile_file_url || '',
+                dispatch_status: 'Dispatched' as BatchStatus
+              };
+            })
+          };
+
+          rawBatches.push(synthesizedDispatchedBatch);
+        }
+
+        // D. If changes occurred during reconciliation, persist them immediately
         if (hasChanges) {
           await this.saveBatches(campaignId, rawBatches);
         }
@@ -315,14 +405,20 @@ export const dispatchBatchService = {
       throw new Error(`Batch with ID ${batchId} not found`);
     }
 
+    const now = new Date();
+    const { displayDate, displayTime } = formatBatchDateTime(now);
+
     const updatedBatch: DispatchBatch = {
       ...targetBatch,
       status: 'Dispatched',
+      dispatched_at: now.toISOString(),
+      dispatched_date: displayDate,
+      dispatched_time: displayTime,
       members: targetBatch.members.map(m => ({
         ...m,
         dispatch_status: 'Dispatched',
       })),
-      updated_at: new Date().toISOString(),
+      updated_at: now.toISOString(),
     };
 
     const updatedBatches = allBatches.map(b => (b.id === batchId ? updatedBatch : b));
