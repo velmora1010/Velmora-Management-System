@@ -25,6 +25,7 @@ import {
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
 import { getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
+import { isInfluencerDispatched } from '../../utils/marketingUtils';
 
 // Central Price Config Rules
 export const PRODUCT_PRICES: Record<string, number> = {
@@ -186,10 +187,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     }
   };
 
-  const isAlreadyDispatched = Boolean(
-    (influencer.dispatchDetails?.dispatch_status || '').trim().toLowerCase() === 'dispatched' ||
-    (influencer.dispatchDetails?.dispatch_status || '').trim().toLowerCase() === 'tracking'
-  );
+  const isAlreadyDispatched = isInfluencerDispatched(influencer);
 
   const [showConfirmStep, setShowConfirmStep] = useState(false);
 

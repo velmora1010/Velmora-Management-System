@@ -13,7 +13,7 @@ interface CampaignAnalyticsProps {
   onBack: () => void;
 }
 
-import { isActiveStatus } from '../../utils/marketingUtils';
+import { isActiveStatus, isInfluencerDispatched } from '../../utils/marketingUtils';
 
 const isFakeUrl = (url: string | null | undefined): boolean => {
   if (!url) return true;
@@ -125,7 +125,7 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
     remainingPayment,
     pendingPaymentsCount
   } = useMemo(() => {
-    const dispCount = dispatchRecords.length;
+    const dispCount = dispatchRecords.filter(d => isInfluencerDispatched({ dispatchDetails: d })).length;
     let delCount = 0;
     let payAdvCount = 0;
     let refVCount = 0;

@@ -8,7 +8,7 @@ import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPla
 import { ImportPricingInfoModal } from '../../components/marketing/ImportPricingInfoModal';
 import { ImportPostDateModal } from '../../components/marketing/ImportPostDateModal';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
-import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType } from '../../utils/marketingUtils';
+import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType, isInfluencerDispatched } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, calculateDraftDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination, isVideoLabel, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
 import { logActivity } from '../../services/activityService';
@@ -160,7 +160,7 @@ City: ${influencer.city}`;
           {/* Right Header Actions */}
           <div className="flex items-center gap-1.5 shrink-0 ml-auto">
             {onDispatch && (
-              influencer.dispatchDetails ? (
+              isInfluencerDispatched(influencer) ? (
                 <span 
                   className="px-2.5 py-1 text-xs font-semibold rounded-md pointer-events-none shrink-0 bg-emerald-950/50 text-emerald-400 border border-emerald-800/40"
                 >

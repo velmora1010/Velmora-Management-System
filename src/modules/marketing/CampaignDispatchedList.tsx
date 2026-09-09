@@ -31,7 +31,7 @@ import {
 import toast from 'react-hot-toast';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
-import { isActiveStatus } from '../../utils/marketingUtils';
+import { isActiveStatus, isInfluencerDispatched, isInfluencerInPrepareDispatch } from '../../utils/marketingUtils';
 import { 
   getUniqueFilterOptions, 
   areFilterValuesEqual 
@@ -147,19 +147,7 @@ export const matchesWeightRange = (weightGrams: number | null, rangeId: string):
   }
 };
 
-export const isInfluencerDispatched = (inf: CampaignInfluencer, dispatchRecords: any[]): boolean => {
-  const dispatch = inf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === String(inf.id));
-  if (!dispatch) return false;
-  const status = (dispatch.dispatch_status || '').trim().toLowerCase();
-  return status === 'dispatched' || status === 'tracking';
-};
-
-export const isInfluencerInPrepareDispatch = (inf: CampaignInfluencer, dispatchRecords: any[]): boolean => {
-  const dispatch = inf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === String(inf.id));
-  if (!dispatch) return false;
-  const status = (dispatch.dispatch_status || '').trim().toLowerCase();
-  return status === 'prepare_dispatch' || status === 'ready to dispatch';
-};
+export { isInfluencerDispatched, isInfluencerInPrepareDispatch };
 
 export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ 
   campaign, 
