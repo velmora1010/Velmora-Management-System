@@ -54,6 +54,7 @@ import {
   type DispatchBatch 
 } from '../../services/dispatchBatchService';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
+import { InfluencerQuickViewModal } from './InfluencerQuickViewModal';
 
 export type LogisticsTab = 'logistics' | 'prepare_dispatch' | 'dispatched';
 
@@ -205,6 +206,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   // Local fallback for dispatch modal (when clicking Dispatch or View Dispatch)
   const [localDispatchInfluencer, setLocalDispatchInfluencer] = useState<CampaignInfluencer | null>(null);
+
+  // Quick View Influencer Info Modal State (Read-only)
+  const [viewInfluencerTarget, setViewInfluencerTarget] = useState<CampaignInfluencer | null>(null);
 
   // Compact Calendar Popover State
   const calendarRef = useRef<HTMLDivElement>(null);
@@ -363,6 +367,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       !isInfluencerInPrepareDispatch(inf, dispatchRecords)
     );
   }, [activeOnly, dispatchRecords, batchedInfluencerIdSet]);
+
+  // Helper to determine exact logistics status for any influencer
+  const getInfluencerStatus = useCallback((inf: CampaignInfluencer): 'Active' | 'Preparing' | 'Dispatched' => {
+    if (isInfluencerDispatched(inf, dispatchRecords)) {
+      return 'Dispatched';
+    }
+    if (batchedInfluencerIdSet.has(String(inf.id)) || isInfluencerInPrepareDispatch(inf, dispatchRecords)) {
+      return 'Preparing';
+    }
+    return 'Active';
+  }, [dispatchRecords, batchedInfluencerIdSet]);
 
   // Counts for summary pills
   const activeCount = activeOnly.length;
@@ -950,10 +965,11 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   return (
     <div className="space-y-6 animate-fade-in text-slate-200">
-      {/* Header Container - Compact Status Bar */}
-      <div className="bg-slate-800/80 px-4 py-3 sm:px-5 sm:py-3.5 rounded-2xl border border-slate-700 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        {/* Left: Back button + 3 Status Counts */}
-        <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap">
+      {/* Header Container - Single Horizontal Status & Action Toolbar (Strictly 1 Row) */}
+      <div className="bg-[#0c1424] px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-700/80 shadow-lg shadow-purple-950/20 flex items-center flex-nowrap gap-2 sm:gap-2.5 w-full min-w-0 overflow-x-auto">
+        {/* LEFT GROUP: Back + Status Chips */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
+          {/* 1. Back Button */}
           <button 
             type="button"
             onClick={() => {
@@ -963,60 +979,43 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 onBack();
               }
             }}
-            className="p-2 hover:bg-slate-700/80 rounded-xl transition-colors text-slate-400 hover:text-slate-200 cursor-pointer border border-slate-700/60 bg-slate-900/60"
+            className="w-9 h-9 rounded-xl transition-colors text-slate-300 hover:text-white cursor-pointer border border-slate-700/80 bg-slate-900 hover:bg-slate-800 flex items-center justify-center shrink-0"
             title={currentTab !== 'logistics' ? 'Back to Logistics' : 'Back to Campaign'}
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={16} />
           </button>
           
-          {/* Summary Pills: Active, Dispatched, Pending */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            <span className="px-2.5 py-1 bg-slate-900/90 text-slate-300 border border-slate-700/80 rounded-lg text-xs font-medium">
-              Active: <strong className="text-slate-100 font-bold">{activeCount}</strong>
-            </span>
-            <span className="px-2.5 py-1 bg-emerald-950/50 text-emerald-300 border border-emerald-800/50 rounded-lg text-xs font-medium">
-              Dispatched: <strong className="text-emerald-200 font-bold">{dispatchedCount}</strong>
-            </span>
-            <span className="px-2.5 py-1 bg-purple-950/50 text-purple-300 border border-purple-800/50 rounded-lg text-xs font-medium">
-              Pending: <strong className="text-purple-200 font-bold">{pendingCount}</strong>
-            </span>
+          {/* 2. Status Group: Active, Pending, Dispatched */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
+            {/* Active (Blue) */}
+            <div className="h-9 px-2.5 sm:px-3 bg-blue-950/40 text-blue-300 border border-blue-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
+              <Users size={13} className="text-blue-400 shrink-0" />
+              <span>Active:</span>
+              <strong className="text-white font-bold">{activeCount}</strong>
+            </div>
+
+            {/* Pending (Purple) */}
+            <div className="h-9 px-2.5 sm:px-3 bg-purple-950/40 text-purple-300 border border-purple-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
+              <Clock size={13} className="text-purple-400 shrink-0" />
+              <span>Pending:</span>
+              <strong className="text-white font-bold">{pendingCount}</strong>
+            </div>
+
+            {/* Dispatched (Green) */}
+            <div className="h-9 px-2.5 sm:px-3 bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
+              <Check size={13} className="text-emerald-400 shrink-0" />
+              <span>Dispatched:</span>
+              <strong className="text-white font-bold">{dispatchedCount}</strong>
+            </div>
           </div>
         </div>
 
-        {/* Right Header Controls: [ Search ] [ Filter Icon ] [ Bulk Select ] [ Prepare Dispatch ] [ Dispatched ] [ Refresh Icon ] */}
-        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-          {/* Search Box */}
-          <div className="relative flex-1 md:w-48">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-            <input 
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search code, user..."
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-3.5 py-2 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-            />
-          </div>
+        {/* Vertical Divider between Left and Center */}
+        <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0" />
 
-          {/* Filter Button (Icon only) */}
-          <button
-            type="button"
-            onClick={() => setIsFilterDrawerOpen(true)}
-            className={`p-2.5 rounded-xl text-sm font-medium transition-colors border flex items-center justify-center relative cursor-pointer ${
-              activeFilterCount > 0 
-                ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold' 
-                : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
-            }`}
-            title="Filters"
-          >
-            <SlidersHorizontal size={17} />
-            {activeFilterCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-
-          {/* Bulk Select Button (TEXT + selected count when applicable) */}
+        {/* CENTER GROUP: Bulk Select + Prepare Dispatch + Dispatched */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
+          {/* 4. Bulk Select */}
           <button
             type="button"
             onClick={() => {
@@ -1027,14 +1026,14 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setIsBulkSelectMode(prev => !prev);
               }
             }}
-            className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 cursor-pointer ${
+            className={`h-9 px-3.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               isBulkSelectMode && currentTab === 'logistics'
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-                : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
+                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200'
             }`}
             title="Bulk Select"
           >
-            {isBulkSelectMode && currentTab === 'logistics' ? <Check size={15} className="text-white" /> : <CheckSquare size={15} />}
+            {isBulkSelectMode && currentTab === 'logistics' ? <Check size={14} className="text-white" /> : <CheckSquare size={14} className="text-slate-300" />}
             <span>Bulk Select</span>
             {selectedInfluencerObjects.length > 0 && currentTab === 'logistics' && (
               <span className="bg-white text-purple-900 text-[11px] font-extrabold rounded-full px-1.5 py-0.2 ml-0.5">
@@ -1043,7 +1042,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* Prepare Dispatch Destination Navigation Button */}
+          {/* 5. Prepare Dispatch (Active only when currentTab === 'prepare_dispatch') */}
           <button
             type="button"
             onClick={() => {
@@ -1054,14 +1053,14 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setCurrentTab('prepare_dispatch');
               }
             }}
-            className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 cursor-pointer ${
+            className={`h-9 px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 shrink-0 cursor-pointer ${
               currentTab === 'prepare_dispatch'
-                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-                : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
+                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/40'
+                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
             }`}
             title="Prepare Dispatch"
           >
-            <Truck size={16} className={currentTab === 'prepare_dispatch' ? 'text-white' : 'text-purple-400'} />
+            <Truck size={15} className={currentTab === 'prepare_dispatch' ? 'text-white' : 'text-purple-400'} />
             <span>Prepare Dispatch</span>
             {prepareDispatchInfluencers.length > 0 && (
               <span className={`text-[11px] font-extrabold rounded-full px-2 py-0.5 leading-none ${
@@ -1074,7 +1073,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* Dispatched Destination Navigation Button */}
+          {/* 6. Dispatched Navigation Button (Active only when currentTab === 'dispatched') */}
           <button
             type="button"
             onClick={() => {
@@ -1084,37 +1083,78 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setCurrentTab('dispatched');
               }
             }}
-            className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 cursor-pointer ${
+            className={`h-9 px-3.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               currentTab === 'dispatched'
                 ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30'
-                : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
+                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
             }`}
             title="Dispatched"
           >
-            <Check size={15} className={currentTab === 'dispatched' ? 'text-white' : 'text-emerald-400'} />
+            <Check size={14} className={currentTab === 'dispatched' ? 'text-white' : 'text-emerald-400'} />
             <span>Dispatched</span>
             {dispatchedInfluencers.length > 0 && (
-              <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold rounded-full px-1.5 py-0.2">
+              <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.2 ${
+                currentTab === 'dispatched'
+                  ? 'bg-emerald-950 text-white border border-emerald-400/30 shadow-inner'
+                  : 'bg-emerald-950/90 text-emerald-300 border border-emerald-800/60'
+              }`}>
                 {dispatchedInfluencers.length}
               </span>
             )}
           </button>
+        </div>
 
-          {/* Compact Calendar Popover Trigger Button */}
-          <div className="relative" ref={calendarRef}>
+        {/* RIGHT GROUP: [ Divider ] [ Search ] [ Filter ] [ Calendar ] [ Refresh ] (Pushed to far right with ml-auto) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 ml-auto shrink-0 flex-nowrap">
+          {/* 7. Vertical Divider before Search */}
+          <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0" />
+
+          {/* 8. Search Box */}
+          <div className="relative w-36 sm:w-44 md:w-52 shrink-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+            <input 
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search code, user..."
+              className="w-full h-9 bg-slate-900/90 border border-slate-700/80 rounded-xl pl-8.5 pr-3 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+            />
+          </div>
+
+          {/* 9. Filter Button (Icon only) */}
+          <button
+            type="button"
+            onClick={() => setIsFilterDrawerOpen(true)}
+            className={`w-9 h-9 rounded-xl text-sm font-medium transition-colors border flex items-center justify-center relative shrink-0 cursor-pointer ${
+              activeFilterCount > 0 
+                ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold shadow-sm shadow-purple-600/20' 
+                : 'bg-purple-950/40 border-purple-700/70 hover:bg-purple-900/50 text-purple-300'
+            }`}
+            title="Filters"
+          >
+            <SlidersHorizontal size={15} />
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
+          {/* 10. Compact Calendar Popover Trigger Button */}
+          <div className="relative shrink-0" ref={calendarRef}>
             <button
               type="button"
               onClick={() => setIsCalendarOpen(prev => !prev)}
-              className={`p-2.5 rounded-xl text-sm font-medium transition-colors border flex items-center justify-center relative cursor-pointer ${
+              className={`w-9 h-9 rounded-xl text-sm font-medium transition-colors border flex items-center justify-center relative cursor-pointer ${
                 isCalendarOpen || (selectedCalendarDate && selectedCalendarDate !== getTodayDateKey())
                   ? 'bg-purple-950/60 border-purple-500 text-purple-300 font-semibold shadow-md shadow-purple-600/20'
-                  : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-300'
+                  : 'bg-slate-900/90 border-slate-700/80 hover:bg-slate-800 text-slate-300'
               }`}
               title="View batches by date"
             >
-              <Calendar size={17} />
+              <Calendar size={15} />
               {(pendingBatchDateMap.size > 0 || (selectedCalendarDate && selectedCalendarDate !== getTodayDateKey())) && (
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-purple-500 rounded-full ring-2 ring-slate-900" />
+                <span className="absolute -top-1 -right-1 w-2 h-2 bg-purple-500 rounded-full ring-2 ring-slate-900" />
               )}
             </button>
 
@@ -1261,14 +1301,14 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </div>
 
-          {/* Refresh Button */}
+          {/* 11. Refresh Button */}
           <button
             type="button"
             onClick={handleRefresh}
-            className="p-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl transition-colors border border-slate-700 flex items-center justify-center cursor-pointer"
+            className="w-9 h-9 bg-slate-900/90 hover:bg-slate-800 text-slate-300 rounded-xl transition-colors border border-slate-700/80 flex items-center justify-center shrink-0 cursor-pointer"
             title="Refresh"
           >
-            <RefreshCcw size={17} className={(isDispatchLoading || isInfluencersLoading) ? 'animate-spin' : ''} />
+            <RefreshCcw size={15} className={(isDispatchLoading || isInfluencersLoading) ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
@@ -1969,6 +2009,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           }} 
         />
       )}
+
+      {/* Read-only Quick View Influencer Info Modal */}
+      {viewInfluencerTarget && (
+        <InfluencerQuickViewModal
+          influencer={viewInfluencerTarget}
+          campaign={campaign}
+          status={getInfluencerStatus(viewInfluencerTarget)}
+          dispatchRecord={getDispatchData(viewInfluencerTarget)}
+          onClose={() => setViewInfluencerTarget(null)}
+        />
+      )}
     </div>
   );
 
@@ -2443,12 +2494,26 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         </div>
 
-        {/* Right: Influencer Code */}
-        {inf.code && (
-          <span className="px-2.5 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
-            {inf.code}
-          </span>
-        )}
+        {/* Right: Influencer Code + View (eye) Button */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {inf.code && (
+            <span className="px-2.5 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shadow-sm">
+              {inf.code}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setViewInfluencerTarget(inf);
+            }}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-purple-950/60 border border-slate-800/60 hover:border-purple-800/50 transition-all cursor-pointer flex items-center justify-center"
+            title="View Influencer"
+            aria-label="View Influencer"
+          >
+            <Eye size={15} />
+          </button>
+        </div>
       </div>
     );
   }
@@ -2514,13 +2579,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         </div>
 
-        {/* Right: Code + Dispatch CTA + Return Button */}
+        {/* Right: Code + View Info + Dispatch CTA + Return Button */}
         <div className="flex items-center gap-2 shrink-0">
-          {inf.code && (
-            <span className="px-2 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
-              {inf.code}
-            </span>
-          )}
+          <div className="flex items-center gap-1">
+            {inf.code && (
+              <span className="px-2 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
+                {inf.code}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewInfluencerTarget(inf);
+              }}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-purple-950/60 border border-transparent hover:border-purple-800/40 transition-colors cursor-pointer flex items-center justify-center"
+              title="View Influencer"
+              aria-label="View Influencer"
+            >
+              <Eye size={14} />
+            </button>
+          </div>
 
           {isDispatched ? (
             <button
@@ -2605,13 +2684,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         </div>
 
-        {/* Right: Code + View Dispatch Button */}
+        {/* Right: Code + View Info + View Dispatch Button */}
         <div className="flex items-center gap-2 shrink-0">
-          {inf.code && (
-            <span className="px-2 py-1 bg-emerald-950/60 border border-emerald-800/40 text-emerald-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
-              {inf.code}
-            </span>
-          )}
+          <div className="flex items-center gap-1">
+            {inf.code && (
+              <span className="px-2 py-1 bg-emerald-950/60 border border-emerald-800/40 text-emerald-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
+                {inf.code}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewInfluencerTarget(inf);
+              }}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-emerald-950/60 border border-transparent hover:border-emerald-800/40 transition-colors cursor-pointer flex items-center justify-center"
+              title="View Influencer"
+              aria-label="View Influencer"
+            >
+              <Eye size={14} />
+            </button>
+          </div>
 
           <button
             type="button"
@@ -2619,7 +2712,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             className="px-3 py-1.5 bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/60 hover:border-emerald-700 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
             title="View saved dispatch details"
           >
-            <Eye size={14} />
+            <Package size={14} />
             <span>View Dispatch</span>
           </button>
         </div>
