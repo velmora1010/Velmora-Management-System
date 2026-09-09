@@ -528,6 +528,25 @@ export const dispatchBatchService = {
  * Timezone-safe against UTC offset shifts and handles localized date strings.
  */
 export const getBatchLocalDateKey = (batch: { created_at?: string; dispatch_date?: string }): string | null => {
+  // Priority 1: If dispatch_date is explicitly formatted as "DD Mon YYYY" (e.g. "09 Sep 2026")
+  if (batch.dispatch_date) {
+    const parts = batch.dispatch_date.trim().split(/\s+/);
+    if (parts.length === 3) {
+      const day = parts[0].padStart(2, '0');
+      const monthStr = parts[1].toLowerCase().slice(0, 3);
+      const year = parts[2];
+      const months: Record<string, string> = {
+        jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+        jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+      };
+      const month = months[monthStr];
+      if (month && /^\d{4}$/.test(year) && /^\d{2}$/.test(day)) {
+        return `${year}-${month}-${day}`;
+      }
+    }
+  }
+
+  // Priority 2: Use created_at timestamp in local time
   if (batch.created_at) {
     const d = new Date(batch.created_at);
     if (!isNaN(d.getTime())) {
@@ -537,26 +556,18 @@ export const getBatchLocalDateKey = (batch: { created_at?: string; dispatch_date
       return `${year}-${month}-${day}`;
     }
   }
+
+  // Priority 3: Fallback for dispatch_date parsed as standard Date
   if (batch.dispatch_date) {
-    const parts = batch.dispatch_date.trim().split(/\s+/);
-    if (parts.length === 3) {
-      const day = parts[0].padStart(2, '0');
-      const monthStr = parts[1].toLowerCase();
-      const year = parts[2];
-      const months: Record<string, string> = {
-        jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-        jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
-      };
-      const month = months[monthStr.slice(0, 3)];
-      if (month && year) {
-        return `${year}-${month}-${day}`;
-      }
-    }
     const d = new Date(batch.dispatch_date);
     if (!isNaN(d.getTime())) {
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     }
   }
+
   return null;
 };
 
