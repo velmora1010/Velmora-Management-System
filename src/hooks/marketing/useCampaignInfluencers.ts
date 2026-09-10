@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import type { CampaignInfluencer, InfluencerBargainHistory, InfluencerPlatformDetail, InfluencerPostDate } from '../../types';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
+import { dispatchBatchService } from '../../services/dispatchBatchService';
 import toast from 'react-hot-toast';
 
 const MONTH_NAME_MAP: Record<string, number> = {
@@ -1206,6 +1207,16 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       if (error) throw error;
 
       setInfluencers(prev => prev.map(inf => String(inf.id) === String(id) ? { ...inf, is_archived: dbValue } : inf));
+
+      // Clean up batch membership if influencer moved to non-active status
+      if (campaignId && (newStatus === 'recycle_bin' || newStatus === 'other')) {
+        try {
+          await dispatchBatchService.removeInfluencerFromBatches(campaignId, targetId);
+        } catch (batchErr) {
+          console.warn('Failed to prune batch membership on influencer status change:', batchErr);
+        }
+      }
+
       notifyInfluencerChange(campaignId);
 
       const statusLabels: Record<string, string> = {
@@ -1260,6 +1271,15 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       // 2. Delete base influencer info row
       const { error: infoDelErr } = await supabase.from(SUPABASE_TABLES.influencersInfo).delete().eq('id', numericId);
       if (infoDelErr) throw infoDelErr;
+
+      // 3. Clean up batch membership and prune any orphan empty batches
+      if (campaignId) {
+        try {
+          await dispatchBatchService.removeInfluencerFromBatches(campaignId, numericId);
+        } catch (batchErr) {
+          console.warn('Failed to prune batch membership after influencer deletion:', batchErr);
+        }
+      }
 
       await loadInfluencers();
       notifyInfluencerChange(campaignId);

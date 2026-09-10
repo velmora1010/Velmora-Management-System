@@ -254,6 +254,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     loadSavedBatches();
   }, [loadSavedBatches, dispatchRecords]);
 
+  // Reload batches on global influencer update or deletion
+  useEffect(() => {
+    const handleGlobalUpdate = () => {
+      loadSavedBatches();
+    };
+    window.addEventListener('velmora:influencer-updated', handleGlobalUpdate);
+    return () => {
+      window.removeEventListener('velmora:influencer-updated', handleGlobalUpdate);
+    };
+  }, [loadSavedBatches]);
+
   // Sync draft filters when drawer opens
   useEffect(() => {
     if (isFilterDrawerOpen) {
@@ -663,51 +674,52 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   // Batches processed with active-only filter
   const processedBatches = useMemo(() => {
+    // If influencers are still loading and activeInfluencersMap is empty, do NOT treat members as deleted
+    const isStillInitialLoading = (isInfluencersLoading || isDispatchLoading) && activeInfluencersMap.size === 0;
+
     return savedBatches.map(batch => {
       // All members currently active in the campaign
       const allActiveMembersInBatch = batch.members
         .map(m => {
           const found = activeInfluencersMap.get(String(m.influencer_id));
           if (found) return found;
-          // Fallback if activeInfluencersMap is loading or member is in batch
-          return {
-            id: isNaN(Number(m.influencer_id)) ? m.influencer_id : Number(m.influencer_id),
-            campaign_id: isNaN(Number(campaign.id)) ? campaign.id : Number(campaign.id),
-            code: m.influencer_code || '',
-            name: m.creator_name || 'Influencer',
-            influencer_name: m.creator_name || 'Influencer',
-            profile_file_url: m.profile_file_url || '',
-            is_archived: 'false',
-          } as CampaignInfluencer;
+          // During initial loading only, retain temporary shell so UI doesn't flicker/prune prematurely
+          if (isStillInitialLoading) {
+            return {
+              id: isNaN(Number(m.influencer_id)) ? m.influencer_id : Number(m.influencer_id),
+              campaign_id: isNaN(Number(campaign.id)) ? campaign.id : Number(campaign.id),
+              code: m.influencer_code || '',
+              name: m.creator_name || 'Influencer',
+              influencer_name: m.creator_name || 'Influencer',
+              profile_file_url: m.profile_file_url || '',
+              is_archived: 'false',
+            } as CampaignInfluencer;
+          }
+          // Authoritative loaded state: member does not exist in active influencers list (deleted)
+          return null;
         })
-        .filter((inf): inf is CampaignInfluencer => Boolean(inf) && isActiveStatus(inf.is_archived));
+        .filter((inf): inf is CampaignInfluencer => inf !== null && inf !== undefined && isActiveStatus(inf.is_archived));
 
       // Filtered active members matching search / filters
       const activeMembers = allActiveMembersInBatch.filter(matchesFilterCriteria);
 
       const totalMembers = allActiveMembersInBatch.length;
 
-      // An influencer is confirmed dispatched if:
-      // 1. The batch status is 'Dispatched'
-      // 2. The member's status in batch.members is 'Dispatched'
-      // 3. Or DB dispatch record has 'dispatched' or 'tracking'
+      // An influencer is confirmed dispatched strictly if they have a confirmed dispatched/tracking record
       const dispatchedInBatch = allActiveMembersInBatch.filter(inf => {
-        if (batch.status === 'Dispatched' || String(batch.status).trim().toLowerCase() === 'dispatched') {
-          return true;
-        }
-        const m = batch.members.find(bm => String(bm.influencer_id) === String(inf.id));
-        if (m && (m.dispatch_status === 'Dispatched' || String(m.dispatch_status).trim().toLowerCase() === 'dispatched')) {
-          return true;
-        }
         return isInfluencerDispatched(inf, dispatchRecords);
       }).length;
 
-      // Fully dispatched when batch.status is Dispatched OR all active members are dispatched
-      const isBatchDispatched = (batch.status === 'Dispatched' || String(batch.status).trim().toLowerCase() === 'dispatched') || 
-        (totalMembers > 0 && dispatchedInBatch === totalMembers);
+      // A batch is considered Dispatched ONLY if it has at least 1 valid member and either:
+      // 1. All valid members are confirmed dispatched
+      // 2. Or batch status is 'Dispatched' AND at least 1 confirmed dispatched member exists
+      const isBatchDispatched = totalMembers > 0 && (
+        (dispatchedInBatch === totalMembers) ||
+        ((batch.status === 'Dispatched' || String(batch.status).trim().toLowerCase() === 'dispatched') && dispatchedInBatch > 0)
+      );
 
       // Pending action required ONLY while batch is NOT fully dispatched and has pending members
-      const isPendingAction = !isBatchDispatched && (totalMembers - dispatchedInBatch > 0);
+      const isPendingAction = !isBatchDispatched && totalMembers > 0 && (totalMembers - dispatchedInBatch > 0);
       const pendingCount = isBatchDispatched ? 0 : Math.max(0, totalMembers - dispatchedInBatch);
       const dispatchPercentage = totalMembers > 0 ? Math.round((dispatchedInBatch / totalMembers) * 100) : 0;
 
@@ -762,28 +774,41 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       if (timeB !== timeA) return timeB - timeA;
       return b.batch.batch_name.localeCompare(a.batch.batch_name);
     });
-  }, [savedBatches, activeInfluencersMap, matchesFilterCriteria, dispatchRecords, campaign.id]);
+  }, [savedBatches, activeInfluencersMap, matchesFilterCriteria, dispatchRecords, campaign.id, isInfluencersLoading, isDispatchLoading]);
 
   // 1. Prepare Dispatch Batches: ONLY batches with pending action (undispatched active influencers).
   // When 100% dispatched, the batch is removed from Prepare Dispatch.
   const prepareDispatchBatches = useMemo(() => {
-    return processedBatches.filter(b => b.isPendingAction);
+    return processedBatches.filter(b => b.isPendingAction && b.totalMembers > 0);
   }, [processedBatches]);
 
-  // 2. Dispatched Batches: ONLY batches with confirmed dispatched active influencers or Dispatched status.
+  // 2. Dispatched Batches: ONLY batches with confirmed dispatched active influencers (dispatchedInBatch > 0).
+  // When all dispatched members belonging to a batch are deleted/removed (0 remain), the batch completely disappears.
   const dispatchedBatches = useMemo(() => {
-    return processedBatches.filter(b => b.isBatchDispatched || b.dispatchedInBatch > 0);
-  }, [processedBatches]);
+    return processedBatches.filter(b => {
+      // Must have at least 1 valid dispatched influencer
+      if (b.dispatchedInBatch <= 0) return false;
+
+      // If filters or search applied, filter by matching criteria
+      const hasFilter = searchTerm.trim() !== '' || activeFilterCount > 0;
+      if (hasFilter) {
+        const matchingDispatched = b.activeMembers.filter(inf => isInfluencerDispatched(inf, dispatchRecords));
+        const matchesBatchName = searchTerm.trim() !== '' && b.batch.batch_name.toLowerCase().includes(searchTerm.trim().toLowerCase());
+        return matchingDispatched.length > 0 || matchesBatchName;
+      }
+      return true;
+    });
+  }, [processedBatches, searchTerm, activeFilterCount, dispatchRecords]);
 
   // Total pending influencers waiting in Prepare Dispatch batches
   const totalPendingInPrepareBatches = useMemo(() => {
     return prepareDispatchInfluencers.length;
   }, [prepareDispatchInfluencers]);
 
-  // Total dispatched influencers in Dispatched batches
+  // Total dispatched influencers in Dispatched batches (matches actual valid dispatched members across batches)
   const totalDispatchedInBatches = useMemo(() => {
-    return dispatchedInfluencers.length;
-  }, [dispatchedInfluencers]);
+    return dispatchedBatches.reduce((acc, b) => acc + b.dispatchedInBatch, 0);
+  }, [dispatchedBatches]);
 
   // Map of local date string (YYYY-MM-DD) -> Pending Prepare Dispatch Batches created on that date
   const pendingBatchDateMap = useMemo(() => {

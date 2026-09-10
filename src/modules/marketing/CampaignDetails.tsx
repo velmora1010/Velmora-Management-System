@@ -512,7 +512,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           onSuccess={() => {
             setDispatchingInfluencer(null);
             refresh();
-            setCurrentView('dispatched-list');
+            handleViewChange('dispatched-list');
           }} 
         />
       )}

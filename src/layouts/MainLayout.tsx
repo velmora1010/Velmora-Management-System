@@ -6,6 +6,7 @@ import { ThemeToggle } from '../components/ui/ThemeToggle';
 import { NotificationCenter } from '../components/notifications/NotificationCenter';
 import { useAuth } from '../hooks/useAuth';
 import { getNavigationState, saveNavigationState, saveDepartmentNavigation, clearNavigationState } from '../utils/navigationPersistence';
+import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 
 const SWITCHABLE_ACCOUNTS = [

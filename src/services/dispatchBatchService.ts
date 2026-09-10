@@ -108,217 +108,301 @@ export const dispatchBatchService = {
       return rawBatches;
     }
 
-    // 3. Authoritative Reconciliation with Supabase influencer_dispatch_details_rows
+    // 3. Authoritative Reconciliation with Supabase tables strictly scoped to campaignId
     try {
       const numericCampaignId = isNaN(Number(cId)) ? cId : Number(cId);
+
+      // Collect all member IDs currently in rawBatches to perform targeted verification
+      const allBatchMemberIds = Array.from(new Set(
+        rawBatches.flatMap(b => (b.members || []).map(m => String(m.influencer_id)))
+      )).filter(Boolean);
+
+      // 1. Fetch dispatch rows strictly for this campaign
       const { data: dispatchRows, error: dispatchErr } = await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
         .select('id, influencer_id, campaign_id, creator_name, dispatch_status, dispatch_date, created_at')
         .eq('campaign_id', numericCampaignId);
 
-      if (!dispatchErr && dispatchRows) {
-        let hasChanges = false;
-        
-        // Build map of current dispatch statuses in DB
-        const dbStatusMap = new Map<string, string>();
-        const prepareDispatchRows: typeof dispatchRows = [];
-        
-        dispatchRows.forEach(r => {
-          const infIdStr = String(r.influencer_id);
-          const st = (r.dispatch_status || '').trim().toLowerCase();
-          dbStatusMap.set(infIdStr, st);
-          if (st === 'prepare_dispatch' || st === 'ready to dispatch') {
-            prepareDispatchRows.push(r);
+      // 2. Fetch active influencer info strictly for this campaign
+      const { data: activeInfRows, error: infErr } = await supabase
+        .from(SUPABASE_TABLES.influencersInfo)
+        .select('id, code, name, influencer_name, is_archived, campaign_id')
+        .eq('campaign_id', numericCampaignId);
+
+      // SAFETY CHECK: If either primary query failed, returned null, or errored, DO NOT PRUNE!
+      // This guarantees zero false pruning during network errors, timeouts, or partial loading.
+      if (dispatchErr || infErr || !dispatchRows || !activeInfRows) {
+        console.warn('Batch reconciliation aborted: Supabase query failed or returned incomplete data', { dispatchErr, infErr });
+        return rawBatches;
+      }
+
+      // 3. TARGETED VERIFICATION FOR BATCH MEMBERS:
+      // Directly verify member IDs with targeted IN query so pagination/limits never cause false positives
+      const verifiedExistingInfIdSet = new Set<string>();
+      if (allBatchMemberIds.length > 0) {
+        const numericMemberIds = allBatchMemberIds.map(id => isNaN(Number(id)) ? id : Number(id));
+        const { data: targetedInfs, error: targetedInfErr } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, is_archived')
+          .eq('campaign_id', numericCampaignId)
+          .in('id', numericMemberIds);
+
+        // SAFETY CHECK: If targeted member verification query fails, abort pruning!
+        if (targetedInfErr || !targetedInfs) {
+          console.warn('Batch reconciliation aborted: Targeted member verification query failed', targetedInfErr);
+          return rawBatches;
+        }
+
+        targetedInfs.forEach(inf => {
+          if (isActiveStatus(inf.is_archived)) {
+            verifiedExistingInfIdSet.add(String(inf.id));
           }
         });
+      }
 
-        // Track which influencer IDs already exist in rawBatches
-        const batchedIdSet = new Set<string>();
-        
-        // A. Clean up existing batches based on DB status
-        const cleanedBatches = rawBatches.map(b => {
-          const originalMemberCount = b.members.length;
-          const validMembers = b.members.filter(m => {
-            const dbStatus = dbStatusMap.get(String(m.influencer_id));
-            // If DB explicitly marks them as pending, they were returned to logistics
-            if (dbStatus === 'pending') {
+      // Also register all general active campaign influencers
+      activeInfRows.forEach(inf => {
+        if (isActiveStatus(inf.is_archived)) {
+          verifiedExistingInfIdSet.add(String(inf.id));
+        }
+      });
+
+      let hasChanges = false;
+      
+      // Build map of current dispatch statuses in DB strictly for this campaign
+      const dbStatusMap = new Map<string, string>();
+      const prepareDispatchRows: typeof dispatchRows = [];
+      
+      dispatchRows.forEach(r => {
+        const infIdStr = String(r.influencer_id);
+        const st = (r.dispatch_status || '').trim().toLowerCase();
+        dbStatusMap.set(infIdStr, st);
+        if (st === 'prepare_dispatch' || st === 'ready to dispatch') {
+          prepareDispatchRows.push(r);
+        }
+      });
+
+      // Track which influencer IDs already exist in rawBatches
+      const batchedIdSet = new Set<string>();
+      
+      // A. Clean up existing batches based on verified DB status
+      const cleanedBatches = rawBatches.map(b => {
+        const originalMemberCount = b.members.length;
+        const isDispatchedBatch = b.status === 'Dispatched' || String(b.status).trim().toLowerCase() === 'dispatched';
+
+        const validMembers = b.members.filter(m => {
+          const infIdStr = String(m.influencer_id);
+
+          // 1. Must exist in verified active campaign influencers (not deleted or archived)
+          if (!verifiedExistingInfIdSet.has(infIdStr)) {
+            hasChanges = true;
+            return false;
+          }
+
+          const dbStatus = dbStatusMap.get(infIdStr);
+
+          // 2. If DB explicitly marks them as pending, they were returned to logistics
+          if (dbStatus === 'pending') {
+            hasChanges = true;
+            return false;
+          }
+
+          // 3. If batch is 'Dispatched', member MUST have an actual dispatched/tracking record
+          if (isDispatchedBatch) {
+            if (!dbStatus || (dbStatus !== 'dispatched' && dbStatus !== 'tracking')) {
               hasChanges = true;
               return false;
             }
-            return true;
-          }).map(m => {
-            const dbStatus = dbStatusMap.get(String(m.influencer_id));
-            if ((dbStatus === 'dispatched' || dbStatus === 'tracking') && m.dispatch_status !== 'Dispatched') {
+          }
+
+          // 4. If batch is Preparing/Pending, member must have prepare_dispatch or ready to dispatch
+          if (!isDispatchedBatch) {
+            if (!dbStatus) {
+              // Dispatch record was deleted
               hasChanges = true;
-              return { ...m, dispatch_status: 'Dispatched' as BatchStatus };
-            }
-            return m;
-          });
-
-          if (validMembers.length !== originalMemberCount) {
-            hasChanges = true;
-          }
-
-          validMembers.forEach(m => batchedIdSet.add(String(m.influencer_id)));
-
-          const allDispatched = validMembers.length > 0 && validMembers.every(m => m.dispatch_status === 'Dispatched');
-          let dispatchedDate = b.dispatched_date;
-          let dispatchedTime = b.dispatched_time;
-          let dispatchedAt = b.dispatched_at;
-
-          if (allDispatched && (!dispatchedDate || !dispatchedTime)) {
-            const memberDates = validMembers.map(m => {
-              const r = dispatchRows.find(dr => String(dr.influencer_id) === String(m.influencer_id));
-              return r?.dispatch_date || r?.created_at;
-            }).filter(Boolean);
-            const refDate = memberDates[0] || b.updated_at || new Date();
-            const formatted = formatBatchDateTime(refDate);
-            dispatchedDate = formatted.displayDate;
-            dispatchedTime = formatted.displayTime;
-            dispatchedAt = new Date(refDate).toISOString();
-            hasChanges = true;
-          }
-
-          if (allDispatched && b.status !== 'Dispatched') {
-            hasChanges = true;
-          }
-
-          return {
-            ...b,
-            status: allDispatched ? ('Dispatched' as BatchStatus) : b.status,
-            dispatched_at: dispatchedAt,
-            dispatched_date: dispatchedDate,
-            dispatched_time: dispatchedTime,
-            members: validMembers
-          };
-        }).filter(b => b.members.length > 0);
-
-        if (cleanedBatches.length !== rawBatches.length) {
-          hasChanges = true;
-        }
-        rawBatches = cleanedBatches;
-
-        // B. Check for unbatched influencers with 'prepare_dispatch' in DB
-        const unbatched = prepareDispatchRows.filter(r => !batchedIdSet.has(String(r.influencer_id)));
-
-        if (unbatched.length > 0) {
-          hasChanges = true;
-          
-          // Fetch influencer details from influencers_info_rows
-          const unbatchedIds = unbatched.map(u => isNaN(Number(u.influencer_id)) ? u.influencer_id : Number(u.influencer_id));
-          const { data: infDetails } = await supabase
-            .from(SUPABASE_TABLES.influencersInfo)
-            .select('id, code, name, influencer_name, profile_file_url, is_archived')
-            .in('id', unbatchedIds);
-
-          const infMap = new Map<string, any>();
-          (infDetails || []).forEach(inf => infMap.set(String(inf.id), inf));
-
-          // Find current max batch number to ensure sequential numbering
-          let maxNum = 0;
-          for (const b of rawBatches) {
-            const match = (b.batch_name || '').match(/BATCH-(\d+)/i);
-            if (match) {
-              const n = parseInt(match[1], 10);
-              if (!isNaN(n) && n > maxNum) maxNum = n;
+              return false;
             }
           }
 
-          const nextBatchNumber = maxNum + 1;
-          const batchCode = `BATCH-${String(nextBatchNumber).padStart(3, '0')}`;
-          const firstRow = unbatched[0];
-          const { displayDate, displayTime } = formatBatchDateTime(firstRow.created_at || firstRow.dispatch_date || new Date());
-
-          const synthesizedBatch: DispatchBatch = {
-            id: `batch-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-            campaign_id: cId,
-            batch_name: batchCode,
-            dispatch_date: displayDate,
-            dispatch_time: displayTime,
-            status: 'Preparing',
-            created_at: firstRow.created_at || new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            created_by: 'Admin',
-            members: unbatched.map(u => {
-              const inf = infMap.get(String(u.influencer_id));
-              return {
-                influencer_id: String(u.influencer_id),
-                influencer_code: inf?.code || '',
-                creator_name: inf?.name || inf?.influencer_name || u.creator_name || 'Influencer',
-                profile_file_url: inf?.profile_file_url || '',
-                dispatch_status: 'Pending' as BatchStatus
-              };
-            })
-          };
-
-          rawBatches.push(synthesizedBatch);
-        }
-
-        // C. Check for unbatched influencers with 'dispatched' or 'tracking' in DB
-        const unbatchedDispatched = dispatchRows.filter(r => {
-          const st = (r.dispatch_status || '').trim().toLowerCase();
-          return (st === 'dispatched' || st === 'tracking') && !batchedIdSet.has(String(r.influencer_id));
+          return true;
+        }).map(m => {
+          const infIdStr = String(m.influencer_id);
+          const dbStatus = dbStatusMap.get(infIdStr);
+          if ((dbStatus === 'dispatched' || dbStatus === 'tracking') && m.dispatch_status !== 'Dispatched') {
+            hasChanges = true;
+            return { ...m, dispatch_status: 'Dispatched' as BatchStatus };
+          }
+          return m;
         });
 
-        if (unbatchedDispatched.length > 0) {
+        if (validMembers.length !== originalMemberCount) {
           hasChanges = true;
+        }
 
-          const unbatchedIds = unbatchedDispatched.map(u => isNaN(Number(u.influencer_id)) ? u.influencer_id : Number(u.influencer_id));
-          const { data: infDetails } = await supabase
-            .from(SUPABASE_TABLES.influencersInfo)
-            .select('id, code, name, influencer_name, profile_file_url, is_archived')
-            .in('id', unbatchedIds);
+        validMembers.forEach(m => batchedIdSet.add(String(m.influencer_id)));
 
-          const infMap = new Map<string, any>();
-          (infDetails || []).forEach(inf => infMap.set(String(inf.id), inf));
+        const allDispatched = validMembers.length > 0 && validMembers.every(m => m.dispatch_status === 'Dispatched');
+        let dispatchedDate = b.dispatched_date;
+        let dispatchedTime = b.dispatched_time;
+        let dispatchedAt = b.dispatched_at;
 
-          let maxNum = 0;
-          for (const b of rawBatches) {
-            const match = (b.batch_name || '').match(/BATCH-(\d+)/i);
-            if (match) {
-              const n = parseInt(match[1], 10);
-              if (!isNaN(n) && n > maxNum) maxNum = n;
-            }
+        if (allDispatched && (!dispatchedDate || !dispatchedTime)) {
+          const memberDates = validMembers.map(m => {
+            const r = dispatchRows.find(dr => String(dr.influencer_id) === String(m.influencer_id));
+            return r?.dispatch_date || r?.created_at;
+          }).filter(Boolean);
+          const refDate = memberDates[0] || b.updated_at || new Date();
+          const formatted = formatBatchDateTime(refDate);
+          dispatchedDate = formatted.displayDate;
+          dispatchedTime = formatted.displayTime;
+          dispatchedAt = new Date(refDate).toISOString();
+          hasChanges = true;
+        }
+
+        if (allDispatched && b.status !== 'Dispatched') {
+          hasChanges = true;
+        }
+
+        return {
+          ...b,
+          status: allDispatched ? ('Dispatched' as BatchStatus) : b.status,
+          dispatched_at: dispatchedAt,
+          dispatched_date: dispatchedDate,
+          dispatched_time: dispatchedTime,
+          members: validMembers
+        };
+      }).filter(b => b.members.length > 0); // Drop any batch where all members were deleted/removed!
+
+      if (cleanedBatches.length !== rawBatches.length) {
+        hasChanges = true;
+      }
+      rawBatches = cleanedBatches;
+
+      // B. Check for unbatched influencers with 'prepare_dispatch' in DB
+      const unbatched = prepareDispatchRows.filter(r => 
+        !batchedIdSet.has(String(r.influencer_id)) && 
+        verifiedExistingInfIdSet.has(String(r.influencer_id))
+      );
+
+      if (unbatched.length > 0) {
+        hasChanges = true;
+        
+        // Fetch influencer details from influencers_info_rows
+        const unbatchedIds = unbatched.map(u => isNaN(Number(u.influencer_id)) ? u.influencer_id : Number(u.influencer_id));
+        const { data: infDetails } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, code, name, influencer_name, profile_file_url, is_archived')
+          .in('id', unbatchedIds);
+
+        const infMap = new Map<string, any>();
+        (infDetails || []).forEach(inf => infMap.set(String(inf.id), inf));
+
+        // Find current max batch number to ensure sequential numbering
+        let maxNum = 0;
+        for (const b of rawBatches) {
+          const match = (b.batch_name || '').match(/BATCH-(\d+)/i);
+          if (match) {
+            const n = parseInt(match[1], 10);
+            if (!isNaN(n) && n > maxNum) maxNum = n;
           }
-
-          const nextBatchNumber = maxNum + 1;
-          const batchCode = `BATCH-${String(nextBatchNumber).padStart(3, '0')}`;
-          const firstRow = unbatchedDispatched[0];
-          const createdDT = formatBatchDateTime(firstRow.created_at || firstRow.dispatch_date || new Date());
-          const dispatchedDT = formatBatchDateTime(firstRow.dispatch_date || firstRow.created_at || new Date());
-
-          const synthesizedDispatchedBatch: DispatchBatch = {
-            id: `batch-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-            campaign_id: cId,
-            batch_name: batchCode,
-            dispatch_date: createdDT.displayDate,
-            dispatch_time: createdDT.displayTime,
-            status: 'Dispatched',
-            dispatched_at: firstRow.created_at || new Date().toISOString(),
-            dispatched_date: dispatchedDT.displayDate,
-            dispatched_time: dispatchedDT.displayTime,
-            created_at: firstRow.created_at || new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            created_by: 'Admin',
-            members: unbatchedDispatched.map(u => {
-              const inf = infMap.get(String(u.influencer_id));
-              return {
-                influencer_id: String(u.influencer_id),
-                influencer_code: inf?.code || '',
-                creator_name: inf?.name || inf?.influencer_name || u.creator_name || 'Influencer',
-                profile_file_url: inf?.profile_file_url || '',
-                dispatch_status: 'Dispatched' as BatchStatus
-              };
-            })
-          };
-
-          rawBatches.push(synthesizedDispatchedBatch);
         }
 
-        // D. If changes occurred during reconciliation, persist them immediately
-        if (hasChanges) {
-          await this.saveBatches(campaignId, rawBatches);
+        const nextBatchNumber = maxNum + 1;
+        const batchCode = `BATCH-${String(nextBatchNumber).padStart(3, '0')}`;
+        const firstRow = unbatched[0];
+        const { displayDate, displayTime } = formatBatchDateTime(firstRow.created_at || firstRow.dispatch_date || new Date());
+
+        const synthesizedBatch: DispatchBatch = {
+          id: `batch-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+          campaign_id: cId,
+          batch_name: batchCode,
+          dispatch_date: displayDate,
+          dispatch_time: displayTime,
+          status: 'Preparing',
+          created_at: firstRow.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          created_by: 'Admin',
+          members: unbatched.map(u => {
+            const inf = infMap.get(String(u.influencer_id));
+            return {
+              influencer_id: String(u.influencer_id),
+              influencer_code: inf?.code || '',
+              creator_name: inf?.name || inf?.influencer_name || u.creator_name || 'Influencer',
+              profile_file_url: inf?.profile_file_url || '',
+              dispatch_status: 'Pending' as BatchStatus
+            };
+          })
+        };
+
+        rawBatches.push(synthesizedBatch);
+      }
+
+      // C. Check for unbatched influencers with 'dispatched' or 'tracking' in DB
+      const unbatchedDispatched = dispatchRows.filter(r => {
+        const st = (r.dispatch_status || '').trim().toLowerCase();
+        return (st === 'dispatched' || st === 'tracking') && 
+          !batchedIdSet.has(String(r.influencer_id)) &&
+          verifiedExistingInfIdSet.has(String(r.influencer_id));
+      });
+
+      if (unbatchedDispatched.length > 0) {
+        hasChanges = true;
+
+        const unbatchedIds = unbatchedDispatched.map(u => isNaN(Number(u.influencer_id)) ? u.influencer_id : Number(u.influencer_id));
+        const { data: infDetails } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, code, name, influencer_name, profile_file_url, is_archived')
+          .in('id', unbatchedIds);
+
+        const infMap = new Map<string, any>();
+        (infDetails || []).forEach(inf => infMap.set(String(inf.id), inf));
+
+        let maxNum = 0;
+        for (const b of rawBatches) {
+          const match = (b.batch_name || '').match(/BATCH-(\d+)/i);
+          if (match) {
+            const n = parseInt(match[1], 10);
+            if (!isNaN(n) && n > maxNum) maxNum = n;
+          }
         }
+
+        const nextBatchNumber = maxNum + 1;
+        const batchCode = `BATCH-${String(nextBatchNumber).padStart(3, '0')}`;
+        const firstRow = unbatchedDispatched[0];
+        const createdDT = formatBatchDateTime(firstRow.created_at || firstRow.dispatch_date || new Date());
+        const dispatchedDT = formatBatchDateTime(firstRow.dispatch_date || firstRow.created_at || new Date());
+
+        const synthesizedDispatchedBatch: DispatchBatch = {
+          id: `batch-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+          campaign_id: cId,
+          batch_name: batchCode,
+          dispatch_date: createdDT.displayDate,
+          dispatch_time: createdDT.displayTime,
+          status: 'Dispatched',
+          dispatched_at: firstRow.created_at || new Date().toISOString(),
+          dispatched_date: dispatchedDT.displayDate,
+          dispatched_time: dispatchedDT.displayTime,
+          created_at: firstRow.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          created_by: 'Admin',
+          members: unbatchedDispatched.map(u => {
+            const inf = infMap.get(String(u.influencer_id));
+            return {
+              influencer_id: String(u.influencer_id),
+              influencer_code: inf?.code || '',
+              creator_name: inf?.name || inf?.influencer_name || u.creator_name || 'Influencer',
+              profile_file_url: inf?.profile_file_url || '',
+              dispatch_status: 'Dispatched' as BatchStatus
+            };
+          })
+        };
+
+        rawBatches.push(synthesizedDispatchedBatch);
+      }
+
+      // D. If verified changes occurred during reconciliation, persist them immediately
+      if (hasChanges) {
+        await this.saveBatches(campaignId, rawBatches);
       }
     } catch (reconcileErr) {
       console.warn('Error during batch reconciliation with Supabase dispatch records:', reconcileErr);
@@ -489,6 +573,44 @@ export const dispatchBatchService = {
       `Batch "${updatedBatch.batch_name}" with ${updatedBatch.members.length} influencers was dispatched on ${updatedBatch.dispatch_date} at ${updatedBatch.dispatch_time}.`
     );
 
+    return updatedBatches;
+  },
+
+  /**
+   * Removes an influencer from all batches for a campaign and prunes any empty batches.
+   * Persists immediately to Supabase system_settings and localStorage.
+   * Strictly scoped to campaignId.
+   */
+  async removeInfluencerFromBatches(
+    campaignId: string | number,
+    influencerId: string | number
+  ): Promise<DispatchBatch[]> {
+    const cId = String(campaignId);
+    const targetInfId = String(influencerId);
+    
+    // Load current batches with skipReconcile to operate directly on existing stored state
+    const existingBatches = await this.getBatches(cId, { skipReconcile: true });
+    let hasChanges = false;
+    
+    const updatedBatches = existingBatches.map(b => {
+      const origCount = b.members.length;
+      const filtered = b.members.filter(m => String(m.influencer_id) !== targetInfId);
+      if (filtered.length !== origCount) {
+        hasChanges = true;
+      }
+      return {
+        ...b,
+        members: filtered
+      };
+    }).filter(b => b.members.length > 0); // Completely prune batches that now have 0 members
+
+    if (updatedBatches.length !== existingBatches.length) {
+      hasChanges = true;
+    }
+
+    if (hasChanges) {
+      await this.saveBatches(cId, updatedBatches);
+    }
     return updatedBatches;
   },
 
