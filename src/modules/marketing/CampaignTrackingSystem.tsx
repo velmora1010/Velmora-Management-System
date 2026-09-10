@@ -42,9 +42,12 @@ import {
   SlidersHorizontal,
   Info,
   History,
-  Target
+  Target,
+  Upload,
+  ChevronDown
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { UploadCourierShipmentModal } from '../../components/marketing/UploadCourierShipmentModal';
 
 interface CampaignTrackingSystemProps {
   campaign: Campaign;
@@ -53,6 +56,7 @@ interface CampaignTrackingSystemProps {
   savedBatches: DispatchBatch[];
   onBackToDispatched: () => void;
   onRefreshData?: () => Promise<void>;
+  allActiveInfluencers?: CampaignInfluencer[];
 }
 
 const STATUS_PILLS: TrackingStatusCategory[] = [
@@ -86,7 +90,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   dispatchRecords,
   savedBatches,
   onBackToDispatched,
-  onRefreshData
+  onRefreshData,
+  allActiveInfluencers
 }) => {
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
@@ -95,6 +100,27 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [selectedStatusDropdown, setSelectedStatusDropdown] = useState('All');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  // Upload Dropdown & Modal State
+  const uploadDropdownRef = useRef<HTMLDivElement>(null);
+  const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false);
+  const [selectedUploadCourier, setSelectedUploadCourier] = useState<'ST Courier' | 'Delhivery'>('ST Courier');
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+
+  // Close upload dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (uploadDropdownRef.current && !uploadDropdownRef.current.contains(event.target as Node)) {
+        setIsUploadDropdownOpen(false);
+      }
+    };
+    if (isUploadDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isUploadDropdownOpen]);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -724,29 +750,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     toast.success('Applied filter from Tracking Assistant!');
   };
 
-  // Render Empty State if no shipments at all in this campaign
-  if (allShipments.length === 0) {
-    return (
-      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-12 text-center text-slate-400 animate-fade-in">
-        <div className="w-16 h-16 rounded-2xl bg-purple-950/40 border border-purple-800/50 flex items-center justify-center text-purple-400 mx-auto mb-4 shadow-sm">
-          <Truck size={32} />
-        </div>
-        <h3 className="text-lg font-bold text-slate-100 mb-1">No Shipments to Track</h3>
-        <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
-          No dispatched influencer shipments are available for tracking in this campaign yet.
-        </p>
-        <button
-          type="button"
-          onClick={onBackToDispatched}
-          className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all inline-flex items-center gap-2 cursor-pointer"
-        >
-          <ArrowLeft size={15} />
-          <span>Back to Dispatched</span>
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4 animate-fade-in">
       {/* 1. TOP HEADER */}
@@ -777,15 +780,69 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           </div>
         </div>
 
-        {/* Right: Auto Sync All + Last Sync */}
-        <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+        {/* Right: Upload + Auto Sync All + Last Sync */}
+        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 self-end sm:self-auto flex-wrap sm:flex-nowrap">
+          {/* Upload Dropdown [Upload ▼] */}
+          <div className="relative shrink-0" ref={uploadDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsUploadDropdownOpen(prev => !prev)}
+              className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer border-0 outline-none focus:outline-none shrink-0"
+              title="Upload Shipments"
+            >
+              <Upload size={13} />
+              <span>Upload</span>
+              <ChevronDown size={12} className={`transition-transform duration-200 ${isUploadDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isUploadDropdownOpen && (
+              <div className="absolute right-0 mt-1.5 w-64 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
+                    setSelectedUploadCourier('ST Courier');
+                    setIsUploadModalOpen(true);
+                  }}
+                  className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer"
+                >
+                  <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
+                    <Upload size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for ST Courier</div>
+                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for ST Courier</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
+                    setSelectedUploadCourier('Delhivery');
+                    setIsUploadModalOpen(true);
+                  }}
+                  className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer mt-1"
+                >
+                  <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
+                    <Upload size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for Delhivery</div>
+                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for Delhivery</div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={handleAutoSyncAll}
             disabled={isBulkSyncing}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 transition-all flex items-center gap-2 cursor-pointer shrink-0"
+            className="px-3.5 py-2 bg-[#141b2d] hover:bg-[#1c263f] text-slate-200 border border-slate-700/80 hover:border-purple-500/50 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
           >
-            <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin' : ''} />
+            <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : 'text-purple-400'} />
             <span>{isBulkSyncing ? 'Syncing...' : 'Auto Sync All'}</span>
           </button>
 
@@ -795,6 +852,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           </div>
         </div>
       </div>
+
+      {allShipments.length === 0 ? (
+        <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-12 text-center text-slate-400 animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-purple-950/40 border border-purple-800/50 flex items-center justify-center text-purple-400 mx-auto mb-4 shadow-sm">
+            <Truck size={32} />
+          </div>
+          <h3 className="text-lg font-bold text-slate-100 mb-1">No Shipments Tracked Yet</h3>
+          <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
+            Upload courier shipments above or dispatch influencers to begin tracking.
+          </p>
+        </div>
+      ) : (
+        <>
 
       {/* 2. 9 SHIPMENT KPI CARDS (Matching Reference Screenshot) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-9 gap-2.5">
@@ -1578,6 +1648,23 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Upload for Courier Shipments Modal (ST Courier or Delhivery) */}
+      {isUploadModalOpen && (
+        <UploadCourierShipmentModal
+          campaign={campaign}
+          courier={selectedUploadCourier}
+          influencers={allActiveInfluencers || dispatchedInfluencers}
+          onClose={() => setIsUploadModalOpen(false)}
+          onSuccess={async () => {
+            if (onRefreshData) {
+              await onRefreshData();
+            }
+          }}
+        />
+      )}
+        </>
       )}
     </div>
   );
