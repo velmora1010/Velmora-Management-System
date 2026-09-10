@@ -983,7 +983,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     <div className="space-y-6 animate-fade-in text-slate-200">
       {/* Header Container - Single Horizontal Status & Action Toolbar (Strictly 1 Row) */}
       <div className="bg-[#0c1424] px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-700/80 shadow-lg shadow-purple-950/20 flex items-center justify-between gap-1.5 sm:gap-2 w-full min-w-0">
-        {/* GROUP 1: [Back] [Active] [Pending] [Dispatched] [Tracking System] */}
+        {/* GROUP 1: [Back] [Active] [Pending] [Dispatched] */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
           {/* 1. Back Button */}
           <button 
@@ -1035,7 +1035,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             <strong className="text-white font-bold">{pendingCount}</strong>
           </div>
 
-          {/* 4. Dispatched */}
+          {/* 4. Dispatched (First Dispatched) */}
           <button
             type="button"
             onClick={() => {
@@ -1046,62 +1046,24 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setDispatchedSubView('batches');
               }
             }}
-            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer select-none ${
               currentTab === 'dispatched' && dispatchedSubView === 'batches'
-                ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30'
-                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
+                ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-600/70 shadow-sm'
+                : 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-950/60'
             }`}
-            title="Dispatched Batches"
+            title="Dispatched"
           >
-            <Check size={14} className={currentTab === 'dispatched' && dispatchedSubView === 'batches' ? 'text-white' : 'text-emerald-400'} />
+            <Check size={13} className="text-emerald-400 shrink-0" />
             <span>Dispatched</span>
-            {dispatchedInfluencers.length > 0 && (
-              <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.2 ${
-                currentTab === 'dispatched' && dispatchedSubView === 'batches'
-                  ? 'bg-emerald-950 text-white border border-emerald-400/30 shadow-inner'
-                  : 'bg-emerald-950/90 text-emerald-300 border border-emerald-800/60'
-              }`}>
-                {dispatchedInfluencers.length}
-              </span>
-            )}
-          </button>
-
-          {/* 5. Tracking System */}
-          <button
-            type="button"
-            onClick={() => {
-              if (currentTab === 'dispatched' && dispatchedSubView === 'tracking') {
-                setDispatchedSubView('batches');
-              } else {
-                setCurrentTab('dispatched');
-                setDispatchedSubView('tracking');
-              }
-            }}
-            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
-              currentTab === 'dispatched' && dispatchedSubView === 'tracking'
-                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
-            }`}
-            title="Shipment Tracking System"
-          >
-            <Truck size={14} className={currentTab === 'dispatched' && dispatchedSubView === 'tracking' ? 'text-white' : 'text-purple-400'} />
-            <span>Tracking System</span>
-            <span className={`text-[9px] font-extrabold uppercase px-1 py-0.2 rounded leading-none ${
-              currentTab === 'dispatched' && dispatchedSubView === 'tracking'
-                ? 'bg-purple-950 text-purple-200 border border-purple-400/40 shadow-inner'
-                : 'bg-purple-950/90 text-purple-300 border border-purple-800/60'
-            }`}>
-              NEW
-            </span>
           </button>
         </div>
 
         {/* Divider between Group 1 and Group 2 */}
         <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0 hidden md:block" />
 
-        {/* GROUP 2: [Bulk Select] [Prepare Dispatch] */}
+        {/* GROUP 2: [Bulk Select] [Prepare Dispatch] [Dispatched] [Tracking System] */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
-          {/* 6. Bulk Select */}
+          {/* 5. Bulk Select */}
           <button
             type="button"
             onClick={() => {
@@ -1112,7 +1074,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setIsBulkSelectMode(prev => !prev);
               }
             }}
-            className={`h-9 px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               isBulkSelectMode && currentTab === 'logistics'
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
                 : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200'
@@ -1128,7 +1090,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* 7. Prepare Dispatch */}
+          {/* 6. Prepare Dispatch */}
           <button
             type="button"
             onClick={() => {
@@ -1159,15 +1121,75 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               </span>
             )}
           </button>
+
+          {/* 7. Dispatched (Second Dispatched - Main Navigation Button) */}
+          <button
+            type="button"
+            onClick={() => {
+              if (currentTab === 'dispatched' && dispatchedSubView === 'batches') {
+                setCurrentTab('logistics');
+              } else {
+                setCurrentTab('dispatched');
+                setDispatchedSubView('batches');
+              }
+            }}
+            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+              currentTab === 'dispatched' && dispatchedSubView === 'batches'
+                ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30'
+                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
+            }`}
+            title="Dispatched"
+          >
+            <Check size={14} className={currentTab === 'dispatched' && dispatchedSubView === 'batches' ? 'text-white' : 'text-emerald-400'} />
+            <span>Dispatched</span>
+            {dispatchedInfluencers.length > 0 && (
+              <span className={`text-[10px] font-bold rounded-full px-1.5 py-0.2 ${
+                currentTab === 'dispatched' && dispatchedSubView === 'batches'
+                  ? 'bg-emerald-950 text-white border border-emerald-400/30 shadow-inner'
+                  : 'bg-emerald-950/90 text-emerald-300 border border-emerald-800/60'
+              }`}>
+                {dispatchedInfluencers.length}
+              </span>
+            )}
+          </button>
+
+          {/* 8. Tracking System (with NEW badge) */}
+          <button
+            type="button"
+            onClick={() => {
+              if (currentTab === 'dispatched' && dispatchedSubView === 'tracking') {
+                setDispatchedSubView('batches');
+              } else {
+                setCurrentTab('dispatched');
+                setDispatchedSubView('tracking');
+              }
+            }}
+            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+              currentTab === 'dispatched' && dispatchedSubView === 'tracking'
+                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
+            }`}
+            title="Shipment Tracking System"
+          >
+            <Truck size={14} className={currentTab === 'dispatched' && dispatchedSubView === 'tracking' ? 'text-white' : 'text-purple-400'} />
+            <span>Tracking System</span>
+            <span className={`text-[9px] font-extrabold uppercase px-1 py-0.2 rounded leading-none ${
+              currentTab === 'dispatched' && dispatchedSubView === 'tracking'
+                ? 'bg-purple-950 text-purple-200 border border-purple-400/40 shadow-inner'
+                : 'bg-purple-950/90 text-purple-300 border border-purple-800/60'
+            }`}>
+              NEW
+            </span>
+          </button>
         </div>
 
-        {/* Divider between Group 2 and Group 3 */}
+        {/* 9. Divider between Group 2 and Group 3 */}
         <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0 hidden md:block" />
 
         {/* GROUP 3: [Search] [Filter] [Refresh] */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
-          {/* 8. Search Box */}
-          <div className="relative w-28 sm:w-36 md:w-44 lg:w-48 shrink-0">
+          {/* 10. Search Box */}
+          <div className="relative w-28 sm:w-36 md:w-40 lg:w-48 shrink-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
             <input 
               type="text"
@@ -1178,7 +1200,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             />
           </div>
 
-          {/* 9. Filter Button */}
+          {/* 11. Filter Button */}
           <button
             type="button"
             onClick={() => setIsFilterDrawerOpen(true)}
@@ -1197,7 +1219,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* 10. Refresh Button */}
+          {/* 12. Refresh Button */}
           <button
             type="button"
             onClick={handleRefresh}
