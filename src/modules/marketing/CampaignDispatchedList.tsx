@@ -1153,7 +1153,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             )}
           </button>
 
-          {/* 8. Tracking System (with NEW badge) */}
+          {/* 8. Tracking (with NEW badge) */}
           <button
             type="button"
             onClick={() => {
@@ -1169,10 +1169,10 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
                 : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
             }`}
-            title="Shipment Tracking System"
+            title="Tracking"
           >
             <Truck size={14} className={currentTab === 'dispatched' && dispatchedSubView === 'tracking' ? 'text-white' : 'text-purple-400'} />
-            <span>Tracking System</span>
+            <span>Tracking</span>
             <span className={`text-[9px] font-extrabold uppercase px-1 py-0.2 rounded leading-none ${
               currentTab === 'dispatched' && dispatchedSubView === 'tracking'
                 ? 'bg-purple-950 text-purple-200 border border-purple-400/40 shadow-inner'
@@ -1189,7 +1189,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         {/* GROUP 3: [Search] [Filter] [Refresh] */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
           {/* 10. Search Box */}
-          <div className="relative w-28 sm:w-36 md:w-40 lg:w-48 shrink-0">
+          <div className="relative w-28 sm:w-32 md:w-36 lg:w-44 shrink-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
             <input 
               type="text"
