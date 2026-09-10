@@ -5,8 +5,7 @@ import { ErrorBoundary } from '../components/system/ErrorBoundary';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
 import { NotificationCenter } from '../components/notifications/NotificationCenter';
 import { useAuth } from '../hooks/useAuth';
-import { supabase } from '../lib/supabase';
-import { getNavigationState, saveNavigationState, saveDepartmentNavigation } from '../utils/navigationPersistence';
+import { getNavigationState, saveNavigationState, saveDepartmentNavigation, clearNavigationState } from '../utils/navigationPersistence';
 import toast from 'react-hot-toast';
 
 const SWITCHABLE_ACCOUNTS = [
@@ -42,7 +41,9 @@ export const MainLayout = () => {
   }, [location.pathname]);
   
   const handleLogout = async () => {
+    clearNavigationState();
     await supabase.auth.signOut();
+    navigate('/login', { replace: true });
   };
 
   const handleSwitchUser = async (e: React.FormEvent) => {

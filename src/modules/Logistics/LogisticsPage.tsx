@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { LogisticsDashboard } from './LogisticsDashboard';
 import { ImportOrders } from './ImportOrders';
 import { OrderData } from './OrderData';
@@ -8,7 +9,24 @@ import { CodTrash } from './CodTrash';
 import { Database, FileSpreadsheet, Recycle, Truck, LayoutDashboard, BarChart3 } from 'lucide-react';
 
 export const LogisticsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'import' | 'data' | 'tracking' | 'analytics' | 'trash'>('dashboard');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const validTabs = ['dashboard', 'import', 'data', 'tracking', 'analytics', 'trash'];
+  const activeTab: 'dashboard' | 'import' | 'data' | 'tracking' | 'analytics' | 'trash' = 
+    (tabParam && validTabs.includes(tabParam))
+      ? (tabParam as any)
+      : 'dashboard';
+
+  const setActiveTab = (tab: 'dashboard' | 'import' | 'data' | 'tracking' | 'analytics' | 'trash') => {
+    const newParams = new URLSearchParams(searchParams);
+    if (tab === 'dashboard') {
+      newParams.delete('tab');
+    } else {
+      newParams.set('tab', tab);
+    }
+    setSearchParams(newParams);
+  };
+
   const [selectedFileId, setSelectedFileId] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState('');
 

@@ -12,11 +12,12 @@ import { EditCampaignModal } from './EditCampaignModal';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
 import { useCampaigns } from '../../hooks/marketing/useCampaigns';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
-import { getDepartmentNavigation, saveDepartmentNavigation, DepartmentNavigation } from '../../utils/navigationPersistence';
+import { saveDepartmentNavigation, DepartmentNavigation } from '../../utils/navigationPersistence';
 import { logActivity } from '../../services/activityService';
 
 interface CampaignDetailsProps {
@@ -30,15 +31,16 @@ type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatc
 import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
 
 export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBack, onCampaignUpdate }) => {
-  const [currentView, setCurrentView] = useState<CampaignView>(() => {
-    const nav = getDepartmentNavigation('marketing');
-    return nav?.campaignView || 'overview';
-  });
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [editingInfluencerId, setEditingInfluencerId] = useState<string | null>(() => {
-    const nav = getDepartmentNavigation('marketing');
-    return nav?.editingInfluencerId || null;
-  });
+  const subviewParam = searchParams.get('subview');
+  const validSubviews: CampaignView[] = ['overview', 'add-influencer', 'influencer-list', 'dispatched-list', 'status-tracking', 'calendar', 'analytics'];
+  const currentView: CampaignView = (subviewParam && validSubviews.includes(subviewParam as CampaignView))
+    ? (subviewParam as CampaignView)
+    : 'overview';
+
+  const editInfluencerIdParam = searchParams.get('editInfluencerId');
+  const editingInfluencerId = editInfluencerIdParam;
 
   const [editingInfluencer, setEditingInfluencer] = useState<CampaignInfluencer | null>(null);
   const [dispatchingInfluencer, setDispatchingInfluencer] = useState<CampaignInfluencer | null>(null);
@@ -46,7 +48,20 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const { influencers, refresh } = useCampaignInfluencers(campaign.id);
 
   const handleViewChange = (newView: CampaignView, edits: Partial<DepartmentNavigation> = {}) => {
-    setCurrentView(newView);
+    const newParams = new URLSearchParams(searchParams);
+    if (newView === 'overview') {
+      newParams.delete('subview');
+    } else {
+      newParams.set('subview', newView);
+    }
+
+    if (edits?.editingInfluencerId) {
+      newParams.set('editInfluencerId', edits.editingInfluencerId);
+    } else {
+      newParams.delete('editInfluencerId');
+    }
+
+    setSearchParams(newParams);
     saveDepartmentNavigation('marketing', '/marketing', {
       campaignView: newView,
       ...edits
@@ -55,13 +70,28 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
 
   // Resolve Influencer ID against loaded influencers list
   useEffect(() => {
-    if (editingInfluencerId && influencers.length > 0) {
-      const match = influencers.find(inf => String(inf.id) === String(editingInfluencerId));
+    if (editInfluencerIdParam && influencers.length > 0) {
+      const match = influencers.find(inf => String(inf.id) === String(editInfluencerIdParam));
       if (match) {
         setEditingInfluencer(match);
+      } else {
+        console.warn(`[NAV] Saved editing influencer ID ${editInfluencerIdParam} not found, resetting.`);
+        setEditingInfluencer(null);
+        if (currentView === 'add-influencer') {
+          handleViewChange('influencer-list', { editingInfluencerId: undefined });
+        } else {
+          const newParams = new URLSearchParams(searchParams);
+          newParams.delete('editInfluencerId');
+          setSearchParams(newParams);
+          saveDepartmentNavigation('marketing', '/marketing', {
+            editingInfluencerId: undefined
+          });
+        }
       }
+    } else if (!editInfluencerIdParam) {
+      setEditingInfluencer(null);
     }
-  }, [influencers, editingInfluencerId]);
+  }, [influencers, editInfluencerIdParam, currentView]);
 
   const { updateCampaign } = useCampaigns();
 
@@ -240,7 +270,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
 
       if (existing && existing.length > 0) {
         // Already exists, redirect
-        setCurrentView('status-tracking');
+        handleViewChange('status-tracking');
         return;
       }
 
@@ -333,7 +363,6 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                  initialData={editingInfluencer || undefined}
                  onBack={() => {
                    setEditingInfluencer(null);
-                   setEditingInfluencerId(null);
                    handleViewChange('influencer-list', { editingInfluencerId: undefined, activeTab: undefined });
                    refresh();
                  }} 
@@ -344,26 +373,17 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                  onBack={() => handleViewChange('overview')} 
                  onAddInfluencer={() => {
                    setEditingInfluencer(null);
-                   setEditingInfluencerId(null);
                    handleViewChange('add-influencer', { editingInfluencerId: undefined, activeTab: undefined });
                  }}
                  editingInfluencerId={editingInfluencerId}
                  onEdit={(inf) => {
                    sessionStorage.removeItem(`influencer_edit_draft_${campaign.id}_${inf.id}`);
                    setEditingInfluencer(inf);
-                   setEditingInfluencerId(String(inf.id));
-                   saveDepartmentNavigation('marketing', '/marketing', {
-                     campaignView: 'influencer-list',
-                     editingInfluencerId: String(inf.id)
-                   });
+                   handleViewChange('add-influencer', { editingInfluencerId: String(inf.id) });
                  }}
                   onCancelEdit={async () => {
                     setEditingInfluencer(null);
-                    setEditingInfluencerId(null);
-                    saveDepartmentNavigation('marketing', '/marketing', {
-                      campaignView: 'influencer-list',
-                      editingInfluencerId: undefined
-                    });
+                    handleViewChange('influencer-list', { editingInfluencerId: undefined });
                     await refresh();
                   }}
                  onDispatch={(inf) => {

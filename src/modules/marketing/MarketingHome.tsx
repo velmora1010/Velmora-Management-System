@@ -1,28 +1,58 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { Megaphone, Database } from 'lucide-react';
 import { InfluencerDashboard } from './InfluencerDashboard';
 import { InfluenceDatabase } from './InfluenceDatabase';
-import { useLocation } from 'react-router-dom';
-import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
+import { useLocation, useSearchParams } from 'react-router-dom';
+import { saveDepartmentNavigation } from '../../utils/navigationPersistence';
 
 type MarketingView = 'home' | 'influencer-dashboard' | 'influence-db';
 
 export const MarketingHome: React.FC = () => {
-  const [currentView, setCurrentView] = useState<MarketingView>(() => {
-    const nav = getDepartmentNavigation('marketing');
-    return nav?.marketingView || 'home';
-  });
+  const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const state = location.state as { openCampaignId?: string } | null;
 
+  const tabParam = searchParams.get('tab');
+  const currentView: MarketingView = 
+    (tabParam === 'influencers' || tabParam === 'influencer-dashboard')
+      ? 'influencer-dashboard'
+      : tabParam === 'influence-db'
+      ? 'influence-db'
+      : 'home';
+
   const handleViewChange = (newView: MarketingView) => {
-    setCurrentView(newView);
+    const newParams = new URLSearchParams(searchParams);
+    if (newView === 'home') {
+      newParams.delete('tab');
+      newParams.delete('view');
+      newParams.delete('campaignId');
+      newParams.delete('subview');
+      newParams.delete('editInfluencerId');
+    } else if (newView === 'influencer-dashboard') {
+      newParams.set('tab', 'influencers');
+    } else if (newView === 'influence-db') {
+      newParams.set('tab', 'influence-db');
+      newParams.delete('view');
+      newParams.delete('campaignId');
+      newParams.delete('subview');
+      newParams.delete('editInfluencerId');
+    }
+    setSearchParams(newParams);
     saveDepartmentNavigation('marketing', '/marketing', { marketingView: newView });
   };
 
   useEffect(() => {
     if (state?.openCampaignId) {
-      handleViewChange('influencer-dashboard');
+      const newParams = new URLSearchParams(searchParams);
+      newParams.set('tab', 'influencers');
+      newParams.set('view', 'campaign-details');
+      newParams.set('campaignId', String(state.openCampaignId));
+      setSearchParams(newParams);
+      saveDepartmentNavigation('marketing', '/marketing', { 
+        marketingView: 'influencer-dashboard',
+        dashboardView: 'campaign-details',
+        selectedCampaignId: String(state.openCampaignId)
+      });
     }
   }, [state?.openCampaignId]);
 

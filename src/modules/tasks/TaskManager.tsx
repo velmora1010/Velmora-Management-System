@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AddTaskForm } from './AddTaskForm';
 import { ViewCreatedTasks } from './ViewCreatedTasks';
 import { TaskStatus } from './TaskStatus';
@@ -8,7 +9,24 @@ import { AddTaskCategory } from './AddTaskCategory';
 import { LayoutDashboard } from 'lucide-react';
 
 export const TaskManager: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'add' | 'view' | 'status' | 'addMain' | 'viewMain' | 'category'>('add');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const validTabs = ['add', 'view', 'status', 'addMain', 'viewMain', 'category'];
+  const activeTab: 'add' | 'view' | 'status' | 'addMain' | 'viewMain' | 'category' = 
+    (tabParam && validTabs.includes(tabParam))
+      ? (tabParam as any)
+      : 'add';
+
+  const setActiveTab = (tab: 'add' | 'view' | 'status' | 'addMain' | 'viewMain' | 'category') => {
+    const newParams = new URLSearchParams(searchParams);
+    if (tab === 'add') {
+      newParams.delete('tab');
+    } else {
+      newParams.set('tab', tab);
+    }
+    setSearchParams(newParams);
+  };
+
   const [editingTask, setEditingTask] = useState<any | null>(null);
 
   const navButtonClass = (isActive: boolean) => 
