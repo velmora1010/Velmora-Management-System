@@ -28,7 +28,8 @@ import {
   MoreVertical,
   Tag,
   User,
-  Hash
+  Hash,
+  Upload
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
@@ -49,13 +50,14 @@ import { logisticsWorkflowService } from '../../services/logisticsWorkflowServic
 import { 
   dispatchBatchService, 
   formatBatchDateTime, 
-  getBatchLocalDateKey,
-  getTodayDateKey,
+  getBatchLocalDateKey, 
+  getTodayDateKey, 
   type DispatchBatch 
 } from '../../services/dispatchBatchService';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
 import { InfluencerQuickViewModal } from './InfluencerQuickViewModal';
 import { CampaignTrackingSystem } from './CampaignTrackingSystem';
+import { UploadCourierShipmentModal } from '../../components/marketing/UploadCourierShipmentModal';
 
 export type LogisticsTab = 'logistics' | 'prepare_dispatch' | 'dispatched';
 
@@ -248,6 +250,27 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
       setIsCalendarOpen(false);
     }
   }, [currentTab]);
+
+  // Courier Upload Dropdown & Modal State
+  const uploadDropdownRef = useRef<HTMLDivElement>(null);
+  const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false);
+  const [selectedUploadCourier, setSelectedUploadCourier] = useState<'ST Courier' | 'Delhivery'>('ST Courier');
+  const [isUploadCourierModalOpen, setIsUploadCourierModalOpen] = useState(false);
+
+  // Close upload dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (uploadDropdownRef.current && !uploadDropdownRef.current.contains(event.target as Node)) {
+        setIsUploadDropdownOpen(false);
+      }
+    };
+    if (isUploadDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isUploadDropdownOpen]);
 
   // Load saved batches from persistent storage
   const loadSavedBatches = useCallback(async () => {
@@ -1141,6 +1164,60 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               placeholder="Search code, user..."
               className="w-full h-9 bg-slate-900/90 border border-slate-700/80 rounded-xl pl-8.5 pr-3 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
             />
+          </div>
+
+          {/* 8b. Upload Dropdown [Upload ▼] */}
+          <div className="relative shrink-0" ref={uploadDropdownRef}>
+            <button
+              type="button"
+              onClick={() => setIsUploadDropdownOpen(prev => !prev)}
+              className="h-9 px-3 sm:px-3.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-sm cursor-pointer border-0 outline-none focus:outline-none shrink-0"
+              title="Upload Actions"
+            >
+              <Upload size={14} />
+              <span>Upload</span>
+              <ChevronDown size={13} className={`transition-transform duration-200 ${isUploadDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isUploadDropdownOpen && (
+              <div className="absolute right-0 mt-1.5 w-64 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
+                    setSelectedUploadCourier('ST Courier');
+                    setIsUploadCourierModalOpen(true);
+                  }}
+                  className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer"
+                >
+                  <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
+                    <Upload size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for ST Courier</div>
+                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for ST Courier</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
+                    setSelectedUploadCourier('Delhivery');
+                    setIsUploadCourierModalOpen(true);
+                  }}
+                  className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer mt-1"
+                >
+                  <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
+                    <Upload size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for Delhivery</div>
+                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for Delhivery</div>
+                  </div>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 9. Filter Button (Icon only) */}
@@ -2092,6 +2169,19 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           status={getInfluencerStatus(viewInfluencerTarget)}
           dispatchRecord={getDispatchData(viewInfluencerTarget)}
           onClose={() => setViewInfluencerTarget(null)}
+        />
+      )}
+
+      {/* Upload for Courier Shipments Modal (ST Courier or Delhivery) */}
+      {isUploadCourierModalOpen && (
+        <UploadCourierShipmentModal
+          campaign={campaign}
+          courier={selectedUploadCourier}
+          influencers={activeOnly}
+          onClose={() => setIsUploadCourierModalOpen(false)}
+          onSuccess={async () => {
+            await Promise.all([refreshDispatch(), refreshInfluencers(), loadSavedBatches()]);
+          }}
         />
       )}
     </div>
