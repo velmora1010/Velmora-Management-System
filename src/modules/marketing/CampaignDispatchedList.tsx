@@ -55,6 +55,7 @@ import {
 } from '../../services/dispatchBatchService';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
 import { InfluencerQuickViewModal } from './InfluencerQuickViewModal';
+import { CampaignTrackingSystem } from './CampaignTrackingSystem';
 
 export type LogisticsTab = 'logistics' | 'prepare_dispatch' | 'dispatched';
 
@@ -166,6 +167,14 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
 
   // Workflow Tab Navigation ('logistics' | 'prepare_dispatch' | 'dispatched')
   const [currentTab, setCurrentTab] = useState<LogisticsTab>('logistics');
+
+  // Dispatched subview ('batches' | 'tracking') - default is 'batches'
+  const [dispatchedSubView, setDispatchedSubView] = useState<'batches' | 'tracking'>('batches');
+
+  // Reset dispatched subview when campaign changes
+  useEffect(() => {
+    setDispatchedSubView('batches');
+  }, [campaign.id]);
 
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
@@ -1058,6 +1067,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               } else {
                 setSelectedCalendarDate(getTodayDateKey());
                 setCurrentTab('prepare_dispatch');
+                setDispatchedSubView('batches');
               }
             }}
             className={`h-9 px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-2 shrink-0 cursor-pointer ${
@@ -1085,9 +1095,14 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             type="button"
             onClick={() => {
               if (currentTab === 'dispatched') {
-                setCurrentTab('logistics');
+                if (dispatchedSubView === 'tracking') {
+                  setDispatchedSubView('batches');
+                } else {
+                  setCurrentTab('logistics');
+                }
               } else {
                 setCurrentTab('dispatched');
+                setDispatchedSubView('batches');
               }
             }}
             className={`h-9 px-3.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
@@ -1440,17 +1455,45 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setCurrentTab('logistics')}
+              onClick={() => {
+                if (dispatchedSubView === 'tracking') {
+                  setDispatchedSubView('batches');
+                } else {
+                  setCurrentTab('logistics');
+                }
+              }}
               className="px-3 py-2 bg-[#0d1d1f] hover:bg-[#122629] text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-emerald-800/60 hover:border-emerald-500/60 transition-all flex items-center gap-2 cursor-pointer shadow-sm group"
-              title="Return to Influencer Logistics"
+              title={dispatchedSubView === 'tracking' ? "Return to Batches" : "Return to Influencer Logistics"}
             >
               <ArrowLeft size={14} className="text-emerald-400 group-hover:-translate-x-0.5 transition-transform" />
-              <span>Back to Logistics</span>
+              <span>{dispatchedSubView === 'tracking' ? 'Back to Batches' : 'Back to Logistics'}</span>
             </button>
           </div>
 
-          {/* Right: Two compact KPI cards side-by-side */}
-          <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* Right: Tracking System card + Two compact KPI cards side-by-side */}
+          <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap sm:flex-nowrap">
+            {/* Tracking System Button/Card */}
+            <button
+              type="button"
+              onClick={() => setDispatchedSubView(prev => prev === 'tracking' ? 'batches' : 'tracking')}
+              className={`flex-1 sm:flex-initial sm:min-w-[155px] border rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm transition-all cursor-pointer ${
+                dispatchedSubView === 'tracking'
+                  ? 'bg-purple-950/80 border-purple-500 text-white shadow-purple-900/30 ring-1 ring-purple-500/50'
+                  : 'bg-[#0d1d1f] hover:bg-[#132729] border-purple-800/60 hover:border-purple-600 text-slate-300'
+              }`}
+              title="Open Shipment Tracking System"
+            >
+              <div className="w-8 h-8 rounded-lg bg-purple-950/80 border border-purple-700/60 flex items-center justify-center text-purple-400 shrink-0">
+                <Truck size={16} />
+              </div>
+              <div className="text-left min-w-0">
+                <div className="text-[10px] sm:text-[11px] font-medium text-slate-400 truncate">Shipment Tracking</div>
+                <div className="text-xs sm:text-sm font-bold text-purple-300 truncate">
+                  {dispatchedSubView === 'tracking' ? 'Active Tracking' : 'Tracking System'}
+                </div>
+              </div>
+            </button>
+
             {/* Total Batches KPI */}
             <div className="flex-1 sm:flex-initial sm:min-w-[140px] bg-[#0d1d1f] border border-emerald-900/60 rounded-xl px-3.5 py-2 sm:py-2.5 flex items-center gap-3 shadow-sm">
               <div className="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-800/50 flex items-center justify-center text-emerald-400 shrink-0">
@@ -1916,8 +1959,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         )
       ) : currentTab === 'dispatched' ? (
-        /* ==================== DISPATCHED BATCH-BASED VIEW ==================== */
-        dispatchedBatches.length === 0 ? (
+        /* ==================== DISPATCHED VIEW (BATCHES OR TRACKING) ==================== */
+        dispatchedSubView === 'tracking' ? (
+          <CampaignTrackingSystem
+            campaign={campaign}
+            dispatchedInfluencers={dispatchedInfluencers}
+            dispatchRecords={dispatchRecords}
+            savedBatches={savedBatches}
+            onBackToDispatched={() => setDispatchedSubView('batches')}
+            onRefreshData={handleRefresh}
+          />
+        ) : dispatchedBatches.length === 0 ? (
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-12 text-center text-slate-400">
             <Package className="mx-auto mb-3 text-emerald-400/50" size={42} />
             <h3 className="text-base font-semibold text-slate-200 mb-1">No Dispatched Batches</h3>
