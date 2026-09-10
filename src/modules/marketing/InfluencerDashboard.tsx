@@ -4,8 +4,8 @@ import { useCampaigns } from '../../hooks/marketing/useCampaigns';
 import type { Campaign } from '../../types';
 import { CampaignForm } from './CampaignForm';
 import { CampaignDetails } from './CampaignDetails';
-import { useLocation } from 'react-router-dom';
-import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
+import { useLocation, useSearchParams } from 'react-router-dom';
+import { saveDepartmentNavigation } from '../../utils/navigationPersistence';
 
 interface InfluencerDashboardProps {
   onBack: () => void;
@@ -15,17 +15,17 @@ type DashboardView = 'overview' | 'create-campaign' | 'campaign-details';
 
 export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack }) => {
   const { campaigns, isLoading, error, refreshCampaigns } = useCampaigns();
-  
-  const [view, setView] = useState<DashboardView>(() => {
-    const nav = getDepartmentNavigation('marketing');
-    return nav?.dashboardView || 'overview';
-  });
-  
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(() => {
-    const nav = getDepartmentNavigation('marketing');
-    return nav?.selectedCampaignId || null;
-  });
+  const [searchParams, setSearchParams] = useSearchParams();
 
+  const viewParam = searchParams.get('view');
+  const view: DashboardView = 
+    viewParam === 'create-campaign' 
+      ? 'create-campaign' 
+      : viewParam === 'campaign-details' 
+      ? 'campaign-details' 
+      : 'overview';
+
+  const campaignIdParam = searchParams.get('campaignId');
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   
   const location = useLocation();
@@ -33,30 +33,39 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
 
   // Resolve Campaign ID against campaigns data
   useEffect(() => {
-    if (selectedCampaignId && campaigns.length > 0) {
-      const match = campaigns.find(c => String(c.id) === String(selectedCampaignId));
+    if (campaignIdParam && campaigns.length > 0) {
+      const match = campaigns.find(c => String(c.id) === String(campaignIdParam));
       if (match) {
         setSelectedCampaign(match);
-      } else {
-        console.warn(`[NAV] Saved campaign ID ${selectedCampaignId} not found, resetting.`);
+      } else if (!isLoading) {
+        console.warn(`[NAV] Saved campaign ID ${campaignIdParam} not found, resetting.`);
         setSelectedCampaign(null);
-        setView('overview');
-        setSelectedCampaignId(null);
+        const newParams = new URLSearchParams(searchParams);
+        newParams.delete('view');
+        newParams.delete('campaignId');
+        newParams.delete('subview');
+        newParams.delete('editInfluencerId');
+        setSearchParams(newParams);
         saveDepartmentNavigation('marketing', '/marketing', {
           dashboardView: 'overview',
           selectedCampaignId: undefined
         });
       }
+    } else if (!campaignIdParam) {
+      setSelectedCampaign(null);
     }
-  }, [campaigns, selectedCampaignId]);
+  }, [campaigns, campaignIdParam, isLoading]);
 
   useEffect(() => {
     if (state?.openCampaignId && campaigns.length > 0) {
       const match = campaigns.find(c => String(c.id) === String(state.openCampaignId));
       if (match) {
         setSelectedCampaign(match);
-        setSelectedCampaignId(String(match.id));
-        setView('campaign-details');
+        const newParams = new URLSearchParams(searchParams);
+        newParams.set('tab', 'influencers');
+        newParams.set('view', 'campaign-details');
+        newParams.set('campaignId', String(match.id));
+        setSearchParams(newParams);
         saveDepartmentNavigation('marketing', '/marketing', {
           dashboardView: 'campaign-details',
           selectedCampaignId: String(match.id)
@@ -81,8 +90,13 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
 
   const handleCreateNew = () => {
     setSelectedCampaign(null);
-    setSelectedCampaignId(null);
-    setView('create-campaign');
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('tab', 'influencers');
+    newParams.set('view', 'create-campaign');
+    newParams.delete('campaignId');
+    newParams.delete('subview');
+    newParams.delete('editInfluencerId');
+    setSearchParams(newParams);
     setIsMobileSidebarOpen(false);
     saveDepartmentNavigation('marketing', '/marketing', {
       dashboardView: 'create-campaign',
@@ -92,12 +106,32 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
 
   const handleSelectCampaign = (campaign: Campaign) => {
     setSelectedCampaign(campaign);
-    setSelectedCampaignId(String(campaign.id));
-    setView('campaign-details');
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('tab', 'influencers');
+    newParams.set('view', 'campaign-details');
+    newParams.set('campaignId', String(campaign.id));
+    setSearchParams(newParams);
     setIsMobileSidebarOpen(false);
     saveDepartmentNavigation('marketing', '/marketing', {
       dashboardView: 'campaign-details',
       selectedCampaignId: String(campaign.id)
+    });
+  };
+
+  const handleBackToOverview = () => {
+    setSelectedCampaign(null);
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('tab', 'influencers');
+    newParams.delete('view');
+    newParams.delete('campaignId');
+    newParams.delete('subview');
+    newParams.delete('editInfluencerId');
+    setSearchParams(newParams);
+    saveDepartmentNavigation('marketing', '/marketing', {
+      dashboardView: 'overview',
+      selectedCampaignId: undefined,
+      campaignView: undefined,
+      editingInfluencerId: undefined
     });
   };
 
@@ -271,29 +305,25 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
             onSuccess={(campaign) => {
               handleSelectCampaign(campaign);
             }} 
-            onCancel={() => setView('overview')} 
+            onCancel={handleBackToOverview} 
           />
         )}
 
-        {view === 'campaign-details' && selectedCampaign && (
-          <CampaignDetails 
-            campaign={selectedCampaign} 
-            onBack={() => {
-              setView('overview');
-              setSelectedCampaign(null);
-              setSelectedCampaignId(null);
-              saveDepartmentNavigation('marketing', '/marketing', {
-                dashboardView: 'overview',
-                selectedCampaignId: undefined,
-                campaignView: undefined,
-                editingInfluencerId: undefined
-              });
-            }} 
-            onCampaignUpdate={(updatedCampaign) => {
-              setSelectedCampaign(updatedCampaign);
-              refreshCampaigns();
-            }}
-          />
+        {view === 'campaign-details' && (
+          selectedCampaign ? (
+            <CampaignDetails 
+              campaign={selectedCampaign} 
+              onBack={handleBackToOverview} 
+              onCampaignUpdate={(updatedCampaign) => {
+                setSelectedCampaign(updatedCampaign);
+                refreshCampaigns();
+              }}
+            />
+          ) : isLoading ? (
+            <div className="flex h-64 items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : null
         )}
       </main>
     </div>

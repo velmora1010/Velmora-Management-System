@@ -7,7 +7,7 @@ import { NotificationCenter } from '../components/notifications/NotificationCent
 import { AiAssistantPanel } from '../components/ai/AiAssistantPanel';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
-import { getNavigationState, saveNavigationState, saveDepartmentNavigation } from '../utils/navigationPersistence';
+import { getNavigationState, saveNavigationState, saveDepartmentNavigation, clearNavigationState } from '../utils/navigationPersistence';
 
 export const MainLayout = () => {
   const location = useLocation();
@@ -28,7 +28,9 @@ export const MainLayout = () => {
   }, [location.pathname]);
   
   const handleLogout = async () => {
+    clearNavigationState();
     await supabase.auth.signOut();
+    navigate('/login', { replace: true });
   };
   
   const isHome = location.pathname === '/';

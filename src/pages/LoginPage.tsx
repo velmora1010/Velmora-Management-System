@@ -1,18 +1,26 @@
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 
 export const LoginPage = () => {
   const { user, isAuthLoading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // If already authenticated, redirect to dashboard
+  // If user was redirected here from a deep link, restore it after login; otherwise land on Dashboard ('/')
+  const fromLocation = (location.state as any)?.from;
+  const targetPath = (fromLocation?.pathname && fromLocation.pathname !== '/login')
+    ? `${fromLocation.pathname}${fromLocation.search || ''}${fromLocation.hash || ''}`
+    : '/';
+
+  // If already authenticated, redirect to targetPath
   if (!isAuthLoading && user) {
-    return <Navigate to="/inventory/dashboard" replace />;
+    return <Navigate to={targetPath} replace />;
   }
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -26,6 +34,7 @@ export const LoginPage = () => {
       });
 
       if (error) throw error;
+      navigate(targetPath, { replace: true });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to sign in';
       toast.error(message);
