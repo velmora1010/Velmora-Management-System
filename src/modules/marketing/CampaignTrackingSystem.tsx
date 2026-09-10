@@ -10,6 +10,7 @@ import {
   getTrackingStatusBadgeStyle,
   getTrackingCache,
   getLastCampaignSyncTime,
+  getCampaignShipments,
   TrackingStatusCategory,
   InfluencerDispatchedShipment
 } from '../../services/influencerTrackingService';
@@ -23,6 +24,7 @@ import {
   RefreshCw,
   ExternalLink,
   ArrowLeft,
+  FileSpreadsheet,
   X,
   RotateCcw,
   Check,
@@ -138,6 +140,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [activeTrackingModalShipment, setActiveTrackingModalShipment] = useState<InfluencerDispatchedShipment | null>(null);
   const [copiedAwb, setCopiedAwb] = useState<string | null>(null);
 
+  // Campaign imported shipments (ST Courier + Delhivery)
+  const [campaignShipments, setCampaignShipments] = useState<InfluencerDispatchedShipment[]>(() => getCampaignShipments(campaign.id));
+
   // Local tracking overrides/cache state
   const [trackingCache, setTrackingCache] = useState<Record<string, any>>(() => getTrackingCache(campaign.id));
 
@@ -148,8 +153,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const campaignTitle = campaign.campaign_name || (campaign as any).name || 'Campaign';
   const botChatEndRef = useRef<HTMLDivElement>(null);
 
-  // Reload cache when campaign changes
+  // Reload cache and shipments when campaign changes
   useEffect(() => {
+    setCampaignShipments(getCampaignShipments(campaign.id));
     setTrackingCache(getTrackingCache(campaign.id));
     setLastSyncTime(getLastCampaignSyncTime(campaign.id));
     setCurrentPage(1);
@@ -159,19 +165,44 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   }, [campaign.id]);
 
   // Build unified dispatched shipments strictly for the current campaign
+  // Combines uploaded campaign shipments (ST Courier & Delhivery) and dispatched influencers
   const allShipments: InfluencerDispatchedShipment[] = useMemo(() => {
-    const list: InfluencerDispatchedShipment[] = [];
-    const seenIds = new Set<string>();
+    const shipmentMap = new Map<string, InfluencerDispatchedShipment>();
 
+    // 1. First index uploaded campaign shipments (ST Courier & Delhivery)
+    for (const cs of campaignShipments) {
+      const awbKey = (cs.awbNumber || '').toLowerCase().trim();
+      const uniqueKey = awbKey || (cs.id ? cs.id.toLowerCase().trim() : '');
+      if (!uniqueKey) continue;
+
+      const cached = cs.awbNumber ? trackingCache[cs.awbNumber] : null;
+      const courierLower = (cs.courier || '').toLowerCase();
+      const isDelhivery = courierLower.includes('delhivery');
+      const isSTCourier = courierLower.includes('st courier');
+
+      const statusSource = isDelhivery 
+        ? 'Uploaded Delhivery File'
+        : (isSTCourier ? 'Live ST Courier Tracking' : (cs.statusSource || 'Uploaded File'));
+      const sourceType = isDelhivery ? 'UPLOADED_FILE' : (isSTCourier ? 'LIVE_API' : (cs.sourceType || 'UPLOADED_FILE'));
+
+      shipmentMap.set(uniqueKey, {
+        ...cs,
+        status: cached?.status || cs.status,
+        rawStatus: cached?.rawStatus || cs.rawStatus,
+        statusSource,
+        sourceType,
+        lastLocation: cached?.lastLocation || cs.lastLocation,
+        trackingDateTime: cached?.trackingDateTime || cs.trackingDateTime,
+        lastSyncedAt: cached?.lastSyncedAt || cs.lastSyncedAt,
+        syncError: cached?.syncError || cs.syncError,
+        trackingUrl: cs.trackingUrl || getCourierTrackingUrl(cs.courier, cs.awbNumber)
+      });
+    }
+
+    // 2. Merge dispatched influencers
     for (const inf of dispatchedInfluencers) {
       const infId = String(inf.id);
-      if (seenIds.has(infId)) continue;
-      seenIds.add(infId);
-
-      // Find matching dispatch record
       const dispatch = inf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === infId);
-      
-      // Find associated batch
       const batch = savedBatches.find(b => b.members && b.members.some(m => String(m.influencer_id) === infId));
       const batchCode = batch?.batch_name || '—';
       const batchId = batch?.id;
@@ -182,13 +213,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       const dispatchDate = dispatch?.dispatch_date || (batch as any)?.dispatched_date || dispatch?.created_at || '';
       const expectedDeliveryDate = dispatch?.expected_delivery_date || '';
 
-      // Check local cache for live updates
-      const cached = rawAwb ? trackingCache[rawAwb] : null;
-
-      const effectiveStatus: TrackingStatusCategory = cached
-        ? cached.status
-        : normalizeTrackingStatus(rawStatus);
-
       const username = inf.platforms?.find(p => p.username && p.username.trim())?.username?.trim()
         || inf.influencer_name?.trim()
         || (inf as any).username?.trim()
@@ -196,34 +220,66 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         || '—';
       const cleanUsername = username.startsWith('@') ? username : `@${username}`;
 
-      list.push({
-        id: dispatch?.id || infId,
-        influencerId: infId,
-        creatorName: inf.influencer_name || inf.name || 'Influencer',
-        username: cleanUsername,
-        influencerCode: inf.code || '',
-        profilePhoto: inf.profile_file_url || '',
-        phoneNumber: inf.phone_number || dispatch?.phone_number || '',
-        altPhoneNumber: dispatch?.alternative_phone_number || '',
-        state: inf.state || dispatch?.state || '',
-        batchId,
-        batchCode,
-        awbNumber: rawAwb,
-        courier: rawCourier,
-        dispatchDate,
-        expectedDeliveryDate,
-        status: effectiveStatus,
-        rawStatus: cached?.rawStatus || rawStatus,
-        lastLocation: cached?.lastLocation,
-        trackingDateTime: cached?.trackingDateTime,
-        lastSyncedAt: cached?.lastSyncedAt,
-        trackingUrl: getCourierTrackingUrl(rawCourier, rawAwb),
-        syncError: cached?.syncError
-      });
+      const awbKey = rawAwb ? rawAwb.toLowerCase().trim() : '';
+      const lookupKey = awbKey || infId.toLowerCase().trim();
+
+      if (shipmentMap.has(lookupKey)) {
+        // If an uploaded record with this AWB exists, associate it with this influencer
+        const existing = shipmentMap.get(lookupKey)!;
+        shipmentMap.set(lookupKey, {
+          ...existing,
+          influencerId: infId,
+          creatorName: existing.creatorName === 'Influencer Not Matched' ? (inf.influencer_name || inf.name || 'Influencer') : existing.creatorName,
+          username: existing.username === '—' ? cleanUsername : existing.username,
+          influencerCode: existing.influencerCode || inf.code || '',
+          profilePhoto: existing.profilePhoto || inf.profile_file_url || '',
+          phoneNumber: existing.phoneNumber || inf.phone_number || dispatch?.phone_number || '',
+          altPhoneNumber: existing.altPhoneNumber || dispatch?.alternative_phone_number || '',
+          state: existing.state || inf.state || dispatch?.state || '',
+          batchId: existing.batchId || batchId,
+          batchCode: existing.batchCode !== '—' ? existing.batchCode : batchCode,
+          dispatchDate: existing.dispatchDate || dispatchDate,
+          expectedDeliveryDate: existing.expectedDeliveryDate || expectedDeliveryDate
+        });
+      } else {
+        // Add as a new dispatched influencer shipment
+        const cached = rawAwb ? trackingCache[rawAwb] : null;
+        const effectiveStatus = cached ? cached.status : normalizeTrackingStatus(rawStatus);
+        const courierLower = rawCourier.toLowerCase();
+        const isDelhivery = courierLower.includes('delhivery');
+        const isSTCourier = courierLower.includes('st courier');
+
+        shipmentMap.set(lookupKey, {
+          id: dispatch?.id || infId,
+          influencerId: infId,
+          creatorName: inf.influencer_name || inf.name || 'Influencer',
+          username: cleanUsername,
+          influencerCode: inf.code || '',
+          profilePhoto: inf.profile_file_url || '',
+          phoneNumber: inf.phone_number || dispatch?.phone_number || '',
+          altPhoneNumber: dispatch?.alternative_phone_number || '',
+          state: inf.state || dispatch?.state || '',
+          batchId,
+          batchCode,
+          awbNumber: rawAwb,
+          courier: rawCourier,
+          dispatchDate,
+          expectedDeliveryDate,
+          status: effectiveStatus,
+          rawStatus: cached?.rawStatus || rawStatus,
+          statusSource: isDelhivery ? 'Uploaded Delhivery File' : (isSTCourier ? 'Live ST Courier Tracking' : 'Live Tracking'),
+          sourceType: isDelhivery ? 'UPLOADED_FILE' : 'LIVE_API',
+          lastLocation: cached?.lastLocation,
+          trackingDateTime: cached?.trackingDateTime,
+          lastSyncedAt: cached?.lastSyncedAt,
+          trackingUrl: getCourierTrackingUrl(rawCourier, rawAwb),
+          syncError: cached?.syncError
+        });
+      }
     }
 
-    return list;
-  }, [dispatchedInfluencers, dispatchRecords, savedBatches, trackingCache]);
+    return Array.from(shipmentMap.values());
+  }, [dispatchedInfluencers, dispatchRecords, savedBatches, campaignShipments, trackingCache]);
 
   // Unique couriers present in this campaign (case-insensitive deduplicated)
   const availableCouriers = useMemo(() => {
@@ -384,6 +440,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Single Shipment Sync
   const handleSyncShipment = async (shipment: InfluencerDispatchedShipment) => {
+    if ((shipment.courier || '').toLowerCase().includes('delhivery')) {
+      toast('Status is based on the uploaded Delhivery file. Live API sync is only for ST Courier.', { icon: 'ℹ️' });
+      return;
+    }
+
     if (!shipment.awbNumber) {
       toast.error('Cannot sync: Missing AWB number.');
       return;
@@ -395,15 +456,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     try {
       const updated = await syncSingleShipment(shipment, campaign.id);
       setTrackingCache(getTrackingCache(campaign.id));
-      const nowStr = new Date().toLocaleString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      });
+      setCampaignShipments(getCampaignShipments(campaign.id));
+      const nowStr = new Date().toLocaleString();
       setLastSyncTime(nowStr);
 
       if (updated.syncError) {
@@ -422,38 +476,46 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
   };
 
-  // Auto Sync All Eligible Shipments
+  // Auto Sync All Eligible Shipments (ST Courier only; skips Delhivery file-sourced shipments)
   const handleAutoSyncAll = async () => {
-    const eligible = allShipments.filter(s => s.awbNumber && s.status !== 'Delivered');
+    const stEligible = allShipments.filter(s => 
+      (s.courier || '').toLowerCase().includes('st courier') && 
+      s.awbNumber && 
+      s.status !== 'Delivered'
+    );
 
-    if (eligible.length === 0) {
-      toast.error('No active shipments with AWB numbers eligible to sync.');
+    const delhiveryCount = allShipments.filter(s => 
+      (s.courier || '').toLowerCase().includes('delhivery')
+    ).length;
+
+    if (stEligible.length === 0) {
+      if (delhiveryCount > 0) {
+        toast(`Skipped ${delhiveryCount} Delhivery shipment(s) (Status source: Uploaded file). No eligible ST Courier shipments to sync.`, { icon: 'ℹ️' });
+      } else {
+        toast.error('No active ST Courier shipments eligible to sync.');
+      }
       return;
     }
 
     setIsBulkSyncing(true);
     const progressToastId = 'bulk-sync-progress';
-    toast.loading(`Syncing ${eligible.length} shipments...`, { id: progressToastId });
+    toast.loading(`Syncing ${stEligible.length} ST Courier shipments...`, { id: progressToastId });
 
     try {
       const result = await syncAllShipments(allShipments, campaign.id, (p) => {
-        toast.loading(`Syncing shipments (${p.completed}/${p.total})...`, { id: progressToastId });
+        toast.loading(`Syncing ST Courier (${p.completed}/${p.total})...`, { id: progressToastId });
       });
 
       setTrackingCache(getTrackingCache(campaign.id));
-      const nowStr = new Date().toLocaleString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      });
+      setCampaignShipments(getCampaignShipments(campaign.id));
+      const nowStr = new Date().toLocaleString();
       setLastSyncTime(nowStr);
 
       toast.dismiss(progressToastId);
-      toast.success(`Sync complete! Successfully synced: ${result.successful}, Failed: ${result.failed}`);
+      const summary = delhiveryCount > 0
+        ? `ST Courier: Synced ${result.successful}, Failed ${result.failed}\nDelhivery: Skipped live sync (${delhiveryCount} shipments - Status source: Uploaded file)`
+        : `ST Courier: Synced ${result.successful}, Failed ${result.failed}`;
+      toast.success(summary, { duration: 6000 });
     } catch (err) {
       toast.dismiss(progressToastId);
       toast.error('Bulk sync encountered an error.');
@@ -535,6 +597,77 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         addExchange(`Filtered table to ${cName} shipments.`);
         return;
       }
+    }
+
+    // Courier-specific inquiry: ST Courier delivered
+    if (q.includes('st courier') && (q.includes('delivered') || q.includes('completed'))) {
+      const stShipments = allShipments.filter(s => (s.courier || '').toLowerCase().includes('st courier'));
+      const count = stShipments.filter(s => s.status === 'Delivered').length;
+      addExchange(
+        `${count} of ${stShipments.length} ST Courier shipments are currently marked as Delivered in ${campaignTitle} (Status Source: Live ST Courier Tracking).`,
+        count > 0 ? {
+          label: `View ${count} Delivered ST Courier Shipments`,
+          filterStatus: 'Delivered',
+          filterCourier: 'ST Courier'
+        } : undefined
+      );
+      return;
+    }
+
+    // Courier-specific inquiry: Delhivery delivered
+    if (q.includes('delhivery') && (q.includes('delivered') || q.includes('completed'))) {
+      const delShipments = allShipments.filter(s => (s.courier || '').toLowerCase().includes('delhivery'));
+      const count = delShipments.filter(s => s.status === 'Delivered').length;
+      addExchange(
+        `${count} of ${delShipments.length} Delhivery shipments are currently marked as Delivered in ${campaignTitle} (Status Source: Uploaded Delhivery File).`,
+        count > 0 ? {
+          label: `View ${count} Delivered Delhivery Shipments`,
+          filterStatus: 'Delivered',
+          filterCourier: 'Delhivery'
+        } : undefined
+      );
+      return;
+    }
+
+    // Courier-specific inquiry: Delhivery pending
+    if (q.includes('delhivery') && (q.includes('pending') || q.includes('waiting'))) {
+      const delShipments = allShipments.filter(s => (s.courier || '').toLowerCase().includes('delhivery'));
+      const count = delShipments.filter(s => s.status === 'Pending').length;
+      addExchange(
+        `${count} of ${delShipments.length} Delhivery shipments are currently in Pending status in ${campaignTitle} (Status Source: Uploaded Delhivery File).`,
+        count > 0 ? {
+          label: `View ${count} Pending Delhivery Shipments`,
+          filterStatus: 'Pending',
+          filterCourier: 'Delhivery'
+        } : undefined
+      );
+      return;
+    }
+
+    // Courier-specific inquiry: All ST Courier shipments
+    if (q.includes('all st courier') || q === 'st courier' || q.includes('show st courier')) {
+      const count = allShipments.filter(s => (s.courier || '').toLowerCase().includes('st courier')).length;
+      addExchange(
+        `There are ${count} ST Courier shipments tracked in ${campaignTitle} (Status Source: Live ST Courier Tracking).`,
+        {
+          label: 'Show ST Courier Shipments',
+          filterCourier: 'ST Courier'
+        }
+      );
+      return;
+    }
+
+    // Courier-specific inquiry: All Delhivery shipments
+    if (q.includes('all delhivery') || q === 'delhivery' || q.includes('show delhivery')) {
+      const count = allShipments.filter(s => (s.courier || '').toLowerCase().includes('delhivery')).length;
+      addExchange(
+        `There are ${count} Delhivery shipments imported in ${campaignTitle} (Status Source: Uploaded Delhivery File).`,
+        {
+          label: 'Show Delhivery Shipments',
+          filterCourier: 'Delhivery'
+        }
+      );
+      return;
     }
 
     // Question 1: Delivered shipments
@@ -1159,28 +1292,44 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
                         {/* Order ID / Code */}
                         <td className="px-3.5 py-3 font-mono font-bold text-slate-200">
-                          {s.influencerCode || (s.id.length > 8 ? s.id.slice(0, 8) : s.id)}
+                          {s.orderId || s.influencerCode || (s.id.length > 8 ? s.id.slice(0, 8) : s.id)}
                         </td>
 
                         {/* Influencer Details */}
                         <td className="px-3.5 py-3">
-                          <div className="flex items-center gap-2.5 min-w-[140px]">
-                            <div className="w-8 h-8 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm">
-                              {s.profilePhoto ? (
-                                <img src={s.profilePhoto} alt={s.creatorName} className="w-full h-full object-cover" />
-                              ) : (
-                                <span>{(s.creatorName || 'A').charAt(0).toUpperCase()}</span>
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-bold text-slate-100 truncate hover:text-purple-300 transition-colors">
-                                {s.creatorName}
+                          {s.creatorName === 'Influencer Not Matched' ? (
+                            <div className="flex items-center gap-2.5 min-w-[140px]">
+                              <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 text-xs font-bold shrink-0">
+                                ?
                               </div>
-                              <div className="text-[10px] text-slate-400 font-mono truncate">
-                                {s.username} {s.phoneNumber ? `· ${s.phoneNumber}` : ''}
+                              <div className="min-w-0">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/80 text-amber-300 border border-amber-800/60 inline-block truncate">
+                                  Influencer Not Matched
+                                </span>
+                                <div className="text-[10px] text-slate-500 font-mono truncate mt-0.5">
+                                  {s.orderId ? `Ref: ${s.orderId}` : 'No creator linked'}
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          ) : (
+                            <div className="flex items-center gap-2.5 min-w-[140px]">
+                              <div className="w-8 h-8 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm">
+                                {s.profilePhoto ? (
+                                  <img src={s.profilePhoto} alt={s.creatorName} className="w-full h-full object-cover" />
+                                ) : (
+                                  <span>{(s.creatorName || 'A').charAt(0).toUpperCase()}</span>
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-100 truncate hover:text-purple-300 transition-colors">
+                                  {s.creatorName}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono truncate">
+                                  {s.username} {s.phoneNumber ? `· ${s.phoneNumber}` : ''}
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </td>
 
                         {/* AWB Number */}
@@ -1204,7 +1353,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
                         {/* Courier */}
                         <td className="px-3.5 py-3">
-                          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-900 border border-slate-800 text-slate-300 whitespace-nowrap">
+                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold whitespace-nowrap border ${
+                            s.courier.toLowerCase().includes('delhivery')
+                              ? 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300'
+                              : 'bg-purple-950/60 border-purple-800/60 text-purple-300'
+                          }`}>
                             {s.courier}
                           </span>
                         </td>
@@ -1221,9 +1374,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           </span>
                         </td>
 
-                        {/* Last Synced */}
+                        {/* Last Synced / Imported */}
                         <td className="px-3.5 py-3 text-center font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                          {s.lastSyncedAt || s.trackingDateTime || s.dispatchDate || '—'}
+                          {s.sourceType === 'UPLOADED_FILE' || s.courier.toLowerCase().includes('delhivery') ? (
+                            <span title="Status sourced from uploaded Delhivery file">
+                              {s.lastSyncedAt ? `Imported: ${s.lastSyncedAt}` : 'Uploaded File'}
+                            </span>
+                          ) : (
+                            <span>
+                              {s.lastSyncedAt ? `Synced: ${s.lastSyncedAt}` : (s.trackingDateTime || s.dispatchDate || '—')}
+                            </span>
+                          )}
                         </td>
 
                         {/* Actions */}
@@ -1239,16 +1400,28 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                               <span>Track</span>
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={() => handleSyncShipment(s)}
-                              disabled={isSyncing || !s.awbNumber}
-                              className="px-2.5 py-1.5 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 hover:text-purple-300 disabled:opacity-40 text-xs font-semibold rounded-xl border border-purple-500/30 transition-all flex items-center gap-1 cursor-pointer shadow-sm"
-                              title="Sync live status"
-                            >
-                              <RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
-                              <span>Sync</span>
-                            </button>
+                            {s.courier.toLowerCase().includes('delhivery') ? (
+                              <button
+                                type="button"
+                                onClick={() => handleSyncShipment(s)}
+                                className="px-2.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-300 text-xs font-semibold rounded-xl border border-slate-800 transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                                title="Status is based on uploaded Delhivery file"
+                              >
+                                <FileSpreadsheet size={11} className="text-cyan-400" />
+                                <span>File</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleSyncShipment(s)}
+                                disabled={isSyncing || !s.awbNumber}
+                                className="px-2.5 py-1.5 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 hover:text-purple-300 disabled:opacity-40 text-xs font-semibold rounded-xl border border-purple-500/30 transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                                title="Sync live status from ST Courier"
+                              >
+                                <RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
+                                <span>Sync</span>
+                              </button>
+                            )}
 
                             <button
                               type="button"
@@ -1501,16 +1674,32 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-2.5 text-xs">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                   <span className="text-slate-400">Influencer:</span>
-                  <span className="font-bold text-white text-sm">{activeTrackingModalShipment.creatorName} ({activeTrackingModalShipment.username})</span>
+                  <span className="font-bold text-white text-sm">
+                    {activeTrackingModalShipment.creatorName} {activeTrackingModalShipment.username !== '—' ? `(${activeTrackingModalShipment.username})` : ''}
+                  </span>
                 </div>
+                {(activeTrackingModalShipment.orderId || activeTrackingModalShipment.influencerCode) && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Order / Reference:</span>
+                    <span className="font-mono text-slate-200">{activeTrackingModalShipment.orderId || activeTrackingModalShipment.influencerCode}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Phone:</span>
-                  <span className="font-mono text-slate-200">{activeTrackingModalShipment.phoneNumber || '—'}</span>
+                  <span className="text-slate-400">AWB / Waybill:</span>
+                  <span className="font-mono font-bold text-purple-300">{activeTrackingModalShipment.awbNumber || '—'}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Batch Code:</span>
-                  <span className="font-mono font-bold text-purple-300">{activeTrackingModalShipment.batchCode}</span>
-                </div>
+                {activeTrackingModalShipment.phoneNumber && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Phone:</span>
+                    <span className="font-mono text-slate-200">{activeTrackingModalShipment.phoneNumber}</span>
+                  </div>
+                )}
+                {activeTrackingModalShipment.batchCode && activeTrackingModalShipment.batchCode !== '—' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Batch Code:</span>
+                    <span className="font-mono font-bold text-purple-300">{activeTrackingModalShipment.batchCode}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Courier Partner:</span>
                   <span className="font-semibold text-slate-200">{activeTrackingModalShipment.courier}</span>
@@ -1525,6 +1714,28 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                     <span className="text-slate-200">{activeTrackingModalShipment.expectedDeliveryDate}</span>
                   </div>
                 )}
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Status Source:</span>
+                  {activeTrackingModalShipment.courier.toLowerCase().includes('delhivery') ? (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-cyan-950/70 border border-cyan-800/60 text-cyan-300">
+                      <span>Uploaded Delhivery File</span>
+                      <span className="text-[9px] font-bold px-1 bg-cyan-900/60 rounded text-cyan-200">UPLOADED FILE</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-950/70 border border-purple-800/60 text-purple-300">
+                      <span>Live ST Courier Tracking</span>
+                      <span className="text-[9px] font-bold px-1 bg-purple-900/60 rounded text-purple-200">LIVE API</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">
+                    {activeTrackingModalShipment.courier.toLowerCase().includes('delhivery') ? 'Imported:' : 'Last Synced:'}
+                  </span>
+                  <span className="font-mono text-slate-300 text-[11px]">
+                    {activeTrackingModalShipment.lastSyncedAt || activeTrackingModalShipment.trackingDateTime || activeTrackingModalShipment.dispatchDate || '—'}
+                  </span>
+                </div>
                 <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
                   <span className="text-slate-400">Current Status:</span>
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${getTrackingStatusBadgeStyle(activeTrackingModalShipment.status).bg} ${getTrackingStatusBadgeStyle(activeTrackingModalShipment.status).text} ${getTrackingStatusBadgeStyle(activeTrackingModalShipment.status).border}`}>
@@ -1627,15 +1838,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               )}
 
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSyncShipment(activeTrackingModalShipment)}
-                  disabled={syncingIds.includes(activeTrackingModalShipment.id)}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-purple-600/30"
-                >
-                  <RefreshCw size={12} className={syncingIds.includes(activeTrackingModalShipment.id) ? 'animate-spin' : ''} />
-                  <span>Sync Now</span>
-                </button>
+                {activeTrackingModalShipment.courier.toLowerCase().includes('delhivery') ? (
+                  <div className="px-3.5 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                    <FileSpreadsheet size={13} className="text-cyan-400" />
+                    <span>Status Sourced from Uploaded File</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleSyncShipment(activeTrackingModalShipment)}
+                    disabled={syncingIds.includes(activeTrackingModalShipment.id)}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-purple-600/30"
+                  >
+                    <RefreshCw size={12} className={syncingIds.includes(activeTrackingModalShipment.id) ? 'animate-spin' : ''} />
+                    <span>Sync Now</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1658,6 +1876,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           influencers={allActiveInfluencers || dispatchedInfluencers}
           onClose={() => setIsUploadModalOpen(false)}
           onSuccess={async () => {
+            setCampaignShipments(getCampaignShipments(campaign.id));
+            setTrackingCache(getTrackingCache(campaign.id));
+            setLastSyncTime(getLastCampaignSyncTime(campaign.id) || new Date().toLocaleString());
             if (onRefreshData) {
               await onRefreshData();
             }

@@ -10,9 +10,9 @@ import {
   Truck, 
   Search, 
   FileCheck, 
-  ArrowRight,
   Package,
-  Check
+  Check,
+  RefreshCw
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
@@ -20,6 +20,14 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import db from '../../lib/db';
 import { dispatchBatchService } from '../../services/dispatchBatchService';
 import { logActivity } from '../../services/activityService';
+import {
+  syncSingleShipment,
+  normalizeDelhiveryStatus,
+  normalizeTrackingStatus,
+  upsertCampaignShipments,
+  InfluencerDispatchedShipment,
+  getCourierTrackingUrl
+} from '../../services/influencerTrackingService';
 import toast from 'react-hot-toast';
 
 export interface UploadCourierShipmentModalProps {
@@ -33,13 +41,20 @@ export interface UploadCourierShipmentModalProps {
 export interface ParsedShipmentRow {
   rowIdx: number;
   rawIdentifier: string;
+  orderId?: string;
   awbNumber: string;
   weight?: string;
   status?: string;
+  statusType?: string;
+  currentStatus?: string;
   dispatchDate?: string;
   expectedDeliveryDate?: string;
+  consigneeName?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
   matchedInfluencer?: CampaignInfluencer;
-  matchType?: 'code' | 'phone' | 'name' | 'id';
+  matchType?: 'code' | 'phone' | 'name' | 'id' | 'awb';
   isValid: boolean;
   errorReason?: string;
 }
@@ -55,12 +70,28 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<ParsedShipmentRow[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterView, setFilterView] = useState<'all' | 'matched' | 'unmatched'>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Normalize helper
+  // Import Progress State
+  const [importProgress, setImportProgress] = useState<{
+    total: number;
+    completed: number;
+    successful: number;
+    failed: number;
+    currentAwb: string;
+    phase: string;
+  }>({
+    total: 0,
+    completed: 0,
+    successful: 0,
+    failed: 0,
+    currentAwb: '',
+    phase: ''
+  });
+
+  // Normalize string helpers
   const cleanStr = (val: any): string => {
     if (val === undefined || val === null) return '';
     let s = String(val).trim();
@@ -79,7 +110,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
     return cleanStr(val).replace(/^#+/, '').trim().toLowerCase();
   };
 
-  // Find header index based on possible variations
+  // Find header index based on possible variations (ignoring punctuation & whitespace)
   const findColumnKey = (rowKeys: string[], possibleNames: string[]): string | null => {
     for (const key of rowKeys) {
       const normKey = key.toString().toLowerCase().trim().replace(/[^a-z0-9]/g, '');
@@ -123,29 +154,55 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
       const headers = Object.keys(rawData[0]);
 
-      // Detect AWB column
-      const awbCol = findColumnKey(headers, [
-        'trackingnumber', 'trackingno', 'trackingid', 'waybill', 'awbnumber', 
-        'awbno', 'awb', 'consignmentno', 'consignmentnumber', 'cnno', 'lrno', 'docketno'
-      ]);
+      // REQUIRED HEADER VALIDATION STRICTLY PER COURIER SPECIFICATION
+      if (courier === 'ST Courier') {
+        const hasTrackingNumber = findColumnKey(headers, ['trackingnumber', 'trackingno', 'trackingid', 'tracking']);
+        if (!hasTrackingNumber) {
+          toast.error('Invalid ST Courier file: Tracking number column not found.', { duration: 6000 });
+          setIsProcessing(false);
+          return;
+        }
+      } else if (courier === 'Delhivery') {
+        const hasWaybill = findColumnKey(headers, ['waybill', 'waybillno', 'waybillnumber']);
+        if (!hasWaybill) {
+          toast.error('Invalid Delhivery file: Waybill column not found.', { duration: 6000 });
+          setIsProcessing(false);
+          return;
+        }
+      }
 
-      // Detect identifier column
-      const idCol = findColumnKey(headers, [
-        'order', 'orderid', 'orderno', 'ordernumber', 'influencercode', 'code', 
-        'influencerid', 'creatorname', 'creator', 'influencername', 'name', 
-        'customername', 'recipient', 'mobile', 'phone', 'phonenumber', 'contact'
-      ]);
+      // Detect Columns based on courier-specific headers and standard fallbacks
+      let awbCol: string | null = null;
+      let orderCol: string | null = null;
+      let consigneeNameCol: string | null = null;
+      let currentStatusCol: string | null = null;
+      let statusTypeCol: string | null = null;
+      let weightCol: string | null = null;
+      let dateCol: string | null = null;
+      let eddCol: string | null = null;
+      let cityCol: string | null = null;
+      let stateCol: string | null = null;
+      let pinCol: string | null = null;
 
-      // Detect optional columns
-      const weightCol = findColumnKey(headers, ['weight', 'totalweight', 'chargedweight', 'actualweight']);
-      const statusCol = findColumnKey(headers, ['status', 'shipmentstatus', 'currentstatus']);
-      const dateCol = findColumnKey(headers, ['dispatchdate', 'bookingdate', 'orderdate', 'date', 'pickupdate']);
-      const eddCol = findColumnKey(headers, ['expecteddeliverydate', 'edd', 'deliverydate']);
-
-      if (!awbCol) {
-        toast.error('Could not detect AWB / Tracking number column. Please ensure header includes "Tracking number", "AWB", or "Waybill".', { duration: 6000 });
-        setIsProcessing(false);
-        return;
+      if (courier === 'ST Courier') {
+        awbCol = findColumnKey(headers, ['trackingnumber', 'trackingno', 'trackingid', 'tracking', 'awbnumber', 'awb']);
+        orderCol = findColumnKey(headers, ['order', 'orderno', 'orderid', 'ordernumber', 'influencercode', 'code']);
+        currentStatusCol = findColumnKey(headers, ['status', 'shipmentstatus', 'substatus', 'currentstatus']);
+        dateCol = findColumnKey(headers, ['orderdate', 'dispatchdate', 'bookingdate', 'date', 'pickupdate']);
+        weightCol = findColumnKey(headers, ['weight', 'totalweight', 'chargedweight']);
+      } else {
+        // Delhivery
+        awbCol = findColumnKey(headers, ['waybill', 'waybillno', 'waybillnumber', 'awb', 'trackingnumber']);
+        orderCol = findColumnKey(headers, ['referenceno', 'reference', 'refno', 'order', 'orderid', 'orderno']);
+        consigneeNameCol = findColumnKey(headers, ['consigneename', 'creatorname', 'influencername', 'customername', 'name', 'recipient']);
+        currentStatusCol = findColumnKey(headers, ['currentstatus', 'status', 'shipmentstatus']);
+        statusTypeCol = findColumnKey(headers, ['statustype', 'type', 'shipmenttype']);
+        dateCol = findColumnKey(headers, ['pickupdate', 'dispatchdate', 'bookingdate', 'firstbaggingdate', 'date']);
+        eddCol = findColumnKey(headers, ['delivereddate', 'deliverydate', 'estimateddeliverydate', 'promiseddeliverydate', 'edd']);
+        cityCol = findColumnKey(headers, ['city', 'destinationcity']);
+        stateCol = findColumnKey(headers, ['destinationstate', 'state']);
+        pinCol = findColumnKey(headers, ['pin', 'pincode', 'postalcode', 'zip']);
+        weightCol = findColumnKey(headers, ['weight', 'amount', 'mpsamount']);
       }
 
       // Build quick lookup maps for campaign influencers
@@ -166,40 +223,46 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       const parsed: ParsedShipmentRow[] = [];
 
       rawData.forEach((row, idx) => {
-        const rawAwb = cleanStr(row[awbCol]);
-        const rawId = idCol ? cleanStr(row[idCol]) : '';
+        const rawAwb = awbCol ? cleanStr(row[awbCol]) : '';
+        const rawOrderId = orderCol ? cleanStr(row[orderCol]) : '';
+        const rawConsigneeName = consigneeNameCol ? cleanStr(row[consigneeNameCol]) : '';
+        const rawCurrentStatus = currentStatusCol ? cleanStr(row[currentStatusCol]) : '';
+        const rawStatusType = statusTypeCol ? cleanStr(row[statusTypeCol]) : '';
         const rawWeight = weightCol ? cleanStr(row[weightCol]) : '';
-        const rawStatus = statusCol ? cleanStr(row[statusCol]) : '';
         const rawDate = dateCol ? cleanStr(row[dateCol]) : '';
         const rawEdd = eddCol ? cleanStr(row[eddCol]) : '';
+        const rawCity = cityCol ? cleanStr(row[cityCol]) : '';
+        const rawState = stateCol ? cleanStr(row[stateCol]) : '';
+        const rawPin = pinCol ? cleanStr(row[pinCol]) : '';
 
         // Skip completely empty rows
-        if (!rawAwb && !rawId) return;
+        if (!rawAwb && !rawOrderId && !rawConsigneeName) return;
 
         let matchedInf: CampaignInfluencer | undefined;
-        let matchType: 'code' | 'phone' | 'name' | 'id' | undefined;
+        let matchType: 'code' | 'phone' | 'name' | 'id' | 'awb' | undefined;
 
-        if (rawId) {
-          const normId = normalizeCode(rawId);
-          const normPhone = normalizePhone(rawId);
-          const normName = cleanStr(rawId).toLowerCase();
-
-          if (codeMap.has(normId)) {
-            matchedInf = codeMap.get(normId);
+        // 1. Match by Order / Reference number (e.g. #8861 or #9212)
+        if (rawOrderId) {
+          const normCode = normalizeCode(rawOrderId);
+          if (codeMap.has(normCode)) {
+            matchedInf = codeMap.get(normCode);
             matchType = 'code';
-          } else if (normPhone && phoneMap.has(normPhone)) {
-            matchedInf = phoneMap.get(normPhone);
-            matchType = 'phone';
-          } else if (nameMap.has(normName)) {
-            matchedInf = nameMap.get(normName);
-            matchType = 'name';
-          } else if (idMap.has(rawId)) {
-            matchedInf = idMap.get(rawId);
+          } else if (idMap.has(rawOrderId)) {
+            matchedInf = idMap.get(rawOrderId);
             matchType = 'id';
           }
         }
 
-        // If not matched by identifier, try checking if rawAwb itself matches code or if row has other phone/code fields
+        // 2. Match by Consignee / Creator Name if not matched yet
+        if (!matchedInf && rawConsigneeName) {
+          const normName = cleanStr(rawConsigneeName).toLowerCase();
+          if (nameMap.has(normName)) {
+            matchedInf = nameMap.get(normName);
+            matchType = 'name';
+          }
+        }
+
+        // 3. Match across row values for phone or code
         if (!matchedInf) {
           for (const key of headers) {
             const val = cleanStr(row[key]);
@@ -219,23 +282,30 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
 
         const isValidAwb = Boolean(rawAwb && rawAwb.length >= 4);
-        const isValid = Boolean(isValidAwb && matchedInf);
 
+        // DO NOT drop rows where influencer is not matched!
+        // Unmatched shipments are preserved with "Influencer Not Matched"
+        const isValid = isValidAwb;
         let errorReason = '';
         if (!isValidAwb) {
-          errorReason = 'Missing or invalid AWB number';
-        } else if (!matchedInf) {
-          errorReason = `No influencer found for "${rawId || 'row ' + (idx + 1)}" in this campaign`;
+          errorReason = courier === 'Delhivery' ? 'Missing or invalid Waybill' : 'Missing or invalid Tracking number';
         }
 
         parsed.push({
           rowIdx: idx + 1,
-          rawIdentifier: rawId || rawAwb,
+          rawIdentifier: rawOrderId || rawConsigneeName || rawAwb,
+          orderId: rawOrderId || undefined,
           awbNumber: rawAwb,
           weight: rawWeight || undefined,
-          status: rawStatus || undefined,
+          status: rawCurrentStatus || rawStatusType || undefined,
+          statusType: rawStatusType || undefined,
+          currentStatus: rawCurrentStatus || undefined,
           dispatchDate: rawDate || undefined,
           expectedDeliveryDate: rawEdd || undefined,
+          consigneeName: rawConsigneeName || undefined,
+          city: rawCity || undefined,
+          state: rawState || undefined,
+          pincode: rawPin || undefined,
           matchedInfluencer: matchedInf,
           matchType,
           isValid,
@@ -255,18 +325,21 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   };
 
   // Preview filtering & statistics
-  const matchedCount = useMemo(() => parsedRows.filter(r => r.isValid).length, [parsedRows]);
-  const unmatchedCount = useMemo(() => parsedRows.filter(r => !r.isValid).length, [parsedRows]);
+  const totalCount = parsedRows.length;
+  const matchedCount = useMemo(() => parsedRows.filter(r => r.isValid && r.matchedInfluencer).length, [parsedRows]);
+  const unmatchedCount = useMemo(() => parsedRows.filter(r => r.isValid && !r.matchedInfluencer).length, [parsedRows]);
+  const invalidCount = useMemo(() => parsedRows.filter(r => !r.isValid).length, [parsedRows]);
+  const validCount = useMemo(() => parsedRows.filter(r => r.isValid).length, [parsedRows]);
 
   const filteredPreviewRows = useMemo(() => {
     return parsedRows.filter(row => {
-      if (filterView === 'matched' && !row.isValid) return false;
-      if (filterView === 'unmatched' && row.isValid) return false;
+      if (filterView === 'matched' && !row.matchedInfluencer) return false;
+      if (filterView === 'unmatched' && row.matchedInfluencer) return false;
 
       if (!searchTerm) return true;
       const term = searchTerm.toLowerCase();
-      const creator = (row.matchedInfluencer?.influencer_name || row.matchedInfluencer?.name || '').toLowerCase();
-      const code = (row.matchedInfluencer?.code || '').toLowerCase();
+      const creator = (row.matchedInfluencer?.influencer_name || row.matchedInfluencer?.name || row.consigneeName || '').toLowerCase();
+      const code = (row.matchedInfluencer?.code || row.orderId || '').toLowerCase();
       const awb = row.awbNumber.toLowerCase();
       const raw = row.rawIdentifier.toLowerCase();
 
@@ -274,170 +347,287 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
     });
   }, [parsedRows, filterView, searchTerm]);
 
-  // Execute database import
+  // Execute import workflow
   const handleConfirmImport = async () => {
-    const validRows = parsedRows.filter(r => r.isValid && r.matchedInfluencer);
+    const validRows = parsedRows.filter(r => r.isValid);
     if (validRows.length === 0) {
-      toast.error('No valid matched shipments to import.');
+      toast.error('No valid shipments to import.');
       return;
     }
 
-    setIsImporting(true);
-    const toastId = toast.loading(`Importing ${validRows.length} shipments for ${courier}...`);
+    setStep('importing');
+    const todayDate = new Date().toISOString().split('T')[0];
 
-    try {
-      let savedCount = 0;
-      const todayDate = new Date().toISOString().split('T')[0];
+    // =========================================================================
+    // WORKFLOW 1: ST COURIER (FETCH STATUS ONE BY ONE VIA API)
+    // =========================================================================
+    if (courier === 'ST Courier') {
+      setImportProgress({
+        total: validRows.length,
+        completed: 0,
+        successful: 0,
+        failed: 0,
+        currentAwb: '',
+        phase: 'Fetching live tracking statuses one by one from ST Courier...'
+      });
 
-      for (const row of validRows) {
-        const inf = row.matchedInfluencer!;
-        const influencerId = String(inf.id);
-        const campaignId = String(campaign.id);
-        const awb = row.awbNumber.trim();
-        const weight = row.weight || inf.dispatchDetails?.total_weight || '500g';
-        const dispatchDate = row.dispatchDate || inf.dispatchDetails?.dispatch_date || todayDate;
-        const expectedEdd = row.expectedDeliveryDate || inf.dispatchDetails?.expected_delivery_date || null;
+      const trackedShipments: InfluencerDispatchedShipment[] = [];
+      let successfulCount = 0;
+      let failedCount = 0;
+      let completedCount = 0;
 
-        // 1. Check if dispatch record exists in Supabase
-        const { data: existingRecords } = await supabase
-          .from(SUPABASE_TABLES.influencerDispatch)
-          .select('id')
-          .eq('influencer_id', influencerId)
-          .eq('campaign_id', campaignId);
+      // Controlled concurrency (2 at a time) to prevent API rate limits
+      const concurrency = 2;
+      for (let i = 0; i < validRows.length; i += concurrency) {
+        const chunk = validRows.slice(i, i + concurrency);
 
-        if (existingRecords && existingRecords.length > 0) {
-          // Update existing dispatch record
-          await supabase
-            .from(SUPABASE_TABLES.influencerDispatch)
-            .update({
-              courier_partner: courier,
-              tracking_id: awb,
-              dispatch_status: 'Dispatched',
-              dispatch_date: dispatchDate,
-              expected_delivery_date: expectedEdd,
-              total_weight: weight
-            })
-            .eq('id', existingRecords[0].id);
-        } else {
-          // Insert new dispatch record
-          await supabase
-            .from(SUPABASE_TABLES.influencerDispatch)
-            .insert({
-              influencer_id: influencerId,
-              campaign_id: campaignId,
-              creator_name: inf.influencer_name || inf.name || 'Influencer',
-              phone_number: inf.phone_number || null,
-              alternative_phone_number: inf.alternative_number || null,
-              address: inf.complete_address || (inf as any).address || null,
-              state: inf.state || null,
-              campaign_name: campaign.campaign_name,
-              courier_partner: courier,
-              tracking_id: awb,
-              dispatch_status: 'Dispatched',
-              dispatch_date: dispatchDate,
-              expected_delivery_date: expectedEdd,
-              total_weight: weight,
-              selected_products: [],
-              total_products: 1
-            });
-        }
+        await Promise.all(
+          chunk.map(async (row) => {
+            const inf = row.matchedInfluencer;
+            const awb = row.awbNumber.trim();
+            const orderId = row.orderId || (inf ? inf.code : undefined) || '';
 
-        // 2. Also register in local Dexie database for Logistics/Tracking sync
-        try {
-          const existingOrder = await db.logistics_orders
-            .where('orderId')
-            .equals(inf.code || `INF-${influencerId}`)
-            .first();
+            setImportProgress(prev => ({
+              ...prev,
+              currentAwb: awb,
+              completed: completedCount
+            }));
 
-          if (existingOrder) {
-            await db.logistics_orders.update(existingOrder.id!, {
+            // Prepare base shipment record
+            const baseShipment: InfluencerDispatchedShipment = {
+              id: inf ? (inf.dispatchDetails?.id || String(inf.id)) : `st-${awb}`,
+              influencerId: inf ? String(inf.id) : undefined,
+              creatorName: inf ? (inf.influencer_name || inf.name || 'Influencer') : 'Influencer Not Matched',
+              username: inf?.platforms?.find(p => p.username)?.username || (inf ? `@${inf.influencer_name}` : '—'),
+              influencerCode: inf?.code || orderId || '',
+              orderId: orderId || undefined,
+              profilePhoto: inf?.profile_file_url || '',
+              phoneNumber: inf?.phone_number || '',
+              altPhoneNumber: inf?.alternative_number || '',
+              state: inf?.state || row.state || '',
+              city: row.city || undefined,
+              pincode: row.pincode || undefined,
+              batchCode: '—',
               awbNumber: awb,
-              courier,
-              syncedAt: new Date().toLocaleString()
-            });
-          } else {
-            await db.logistics_orders.add({
-              orderId: inf.code || `INF-${influencerId}`,
-              awbNumber: awb,
-              courier,
-              customerName: inf.influencer_name || inf.name || 'Influencer',
-              phoneNumber: inf.phone_number || '',
-              orderType: 'Influencer Kit',
-              amount: '0',
-              products: 'Influencer Kit',
-              stage: 'order_data',
-              uploadedAt: new Date().toLocaleString(),
-              status: 'Not Tracked',
-              state: inf.state || 'Unknown',
-              pincode: inf.pincode || ''
-            });
-          }
-        } catch (dexieErr) {
-          console.warn('Dexie logistics order update non-fatal error:', dexieErr);
-        }
+              courier: 'ST Courier',
+              dispatchDate: row.dispatchDate || todayDate,
+              expectedDeliveryDate: row.expectedDeliveryDate || '',
+              status: 'Pending',
+              rawStatus: row.status || 'Pending',
+              statusSource: 'Live ST Courier Tracking',
+              sourceType: 'LIVE_API',
+              trackingUrl: getCourierTrackingUrl('ST Courier', awb)
+            };
 
-        savedCount++;
-      }
+            // Fetch live status from ST Courier tracking service
+            const tracked = await syncSingleShipment(baseShipment, campaign.id);
+            trackedShipments.push(tracked);
 
-      // 3. Keep dispatch batches in sync
-      try {
-        const loadedBatches = await dispatchBatchService.getBatches(campaign.id);
-        if (loadedBatches && loadedBatches.length > 0) {
-          const updatedBatches = loadedBatches.map(b => {
-            let batchModified = false;
-            const updatedMembers = b.members.map(m => {
-              const matched = validRows.find(vr => String(vr.matchedInfluencer?.id) === String(m.influencer_id));
-              if (matched) {
-                batchModified = true;
-                return { ...m, dispatch_status: 'Dispatched' as const };
-              }
-              return m;
-            });
-            if (batchModified) {
-              const allDispatched = updatedMembers.every(m => m.dispatch_status === 'Dispatched');
-              return {
-                ...b,
-                members: updatedMembers,
-                status: allDispatched ? ('Dispatched' as const) : b.status,
-                updated_at: new Date().toISOString()
-              };
+            if (!tracked.syncError && tracked.status !== 'Exception') {
+              successfulCount++;
+            } else {
+              failedCount++;
             }
-            return b;
-          });
-          await dispatchBatchService.saveBatches(campaign.id, updatedBatches);
-        }
-      } catch (batchErr) {
-        console.warn('Batch update non-fatal error:', batchErr);
+            completedCount++;
+
+            setImportProgress({
+              total: validRows.length,
+              completed: completedCount,
+              successful: successfulCount,
+              failed: failedCount,
+              currentAwb: awb,
+              phase: `Processed ${completedCount} of ${validRows.length} shipments`
+            });
+          })
+        );
       }
 
-      // 4. Log activity
+      // Save all tracked shipments to campaign storage
+      upsertCampaignShipments(campaign.id, trackedShipments);
+
+      // Also persist matched influencers to Supabase and Dexie
+      for (const s of trackedShipments) {
+        if (s.influencerId) {
+          try {
+            const { data: existingRecords } = await supabase
+              .from(SUPABASE_TABLES.influencerDispatch)
+              .select('id')
+              .eq('influencer_id', s.influencerId)
+              .eq('campaign_id', String(campaign.id));
+
+            if (existingRecords && existingRecords.length > 0) {
+              await supabase
+                .from(SUPABASE_TABLES.influencerDispatch)
+                .update({
+                  courier_partner: 'ST Courier',
+                  tracking_id: s.awbNumber,
+                  dispatch_status: 'Dispatched',
+                  dispatch_date: s.dispatchDate,
+                  expected_delivery_date: s.expectedDeliveryDate || null,
+                  total_weight: '500g'
+                })
+                .eq('id', existingRecords[0].id);
+            }
+
+            const existingOrder = await db.logistics_orders
+              .where('orderId')
+              .equals(s.influencerCode || `INF-${s.influencerId}`)
+              .first();
+
+            if (existingOrder) {
+              await db.logistics_orders.update(existingOrder.id!, {
+                awbNumber: s.awbNumber,
+                courier: 'ST Courier',
+                syncedAt: new Date().toLocaleString()
+              });
+            }
+          } catch (e) {
+            console.warn('Non-fatal sync error to database:', e);
+          }
+        }
+      }
+
+      // Log activity
       try {
         await logActivity({
           department: 'Marketing',
-          action: `Bulk Upload ${courier} Shipments`,
-          description: `Imported ${savedCount} shipments for ${courier} in campaign "${campaign.campaign_name}" from file "${file?.name}"`,
+          action: 'Upload ST Courier Shipments',
+          description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Successfully tracked: ${successfulCount}, Failed: ${failedCount}`,
           record_id: String(campaign.id),
           record_name: campaign.campaign_name,
-          metadata: {
-            courier,
-            savedCount,
-            fileName: file?.name
-          }
+          metadata: { courier: 'ST Courier', total: trackedShipments.length, successful: successfulCount, failed: failedCount }
         });
-      } catch (logErr) {
-        // Non fatal
+      } catch (e) {}
+
+      toast.success(`Successfully tracked: ${successfulCount}, Failed: ${failedCount}`, { duration: 5000 });
+      setTimeout(() => {
+        onSuccess();
+        onClose();
+      }, 700);
+
+    // =========================================================================
+    // WORKFLOW 2: DELHIVERY (UPLOADED FILE STATUS AS SOURCE OF TRUTH - NO API)
+    // =========================================================================
+    } else {
+      setImportProgress({
+        total: validRows.length,
+        completed: 0,
+        successful: 0,
+        failed: 0,
+        currentAwb: '',
+        phase: 'Processing and normalizing Delhivery shipments from uploaded file...'
+      });
+
+      const nowTimestamp = new Date().toLocaleString();
+      const delhiveryShipments: InfluencerDispatchedShipment[] = [];
+
+      for (let i = 0; i < validRows.length; i++) {
+        const row = validRows[i];
+        const inf = row.matchedInfluencer;
+        const awb = row.awbNumber.trim();
+        const orderId = row.orderId || (inf ? inf.code : undefined) || '';
+
+        // Normalize status using the Delhivery status normalizer
+        const normalized = normalizeDelhiveryStatus(row.currentStatus, row.statusType);
+        const rawStatus = row.currentStatus || row.statusType || 'DELIVERED';
+
+        const shipmentObj: InfluencerDispatchedShipment = {
+          id: inf ? (inf.dispatchDetails?.id || String(inf.id)) : `del-${awb}`,
+          influencerId: inf ? String(inf.id) : undefined,
+          creatorName: inf ? (inf.influencer_name || inf.name || 'Influencer') : (row.consigneeName || 'Influencer Not Matched'),
+          username: inf?.platforms?.find(p => p.username)?.username || (inf ? `@${inf.influencer_name}` : '—'),
+          influencerCode: inf?.code || orderId || '',
+          orderId: orderId || undefined,
+          profilePhoto: inf?.profile_file_url || '',
+          phoneNumber: inf?.phone_number || '',
+          altPhoneNumber: inf?.alternative_number || '',
+          state: inf?.state || row.state || '',
+          city: row.city || undefined,
+          pincode: row.pincode || undefined,
+          batchCode: '—',
+          awbNumber: awb,
+          courier: 'Delhivery',
+          dispatchDate: row.dispatchDate || todayDate,
+          expectedDeliveryDate: row.expectedDeliveryDate || '',
+          status: normalized,
+          rawStatus,
+          statusSource: 'Uploaded Delhivery File',
+          sourceType: 'UPLOADED_FILE',
+          lastSyncedAt: nowTimestamp,
+          trackingUrl: getCourierTrackingUrl('Delhivery', awb)
+        };
+
+        delhiveryShipments.push(shipmentObj);
+
+        // Also save to Dexie db.shipments
+        try {
+          await db.shipments.put({
+            awb,
+            orderId: orderId || awb,
+            status: rawStatus,
+            state: row.state || 'Unknown',
+            lastLocation: '-',
+            trackingDateTime: '-',
+            department: (row.state === 'Tamil Nadu') ? 'Tamil Nadu' : 'Other State',
+            lastSyncedAt: Date.now()
+          });
+        } catch (dbErr) {}
+
+        // If matched to an influencer, persist to Supabase
+        if (inf) {
+          try {
+            const { data: existingRecords } = await supabase
+              .from(SUPABASE_TABLES.influencerDispatch)
+              .select('id')
+              .eq('influencer_id', String(inf.id))
+              .eq('campaign_id', String(campaign.id));
+
+            if (existingRecords && existingRecords.length > 0) {
+              await supabase
+                .from(SUPABASE_TABLES.influencerDispatch)
+                .update({
+                  courier_partner: 'Delhivery',
+                  tracking_id: awb,
+                  dispatch_status: 'Dispatched',
+                  dispatch_date: row.dispatchDate || todayDate,
+                  expected_delivery_date: row.expectedDeliveryDate || null,
+                  total_weight: row.weight || '500g'
+                })
+                .eq('id', existingRecords[0].id);
+            }
+          } catch (e) {}
+        }
       }
 
-      toast.dismiss(toastId);
-      toast.success(`Successfully imported ${savedCount} shipments for ${courier}!`);
-      onSuccess();
-      onClose();
-    } catch (err: any) {
-      console.error('Import execution error:', err);
-      toast.dismiss(toastId);
-      toast.error(`Import failed: ${err.message || String(err)}`);
-    } finally {
-      setIsImporting(false);
+      // Save all Delhivery shipments into isolated campaign storage
+      upsertCampaignShipments(campaign.id, delhiveryShipments);
+
+      setImportProgress({
+        total: validRows.length,
+        completed: validRows.length,
+        successful: validRows.length,
+        failed: 0,
+        currentAwb: '',
+        phase: `Successfully imported ${delhiveryShipments.length} Delhivery shipments`
+      });
+
+      // Log activity
+      try {
+        await logActivity({
+          department: 'Marketing',
+          action: 'Upload Delhivery Shipments',
+          description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File)`,
+          record_id: String(campaign.id),
+          record_name: campaign.campaign_name,
+          metadata: { courier: 'Delhivery', total: delhiveryShipments.length, source: 'Uploaded File' }
+        });
+      } catch (e) {}
+
+      toast.success(`Successfully imported ${delhiveryShipments.length} Delhivery shipments (Source: Uploaded File)`);
+      setTimeout(() => {
+        onSuccess();
+        onClose();
+      }, 700);
     }
   };
 
@@ -461,7 +651,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Upload shipments for {courier} in <span className="text-purple-300 font-semibold">{campaign.campaign_name}</span>
+                {courier === 'ST Courier' ? (
+                  <span>Upload ST Courier CSV → Live status will be retrieved one by one via ST Courier service</span>
+                ) : (
+                  <span>Upload Delhivery CSV → Status will be extracted directly from the uploaded file (No API calls)</span>
+                )}
               </p>
             </div>
           </div>
@@ -469,8 +663,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           <button 
             type="button"
             onClick={onClose}
-            disabled={isImporting}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-lg transition-colors cursor-pointer"
+            disabled={step === 'importing'}
+            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 rounded-lg transition-colors cursor-pointer disabled:opacity-40"
           >
             <X size={20} />
           </button>
@@ -496,7 +690,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                 {isProcessing ? (
                   <div className="flex flex-col items-center gap-3">
                     <Loader2 size={38} className="text-purple-400 animate-spin" />
-                    <span className="text-sm font-semibold text-slate-200">Reading & parsing file...</span>
+                    <span className="text-sm font-semibold text-slate-200">Reading & validating columns...</span>
                   </div>
                 ) : (
                   <>
@@ -504,10 +698,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                       <FileSpreadsheet size={36} />
                     </div>
                     <p className="text-base font-bold text-slate-100 group-hover:text-purple-300 transition-colors">
-                      Click or drag shipment file here
+                      Click or drag {courier} shipment file here
                     </p>
                     <p className="text-xs text-slate-400 mt-1">
-                      Supports Excel (.xlsx, .xls) and CSV (.csv) exports
+                      Supports CSV (.csv) and Excel (.xlsx, .xls) exports
                     </p>
                   </>
                 )}
@@ -517,15 +711,22 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               <div className="p-4 bg-[#0e1626]/60 border border-slate-800/80 rounded-xl space-y-2 text-xs">
                 <div className="font-semibold text-slate-300 flex items-center gap-1.5">
                   <Package size={14} className="text-purple-400" />
-                  <span>Column Auto-Detection Reference</span>
+                  <span>Required Identifier for {courier}</span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-slate-400 text-[11px] leading-relaxed">
-                  <div>
-                    <span className="text-purple-300 font-medium">Tracking Number / AWB:</span> Tracking number, AWB, Waybill, Consignment No, Tracking ID
-                  </div>
-                  <div>
-                    <span className="text-purple-300 font-medium">Influencer Identifier:</span> Order, Order ID, Influencer Code, Creator Name, Phone
-                  </div>
+                <div className="text-slate-400 text-[11px] leading-relaxed">
+                  {courier === 'ST Courier' ? (
+                    <div>
+                      <span className="text-purple-300 font-bold">Required column: </span>
+                      <code className="text-purple-200 bg-purple-950/60 px-1.5 py-0.5 rounded border border-purple-800/50">Tracking number</code>
+                      <span className="ml-2 text-slate-400">· Other fields: Order, Status, Carrier, Order date</span>
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="text-purple-300 font-bold">Required column: </span>
+                      <code className="text-purple-200 bg-purple-950/60 px-1.5 py-0.5 rounded border border-purple-800/50">Waybill</code>
+                      <span className="ml-2 text-slate-400">· Other fields: Reference No., Status Type, Current Status, Consignee Name, Pick Up Date</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -541,8 +742,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                     filterView === 'all' ? 'bg-purple-950/50 border-purple-500' : 'bg-[#0e1626]/70 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="text-[11px] font-medium text-slate-400">Total Rows</div>
-                  <div className="text-lg font-bold text-slate-100">{parsedRows.length}</div>
+                  <div className="text-[11px] font-medium text-slate-400">Total Valid Rows</div>
+                  <div className="text-lg font-bold text-slate-100">{validCount}</div>
                 </div>
 
                 <div 
@@ -553,7 +754,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                 >
                   <div className="text-[11px] font-medium text-emerald-400 flex items-center gap-1">
                     <CheckCircle2 size={12} />
-                    <span>Matched Shipments</span>
+                    <span>Matched Influencers</span>
                   </div>
                   <div className="text-lg font-bold text-emerald-300">{matchedCount}</div>
                 </div>
@@ -561,14 +762,14 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                 <div 
                   onClick={() => setFilterView('unmatched')}
                   className={`p-3 rounded-xl border transition-all cursor-pointer ${
-                    filterView === 'unmatched' ? 'bg-rose-950/50 border-rose-500' : 'bg-[#0e1626]/70 border-slate-800 hover:border-slate-700'
+                    filterView === 'unmatched' ? 'bg-amber-950/50 border-amber-500' : 'bg-[#0e1626]/70 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="text-[11px] font-medium text-rose-400 flex items-center gap-1">
+                  <div className="text-[11px] font-medium text-amber-400 flex items-center gap-1">
                     <AlertTriangle size={12} />
-                    <span>Unmatched / Skipped</span>
+                    <span>Influencer Not Matched</span>
                   </div>
-                  <div className="text-lg font-bold text-rose-300">{unmatchedCount}</div>
+                  <div className="text-lg font-bold text-amber-300">{unmatchedCount}</div>
                 </div>
               </div>
 
@@ -579,7 +780,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                   type="text" 
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
-                  placeholder="Search by creator name, code, or AWB..." 
+                  placeholder="Search by order ID, name, code, or AWB..." 
                   className="w-full h-9 bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
                 />
               </div>
@@ -590,9 +791,9 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                   <thead className="bg-[#121929] sticky top-0 z-10 border-b border-slate-800 text-slate-400 text-[11px]">
                     <tr>
                       <th className="py-2.5 px-3">#</th>
-                      <th className="py-2.5 px-3">File Ref</th>
-                      <th className="py-2.5 px-3">Matched Influencer</th>
-                      <th className="py-2.5 px-3">AWB / Tracking</th>
+                      <th className="py-2.5 px-3">Order / Ref</th>
+                      <th className="py-2.5 px-3">Influencer</th>
+                      <th className="py-2.5 px-3">{courier === 'Delhivery' ? 'Waybill' : 'Tracking Number'}</th>
                       <th className="py-2.5 px-3">Courier</th>
                       <th className="py-2.5 px-3">Status</th>
                     </tr>
@@ -601,11 +802,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                     {filteredPreviewRows.length > 0 ? (
                       filteredPreviewRows.map((row, idx) => {
                         const inf = row.matchedInfluencer;
-                        const creator = inf?.influencer_name || inf?.name || '—';
+                        const creator = inf?.influencer_name || inf?.name || row.consigneeName || 'Influencer Not Matched';
                         return (
                           <tr key={idx} className={`hover:bg-slate-800/40 transition-colors ${!row.isValid ? 'bg-rose-950/10' : ''}`}>
                             <td className="py-2.5 px-3 text-slate-500 font-mono text-[11px]">{row.rowIdx}</td>
-                            <td className="py-2.5 px-3 font-medium text-slate-300">{row.rawIdentifier}</td>
+                            <td className="py-2.5 px-3 font-medium text-slate-300 font-mono">{row.orderId || row.rawIdentifier}</td>
                             <td className="py-2.5 px-3">
                               {inf ? (
                                 <div>
@@ -613,7 +814,9 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                                   <div className="text-[10px] text-purple-400 font-mono">{inf.code || 'No Code'}</div>
                                 </div>
                               ) : (
-                                <span className="text-rose-400 text-[11px] italic">Not Found</span>
+                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/80 text-amber-300 border border-amber-800/50">
+                                  Influencer Not Matched
+                                </span>
                               )}
                             </td>
                             <td className="py-2.5 px-3 font-mono font-medium text-slate-200">
@@ -625,13 +828,14 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                               </span>
                             </td>
                             <td className="py-2.5 px-3">
-                              {row.isValid ? (
-                                <span className="text-emerald-400 flex items-center gap-1 font-semibold text-[11px]">
-                                  <Check size={12} /> Ready
+                              {courier === 'ST Courier' ? (
+                                <span className="text-purple-300 text-[11px] flex items-center gap-1 font-medium">
+                                  <RefreshCw size={10} className="animate-spin text-purple-400" />
+                                  <span>Will fetch live</span>
                                 </span>
                               ) : (
-                                <span className="text-rose-400 text-[11px]" title={row.errorReason}>
-                                  {row.errorReason}
+                                <span className="text-emerald-400 text-[11px] font-semibold">
+                                  {row.currentStatus || row.status || 'Delivered'}
                                 </span>
                               )}
                             </td>
@@ -650,6 +854,51 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               </div>
             </div>
           )}
+
+          {step === 'importing' && (
+            <div className="py-8 px-4 flex flex-col items-center justify-center space-y-6 animate-fade-in">
+              <div className="w-16 h-16 rounded-2xl bg-purple-950/70 border border-purple-600/60 flex items-center justify-center text-purple-400 shadow-xl shadow-purple-950/50">
+                <RefreshCw size={32} className="animate-spin text-purple-400" />
+              </div>
+
+              <div className="text-center space-y-1">
+                <h3 className="text-base font-bold text-white">
+                  {courier === 'ST Courier' ? 'Fetching Live ST Courier Tracking' : 'Importing Delhivery Shipments'}
+                </h3>
+                <p className="text-xs text-slate-400 max-w-sm">
+                  {importProgress.phase || 'Processing shipments...'}
+                </p>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full max-w-md space-y-2">
+                <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden border border-slate-700">
+                  <div 
+                    className="bg-gradient-to-r from-purple-600 to-indigo-500 h-2.5 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${importProgress.total > 0 ? Math.round((importProgress.completed / importProgress.total) * 100) : 0}%`
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                  <span>Processed {importProgress.completed} of {importProgress.total} shipments</span>
+                  <span>{importProgress.total > 0 ? Math.round((importProgress.completed / importProgress.total) * 100) : 0}%</span>
+                </div>
+              </div>
+
+              {/* Live Count Badges */}
+              <div className="flex items-center gap-3">
+                <span className="px-3 py-1 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 text-xs font-bold">
+                  Tracked / Ready: {importProgress.successful}
+                </span>
+                {importProgress.failed > 0 && (
+                  <span className="px-3 py-1 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs font-bold">
+                    Failed: {importProgress.failed}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer Actions */}
@@ -663,7 +912,6 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                   setFile(null);
                   setParsedRows([]);
                 }}
-                disabled={isImporting}
                 className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-colors cursor-pointer"
               >
                 Back to File Select
@@ -672,22 +920,17 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               <button
                 type="button"
                 onClick={handleConfirmImport}
-                disabled={isImporting || matchedCount === 0}
+                disabled={validCount === 0}
                 className="px-5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 rounded-xl transition-all shadow-md shadow-purple-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isImporting ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Importing Shipments...</span>
-                  </>
-                ) : (
-                  <>
-                    <FileCheck size={14} />
-                    <span>Confirm & Import ({matchedCount}) Shipments</span>
-                  </>
-                )}
+                <FileCheck size={14} />
+                <span>Confirm & Import ({validCount}) Shipments</span>
               </button>
             </>
+          ) : step === 'importing' ? (
+            <div className="w-full flex justify-center text-xs text-slate-400">
+              Please wait while shipments are being processed...
+            </div>
           ) : (
             <div className="w-full flex justify-end">
               <button
