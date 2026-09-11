@@ -43,7 +43,8 @@ import {
   History,
   Target,
   Upload,
-  ChevronDown
+  ChevronDown,
+  Eye
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { UploadCourierShipmentModal } from '../../components/marketing/UploadCourierShipmentModal';
@@ -142,9 +143,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  // Table selection
-  const [selectedShipmentIds, setSelectedShipmentIds] = useState<string[]>([]);
-
   // Syncing state
   const [syncingIds, setSyncingIds] = useState<string[]>([]);
   const [isBulkSyncing, setIsBulkSyncing] = useState(false);
@@ -166,7 +164,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     setTrackingCache(getTrackingCache(campaign.id));
     setLastSyncTime(getLastCampaignSyncTime(campaign.id));
     setCurrentPage(1);
-    setSelectedShipmentIds([]);
   }, [campaign.id]);
 
   // Build unified dispatched shipments strictly for the current campaign
@@ -527,21 +524,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     } finally {
       setIsBulkSyncing(false);
     }
-  };
-
-  // Table selection handlers
-  const handleToggleSelectAll = () => {
-    if (selectedShipmentIds.length === paginatedShipments.length) {
-      setSelectedShipmentIds([]);
-    } else {
-      setSelectedShipmentIds(paginatedShipments.map(s => s.id));
-    }
-  };
-
-  const handleToggleSelectRow = (id: string) => {
-    setSelectedShipmentIds(prev => 
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
   };
 
   return (
@@ -910,105 +892,46 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-[#0e1626] text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10 select-none">
                 <tr>
-                  <th className="px-3.5 py-3 w-10 text-center bg-[#0e1626]">
-                    <input
-                      type="checkbox"
-                      checked={selectedShipmentIds.length === paginatedShipments.length && paginatedShipments.length > 0}
-                      onChange={handleToggleSelectAll}
-                      className="rounded accent-purple-600 cursor-pointer"
-                    />
-                  </th>
-                  <th className="px-3.5 py-3 bg-[#0e1626]">ORDER ID / CODE</th>
-                  <th className="px-3.5 py-3 bg-[#0e1626]">INFLUENCER</th>
-                  <th className="px-3.5 py-3 bg-[#0e1626]">AWB NUMBER</th>
-                  <th className="px-3.5 py-3 bg-[#0e1626]">COURIER</th>
-                  <th className="px-3.5 py-3 text-center bg-[#0e1626]">STATUS</th>
-                  <th className="px-3.5 py-3 text-center bg-[#0e1626]">LAST SYNCED</th>
-                  <th className="px-3.5 py-3 text-right bg-[#0e1626]">ACTIONS</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">ORDER ID</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">AWB NUMBER</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">COURIER</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-right w-24">ACTIONS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
                 {paginatedShipments.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-slate-500 italic">
+                    <td colSpan={4} className="p-8 text-center text-slate-500 italic">
                       No shipments matching your filter criteria.
                     </td>
                   </tr>
                 ) : (
                   paginatedShipments.map((s) => {
-                    const isSyncing = syncingIds.includes(s.id);
-                    const isSelected = selectedShipmentIds.includes(s.id);
-                    const badgeStyle = getTrackingStatusBadgeStyle(s.status);
+                    const displayOrderId = s.orderId 
+                      ? (s.orderId.startsWith('#') ? s.orderId : `#${s.orderId}`)
+                      : (s.influencerCode || (s.id.length > 8 ? `#${s.id.slice(0, 8)}` : `#${s.id}`));
 
                     return (
                       <tr
                         key={s.id}
-                        className={`transition-colors hover:bg-slate-850/40 ${
-                          isSelected ? 'bg-purple-950/20' : ''
-                        }`}
+                        className="transition-colors hover:bg-slate-850/40"
                       >
-                        {/* Checkbox */}
-                        <td className="px-3.5 py-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => handleToggleSelectRow(s.id)}
-                            className="rounded accent-purple-600 cursor-pointer"
-                          />
+                        {/* 1. ORDER ID */}
+                        <td className="px-5 py-3.5 font-mono font-bold text-slate-200">
+                          {displayOrderId}
                         </td>
 
-                        {/* Order ID / Code */}
-                        <td className="px-3.5 py-3 font-mono font-bold text-slate-200">
-                          {s.orderId || s.influencerCode || (s.id.length > 8 ? s.id.slice(0, 8) : s.id)}
-                        </td>
-
-                        {/* Influencer Details */}
-                        <td className="px-3.5 py-3">
-                          {s.creatorName === 'Influencer Not Matched' ? (
-                            <div className="flex items-center gap-2.5 min-w-[140px]">
-                              <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 text-xs font-bold shrink-0">
-                                ?
-                              </div>
-                              <div className="min-w-0">
-                                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/80 text-amber-300 border border-amber-800/60 inline-block truncate">
-                                  Influencer Not Matched
-                                </span>
-                                <div className="text-[10px] text-slate-500 font-mono truncate mt-0.5">
-                                  {s.orderId ? `Ref: ${s.orderId}` : 'No creator linked'}
-                                </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2.5 min-w-[140px]">
-                              <div className="w-8 h-8 rounded-full overflow-hidden bg-purple-600 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm">
-                                {s.profilePhoto ? (
-                                  <img src={s.profilePhoto} alt={s.creatorName} className="w-full h-full object-cover" />
-                                ) : (
-                                  <span>{(s.creatorName || 'A').charAt(0).toUpperCase()}</span>
-                                )}
-                              </div>
-                              <div className="min-w-0">
-                                <div className="font-bold text-slate-100 truncate hover:text-purple-300 transition-colors">
-                                  {s.creatorName}
-                                </div>
-                                <div className="text-[10px] text-slate-400 font-mono truncate">
-                                  {s.username} {s.phoneNumber ? `· ${s.phoneNumber}` : ''}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </td>
-
-                        {/* AWB Number */}
-                        <td className="px-3.5 py-3 font-mono font-bold text-slate-200">
+                        {/* 2. AWB NUMBER */}
+                        <td className="px-5 py-3.5 font-mono font-bold text-slate-200">
                           {s.awbNumber ? (
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-2">
                               <span>{s.awbNumber}</span>
                               <button
                                 type="button"
                                 onClick={() => handleCopyAwb(s.awbNumber)}
                                 className="p-1 text-slate-500 hover:text-purple-300 rounded transition-colors cursor-pointer"
                                 title="Copy AWB"
+                                aria-label="Copy AWB"
                               >
                                 {copiedAwb === s.awbNumber ? <Check size={12} className="text-emerald-400" /> : <Copy size={11} />}
                               </button>
@@ -1018,9 +941,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           )}
                         </td>
 
-                        {/* Courier */}
-                        <td className="px-3.5 py-3">
-                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold whitespace-nowrap border ${
+                        {/* 3. COURIER */}
+                        <td className="px-5 py-3.5">
+                          <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap border ${
                             s.courier.toLowerCase().includes('delhivery')
                               ? 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300'
                               : 'bg-purple-950/60 border-purple-800/60 text-purple-300'
@@ -1029,74 +952,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           </span>
                         </td>
 
-                        {/* Status */}
-                        <td className="px-3.5 py-3 text-center">
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
-                            {isSyncing ? (
-                              <RefreshCw size={10} className="animate-spin" />
-                            ) : (
-                              <span className={`w-1.5 h-1.5 rounded-full ${badgeStyle.dot}`} />
-                            )}
-                            <span>{isSyncing ? 'Syncing...' : s.status}</span>
-                          </span>
-                        </td>
-
-                        {/* Last Synced / Imported */}
-                        <td className="px-3.5 py-3 text-center font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                          {s.sourceType === 'UPLOADED_FILE' || s.courier.toLowerCase().includes('delhivery') ? (
-                            <span title="Status sourced from uploaded Delhivery file">
-                              {s.lastSyncedAt ? `Imported: ${s.lastSyncedAt}` : 'Uploaded File'}
-                            </span>
-                          ) : (
-                            <span>
-                              {s.lastSyncedAt ? `Synced: ${s.lastSyncedAt}` : (s.trackingDateTime || s.dispatchDate || '—')}
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Actions */}
-                        <td className="px-3.5 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                        {/* 4. ACTIONS */}
+                        <td className="px-5 py-3.5 text-right">
+                          <div className="flex items-center justify-end">
                             <button
                               type="button"
                               onClick={() => setActiveTrackingModalShipment(s)}
-                              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white text-xs font-semibold rounded-xl border border-slate-700/80 transition-all flex items-center gap-1 cursor-pointer shadow-sm"
-                              title="View details & timeline"
+                              className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group"
+                              title="View Shipment Details"
+                              aria-label="View Shipment Details"
                             >
-                              <Truck size={12} className="text-purple-400" />
-                              <span>Track</span>
-                            </button>
-
-                            {s.courier.toLowerCase().includes('delhivery') ? (
-                              <button
-                                type="button"
-                                onClick={() => handleSyncShipment(s)}
-                                className="px-2.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-300 text-xs font-semibold rounded-xl border border-slate-800 transition-all flex items-center gap-1 cursor-pointer shadow-sm"
-                                title="Status is based on uploaded Delhivery file"
-                              >
-                                <FileSpreadsheet size={11} className="text-cyan-400" />
-                                <span>File</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleSyncShipment(s)}
-                                disabled={isSyncing || !s.awbNumber}
-                                className="px-2.5 py-1.5 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 hover:text-purple-300 disabled:opacity-40 text-xs font-semibold rounded-xl border border-purple-500/30 transition-all flex items-center gap-1 cursor-pointer shadow-sm"
-                                title="Sync live status from ST Courier"
-                              >
-                                <RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
-                                <span>Sync</span>
-                              </button>
-                            )}
-
-                            <button
-                              type="button"
-                              onClick={() => setActiveTrackingModalShipment(s)}
-                              className="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                              title="More options"
-                            >
-                              <MoreVertical size={13} />
+                              <Eye size={15} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
                             </button>
                           </div>
                         </td>
@@ -1238,7 +1104,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                 {(activeTrackingModalShipment.orderId || activeTrackingModalShipment.influencerCode) && (
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Order / Reference:</span>
-                    <span className="font-mono text-slate-200">{activeTrackingModalShipment.orderId || activeTrackingModalShipment.influencerCode}</span>
+                    <span className="font-mono text-slate-200">
+                      {activeTrackingModalShipment.orderId
+                        ? (activeTrackingModalShipment.orderId.startsWith('#') ? activeTrackingModalShipment.orderId : `#${activeTrackingModalShipment.orderId}`)
+                        : activeTrackingModalShipment.influencerCode}
+                    </span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">
