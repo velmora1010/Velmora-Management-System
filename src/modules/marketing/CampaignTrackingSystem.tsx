@@ -12,9 +12,11 @@ import {
   getLastCampaignSyncTime,
   getCampaignShipments,
   fetchCampaignShipmentsFromDb,
+  deleteCampaignShipmentsFromDb,
   TrackingStatusCategory,
   InfluencerDispatchedShipment
 } from '../../services/influencerTrackingService';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import {
   Truck,
   Package,
@@ -216,7 +218,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       });
     }
 
-    // 2. Merge dispatched influencers
+    // 2. Enrich uploaded campaign tracking shipments with matched influencer details
     for (const inf of dispatchedInfluencers) {
       const infId = String(inf.id);
       const dispatch = inf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === infId);
@@ -225,8 +227,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       const batchId = batch?.id;
 
       const rawAwb = (dispatch?.tracking_id || '').trim();
-      const rawCourier = (dispatch?.courier_partner || 'ST Courier').trim();
-      const rawStatus = (dispatch?.dispatch_status || 'Dispatched').trim();
+      const rawCode = (inf.code || '').trim().toLowerCase();
       const dispatchDate = dispatch?.dispatch_date || (batch as any)?.dispatched_date || dispatch?.created_at || '';
       const expectedDeliveryDate = dispatch?.expected_delivery_date || '';
 
@@ -238,61 +239,30 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       const cleanUsername = username.startsWith('@') ? username : `@${username}`;
 
       const awbKey = rawAwb ? rawAwb.toLowerCase().trim() : '';
-      const lookupKey = awbKey || infId.toLowerCase().trim();
 
-      if (shipmentMap.has(lookupKey)) {
-        // If an uploaded record with this AWB exists, associate it with this influencer
-        const existing = shipmentMap.get(lookupKey)!;
-        shipmentMap.set(lookupKey, {
-          ...existing,
-          influencerId: infId,
-          creatorName: existing.creatorName === 'Influencer Not Matched' ? (inf.influencer_name || inf.name || 'Influencer') : existing.creatorName,
-          username: existing.username === '—' ? cleanUsername : existing.username,
-          influencerCode: existing.influencerCode || inf.code || '',
-          profilePhoto: existing.profilePhoto || inf.profile_file_url || '',
-          phoneNumber: existing.phoneNumber || inf.phone_number || dispatch?.phone_number || '',
-          altPhoneNumber: existing.altPhoneNumber || dispatch?.alternative_phone_number || '',
-          state: existing.state || inf.state || dispatch?.state || '',
-          batchId: existing.batchId || batchId,
-          batchCode: existing.batchCode !== '—' ? existing.batchCode : batchCode,
-          dispatchDate: existing.dispatchDate || dispatchDate,
-          expectedDeliveryDate: existing.expectedDeliveryDate || expectedDeliveryDate
-        });
-      } else {
-        // Add as a new dispatched influencer shipment
-        const cached = rawAwb ? trackingCache[rawAwb] : null;
-        const effectiveStatus = cached ? cached.status : normalizeTrackingStatus(rawStatus);
-        const courierLower = rawCourier.toLowerCase();
-        const isDelhivery = courierLower.includes('delhivery');
-        const isSTCourier = courierLower.includes('st courier');
+      shipmentMap.forEach((existing, key) => {
+        const matchesAwb = awbKey && (existing.awbNumber || '').toLowerCase().trim() === awbKey;
+        const matchesId = existing.influencerId && String(existing.influencerId) === infId;
+        const matchesCode = rawCode && (existing.influencerCode || existing.orderId || '').toLowerCase().trim() === rawCode;
 
-        shipmentMap.set(lookupKey, {
-          id: dispatch?.id || infId,
-          influencerId: infId,
-          creatorName: inf.influencer_name || inf.name || 'Influencer',
-          username: cleanUsername,
-          influencerCode: inf.code || '',
-          profilePhoto: inf.profile_file_url || '',
-          phoneNumber: inf.phone_number || dispatch?.phone_number || '',
-          altPhoneNumber: dispatch?.alternative_phone_number || '',
-          state: inf.state || dispatch?.state || '',
-          batchId,
-          batchCode,
-          awbNumber: rawAwb,
-          courier: rawCourier,
-          dispatchDate,
-          expectedDeliveryDate,
-          status: effectiveStatus,
-          rawStatus: cached?.rawStatus || rawStatus,
-          statusSource: isDelhivery ? 'Uploaded Delhivery File' : (isSTCourier ? 'Live ST Courier Tracking' : 'Live Tracking'),
-          sourceType: isDelhivery ? 'UPLOADED_FILE' : 'LIVE_API',
-          lastLocation: cached?.lastLocation,
-          trackingDateTime: cached?.trackingDateTime,
-          lastSyncedAt: cached?.lastSyncedAt,
-          trackingUrl: getCourierTrackingUrl(rawCourier, rawAwb),
-          syncError: cached?.syncError
-        });
-      }
+        if (matchesAwb || matchesId || matchesCode) {
+          shipmentMap.set(key, {
+            ...existing,
+            influencerId: infId,
+            creatorName: existing.creatorName === 'Influencer Not Matched' ? (inf.influencer_name || inf.name || 'Influencer') : existing.creatorName,
+            username: existing.username === '—' ? cleanUsername : existing.username,
+            influencerCode: existing.influencerCode || inf.code || '',
+            profilePhoto: existing.profilePhoto || inf.profile_file_url || '',
+            phoneNumber: existing.phoneNumber || inf.phone_number || dispatch?.phone_number || '',
+            altPhoneNumber: existing.altPhoneNumber || dispatch?.alternative_phone_number || '',
+            state: existing.state || inf.state || dispatch?.state || '',
+            batchId: existing.batchId || batchId,
+            batchCode: existing.batchCode !== '—' ? existing.batchCode : batchCode,
+            dispatchDate: existing.dispatchDate || dispatchDate,
+            expectedDeliveryDate: existing.expectedDeliveryDate || expectedDeliveryDate
+          });
+        }
+      });
     }
 
     return Array.from(shipmentMap.values());
@@ -435,15 +405,60 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return filteredShipments.slice(startIdx, startIdx + pageSize);
   }, [filteredShipments, safeCurrentPage, pageSize]);
 
-  // Clear all filters
-  const handleClearAllFilters = () => {
-    setSearchTerm('');
-    setSelectedCourier('All');
-    setSelectedStatusTab('All');
-    setSelectedStatusDropdown('All');
-    setStartDate('');
-    setEndDate('');
-    setCurrentPage(1);
+  // Delete All Tracking Records Confirmation Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Clear All: Permanently deletes all tracking records for this campaign from Supabase
+  const handleClearAllTrackingData = async () => {
+    if (!campaign?.id) {
+      toast.error('Unable to clear tracking data because the current campaign could not be identified.');
+      return;
+    }
+
+    setIsDeleting(true);
+    const toastId = toast.loading('Deleting tracking data...');
+
+    try {
+      const result = await deleteCampaignShipmentsFromDb(campaign.id);
+
+      if (!result.success) {
+        toast.error(`Failed to clear tracking data: ${result.error || 'Unknown error'}`, { id: toastId });
+        await loadShipments();
+        return;
+      }
+
+      // Reset local state immediately
+      setCampaignShipments([]);
+      setTrackingCache({});
+      setLastSyncTime(null);
+      setActiveTrackingModalShipment(null);
+
+      // Reset search and filter states
+      setSearchTerm('');
+      setSelectedCourier('All');
+      setSelectedStatusTab('All');
+      setSelectedStatusDropdown('All');
+      setStartDate('');
+      setEndDate('');
+      setCurrentPage(1);
+
+      // Re-verify from DB
+      await loadShipments();
+
+      toast.success('Tracking data cleared successfully.', { id: toastId });
+
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (err: any) {
+      console.error('Clear All error:', err);
+      toast.error(`Failed to clear tracking data: ${err?.message || String(err)}`, { id: toastId });
+      await loadShipments();
+    } finally {
+      setIsDeleting(false);
+      setIsDeleteModalOpen(false);
+    }
   };
 
   // Copy AWB Helper
@@ -731,14 +746,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           />
         </div>
 
-        {/* 7. Clear All Button */}
+        {/* 7. Clear All Button (Destructive: Permanently clears all tracking records for this campaign) */}
         <button
           type="button"
-          onClick={handleClearAllFilters}
-          className="h-10 px-3.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-slate-700/80 hover:border-purple-600/60 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
-          title="Clear all filters"
+          onClick={() => setIsDeleteModalOpen(true)}
+          disabled={isDeleting || allShipments.length === 0}
+          className="h-10 px-3.5 bg-slate-900 hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 text-xs font-semibold rounded-xl border border-slate-700/80 hover:border-rose-700/60 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Delete all tracking shipment records for this campaign"
         >
-          <RotateCcw size={13} />
+          <RotateCcw size={13} className="text-rose-400" />
           <span>Clear All</span>
         </button>
       </div>
@@ -1239,6 +1255,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           }}
         />
       )}
+
+      {/* Confirmation Modal for Clearing/Deleting All Campaign Tracking Data */}
+      <ConfirmModal
+        isOpen={isDeleteModalOpen}
+        title="Delete All Tracking Data?"
+        message="This will permanently delete all imported ST Courier and Delhivery shipment tracking records for this campaign. This action cannot be undone."
+        confirmText={isDeleting ? "Deleting..." : "Delete All"}
+        cancelText="Cancel"
+        isDestructive={true}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+          }
+        }}
+        onConfirm={handleClearAllTrackingData}
+      />
     </div>
   );
 };
