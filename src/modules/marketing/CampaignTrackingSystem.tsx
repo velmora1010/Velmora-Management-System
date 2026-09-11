@@ -598,19 +598,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         </div>
       </div>
 
-      {allShipments.length === 0 ? (
-        <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-12 text-center text-slate-400 animate-fade-in">
-          <div className="w-16 h-16 rounded-2xl bg-purple-950/40 border border-purple-800/50 flex items-center justify-center text-purple-400 mx-auto mb-4 shadow-sm">
-            <Truck size={32} />
-          </div>
-          <h3 className="text-lg font-bold text-slate-100 mb-1">No Shipments Tracked Yet</h3>
-          <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
-            Upload courier shipments above or dispatch influencers to begin tracking.
-          </p>
-        </div>
-      ) : (
-        <>
-      {/* 2. SEARCH & CONTROLS TOOLBAR */}
+      {/* 2. SEARCH & CONTROLS TOOLBAR (Always visible) */}
       <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-2.5">
         {/* 1. Search Box (Compact width ~300-340px) */}
         <div className="relative w-full sm:w-72 lg:w-80 shrink-0">
@@ -758,6 +746,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           <span>Clear All</span>
         </button>
       </div>
+
+      {allShipments.length === 0 ? (
+        <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-12 text-center text-slate-400 animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-purple-950/40 border border-purple-800/50 flex items-center justify-center text-purple-400 mx-auto mb-4 shadow-sm">
+            <Truck size={32} />
+          </div>
+          <h3 className="text-lg font-bold text-slate-100 mb-1">No Shipments Tracked Yet</h3>
+          <p className="text-sm text-slate-400 max-w-md mx-auto mb-6">
+            Upload courier shipments above or dispatch influencers to begin tracking.
+          </p>
+        </div>
+      ) : (
+        <>
 
       {/* 4. STATUS FILTER PILLS (Matching Screenshot order & color schemes) */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
