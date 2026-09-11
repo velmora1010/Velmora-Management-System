@@ -352,17 +352,22 @@ export function upsertCampaignShipments(
   campaignId: string | number,
   newShipments: InfluencerDispatchedShipment[]
 ): InfluencerDispatchedShipment[] {
-  const existing = getCampaignShipments(campaignId);
+  const cleanCampaignId = String(campaignId).trim();
+  const existing = getCampaignShipments(cleanCampaignId);
   const shipmentMap = new Map<string, InfluencerDispatchedShipment>();
 
   existing.forEach(s => {
-    const key = (s.awbNumber || s.id).toLowerCase().trim();
-    if (key) shipmentMap.set(key, s);
+    const courier = (s.courier || '').toLowerCase().trim();
+    const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
+    const key = `${courier}__${awb}`;
+    if (awb) shipmentMap.set(key, s);
   });
 
   newShipments.forEach(s => {
-    const key = (s.awbNumber || s.id).toLowerCase().trim();
-    if (key) {
+    const courier = (s.courier || '').toLowerCase().trim();
+    const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
+    const key = `${courier}__${awb}`;
+    if (awb) {
       const prev = shipmentMap.get(key);
       shipmentMap.set(key, {
         ...(prev || {}),
@@ -377,7 +382,7 @@ export function upsertCampaignShipments(
   });
 
   const merged = Array.from(shipmentMap.values());
-  saveCampaignShipments(campaignId, merged);
+  saveCampaignShipments(cleanCampaignId, merged);
   return merged;
 }
 
@@ -490,34 +495,68 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
   return payload;
 }
 
+export interface UpsertCampaignShipmentsResult {
+  success: boolean;
+  total: number;
+  imported: number;
+  duplicatesUpdated: number;
+  failed: number;
+  shipments: InfluencerDispatchedShipment[];
+  errors?: string[];
+}
+
 /**
  * Fetches campaign shipments directly from the Supabase database table `influencer_tracking_shipments`.
+ * Uses batched pagination (.range) to ensure all records (even > 1000) are loaded.
  * Falls back to local storage cache if offline or initial load.
  */
 export async function fetchCampaignShipmentsFromDb(campaignId: string | number): Promise<InfluencerDispatchedShipment[]> {
-  try {
-    const { data, error } = await supabase
-      .from(SUPABASE_TABLES.influencerTrackingShipments)
-      .select('*')
-      .eq('campaign_id', String(campaignId))
-      .order('created_at', { ascending: false });
+  const cleanCampaignId = String(campaignId).trim();
+  if (!cleanCampaignId) return [];
 
-    if (error) {
-      console.warn('Failed to fetch shipments from Supabase, falling back to local storage:', error);
-      return getCampaignShipments(campaignId);
+  try {
+    const pageSize = 1000;
+    let from = 0;
+    let allRows: any[] = [];
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from(SUPABASE_TABLES.influencerTrackingShipments)
+        .select('*')
+        .eq('campaign_id', cleanCampaignId)
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        console.warn('Failed to fetch shipments from Supabase, falling back to local storage / accumulated rows:', error);
+        if (allRows.length > 0) break;
+        return getCampaignShipments(cleanCampaignId);
+      }
+
+      if (data && data.length > 0) {
+        allRows = allRows.concat(data);
+        if (data.length < pageSize) {
+          hasMore = false;
+        } else {
+          from += pageSize;
+        }
+      } else {
+        hasMore = false;
+      }
     }
 
-    if (Array.isArray(data) && data.length > 0) {
-      const shipments = data.map(mapDbRowToShipment);
-      saveCampaignShipments(campaignId, shipments);
+    if (allRows.length > 0) {
+      const shipments = allRows.map(mapDbRowToShipment);
+      saveCampaignShipments(cleanCampaignId, shipments);
       return shipments;
     }
 
     // If Supabase table has no rows yet for this campaign, check if local storage has shipments
-    const local = getCampaignShipments(campaignId);
+    const local = getCampaignShipments(cleanCampaignId);
     if (local && local.length > 0) {
       // Migrate local records to Supabase asynchronously in background
-      upsertCampaignShipmentsToDb(campaignId, local).catch(err => {
+      upsertCampaignShipmentsToDb(cleanCampaignId, local).catch(err => {
         console.warn('Background migration of local shipments to Supabase:', err);
       });
       return local;
@@ -526,42 +565,105 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
     return [];
   } catch (err) {
     console.error('fetchCampaignShipmentsFromDb exception:', err);
-    return getCampaignShipments(campaignId);
+    return getCampaignShipments(cleanCampaignId);
   }
 }
 
 /**
  * Upserts shipments to the Supabase database table `influencer_tracking_shipments`
  * using the unique constraint (campaign_id, courier, awb_number).
+ * Checks existing DB records to return accurate (total, imported, duplicatesUpdated, failed) statistics.
  * Also keeps local storage synchronized.
  */
 export async function upsertCampaignShipmentsToDb(
   campaignId: string | number,
   shipments: InfluencerDispatchedShipment[]
-): Promise<InfluencerDispatchedShipment[]> {
-  // Sync to local cache immediately
-  const localMerged = upsertCampaignShipments(campaignId, shipments);
+): Promise<UpsertCampaignShipmentsResult> {
+  const cleanCampaignId = String(campaignId).trim();
+  const localMerged = upsertCampaignShipments(cleanCampaignId, shipments);
 
   if (!shipments || shipments.length === 0) {
-    return localMerged;
+    return {
+      success: true,
+      total: 0,
+      imported: 0,
+      duplicatesUpdated: 0,
+      failed: 0,
+      shipments: localMerged
+    };
   }
 
   try {
     const valid = shipments.filter(s => s.awbNumber && s.awbNumber.trim());
-    if (valid.length === 0) return localMerged;
+    const invalidCount = shipments.length - valid.length;
+    if (valid.length === 0) {
+      return {
+        success: false,
+        total: shipments.length,
+        imported: 0,
+        duplicatesUpdated: 0,
+        failed: invalidCount,
+        shipments: localMerged,
+        errors: ['No shipments with valid tracking or waybill numbers found']
+      };
+    }
 
-    // Deduplicate in payload by (campaign_id, courier, awb_number)
+    // Deduplicate incoming batch by (campaign_id, courier, awb_number)
     const payloadMap = new Map<string, any>();
     valid.forEach(s => {
-      const p = mapShipmentToDbPayload(s, campaignId);
+      const p = mapShipmentToDbPayload(s, cleanCampaignId);
       const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
       payloadMap.set(key, p);
     });
 
     const payloads = Array.from(payloadMap.values());
 
+    // Check which AWBs already exist in DB for this campaign
+    const existingDbKeys = new Set<string>();
+    try {
+      const pageSize = 1000;
+      let from = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from(SUPABASE_TABLES.influencerTrackingShipments)
+          .select('awb_number, courier')
+          .eq('campaign_id', cleanCampaignId)
+          .range(from, from + pageSize - 1);
+
+        if (error || !data) break;
+        data.forEach(r => {
+          if (r.awb_number) {
+            existingDbKeys.add(`${cleanCampaignId}__${(r.courier || '').toLowerCase()}__${r.awb_number.toLowerCase()}`);
+          }
+        });
+        if (data.length < pageSize) {
+          hasMore = false;
+        } else {
+          from += pageSize;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not query existing DB keys for duplicate count:', e);
+    }
+
+    let initialImportedCount = 0;
+    let initialDuplicateCount = 0;
+
+    payloads.forEach(p => {
+      const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
+      if (existingDbKeys.has(key)) {
+        initialDuplicateCount++;
+      } else {
+        initialImportedCount++;
+      }
+    });
+
     // Batch upsert into Supabase
+    let failedCount = invalidCount;
+    const errors: string[] = [];
     const chunkSize = 50;
+
     for (let i = 0; i < payloads.length; i += chunkSize) {
       const chunk = payloads.slice(i, i + chunkSize);
       const { error } = await supabase
@@ -573,15 +675,44 @@ export async function upsertCampaignShipmentsToDb(
 
       if (error) {
         console.warn('[Supabase Tracking Upsert Error]:', error);
+        errors.push(error.message || String(error));
+        // Count how many in this failed chunk were marked imported vs duplicate and mark them failed
+        chunk.forEach(p => {
+          const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
+          if (existingDbKeys.has(key)) {
+            initialDuplicateCount = Math.max(0, initialDuplicateCount - 1);
+          } else {
+            initialImportedCount = Math.max(0, initialImportedCount - 1);
+          }
+          failedCount++;
+        });
       }
     }
 
-    // Refresh updated list from Supabase
-    const refreshed = await fetchCampaignShipmentsFromDb(campaignId);
-    return refreshed.length > 0 ? refreshed : localMerged;
-  } catch (err) {
+    // Refresh updated list from Supabase with pagination
+    const refreshed = await fetchCampaignShipmentsFromDb(cleanCampaignId);
+    const finalShipments = refreshed.length > 0 ? refreshed : localMerged;
+
+    return {
+      success: failedCount === 0,
+      total: shipments.length,
+      imported: initialImportedCount,
+      duplicatesUpdated: initialDuplicateCount,
+      failed: failedCount,
+      shipments: finalShipments,
+      errors: errors.length > 0 ? errors : undefined
+    };
+  } catch (err: any) {
     console.error('[upsertCampaignShipmentsToDb Error]:', err);
-    return localMerged;
+    return {
+      success: false,
+      total: shipments.length,
+      imported: 0,
+      duplicatesUpdated: 0,
+      failed: shipments.length,
+      shipments: localMerged,
+      errors: [err?.message || String(err)]
+    };
   }
 }
 

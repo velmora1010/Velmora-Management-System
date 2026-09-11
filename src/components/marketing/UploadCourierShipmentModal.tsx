@@ -249,6 +249,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         pin: string;
         matchedInf?: CampaignInfluencer;
       }[] = [];
+      let invalidRowsCount = 0;
 
       rawData.forEach((row) => {
         const rawAwb = awbCol ? cleanStr(row[awbCol]) : '';
@@ -264,9 +265,14 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const rawPin = pinCol ? cleanStr(row[pinCol]) : '';
 
         // Skip completely empty rows
-        if (!rawAwb && !rawOrderId && !rawConsigneeName) return;
+        const hasContent = Object.values(row).some(v => cleanStr(v) !== '');
+        if (!hasContent) return;
+
         // Require valid AWB
-        if (!rawAwb || rawAwb.length < 4) return;
+        if (!rawAwb || rawAwb.length < 4) {
+          invalidRowsCount++;
+          return;
+        }
 
         let matchedInf: CampaignInfluencer | undefined;
 
@@ -327,38 +333,26 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         return;
       }
 
-      // Count new vs duplicate/reconciled
-      let duplicateCount = 0;
-      let newCount = 0;
-      validRows.forEach(r => {
-        const k = r.rawAwb.toLowerCase().trim();
-        if (existingMap.has(k)) {
-          duplicateCount++;
-        } else {
-          newCount++;
-        }
-      });
-
-      console.log(`[Upload Pipeline] Valid rows: ${validRows.length}, New: ${newCount}, Duplicates to update: ${duplicateCount}`);
+      console.log(`[Upload Pipeline] Valid rows: ${validRows.length}, Invalid rows: ${invalidRowsCount}`);
 
       // =======================================================================
       // WORKFLOW A: ST COURIER (LIVE API SYNC ONE BY ONE)
       // =======================================================================
       if (courier === 'ST Courier') {
         setImportProgress({
-          total: validRows.length,
+          total: validRows.length + invalidRowsCount,
           completed: 0,
           successful: 0,
-          failed: 0,
-          duplicates: duplicateCount,
-          imported: newCount,
+          failed: invalidRowsCount,
+          duplicates: 0,
+          imported: 0,
           currentAwb: '',
           phase: `Fetching live statuses from ST Courier (0 of ${validRows.length})...`
         });
 
         const trackedShipments: InfluencerDispatchedShipment[] = [];
-        let successfulCount = 0;
-        let failedCount = 0;
+        let liveApiSyncedCount = 0;
+        let liveApiPendingCount = 0;
         let completedCount = 0;
 
         // Controlled concurrency: 2 at a time
@@ -402,19 +396,19 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               trackedShipments.push(tracked);
 
               if (!tracked.syncError && tracked.status !== 'Exception') {
-                successfulCount++;
+                liveApiSyncedCount++;
               } else {
-                failedCount++;
+                liveApiPendingCount++;
               }
               completedCount++;
 
               setImportProgress({
-                total: validRows.length,
+                total: validRows.length + invalidRowsCount,
                 completed: completedCount,
-                successful: successfulCount,
-                failed: failedCount,
-                duplicates: duplicateCount,
-                imported: newCount,
+                successful: liveApiSyncedCount,
+                failed: invalidRowsCount,
+                duplicates: 0,
+                imported: completedCount,
                 currentAwb: awb,
                 phase: `Fetching ST Courier status (${completedCount} of ${validRows.length})...`
               });
@@ -423,7 +417,12 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
 
         // Save all tracked shipments to campaign database & local storage
-        await upsertCampaignShipmentsToDb(campaign.id, trackedShipments);
+        const dbResult = await upsertCampaignShipmentsToDb(campaign.id, trackedShipments);
+
+        const totalReported = validRows.length + invalidRowsCount;
+        const importedReported = dbResult.imported;
+        const duplicatesReported = dbResult.duplicatesUpdated;
+        const failedReported = dbResult.failed + invalidRowsCount;
 
         // Also persist matched influencers to Supabase and Dexie
         for (const s of trackedShipments) {
@@ -456,10 +455,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           await logActivity({
             department: 'Marketing',
             action: 'Upload ST Courier Shipments',
-            description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Successfully tracked: ${successfulCount}, Failed: ${failedCount}`,
+            description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Imported: ${importedReported}, Duplicates updated: ${duplicatesReported}, Failed: ${failedReported}`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'ST Courier', total: trackedShipments.length, successful: successfulCount, failed: failedCount }
+            metadata: { courier: 'ST Courier', total: totalReported, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, liveSynced: liveApiSyncedCount, livePending: liveApiPendingCount }
           });
         } catch (e) {}
 
@@ -469,8 +468,12 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }));
         setStep('completed');
 
-        const summaryText = `ST Courier Upload Complete\nTotal rows: ${validRows.length}\nImported: ${newCount}\nDuplicates updated: ${duplicateCount}\nFailed: ${failedCount}`;
-        toast.success(summaryText, { duration: 6000 });
+        const summaryText = `ST Courier Upload Complete\nTotal rows: ${totalReported}\nImported: ${importedReported}\nDuplicates updated: ${duplicatesReported}\nFailed: ${failedReported}`;
+        if (failedReported > 0 && importedReported === 0 && duplicatesReported === 0) {
+          toast.error(summaryText, { duration: 6000 });
+        } else {
+          toast.success(summaryText, { duration: 6000 });
+        }
 
         setTimeout(() => {
           onSuccess();
@@ -482,12 +485,12 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       // =======================================================================
       } else {
         setImportProgress({
-          total: validRows.length,
+          total: validRows.length + invalidRowsCount,
           completed: 0,
           successful: 0,
-          failed: 0,
-          duplicates: duplicateCount,
-          imported: newCount,
+          failed: invalidRowsCount,
+          duplicates: 0,
+          imported: 0,
           currentAwb: '',
           phase: `Importing ${validRows.length} Delhivery shipments from file...`
         });
@@ -563,22 +566,21 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                     tracking_id: awb,
                     dispatch_status: 'Dispatched',
                     dispatch_date: row.date || todayDate,
-                    expected_delivery_date: row.edd || null,
-                    total_weight: row.weight || '500g'
+                    expected_delivery_date: row.edd || null
                   })
                   .eq('id', existingRecords[0].id);
               }
             } catch (e) {}
           }
 
-          if (i % 20 === 0 || i === validRows.length - 1) {
+          if (i % 25 === 0 || i === validRows.length - 1) {
             setImportProgress({
-              total: validRows.length,
+              total: validRows.length + invalidRowsCount,
               completed: i + 1,
               successful: i + 1,
-              failed: 0,
-              duplicates: duplicateCount,
-              imported: newCount,
+              failed: invalidRowsCount,
+              duplicates: 0,
+              imported: i + 1,
               currentAwb: awb,
               phase: `Importing Delhivery shipments (${i + 1} of ${validRows.length})...`
             });
@@ -586,7 +588,12 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
 
         // Save all Delhivery shipments into isolated campaign database & local storage
-        await upsertCampaignShipmentsToDb(campaign.id, delhiveryShipments);
+        const dbResult = await upsertCampaignShipmentsToDb(campaign.id, delhiveryShipments);
+
+        const totalReported = validRows.length + invalidRowsCount;
+        const importedReported = dbResult.imported;
+        const duplicatesReported = dbResult.duplicatesUpdated;
+        const failedReported = dbResult.failed + invalidRowsCount;
 
         // Log activity
         try {
@@ -596,7 +603,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File)`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'Delhivery', total: delhiveryShipments.length, source: 'Uploaded File' }
+            metadata: { courier: 'Delhivery', total: totalReported, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, source: 'Uploaded File' }
           });
         } catch (e) {}
 
@@ -606,8 +613,12 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }));
         setStep('completed');
 
-        const summaryText = `Delhivery Upload Complete\nTotal rows: ${validRows.length}\nImported: ${newCount}\nDuplicates updated: ${duplicateCount}\nFailed: 0`;
-        toast.success(summaryText, { duration: 6000 });
+        const summaryText = `Delhivery Upload Complete\nTotal rows: ${totalReported}\nImported: ${importedReported}\nDuplicates updated: ${duplicatesReported}\nFailed: ${failedReported}`;
+        if (failedReported > 0 && importedReported === 0 && duplicatesReported === 0) {
+          toast.error(summaryText, { duration: 6000 });
+        } else {
+          toast.success(summaryText, { duration: 6000 });
+        }
 
         setTimeout(() => {
           onSuccess();

@@ -190,11 +190,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     // 1. First index uploaded campaign shipments (ST Courier & Delhivery)
     for (const cs of campaignShipments) {
       const awbKey = (cs.awbNumber || '').toLowerCase().trim();
-      const uniqueKey = awbKey || (cs.id ? cs.id.toLowerCase().trim() : '');
-      if (!uniqueKey) continue;
+      const courierLower = (cs.courier || '').toLowerCase().trim();
+      const uniqueKey = `${courierLower}__${awbKey || (cs.id ? cs.id.toLowerCase().trim() : '')}`;
+      if (!uniqueKey || uniqueKey === '__') continue;
 
       const cached = cs.awbNumber ? trackingCache[cs.awbNumber] : null;
-      const courierLower = (cs.courier || '').toLowerCase();
       const isDelhivery = courierLower.includes('delhivery');
       const isSTCourier = courierLower.includes('st courier');
 
