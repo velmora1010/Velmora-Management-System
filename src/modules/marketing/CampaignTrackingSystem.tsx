@@ -420,8 +420,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return filteredShipments.slice(startIdx, startIdx + pageSize);
   }, [filteredShipments, safeCurrentPage, pageSize]);
 
-  // Reset all filters
-  const handleResetFilters = () => {
+  // Clear all filters
+  const handleClearAllFilters = () => {
     setSearchTerm('');
     setSelectedCourier('All');
     setSelectedStatusTab('All');
@@ -556,84 +556,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           </div>
         </div>
 
-        {/* Right: Upload + Auto Sync All + Last Sync */}
-        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 self-end sm:self-auto flex-wrap sm:flex-nowrap">
-          {/* Upload Dropdown [Upload ▼] */}
-          <div className="relative shrink-0" ref={uploadDropdownRef}>
-            {/* Hidden File Inputs for ST Courier and Delhivery */}
-            <input
-              type="file"
-              ref={stFileInputRef}
-              accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="hidden"
-              onChange={(e) => handleCourierFileChange(e, 'ST Courier')}
-            />
-            <input
-              type="file"
-              ref={delhiveryFileInputRef}
-              accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="hidden"
-              onChange={(e) => handleCourierFileChange(e, 'Delhivery')}
-            />
-
-            <button
-              type="button"
-              onClick={() => setIsUploadDropdownOpen(prev => !prev)}
-              className="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer border-0 outline-none focus:outline-none shrink-0"
-              title="Upload Shipments"
-            >
-              <Upload size={13} />
-              <span>Upload</span>
-              <ChevronDown size={12} className={`transition-transform duration-200 ${isUploadDropdownOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {isUploadDropdownOpen && (
-              <div className="absolute right-0 mt-1.5 w-64 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <button
-                  type="button"
-                  onClick={() => handleTriggerCourierUpload('ST Courier')}
-                  className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer"
-                >
-                  <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
-                    <Upload size={14} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for ST Courier</div>
-                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for ST Courier</div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleTriggerCourierUpload('Delhivery')}
-                  className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer mt-1"
-                >
-                  <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
-                    <Upload size={14} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for Delhivery</div>
-                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for Delhivery</div>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={handleAutoSyncAll}
-            disabled={isBulkSyncing}
-            className="px-3.5 py-2 bg-[#141b2d] hover:bg-[#1c263f] text-slate-200 border border-slate-700/80 hover:border-purple-500/50 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
-          >
-            <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : 'text-purple-400'} />
-            <span>{isBulkSyncing ? 'Syncing...' : 'Auto Sync All'}</span>
-          </button>
-
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
-            <span>Last Sync: {lastSyncTime || 'Pending initial sync'}</span>
-          </div>
+        {/* Right: Last Sync Info */}
+        <div className="flex items-center gap-2 text-xs text-slate-300 font-medium shrink-0 self-end sm:self-auto">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
+          <span>Last Sync: {lastSyncTime || 'Pending initial sync'}</span>
         </div>
       </div>
 
@@ -649,10 +575,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         </div>
       ) : (
         <>
-      {/* 2. SEARCH & CONTROLS ROW */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm">
-        {/* Search Box */}
-        <div className="relative flex-1 min-w-[240px]">
+      {/* 2. SEARCH & CONTROLS TOOLBAR */}
+      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-2.5">
+        {/* 1. Search Box (Compact width ~300-340px) */}
+        <div className="relative w-full sm:w-72 lg:w-80 shrink-0">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
           <input
             type="text"
@@ -663,68 +589,138 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           />
         </div>
 
-        {/* Filters Group */}
-        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {/* Courier Filter */}
-          <select
-            value={selectedCourier}
-            onChange={(e) => setSelectedCourier(e.target.value)}
-            className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer"
-          >
-            <option value="All">All Couriers</option>
-            {availableCouriers.map(c => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+        {/* 2. Upload Dropdown [Upload ▼] */}
+        <div className="relative shrink-0" ref={uploadDropdownRef}>
+          {/* Hidden File Inputs for ST Courier and Delhivery */}
+          <input
+            type="file"
+            ref={stFileInputRef}
+            accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(e) => handleCourierFileChange(e, 'ST Courier')}
+          />
+          <input
+            type="file"
+            ref={delhiveryFileInputRef}
+            accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={(e) => handleCourierFileChange(e, 'Delhivery')}
+          />
 
-          {/* Status Filter Dropdown */}
-          <select
-            value={selectedStatusDropdown}
-            onChange={(e) => setSelectedStatusDropdown(e.target.value)}
-            className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer"
-          >
-            <option value="All">All Status</option>
-            <option value="Delivered">Delivered</option>
-            <option value="In Transit">In Transit</option>
-            <option value="Out for Delivery">Out for Delivery</option>
-            <option value="Exception">Exception</option>
-            <option value="Failed Attempt">Failed Attempt</option>
-            <option value="Pending">Pending</option>
-            <option value="Info Received">Info Received</option>
-            <option value="Expired">Expired</option>
-          </select>
-
-          {/* Date Range Inputs */}
-          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2 h-10">
-            <Calendar size={13} className="text-slate-400 shrink-0 ml-1" />
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              title="From date"
-              className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
-            />
-            <span className="text-slate-500 text-xs">-</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              title="To date"
-              className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
-            />
-          </div>
-
-          {/* Reset Button */}
           <button
             type="button"
-            onClick={handleResetFilters}
-            className="h-10 px-3 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-slate-700/80 transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-            title="Reset filters"
+            onClick={() => setIsUploadDropdownOpen(prev => !prev)}
+            className="h-10 px-3.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer border-0 outline-none focus:outline-none shrink-0"
+            title="Upload Shipments"
           >
-            <RotateCcw size={13} />
-            <span>Reset</span>
+            <Upload size={13} />
+            <span>Upload</span>
+            <ChevronDown size={12} className={`transition-transform duration-200 ${isUploadDropdownOpen ? 'rotate-180' : ''}`} />
           </button>
+
+          {isUploadDropdownOpen && (
+            <div className="absolute left-0 mt-1.5 w-64 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+              <button
+                type="button"
+                onClick={() => handleTriggerCourierUpload('ST Courier')}
+                className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer"
+              >
+                <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
+                  <Upload size={14} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for ST Courier</div>
+                  <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for ST Courier</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTriggerCourierUpload('Delhivery')}
+                className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer mt-1"
+              >
+                <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
+                  <Upload size={14} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for Delhivery</div>
+                  <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for Delhivery</div>
+                </div>
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* 3. Auto Sync All */}
+        <button
+          type="button"
+          onClick={handleAutoSyncAll}
+          disabled={isBulkSyncing}
+          className="h-10 px-3.5 bg-[#141b2d] hover:bg-[#1c263f] text-slate-200 border border-slate-700/80 hover:border-purple-500/50 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+        >
+          <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : 'text-purple-400'} />
+          <span>{isBulkSyncing ? 'Syncing...' : 'Auto Sync All'}</span>
+        </button>
+
+        {/* 4. All Couriers */}
+        <select
+          value={selectedCourier}
+          onChange={(e) => setSelectedCourier(e.target.value)}
+          className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
+        >
+          <option value="All">All Couriers</option>
+          {availableCouriers.map(c => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+
+        {/* 5. All Status */}
+        <select
+          value={selectedStatusDropdown}
+          onChange={(e) => setSelectedStatusDropdown(e.target.value)}
+          className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
+        >
+          <option value="All">All Status</option>
+          <option value="Delivered">Delivered</option>
+          <option value="In Transit">In Transit</option>
+          <option value="Out for Delivery">Out for Delivery</option>
+          <option value="Exception">Exception</option>
+          <option value="Failed Attempt">Failed Attempt</option>
+          <option value="Pending">Pending</option>
+          <option value="Info Received">Info Received</option>
+          <option value="Expired">Expired</option>
+        </select>
+
+        {/* 6. Date Range Inputs (From - To) */}
+        <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 h-10 shrink-0">
+          <Calendar size={13} className="text-slate-400 shrink-0" />
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            title="From date"
+            className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
+          />
+          <span className="text-slate-500 text-xs">-</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            title="To date"
+            className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
+          />
+        </div>
+
+        {/* 7. Clear All Button */}
+        <button
+          type="button"
+          onClick={handleClearAllFilters}
+          className="h-10 px-3.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-slate-700/80 hover:border-purple-600/60 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+          title="Clear all filters"
+        >
+          <RotateCcw size={13} />
+          <span>Clear All</span>
+        </button>
       </div>
 
       {/* 4. STATUS FILTER PILLS (Matching Screenshot order & color schemes) */}
