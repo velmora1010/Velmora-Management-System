@@ -105,9 +105,36 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Upload Dropdown & Modal State
   const uploadDropdownRef = useRef<HTMLDivElement>(null);
+  const stFileInputRef = useRef<HTMLInputElement>(null);
+  const delhiveryFileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false);
   const [selectedUploadCourier, setSelectedUploadCourier] = useState<'ST Courier' | 'Delhivery'>('ST Courier');
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+
+  const handleTriggerCourierUpload = (courier: 'ST Courier' | 'Delhivery') => {
+    setIsUploadDropdownOpen(false);
+    if (courier === 'ST Courier') {
+      if (stFileInputRef.current) {
+        stFileInputRef.current.value = '';
+        stFileInputRef.current.click();
+      }
+    } else {
+      if (delhiveryFileInputRef.current) {
+        delhiveryFileInputRef.current.value = '';
+        delhiveryFileInputRef.current.click();
+      }
+    }
+  };
+
+  const handleCourierFileChange = (e: React.ChangeEvent<HTMLInputElement>, courier: 'ST Courier' | 'Delhivery') => {
+    const chosen = e.target.files?.[0];
+    if (!chosen) return;
+    setSelectedUploadCourier(courier);
+    setSelectedUploadFile(chosen);
+    setIsUploadModalOpen(true);
+    e.target.value = '';
+  };
 
   // Close upload dropdown on click outside
   useEffect(() => {
@@ -917,6 +944,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 self-end sm:self-auto flex-wrap sm:flex-nowrap">
           {/* Upload Dropdown [Upload ▼] */}
           <div className="relative shrink-0" ref={uploadDropdownRef}>
+            {/* Hidden File Inputs for ST Courier and Delhivery */}
+            <input
+              type="file"
+              ref={stFileInputRef}
+              accept=".csv, .xlsx, .xls"
+              className="hidden"
+              onChange={(e) => handleCourierFileChange(e, 'ST Courier')}
+            />
+            <input
+              type="file"
+              ref={delhiveryFileInputRef}
+              accept=".csv, .xlsx, .xls"
+              className="hidden"
+              onChange={(e) => handleCourierFileChange(e, 'Delhivery')}
+            />
+
             <button
               type="button"
               onClick={() => setIsUploadDropdownOpen(prev => !prev)}
@@ -932,11 +975,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               <div className="absolute right-0 mt-1.5 w-64 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsUploadDropdownOpen(false);
-                    setSelectedUploadCourier('ST Courier');
-                    setIsUploadModalOpen(true);
-                  }}
+                  onClick={() => handleTriggerCourierUpload('ST Courier')}
                   className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer"
                 >
                   <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
@@ -950,11 +989,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsUploadDropdownOpen(false);
-                    setSelectedUploadCourier('Delhivery');
-                    setIsUploadModalOpen(true);
-                  }}
+                  onClick={() => handleTriggerCourierUpload('Delhivery')}
                   className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer mt-1"
                 >
                   <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
@@ -1874,8 +1909,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           campaign={campaign}
           courier={selectedUploadCourier}
           influencers={allActiveInfluencers || dispatchedInfluencers}
-          onClose={() => setIsUploadModalOpen(false)}
+          initialFile={selectedUploadFile}
+          onClose={() => {
+            setIsUploadModalOpen(false);
+            setSelectedUploadFile(null);
+          }}
           onSuccess={async () => {
+            setIsUploadModalOpen(false);
+            setSelectedUploadFile(null);
             setCampaignShipments(getCampaignShipments(campaign.id));
             setTrackingCache(getTrackingCache(campaign.id));
             setLastSyncTime(getLastCampaignSyncTime(campaign.id) || new Date().toLocaleString());

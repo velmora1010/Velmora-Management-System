@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   Upload, 
@@ -34,6 +34,7 @@ export interface UploadCourierShipmentModalProps {
   campaign: Campaign;
   courier: 'ST Courier' | 'Delhivery';
   influencers: CampaignInfluencer[];
+  initialFile?: File | null;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -63,6 +64,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   campaign,
   courier,
   influencers,
+  initialFile,
   onClose,
   onSuccess
 }) => {
@@ -124,10 +126,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
     return null;
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (!selectedFile) return;
-
+  const processSelectedFile = async (selectedFile: File) => {
     const isExcel = selectedFile.name.endsWith('.xlsx') || selectedFile.name.endsWith('.xls');
     const isCsv = selectedFile.name.endsWith('.csv');
 
@@ -323,6 +322,28 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       setIsProcessing(false);
     }
   };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+    await processSelectedFile(selectedFile);
+    if (e.target) {
+      e.target.value = '';
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processSelectedFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  useEffect(() => {
+    if (initialFile) {
+      processSelectedFile(initialFile);
+    }
+  }, [initialFile]);
 
   // Preview filtering & statistics
   const totalCount = parsedRows.length;
@@ -677,6 +698,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               {/* Dropzone Area */}
               <div 
                 onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
                 className="border-2 border-dashed border-slate-700/80 hover:border-purple-500/80 bg-[#0e1626]/70 hover:bg-purple-950/10 rounded-2xl p-8 text-center transition-all cursor-pointer flex flex-col items-center justify-center min-h-[220px] group"
               >
                 <input 

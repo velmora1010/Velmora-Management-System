@@ -1173,13 +1173,6 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           >
             <Truck size={14} className={currentTab === 'dispatched' && dispatchedSubView === 'tracking' ? 'text-white' : 'text-purple-400'} />
             <span>Tracking</span>
-            <span className={`text-[9px] font-extrabold uppercase px-1 py-0.2 rounded leading-none ${
-              currentTab === 'dispatched' && dispatchedSubView === 'tracking'
-                ? 'bg-purple-950 text-purple-200 border border-purple-400/40 shadow-inner'
-                : 'bg-purple-950/90 text-purple-300 border border-purple-800/60'
-            }`}>
-              NEW
-            </span>
           </button>
         </div>
 
