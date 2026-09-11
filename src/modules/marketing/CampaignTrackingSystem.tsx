@@ -26,7 +26,6 @@ import {
   Search,
   RefreshCw,
   ExternalLink,
-  ArrowLeft,
   FileSpreadsheet,
   X,
   RotateCcw,
@@ -57,7 +56,7 @@ interface CampaignTrackingSystemProps {
   dispatchedInfluencers: CampaignInfluencer[];
   dispatchRecords: DispatchDetails[];
   savedBatches: DispatchBatch[];
-  onBackToDispatched: () => void;
+  onBackToDispatched?: () => void;
   onRefreshData?: () => Promise<void>;
   allActiveInfluencers?: CampaignInfluencer[];
 }
@@ -80,7 +79,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   dispatchedInfluencers,
   dispatchRecords,
   savedBatches,
-  onBackToDispatched,
+  onBackToDispatched: _onBackToDispatched,
   onRefreshData,
   allActiveInfluencers
 }) => {
@@ -552,53 +551,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* 1. TOP HEADER */}
-      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl px-5 py-3.5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 shadow-sm">
-        {/* Left: Back button + Title */}
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            type="button"
-            onClick={onBackToDispatched}
-            className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-slate-700/80 hover:border-purple-600 transition-all flex items-center gap-1.5 cursor-pointer shrink-0 group shadow-sm"
-            title="Return to Dispatched Batches"
-          >
-            <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform text-purple-400" />
-            <span>Back to Dispatched</span>
-          </button>
-
-          <div className="w-10 h-10 rounded-xl bg-purple-950/80 border border-purple-700/60 flex items-center justify-center text-purple-400 shrink-0 shadow-sm">
-            <Truck size={20} />
-          </div>
-
-          <div className="min-w-0">
-            <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 truncate">
-              Tracking System
-            </h2>
-            <p className="text-xs text-slate-400 truncate">
-              Track and monitor all dispatched influencer shipments for this campaign.
-            </p>
-          </div>
-        </div>
-
-        {/* Right: Last Sync Info + DB Refresh */}
-        <div className="flex items-center gap-3 text-xs text-slate-300 font-medium shrink-0 self-end sm:self-auto">
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${isLoadingDb ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 shadow-sm shadow-emerald-400/50'}`} />
-            <span>{isLoadingDb ? 'Syncing with database...' : `Last Sync: ${lastSyncTime || 'Pending initial sync'}`}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => loadShipments()}
-            disabled={isLoadingDb}
-            className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
-            title="Refresh shipments from Supabase database"
-          >
-            <RefreshCw size={12} className={isLoadingDb ? 'animate-spin text-purple-400' : ''} />
-          </button>
-        </div>
-      </div>
-
-      {/* 2. SEARCH & CONTROLS TOOLBAR (Always visible) */}
+      {/* SEARCH & CONTROLS TOOLBAR (Always visible) */}
       <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-2.5">
         {/* 1. Search Box (Compact width ~300-340px) */}
         <div className="relative w-full sm:w-72 lg:w-80 shrink-0">
@@ -745,6 +698,25 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           <RotateCcw size={13} className="text-rose-400" />
           <span>Clear All</span>
         </button>
+
+        {/* 8. Last Sync Info + DB Refresh */}
+        <div className="flex items-center gap-2 text-xs text-slate-300 font-medium shrink-0 sm:ml-auto">
+          <div className="flex items-center gap-2 bg-slate-900 border border-slate-700/80 rounded-xl px-3 h-10 shadow-sm">
+            <span className={`w-2 h-2 rounded-full ${isLoadingDb ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 shadow-sm shadow-emerald-400/50'}`} />
+            <span className="text-slate-300 whitespace-nowrap text-xs">
+              {isLoadingDb ? 'Syncing...' : `Last Sync: ${lastSyncTime || 'Pending initial sync'}`}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => loadShipments()}
+            disabled={isLoadingDb}
+            className="w-10 h-10 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0 shadow-sm"
+            title="Refresh shipments from Supabase database"
+          >
+            <RefreshCw size={13} className={isLoadingDb ? 'animate-spin text-purple-400' : ''} />
+          </button>
+        </div>
       </div>
 
       {allShipments.length === 0 ? (
