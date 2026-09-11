@@ -316,7 +316,12 @@ export interface CampaignInfluencer {
   phone_number: string;
   alternative_number: string;
   email?: string;
-  upi_number: string;
+  payment_method?: 'UPI' | 'ACCOUNT_DETAILS' | string | null;
+  upi_number?: string | null;
+  account_holder_name?: string | null;
+  account_number?: string | null;
+  ifsc_code?: string | null;
+  bank_name?: string | null;
   complete_address: string;
   city: string;
   pincode?: string;

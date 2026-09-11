@@ -575,6 +575,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
             phone_number: row.phone || null,
             alternative_number: row.altPhone || null,
             upi_number: row.upi || null,
+            payment_method: row.upi ? 'UPI' : null,
             city: row.city || null,
             state: normStateVal || null,
             complete_address: row.address || null,
@@ -608,7 +609,10 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           if (row.userId && row.userId.trim() !== '') updates.name = row.userId;
           if (row.phone && row.phone.trim() !== '') updates.phone_number = row.phone;
           if (row.altPhone && row.altPhone.trim() !== '') updates.alternative_number = row.altPhone;
-          if (row.upi && row.upi.trim() !== '') updates.upi_number = row.upi;
+          if (row.upi && row.upi.trim() !== '') {
+            updates.upi_number = row.upi;
+            updates.payment_method = 'UPI';
+          }
           if (row.city && row.city.trim() !== '') updates.city = row.city;
 
           const normStateVal = normalizeState(row.state);

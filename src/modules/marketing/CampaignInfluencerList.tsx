@@ -292,8 +292,12 @@ City: ${influencer.city}`;
                   <span className="text-slate-200 font-medium break-all">{influencer.alternative_number || '—'}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">UPI</span>
-                  <span className="text-slate-200 font-medium break-all">{influencer.upi_number || '—'}</span>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Payment</span>
+                  <span className="text-slate-200 font-medium break-all">
+                    {influencer.payment_method === 'ACCOUNT_DETAILS' || influencer.account_number
+                      ? `Bank A/C (${influencer.bank_name || 'Details'})`
+                      : (influencer.upi_number ? `UPI: ${influencer.upi_number}` : '—')}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">User Name</span>
@@ -832,7 +836,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     // 1. Missing Detail Checklist Filters
     if (filterState.missingPhone && !isEmptyValue(influencer.phone_number)) return false;
     if (filterState.missingAltPhone && !isEmptyValue(influencer.alternative_number)) return false;
-    if (filterState.missingUpi && !isEmptyValue(influencer.upi_number)) return false;
+    if (filterState.missingUpi && (!isEmptyValue(influencer.upi_number) || (!isEmptyValue(influencer.account_number) && !isEmptyValue(influencer.ifsc_code)))) return false;
     if (filterState.missingCity && !isEmptyValue(influencer.city)) return false;
     if (filterState.missingState && !isEmptyValue(influencer.state)) return false;
     if (filterState.missingAddress && !isEmptyValue(influencer.complete_address)) return false;
