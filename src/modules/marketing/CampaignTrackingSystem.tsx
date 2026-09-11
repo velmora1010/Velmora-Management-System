@@ -28,7 +28,7 @@ import {
   ExternalLink,
   FileSpreadsheet,
   X,
-  RotateCcw,
+  Trash2,
   Check,
   ChevronRight,
   ChevronLeft,
@@ -266,6 +266,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
     return Array.from(shipmentMap.values());
   }, [dispatchedInfluencers, dispatchRecords, savedBatches, campaignShipments, trackingCache]);
+
+  // True if valid campaign tracking shipments exist in the database
+  const hasTrackingData = allShipments.length > 0;
 
   // Unique couriers present in this campaign (case-insensitive deduplicated)
   const availableCouriers = useMemo(() => {
@@ -553,8 +556,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     <div className="space-y-4 animate-fade-in">
       {/* SEARCH & CONTROLS TOOLBAR (Always visible) */}
       <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-2.5">
-        {/* 1. Search Box (Compact width ~300-340px) */}
-        <div className="relative w-full sm:w-72 lg:w-80 shrink-0">
+        {/* 1. Search Box (Adjusts size based on data presence) */}
+        <div className={`relative ${hasTrackingData ? 'w-full sm:w-72 lg:w-80' : 'w-full sm:w-80 lg:w-96'} shrink-0`}>
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
           <input
             type="text"
@@ -565,7 +568,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           />
         </div>
 
-        {/* 2. Upload Dropdown [Upload ▼] */}
+        {/* 2. Upload Dropdown [Upload ▼] (Always available) */}
         <div className="relative shrink-0" ref={uploadDropdownRef}>
           {/* Hidden File Inputs for ST Courier and Delhivery */}
           <input
@@ -627,96 +630,102 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           )}
         </div>
 
-        {/* 3. Auto Sync All */}
-        <button
-          type="button"
-          onClick={handleAutoSyncAll}
-          disabled={isBulkSyncing}
-          className="h-10 px-3.5 bg-[#141b2d] hover:bg-[#1c263f] text-slate-200 border border-slate-700/80 hover:border-purple-500/50 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
-        >
-          <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : 'text-purple-400'} />
-          <span>{isBulkSyncing ? 'Syncing...' : 'Auto Sync All'}</span>
-        </button>
+        {/* Controls displayed ONLY when tracking data exists */}
+        {hasTrackingData && (
+          <>
+            {/* 3. Sync (Renamed from Auto Sync All, preserves identical sync workflow) */}
+            <button
+              type="button"
+              onClick={handleAutoSyncAll}
+              disabled={isBulkSyncing}
+              className="h-10 px-3.5 bg-[#141b2d] hover:bg-[#1c263f] text-slate-200 border border-slate-700/80 hover:border-purple-500/50 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="Sync shipments with courier status"
+            >
+              <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : 'text-purple-400'} />
+              <span>{isBulkSyncing ? 'Syncing...' : 'Sync'}</span>
+            </button>
 
-        {/* 4. All Couriers */}
-        <select
-          value={selectedCourier}
-          onChange={(e) => setSelectedCourier(e.target.value)}
-          className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
-        >
-          <option value="All">All Couriers</option>
-          {availableCouriers.map(c => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+            {/* 4. All Couriers */}
+            <select
+              value={selectedCourier}
+              onChange={(e) => setSelectedCourier(e.target.value)}
+              className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
+            >
+              <option value="All">All Couriers</option>
+              {availableCouriers.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
 
-        {/* 5. All Status */}
-        <select
-          value={selectedStatusDropdown}
-          onChange={(e) => setSelectedStatusDropdown(e.target.value)}
-          className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
-        >
-          <option value="All">All Status</option>
-          <option value="Delivered">Delivered</option>
-          <option value="In Transit">In Transit</option>
-          <option value="Out for Delivery">Out for Delivery</option>
-          <option value="Exception">Exception</option>
-          <option value="Failed Attempt">Failed Attempt</option>
-          <option value="Pending">Pending</option>
-          <option value="Info Received">Info Received</option>
-          <option value="Expired">Expired</option>
-        </select>
+            {/* 5. All Status */}
+            <select
+              value={selectedStatusDropdown}
+              onChange={(e) => setSelectedStatusDropdown(e.target.value)}
+              className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
+            >
+              <option value="All">All Status</option>
+              <option value="Delivered">Delivered</option>
+              <option value="In Transit">In Transit</option>
+              <option value="Out for Delivery">Out for Delivery</option>
+              <option value="Exception">Exception</option>
+              <option value="Failed Attempt">Failed Attempt</option>
+              <option value="Pending">Pending</option>
+              <option value="Info Received">Info Received</option>
+              <option value="Expired">Expired</option>
+            </select>
 
-        {/* 6. Date Range Inputs (From - To) */}
-        <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 h-10 shrink-0">
-          <Calendar size={13} className="text-slate-400 shrink-0" />
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            title="From date"
-            className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
-          />
-          <span className="text-slate-500 text-xs">-</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            title="To date"
-            className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
-          />
-        </div>
+            {/* 6. Date Range Inputs (From - To) */}
+            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 h-10 shrink-0">
+              <Calendar size={13} className="text-slate-400 shrink-0" />
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                title="From date"
+                className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
+              />
+              <span className="text-slate-500 text-xs">-</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                title="To date"
+                className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
+              />
+            </div>
 
-        {/* 7. Clear All Button (Destructive: Permanently clears all tracking records for this campaign) */}
-        <button
-          type="button"
-          onClick={() => setIsDeleteModalOpen(true)}
-          disabled={isDeleting || allShipments.length === 0}
-          className="h-10 px-3.5 bg-slate-900 hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 text-xs font-semibold rounded-xl border border-slate-700/80 hover:border-rose-700/60 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Delete all tracking shipment records for this campaign"
-        >
-          <RotateCcw size={13} className="text-rose-400" />
-          <span>Clear All</span>
-        </button>
+            {/* 7. Clear All Button (Destructive: Permanently clears all tracking records for this campaign) */}
+            <button
+              type="button"
+              onClick={() => setIsDeleteModalOpen(true)}
+              disabled={isDeleting || allShipments.length === 0}
+              className="h-10 px-3.5 bg-slate-900 hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 text-xs font-semibold rounded-xl border border-slate-700/80 hover:border-rose-700/60 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Delete all tracking shipment records for this campaign"
+            >
+              <Trash2 size={13} className="text-rose-400" />
+              <span>Clear All</span>
+            </button>
 
-        {/* 8. Last Sync Info + DB Refresh */}
-        <div className="flex items-center gap-2 text-xs text-slate-300 font-medium shrink-0 sm:ml-auto">
-          <div className="flex items-center gap-2 bg-slate-900 border border-slate-700/80 rounded-xl px-3 h-10 shadow-sm">
-            <span className={`w-2 h-2 rounded-full ${isLoadingDb ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 shadow-sm shadow-emerald-400/50'}`} />
-            <span className="text-slate-300 whitespace-nowrap text-xs">
-              {isLoadingDb ? 'Syncing...' : `Last Sync: ${lastSyncTime || 'Pending initial sync'}`}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => loadShipments()}
-            disabled={isLoadingDb}
-            className="w-10 h-10 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0 shadow-sm"
-            title="Refresh shipments from Supabase database"
-          >
-            <RefreshCw size={13} className={isLoadingDb ? 'animate-spin text-purple-400' : ''} />
-          </button>
-        </div>
+            {/* 8. Last Sync Info + DB Refresh */}
+            <div className="flex items-center gap-2 text-xs text-slate-300 font-medium shrink-0 sm:ml-auto">
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-700/80 rounded-xl px-3 h-10 shadow-sm">
+                <span className={`w-2 h-2 rounded-full ${isLoadingDb ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 shadow-sm shadow-emerald-400/50'}`} />
+                <span className="text-slate-300 whitespace-nowrap text-xs">
+                  {isLoadingDb ? 'Syncing...' : `Last Sync: ${lastSyncTime || 'Pending initial sync'}`}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadShipments()}
+                disabled={isLoadingDb}
+                className="w-10 h-10 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0 shadow-sm"
+                title="Refresh shipments from Supabase database"
+              >
+                <RefreshCw size={13} className={isLoadingDb ? 'animate-spin text-purple-400' : ''} />
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {allShipments.length === 0 ? (
