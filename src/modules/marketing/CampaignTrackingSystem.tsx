@@ -113,6 +113,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   const handleTriggerCourierUpload = (courier: 'ST Courier' | 'Delhivery') => {
+    console.log(`[Tracking System] Opening file picker for ${courier}...`);
     setIsUploadDropdownOpen(false);
     if (courier === 'ST Courier') {
       if (stFileInputRef.current) {
@@ -129,6 +130,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   const handleCourierFileChange = (e: React.ChangeEvent<HTMLInputElement>, courier: 'ST Courier' | 'Delhivery') => {
     const chosen = e.target.files?.[0];
+    console.log(`[Tracking System] File selected for ${courier}:`, chosen?.name, 'Size:', chosen?.size, 'Type:', chosen?.type);
     if (!chosen) return;
     setSelectedUploadCourier(courier);
     setSelectedUploadFile(chosen);
@@ -948,14 +950,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             <input
               type="file"
               ref={stFileInputRef}
-              accept=".csv, .xlsx, .xls"
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               onChange={(e) => handleCourierFileChange(e, 'ST Courier')}
             />
             <input
               type="file"
               ref={delhiveryFileInputRef}
-              accept=".csv, .xlsx, .xls"
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               onChange={(e) => handleCourierFileChange(e, 'Delhivery')}
             />
@@ -1673,6 +1675,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           </form>
         </div>
       </div>
+        </>
+      )}
 
       {/* 6. TRACKING DETAIL MODAL POPUP */}
       {activeTrackingModalShipment && (
@@ -1925,8 +1929,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             }
           }}
         />
-      )}
-        </>
       )}
     </div>
   );
