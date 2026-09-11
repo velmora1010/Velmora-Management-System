@@ -1,5 +1,7 @@
 import db from '../lib/db';
 import { trackingService } from './trackingService';
+import { supabase } from '../lib/supabase';
+import { SUPABASE_TABLES } from '../config/supabaseTables';
 
 export type TrackingStatusCategory = 
   | 'All'
@@ -380,6 +382,210 @@ export function upsertCampaignShipments(
 }
 
 /**
+ * Maps a Supabase database row to the InfluencerDispatchedShipment frontend model.
+ */
+export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
+  const isDelhivery = (row.courier || '').toLowerCase().includes('delhivery');
+  const isSTCourier = (row.courier || '').toLowerCase().includes('st courier');
+
+  let normalizedStatus: TrackingStatusCategory;
+  if (row.status && [
+    'In Transit', 'Out for Delivery', 'Delivered', 'Exception', 'Failed Attempt', 'Pending', 'Info Received', 'Expired'
+  ].includes(row.status)) {
+    normalizedStatus = row.status as TrackingStatusCategory;
+  } else if (isDelhivery) {
+    normalizedStatus = normalizeDelhiveryStatus(row.raw_status || row.status);
+  } else {
+    normalizedStatus = normalizeTrackingStatus(row.raw_status || row.status);
+  }
+
+  const statusSourceDisplay = isDelhivery
+    ? 'Uploaded Delhivery File'
+    : (isSTCourier ? 'Live ST Courier Tracking' : (row.status_source === 'delhivery_file' ? 'Uploaded Delhivery File' : 'Live ST Courier Tracking'));
+
+  return {
+    id: row.id,
+    influencerId: row.influencer_id || undefined,
+    creatorName: row.creator_name || 'Influencer Not Matched',
+    username: row.username || '—',
+    influencerCode: row.influencer_code || row.order_id || '',
+    orderId: row.order_id || undefined,
+    profilePhoto: row.profile_photo || '',
+    phoneNumber: row.phone_number || '',
+    altPhoneNumber: row.alt_phone_number || '',
+    state: row.state || '',
+    city: row.city || undefined,
+    pincode: row.pincode || undefined,
+    batchId: row.batch_id || undefined,
+    batchCode: row.batch_code || '—',
+    awbNumber: row.awb_number || '',
+    courier: row.courier || (isDelhivery ? 'Delhivery' : 'ST Courier'),
+    dispatchDate: row.dispatch_date || '',
+    expectedDeliveryDate: row.expected_delivery_date || '',
+    status: normalizedStatus,
+    rawStatus: row.raw_status || row.status || 'In Transit',
+    statusSource: statusSourceDisplay,
+    sourceType: row.source_type || (isDelhivery ? 'UPLOADED_FILE' : 'LIVE_API'),
+    lastLocation: row.last_location || undefined,
+    trackingDateTime: row.tracking_date_time || undefined,
+    lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).toLocaleString() : undefined,
+    trackingUrl: row.tracking_url || getCourierTrackingUrl(row.courier || '', row.awb_number || ''),
+    syncError: row.sync_error || undefined,
+  };
+}
+
+/**
+ * Maps frontend shipment data to a database row for Supabase insertion/upsert.
+ */
+export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaignId: string | number): any {
+  const isDelhivery = (s.courier || '').toLowerCase().includes('delhivery');
+  const awb = (s.awbNumber || '').trim();
+  const courier = (s.courier || (isDelhivery ? 'Delhivery' : 'ST Courier')).trim();
+  const statusSource = isDelhivery || s.statusSource === 'Uploaded Delhivery File'
+    ? 'delhivery_file'
+    : 'st_courier';
+  const sourceType = isDelhivery ? 'UPLOADED_FILE' : 'LIVE_API';
+  const nowIso = new Date().toISOString();
+
+  const payload: any = {
+    campaign_id: String(campaignId),
+    influencer_id: s.influencerId || null,
+    creator_name: s.creatorName || null,
+    username: s.username || null,
+    influencer_code: s.influencerCode || null,
+    order_id: s.orderId || (s.influencerCode ? s.influencerCode : null),
+    awb_number: awb,
+    courier,
+    status: s.status || 'In Transit',
+    status_source: statusSource,
+    source_type: sourceType,
+    dispatch_date: s.dispatchDate || null,
+    expected_delivery_date: s.expectedDeliveryDate || null,
+    tracking_url: s.trackingUrl || getCourierTrackingUrl(courier, awb),
+    raw_status: s.rawStatus || s.status || 'In Transit',
+    last_location: s.lastLocation || null,
+    tracking_date_time: s.trackingDateTime || null,
+    profile_photo: s.profilePhoto || null,
+    phone_number: s.phoneNumber || null,
+    alt_phone_number: s.altPhoneNumber || null,
+    state: s.state || null,
+    city: s.city || null,
+    pincode: s.pincode || null,
+    batch_id: s.batchId || null,
+    batch_code: s.batchCode || null,
+    sync_error: s.syncError || null,
+    updated_at: nowIso,
+  };
+
+  if (isDelhivery) {
+    payload.imported_at = nowIso;
+    payload.last_synced_at = null; // Do not pretend an API sync occurred for file-based Delhivery
+  } else {
+    payload.imported_at = nowIso;
+    if (s.lastSyncedAt) {
+      payload.last_synced_at = nowIso;
+    }
+  }
+
+  return payload;
+}
+
+/**
+ * Fetches campaign shipments directly from the Supabase database table `influencer_tracking_shipments`.
+ * Falls back to local storage cache if offline or initial load.
+ */
+export async function fetchCampaignShipmentsFromDb(campaignId: string | number): Promise<InfluencerDispatchedShipment[]> {
+  try {
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLES.influencerTrackingShipments)
+      .select('*')
+      .eq('campaign_id', String(campaignId))
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Failed to fetch shipments from Supabase, falling back to local storage:', error);
+      return getCampaignShipments(campaignId);
+    }
+
+    if (Array.isArray(data) && data.length > 0) {
+      const shipments = data.map(mapDbRowToShipment);
+      saveCampaignShipments(campaignId, shipments);
+      return shipments;
+    }
+
+    // If Supabase table has no rows yet for this campaign, check if local storage has shipments
+    const local = getCampaignShipments(campaignId);
+    if (local && local.length > 0) {
+      // Migrate local records to Supabase asynchronously in background
+      upsertCampaignShipmentsToDb(campaignId, local).catch(err => {
+        console.warn('Background migration of local shipments to Supabase:', err);
+      });
+      return local;
+    }
+
+    return [];
+  } catch (err) {
+    console.error('fetchCampaignShipmentsFromDb exception:', err);
+    return getCampaignShipments(campaignId);
+  }
+}
+
+/**
+ * Upserts shipments to the Supabase database table `influencer_tracking_shipments`
+ * using the unique constraint (campaign_id, courier, awb_number).
+ * Also keeps local storage synchronized.
+ */
+export async function upsertCampaignShipmentsToDb(
+  campaignId: string | number,
+  shipments: InfluencerDispatchedShipment[]
+): Promise<InfluencerDispatchedShipment[]> {
+  // Sync to local cache immediately
+  const localMerged = upsertCampaignShipments(campaignId, shipments);
+
+  if (!shipments || shipments.length === 0) {
+    return localMerged;
+  }
+
+  try {
+    const valid = shipments.filter(s => s.awbNumber && s.awbNumber.trim());
+    if (valid.length === 0) return localMerged;
+
+    // Deduplicate in payload by (campaign_id, courier, awb_number)
+    const payloadMap = new Map<string, any>();
+    valid.forEach(s => {
+      const p = mapShipmentToDbPayload(s, campaignId);
+      const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
+      payloadMap.set(key, p);
+    });
+
+    const payloads = Array.from(payloadMap.values());
+
+    // Batch upsert into Supabase
+    const chunkSize = 50;
+    for (let i = 0; i < payloads.length; i += chunkSize) {
+      const chunk = payloads.slice(i, i + chunkSize);
+      const { error } = await supabase
+        .from(SUPABASE_TABLES.influencerTrackingShipments)
+        .upsert(chunk, {
+          onConflict: 'campaign_id,courier,awb_number',
+          ignoreDuplicates: false
+        });
+
+      if (error) {
+        console.warn('[Supabase Tracking Upsert Error]:', error);
+      }
+    }
+
+    // Refresh updated list from Supabase
+    const refreshed = await fetchCampaignShipmentsFromDb(campaignId);
+    return refreshed.length > 0 ? refreshed : localMerged;
+  } catch (err) {
+    console.error('[upsertCampaignShipmentsToDb Error]:', err);
+    return localMerged;
+  }
+}
+
+/**
  * Sync single shipment using existing courier tracking API and Dexie DB.
  */
 export async function syncSingleShipment(
@@ -471,6 +677,28 @@ export async function syncSingleShipment(
     // Keep persistent campaign storage synchronized
     upsertCampaignShipments(campaignId, [updatedShipment]);
 
+    // Update Supabase database
+    try {
+      await supabase
+        .from(SUPABASE_TABLES.influencerTrackingShipments)
+        .update({
+          status: normalized,
+          raw_status: rawStatus || (isSuccess ? normalized : 'Tracking Failed'),
+          status_source: 'st_courier',
+          source_type: 'LIVE_API',
+          last_location: lastLocation !== '-' ? lastLocation : (shipment.lastLocation || null),
+          tracking_date_time: trackingDateTime !== '-' ? trackingDateTime : (shipment.trackingDateTime || null),
+          last_synced_at: new Date().toISOString(),
+          sync_error: isSuccess ? null : (trackingError || null),
+          updated_at: new Date().toISOString()
+        })
+        .eq('campaign_id', String(campaignId))
+        .eq('courier', shipment.courier || 'ST Courier')
+        .eq('awb_number', awb);
+    } catch (dbErr) {
+      console.warn('Supabase shipment status sync update failed:', dbErr);
+    }
+
     return updatedShipment;
   } catch (err: any) {
     const errorMsg = err.message || String(err);
@@ -498,6 +726,25 @@ export async function syncSingleShipment(
     };
 
     upsertCampaignShipments(campaignId, [failedShipment]);
+
+    // Update Supabase database
+    try {
+      await supabase
+        .from(SUPABASE_TABLES.influencerTrackingShipments)
+        .update({
+          status: normalized,
+          raw_status: 'Tracking Failed',
+          status_source: 'st_courier',
+          source_type: 'LIVE_API',
+          last_synced_at: new Date().toISOString(),
+          sync_error: errorMsg,
+          updated_at: new Date().toISOString()
+        })
+        .eq('campaign_id', String(campaignId))
+        .eq('courier', shipment.courier || 'ST Courier')
+        .eq('awb_number', awb);
+    } catch (dbErr) {}
+
     return failedShipment;
   }
 }

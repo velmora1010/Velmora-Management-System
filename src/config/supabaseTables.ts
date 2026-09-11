@@ -22,6 +22,7 @@ export const SUPABASE_TABLES = {
   influencerProduct: "influencer_products_rows",
   influencerStatus: "influencer_status_tracking_rows",
   influencersInfo: "influencers_info_rows",
+  influencerTrackingShipments: "influencer_tracking_shipments",
   offerAgreements: "offer_agreements",
   mainTasks: "main_tasks_rows",
   productBarcodes: "product_barcodes",

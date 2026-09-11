@@ -19,6 +19,7 @@ import {
   normalizeDelhiveryStatus,
   normalizeTrackingStatus,
   upsertCampaignShipments,
+  upsertCampaignShipmentsToDb,
   getCampaignShipments,
   InfluencerDispatchedShipment,
   getCourierTrackingUrl
@@ -421,8 +422,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           );
         }
 
-        // Save all tracked shipments to campaign storage
-        upsertCampaignShipments(campaign.id, trackedShipments);
+        // Save all tracked shipments to campaign database & local storage
+        await upsertCampaignShipmentsToDb(campaign.id, trackedShipments);
 
         // Also persist matched influencers to Supabase and Dexie
         for (const s of trackedShipments) {
@@ -584,8 +585,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           }
         }
 
-        // Save all Delhivery shipments into isolated campaign storage
-        upsertCampaignShipments(campaign.id, delhiveryShipments);
+        // Save all Delhivery shipments into isolated campaign database & local storage
+        await upsertCampaignShipmentsToDb(campaign.id, delhiveryShipments);
 
         // Log activity
         try {

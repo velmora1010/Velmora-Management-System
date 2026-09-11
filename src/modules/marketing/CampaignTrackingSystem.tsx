@@ -11,6 +11,7 @@ import {
   getTrackingCache,
   getLastCampaignSyncTime,
   getCampaignShipments,
+  fetchCampaignShipmentsFromDb,
   TrackingStatusCategory,
   InfluencerDispatchedShipment
 } from '../../services/influencerTrackingService';
@@ -152,19 +153,33 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [activeTrackingModalShipment, setActiveTrackingModalShipment] = useState<InfluencerDispatchedShipment | null>(null);
   const [copiedAwb, setCopiedAwb] = useState<string | null>(null);
 
-  // Campaign imported shipments (ST Courier + Delhivery)
+  // Campaign imported shipments (ST Courier + Delhivery) - loads from DB with local storage cache fallback
   const [campaignShipments, setCampaignShipments] = useState<InfluencerDispatchedShipment[]>(() => getCampaignShipments(campaign.id));
+  const [isLoadingDb, setIsLoadingDb] = useState(false);
 
   // Local tracking overrides/cache state
   const [trackingCache, setTrackingCache] = useState<Record<string, any>>(() => getTrackingCache(campaign.id));
 
+  // Load shipments directly from Supabase database scoped to current campaign
+  const loadShipments = useCallback(async () => {
+    setIsLoadingDb(true);
+    try {
+      const dbShipments = await fetchCampaignShipmentsFromDb(campaign.id);
+      setCampaignShipments(dbShipments);
+      setTrackingCache(getTrackingCache(campaign.id));
+      setLastSyncTime(getLastCampaignSyncTime(campaign.id));
+    } catch (err) {
+      console.error('Failed to load campaign shipments from Supabase:', err);
+    } finally {
+      setIsLoadingDb(false);
+    }
+  }, [campaign.id]);
+
   // Reload cache and shipments when campaign changes
   useEffect(() => {
-    setCampaignShipments(getCampaignShipments(campaign.id));
-    setTrackingCache(getTrackingCache(campaign.id));
-    setLastSyncTime(getLastCampaignSyncTime(campaign.id));
+    loadShipments();
     setCurrentPage(1);
-  }, [campaign.id]);
+  }, [loadShipments]);
 
   // Build unified dispatched shipments strictly for the current campaign
   // Combines uploaded campaign shipments (ST Courier & Delhivery) and dispatched influencers
@@ -457,10 +472,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
     try {
       const updated = await syncSingleShipment(shipment, campaign.id);
-      setTrackingCache(getTrackingCache(campaign.id));
-      setCampaignShipments(getCampaignShipments(campaign.id));
-      const nowStr = new Date().toLocaleString();
-      setLastSyncTime(nowStr);
+      await loadShipments();
 
       if (updated.syncError) {
         toast.error(`Sync: ${updated.syncError}`, { id: toastId });
@@ -508,10 +520,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         toast.loading(`Syncing ST Courier (${p.completed}/${p.total})...`, { id: progressToastId });
       });
 
-      setTrackingCache(getTrackingCache(campaign.id));
-      setCampaignShipments(getCampaignShipments(campaign.id));
-      const nowStr = new Date().toLocaleString();
-      setLastSyncTime(nowStr);
+      await loadShipments();
 
       toast.dismiss(progressToastId);
       const summary = delhiveryCount > 0
@@ -556,10 +565,21 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           </div>
         </div>
 
-        {/* Right: Last Sync Info */}
-        <div className="flex items-center gap-2 text-xs text-slate-300 font-medium shrink-0 self-end sm:self-auto">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
-          <span>Last Sync: {lastSyncTime || 'Pending initial sync'}</span>
+        {/* Right: Last Sync Info + DB Refresh */}
+        <div className="flex items-center gap-3 text-xs text-slate-300 font-medium shrink-0 self-end sm:self-auto">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${isLoadingDb ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 shadow-sm shadow-emerald-400/50'}`} />
+            <span>{isLoadingDb ? 'Syncing with database...' : `Last Sync: ${lastSyncTime || 'Pending initial sync'}`}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => loadShipments()}
+            disabled={isLoadingDb}
+            className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+            title="Refresh shipments from Supabase database"
+          >
+            <RefreshCw size={12} className={isLoadingDb ? 'animate-spin text-purple-400' : ''} />
+          </button>
         </div>
       </div>
 
@@ -1212,9 +1232,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           onSuccess={async () => {
             setIsUploadModalOpen(false);
             setSelectedUploadFile(null);
-            setCampaignShipments(getCampaignShipments(campaign.id));
-            setTrackingCache(getTrackingCache(campaign.id));
-            setLastSyncTime(getLastCampaignSyncTime(campaign.id) || new Date().toLocaleString());
+            await loadShipments();
             if (onRefreshData) {
               await onRefreshData();
             }
