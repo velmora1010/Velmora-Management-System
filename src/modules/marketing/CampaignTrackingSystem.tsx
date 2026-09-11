@@ -895,13 +895,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">ORDER ID</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">AWB NUMBER</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">COURIER</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">STATUS</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-right w-24">ACTIONS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
                 {paginatedShipments.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="p-8 text-center text-slate-500 italic">
+                    <td colSpan={5} className="p-8 text-center text-slate-500 italic">
                       No shipments matching your filter criteria.
                     </td>
                   </tr>
@@ -910,6 +911,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                     const displayOrderId = s.orderId 
                       ? (s.orderId.startsWith('#') ? s.orderId : `#${s.orderId}`)
                       : (s.influencerCode || (s.id.length > 8 ? `#${s.id.slice(0, 8)}` : `#${s.id}`));
+                    const badgeStyle = getTrackingStatusBadgeStyle(s.status);
 
                     return (
                       <tr
@@ -952,7 +954,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           </span>
                         </td>
 
-                        {/* 4. ACTIONS */}
+                        {/* 4. STATUS */}
+                        <td className="px-5 py-3.5">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${badgeStyle.dot}`} />
+                            <span>{s.status}</span>
+                          </span>
+                        </td>
+
+                        {/* 5. ACTIONS */}
                         <td className="px-5 py-3.5 text-right">
                           <div className="flex items-center justify-end">
                             <button
