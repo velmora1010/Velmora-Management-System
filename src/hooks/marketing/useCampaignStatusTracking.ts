@@ -79,6 +79,8 @@ export interface StatusTrackingRecord {
     influencer_code: string;
     influencer_avatar: string;
     is_archived?: any;
+    platforms?: string[];
+    languages?: string[];
   };
   pricing?: {
     final_price: number;
@@ -120,7 +122,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         
         const { data: infoData, error: infoError } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
-          .select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived')
+          .select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages')
           .in('id', influencerIds);
           
         if (infoError) throw infoError;
@@ -133,12 +135,14 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         if (pricingError) throw pricingError;
 
         let platformMap: Record<string, string> = {};
+        let rawPlatformsData: any[] = [];
         try {
           const { data: platformData } = await supabase
             .from(SUPABASE_TABLES.influencerPlatform)
-            .select('influencer_id, username')
+            .select('influencer_id, username, platform')
             .in('influencer_id', influencerIds);
-          (platformData || []).forEach(pl => {
+          rawPlatformsData = platformData || [];
+          rawPlatformsData.forEach(pl => {
             if (pl.username && !platformMap[pl.influencer_id]) {
               platformMap[pl.influencer_id] = pl.username;
             }
@@ -172,6 +176,19 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
             const rawUser = platformMap[r.influencer_id] || info.name || '';
             const cleanUser = rawUser ? (rawUser.startsWith('@') ? rawUser : `@${rawUser}`) : '—';
             
+            const rawPlatforms = rawPlatformsData.filter(p => String(p.influencer_id) === String(r.influencer_id));
+            const userPlatforms = Array.from(new Set(rawPlatforms.map(p => {
+              const pLower = (p.platform || '').toLowerCase();
+              if (pLower.includes('insta') || pLower === 'ig') return 'Instagram';
+              if (pLower.includes('you') || pLower === 'yt') return 'YouTube';
+              if (pLower.includes('face') || pLower === 'fb') return 'Facebook';
+              return p.platform || 'Other';
+            }).filter(Boolean)));
+
+            const cleanLangs = Array.isArray(info.languages)
+              ? info.languages.filter((l: string) => typeof l === 'string' && !l.startsWith('views_data:'))
+              : (typeof info.languages === 'string' ? info.languages.split(/[,/]+/).map((s: string) => s.trim()).filter(Boolean) : []);
+
             return {
               ...r,
               dispatch: {
@@ -191,7 +208,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 influencer_code: info.code || dispatch.influencer_code || '',
                 username: cleanUser,
                 influencer_avatar: info.profile_file_url,
-                is_archived: info.is_archived
+                is_archived: info.is_archived,
+                platforms: userPlatforms as string[],
+                languages: Array.from(new Set(cleanLangs)) as string[]
               },
               pricing: {
                 final_price: pricing.final_price,

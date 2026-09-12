@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign } from '../../types';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
-import { MapPin, Phone, RefreshCcw, Clock, Package, Video, CreditCard, PenTool, CheckCircle, X, UploadCloud } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { 
+  Clock, Package, Phone, FileText, CreditCard, Video, CheckCircle2, Check, 
+  XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
+  ArrowUpDown, RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy
+} from 'lucide-react';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
@@ -40,9 +43,44 @@ const formatForDateTimeInput = (dateStr: string | undefined | null) => {
   }
 };
 
+// 6 Horizontal Workflow Steps matching reference image
+const WORKFLOW_STEPS = [
+  { id: 'delivered', label: 'Delivery Confirmation', icon: Package, formKey: 'delivered' },
+  { id: 'callExplain', label: 'Call & Explain', icon: Phone, formKey: 'callExplain' },
+  { id: 'shareScript', label: 'Share Script', icon: FileText, formKey: 'shareScript' },
+  { id: 'payAdvance', label: 'Pay Advance', icon: IndianRupee, formKey: 'payAdvance' },
+  { id: 'expTimeline', label: 'Time Line', icon: Clock, formKey: 'expTimeline' },
+  { id: 'draft', label: 'Draft', icon: Video, formKey: 'draft' }
+];
+
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
   const { trackingRecords, isLoading, refresh, saveMilestone } = useCampaignStatusTracking(campaign.id);
-  const activeTrackingRecords = React.useMemo(() => {
+
+  // Filters State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [selectedPlatform, setSelectedPlatform] = useState('ALL');
+  const [selectedLanguage, setSelectedLanguage] = useState('ALL');
+
+  // Modals & Menu State
+  const [activeModal, setActiveModal] = useState<{ recordId: string; stageId: string } | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [detailsRecord, setDetailsRecord] = useState<StatusTrackingRecord | null>(null);
+
+  // Close menus on click outside
+  useEffect(() => {
+    const handleDocumentClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.three-dot-menu-container')) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('click', handleDocumentClick);
+    return () => document.removeEventListener('click', handleDocumentClick);
+  }, []);
+
+  // Filter out archived & naturally sort by Influencer Code
+  const activeTrackingRecords = useMemo(() => {
     const list = (trackingRecords || []).filter(r => isActiveStatus(r.dispatch?.is_archived));
     return list.sort((a, b) => {
       return naturalCompareCodes(
@@ -51,9 +89,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       );
     });
   }, [trackingRecords]);
-  const [activeModal, setActiveModal] = useState<{ recordId: string, stageId: string } | null>(null);
 
-  const calculateStepStatuses = (record: StatusTrackingRecord, currentStep: number) => {
+  // Derive Step Data for any record
+  const getRecordStepData = (record: StatusTrackingRecord) => {
     let metadata: any = {};
     try {
       metadata = JSON.parse(record.notes || '{}');
@@ -61,474 +99,836 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       metadata = {};
     }
 
-    const isDraft1Completed = !!record.draft_video_url;
-    const isDraft2Completed = !!record.re_draft_video_url;
+    const isDelivered = !!record.delivered_confirmed;
+    const isCallExplained = !!metadata.call_explained || (!!record.ref_call_explanation_required && !metadata.call_explanation_pending) || ((record.current_step || 0) >= 2 && !metadata.call_explanation_pending);
+    const isScriptShared = !!metadata.script_shared || !!record.reference_video_received || !!record.ref_script || ((record.current_step || 0) >= 3);
+    const isAdvancePaid = !!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0);
+    const isTimelineSet = !!record.expected_delivery_completed || (!!record.draft_expected_date && !!record.draft_expected_time);
+    const isDraftDone = !!record.draft_received || !!record.draft_video_url || (record.draft_approval_status === 'Approved');
 
-    const pricingTotalVideos = (record.pricing as any)?.total_videos || 1;
-    const rawV1Link = metadata.video1_final_post_link || record.final_post_link;
-    const isVideo1Completed = !!(metadata.video1_confirmed || record.final_post_completed) && 
-                              !isFakeUrl(rawV1Link) && 
-                              !!(metadata.video1_posted_at || record.final_post_actual_datetime);
-    
-    const isVideo2Completed = !!metadata.video2_confirmed && 
-                              !isFakeUrl(metadata.video2_final_post_link) && 
-                              !!metadata.video2_posted_at;
-
-    const isFinalPostCompleted = pricingTotalVideos === 2 
-      ? (isVideo1Completed && isVideo2Completed)
-      : isVideo1Completed;
-
-    const stages = [
-      { key: 'delivered_status', completed: !!record.delivered_confirmed },
-      { key: 'pay_advance_status', completed: !!record.pay_advance_completed },
-      { key: 'reference_status', completed: !!record.reference_video_received },
-      { key: 'timeline_status', completed: !!record.expected_delivery_completed },
-      { key: 'draft1_status', completed: isDraft1Completed },
-      { key: 'draft2_status', completed: isDraft2Completed },
-      { key: 'payment_status', completed: !!record.payment_remaining_completed },
-      { key: 'final_post_status', completed: isFinalPostCompleted }
+    const stepsCompleted = [
+      isDelivered,
+      isCallExplained,
+      isScriptShared,
+      isAdvancePaid,
+      isTimelineSet,
+      isDraftDone
     ];
 
-    const statuses: Record<string, 'NOT_STARTED' | 'CURRENT' | 'COMPLETED' | 'SKIPPED'> = {};
+    let activeIndex = stepsCompleted.findIndex(completed => !completed);
+    if (activeIndex === -1) activeIndex = 6;
 
-    stages.forEach((stage, idx) => {
-      if (stage.completed) {
-        statuses[stage.key] = 'COMPLETED';
-      } else if (idx === currentStep) {
-        statuses[stage.key] = 'CURRENT';
-      } else if (idx < currentStep) {
-        statuses[stage.key] = 'SKIPPED';
-      } else {
-        statuses[stage.key] = 'NOT_STARTED';
-      }
-    });
-
-    return statuses;
+    return {
+      metadata,
+      stepsCompleted,
+      activeIndex,
+      isDelivered,
+      isCallExplained,
+      isScriptShared,
+      isAdvancePaid,
+      isTimelineSet,
+      isDraftDone
+    };
   };
 
-  // Shared save handler: saves milestone, refreshes from DB, shows feedback
-  const handleFormSave = async (recordId: string, data: any) => {
-    console.log("handleFormSave clicked. recordId:", recordId, "data:", data);
-    const record = activeTrackingRecords.find(r => r.id === recordId) || trackingRecords.find(r => r.id === recordId);
-    if (!record) {
-      console.error("handleFormSave failed: record not found.");
-      return;
+  // Derive Overall Status Badge
+  const getOverallStatus = (record: StatusTrackingRecord, stepData: ReturnType<typeof getRecordStepData>) => {
+    const { metadata, stepsCompleted, isDelivered } = stepData;
+    const rawStatus = (record.status || '').toLowerCase();
+
+    // On Hold
+    if (rawStatus === 'on_hold' || rawStatus === 'on hold' || metadata.on_hold) {
+      return {
+        key: 'ON_HOLD',
+        label: 'On Hold',
+        badgeClass: 'bg-slate-800 text-slate-300 border-slate-700',
+        dotClass: 'bg-slate-400'
+      };
     }
 
-    // Determine active stage
-    const stages = getWorkflowStages(record);
-    const activeStage = activeModal ? stages.find(s => s.id === activeModal.stageId) : null;
-    const activeStageIdx = activeStage ? stages.findIndex(s => s.id === activeStage.id) : -1;
+    const completedCount = stepsCompleted.filter(Boolean).length;
+
+    // Completed
+    if (stepsCompleted[5] || completedCount === 6) {
+      return {
+        key: 'COMPLETED',
+        label: 'Completed',
+        badgeClass: 'bg-emerald-950/80 text-emerald-400 border-emerald-700/60',
+        dotClass: 'bg-emerald-400'
+      };
+    }
+
+    // Almost Done
+    if (stepsCompleted[4]) {
+      return {
+        key: 'ALMOST_DONE',
+        label: 'Almost Done',
+        badgeClass: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
+        dotClass: 'bg-purple-400'
+      };
+    }
+
+    // Not Started
+    if (!isDelivered && completedCount === 0) {
+      return {
+        key: 'NOT_STARTED',
+        label: 'Not Started',
+        badgeClass: 'bg-slate-900 text-slate-400 border-slate-800',
+        dotClass: 'bg-slate-500'
+      };
+    }
+
+    // Pending
+    if (record.draft_approval_status === 'Not Approved' || metadata.is_pending || rawStatus === 'pending') {
+      return {
+        key: 'PENDING',
+        label: 'Pending',
+        badgeClass: 'bg-amber-950/80 text-amber-400 border-amber-700/60',
+        dotClass: 'bg-amber-400'
+      };
+    }
+
+    // In Progress
+    return {
+      key: 'IN_PROGRESS',
+      label: 'In Progress',
+      badgeClass: 'bg-blue-950/80 text-blue-400 border-blue-700/60',
+      dotClass: 'bg-blue-400'
+    };
+  };
+
+  // Collect available languages across records
+  const availableLanguages = useMemo(() => {
+    const langs = new Set<string>();
+    activeTrackingRecords.forEach(r => {
+      (r.dispatch?.languages || []).forEach(l => {
+        if (l && typeof l === 'string') langs.add(l);
+      });
+    });
+    return Array.from(langs).sort();
+  }, [activeTrackingRecords]);
+
+  // Overall KPI Counts
+  const kpiCounts = useMemo(() => {
+    const total = activeTrackingRecords.length;
+    let completed = 0;
+    let inProgress = 0;
+    let pending = 0;
+    let onHold = 0;
+    let notStarted = 0;
+
+    activeTrackingRecords.forEach(r => {
+      const stepData = getRecordStepData(r);
+      const status = getOverallStatus(r, stepData);
+      if (status.key === 'COMPLETED') completed++;
+      else if (status.key === 'IN_PROGRESS' || status.key === 'ALMOST_DONE') inProgress++;
+      else if (status.key === 'PENDING') pending++;
+      else if (status.key === 'ON_HOLD') onHold++;
+      else if (status.key === 'NOT_STARTED') notStarted++;
+    });
+
+    const calcPct = (cnt: number) => total > 0 ? ((cnt / total) * 100).toFixed(1) : '0.0';
+
+    return {
+      total,
+      completed,
+      completedPct: calcPct(completed),
+      inProgress,
+      inProgressPct: calcPct(inProgress),
+      pending,
+      pendingPct: calcPct(pending),
+      onHold,
+      onHoldPct: calcPct(onHold),
+      notStarted,
+      notStartedPct: calcPct(notStarted)
+    };
+  }, [activeTrackingRecords]);
+
+  // Filtered influencers based on user selections
+  const filteredRecords = useMemo(() => {
+    return activeTrackingRecords.filter(record => {
+      const dispatch = record.dispatch || ({} as any);
+      const stepData = getRecordStepData(record);
+      const overallStatus = getOverallStatus(record, stepData);
+
+      // Status filter
+      if (selectedStatus !== 'ALL') {
+        if (selectedStatus === 'IN_PROGRESS') {
+          if (overallStatus.key !== 'IN_PROGRESS' && overallStatus.key !== 'ALMOST_DONE') return false;
+        } else if (overallStatus.key !== selectedStatus) {
+          return false;
+        }
+      }
+
+      // Platform filter
+      if (selectedPlatform !== 'ALL') {
+        const platforms = dispatch.platforms || [];
+        if (!platforms.some((p: string) => p.toLowerCase() === selectedPlatform.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // Language filter
+      if (selectedLanguage !== 'ALL') {
+        const languages = dispatch.languages || [];
+        if (!languages.includes(selectedLanguage)) {
+          return false;
+        }
+      }
+
+      // Search Query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const name = (dispatch.influencer_name || '').toLowerCase();
+        const code = (dispatch.influencer_code || '').toLowerCase();
+        const username = (dispatch.username || '').toLowerCase();
+        const phone = (dispatch.phone_number || '').toLowerCase();
+        const tracking = (dispatch.tracking_id || '').toLowerCase();
+        const matches = name.includes(q) || code.includes(q) || username.includes(q) || phone.includes(q) || tracking.includes(q);
+        if (!matches) return false;
+      }
+
+      return true;
+    });
+  }, [activeTrackingRecords, selectedStatus, selectedPlatform, selectedLanguage, searchQuery]);
+
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setSelectedStatus('ALL');
+    setSelectedPlatform('ALL');
+    setSelectedLanguage('ALL');
+  };
+
+  // Milestone Save Handler
+  const handleFormSave = async (recordId: string, data: any) => {
+    const record = activeTrackingRecords.find(r => r.id === recordId) || trackingRecords.find(r => r.id === recordId);
+    if (!record) return;
 
     const updates = { ...data };
 
-    // Automatically set completion flags for the current stage in data if not already set
-    if (activeStage) {
-      if (activeStage.id === 'delivered') {
-        updates.delivered_confirmed = true;
-      } else if (activeStage.id === 'payAdvance') {
-        updates.pay_advance_completed = true;
-      } else if (activeStage.id === 'refVideos') {
-        updates.reference_video_received = true;
-      } else if (activeStage.id === 'expTimeline') {
-        updates.expected_delivery_completed = true;
-      } else if (activeStage.id === 'draft') {
-        updates.draft_received = true;
-      } else if (activeStage.id === 'payRemaining') {
-        updates.payment_remaining_completed = true;
-      }
-    }
-
-    // Merge changes into a temp record to calculate new statuses
-    const tempRecord = { ...record, ...updates };
-
     let metadata: any = {};
     try {
-      metadata = JSON.parse(tempRecord.notes || '{}');
+      metadata = JSON.parse(record.notes || '{}');
     } catch (e) {
       metadata = {};
     }
 
-    // If active stage is reDraft, mark draft2 as complete in metadata
-    if (activeStage && activeStage.id === 'reDraft') {
-      metadata.draft2_received = true;
-      metadata.draft2_completed = true;
-      metadata.draft2_status = 'COMPLETED';
-    }
-
-    // Calculate stages completed array
-    const isDraft1Completed = !!tempRecord.draft_video_url;
-    const isDraft2Completed = (tempRecord.draft_approval_status === 'Approved') || !!tempRecord.re_draft_video_url;
-
-    const pricingTotalVideos = tempRecord.pricing?.total_videos || 1;
-    const rawV1Link = metadata.video1_final_post_link || tempRecord.final_post_link;
-    const isVideo1Completed = !!(metadata.video1_confirmed || tempRecord.final_post_completed) && 
-                              !isFakeUrl(rawV1Link) && 
-                              !!(metadata.video1_posted_at || tempRecord.final_post_actual_datetime);
-    
-    const isVideo2Completed = !!metadata.video2_confirmed && 
-                              !isFakeUrl(metadata.video2_final_post_link) && 
-                              !!metadata.video2_posted_at;
-
-    const isFinalPostCompleted = pricingTotalVideos === 2 
-      ? (isVideo1Completed && isVideo2Completed)
-      : isVideo1Completed;
-
-    const stagesCompleted = [
-      !!tempRecord.delivered_confirmed,
-      !!tempRecord.pay_advance_completed,
-      !!tempRecord.reference_video_received,
-      !!tempRecord.expected_delivery_completed,
-      isDraft1Completed,
-      isDraft2Completed,
-      !!tempRecord.payment_remaining_completed,
-      isFinalPostCompleted
-    ];
-
-    // Determine the next step
-    let nextStep = record.current_step || 0;
-    if (activeStage && activeStageIdx !== -1) {
-      nextStep = Math.max(record.current_step || 0, activeStageIdx + 1);
-    }
-    while (nextStep < 8 && stagesCompleted[nextStep]) {
-      nextStep++;
-    }
-
-    // Recalculate all step colors/statuses using the new nextStep
-    const statuses = calculateStepStatuses(tempRecord, nextStep);
-
-    const updatedMetadata = {
-      ...metadata,
-      ...statuses,
-      completed_at: new Date().toISOString(),
-      last_updated: new Date().toISOString(),
-      workflow_step: activeStage ? activeStage.label : undefined
-    };
-
-    // If notes is already in updates (from form saves), merge it
     if (updates.notes) {
       try {
-        const dataNotes = JSON.parse(updates.notes);
-        Object.assign(updatedMetadata, dataNotes);
+        const newMeta = JSON.parse(updates.notes);
+        metadata = { ...metadata, ...newMeta };
       } catch (e) {}
     }
 
-    updates.notes = JSON.stringify(updatedMetadata);
-    updates.current_step = nextStep;
-    updates.status = nextStep === 8 ? 'completed' : 'pending';
+    if (activeModal?.stageId === 'delivered') {
+      updates.delivered_confirmed = true;
+    } else if (activeModal?.stageId === 'callExplain') {
+      metadata.call_explained = true;
+      metadata.call_explanation_pending = false;
+      updates.ref_call_explanation_required = true;
+    } else if (activeModal?.stageId === 'shareScript') {
+      metadata.script_shared = true;
+      updates.reference_video_received = true;
+    } else if (activeModal?.stageId === 'payAdvance') {
+      updates.pay_advance_completed = true;
+    } else if (activeModal?.stageId === 'expTimeline') {
+      updates.expected_delivery_completed = true;
+    } else if (activeModal?.stageId === 'draft') {
+      updates.draft_received = true;
+    } else if (activeModal?.stageId === 'payRemaining') {
+      updates.payment_remaining_completed = true;
+    } else if (activeModal?.stageId === 'finalPost') {
+      updates.final_post_completed = true;
+    }
 
-    console.log("Saving to Supabase with updates:", updates);
+    metadata.last_updated = new Date().toISOString();
+    updates.notes = JSON.stringify(metadata);
+
     const result = await saveMilestone(recordId, updates);
-    console.log("Supabase response:", result);
     if (result.success) {
-      toast.success(
-        <div>
-          <p className="font-bold text-emerald-400">✓ Details saved successfully.</p>
-          <p className="font-bold text-emerald-400">✓ Step completed.</p>
-          {nextStep < 8 && <p className="font-bold text-indigo-400">✓ Next workflow unlocked.</p>}
-        </div>,
-        { duration: 4000 }
-      );
+      toast.success('Step saved successfully.');
       await refresh();
       setActiveModal(null);
     } else {
-      console.error("Supabase error:", result.error);
       toast.error('Failed to save: ' + (result.error?.message || 'Unknown error'));
     }
   };
 
-  const toggleModal = (recordId: string, stageId: string) => {
-    setActiveModal({ recordId, stageId });
-  };
-
-  useEffect(() => {
-    if (!isLoading && activeTrackingRecords.length > 0) {
-      const target = (window as any).activeTrackingScrollTarget;
-      if (target) {
-        delete (window as any).activeTrackingScrollTarget;
-        setTimeout(() => {
-          const el = document.getElementById(`st-card-${target}`);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            el.classList.add('border-indigo-500', 'ring-2', 'ring-indigo-500/25', 'transition-all');
-            setTimeout(() => {
-              el.classList.remove('border-indigo-500', 'ring-2', 'ring-indigo-500/25');
-            }, 3000);
-          }
-        }, 400);
-      }
-    }
-  }, [isLoading, trackingRecords]);
-
-  const getWorkflowStages = (record: StatusTrackingRecord) => {
+  const handleToggleOnHold = async (record: StatusTrackingRecord) => {
     let metadata: any = {};
     try {
       metadata = JSON.parse(record.notes || '{}');
     } catch (e) {
       metadata = {};
     }
+    const isCurrentlyOnHold = (record.status || '').toLowerCase() === 'on_hold' || !!metadata.on_hold;
+    const newOnHold = !isCurrentlyOnHold;
+    metadata.on_hold = newOnHold;
+    const newStatus = newOnHold ? 'on_hold' : 'in_progress';
 
-    const isDraft1Completed = !!record.draft_video_url;
-    const isDraft2Completed = !!record.re_draft_video_url;
-
-    const pricingTotalVideos = (record.pricing as any)?.total_videos || 1;
-    const rawV1Link = metadata.video1_final_post_link || record.final_post_link;
-    const isVideo1Completed = !!(metadata.video1_confirmed || record.final_post_completed) && 
-                              !isFakeUrl(rawV1Link) && 
-                              !!(metadata.video1_posted_at || record.final_post_actual_datetime);
-    
-    const isVideo2Completed = !!metadata.video2_confirmed && 
-                              !isFakeUrl(metadata.video2_final_post_link) && 
-                              !!metadata.video2_posted_at;
-
-    const isFinalPostCompleted = pricingTotalVideos === 2 
-      ? (isVideo1Completed && isVideo2Completed)
-      : isVideo1Completed;
-
-    const rawStages = [
-      { id: 'delivered', label: 'Delivery Confirmation', icon: Package, completed: !!record.delivered_confirmed, formKey: 'delivered', metaKey: 'delivered_status' },
-      { id: 'payAdvance', label: 'Pay Advance', icon: CreditCard, completed: !!record.pay_advance_completed, formKey: 'payAdvance', metaKey: 'pay_advance_status' },
-      { id: 'refVideos', label: 'Send Reference Videos', icon: Video, completed: !!record.reference_video_received, formKey: 'refVideos', metaKey: 'reference_status' },
-      { id: 'expTimeline', label: 'Expected Delivery Timeline', icon: Clock, completed: !!record.expected_delivery_completed, formKey: 'expTimeline', metaKey: 'timeline_status' },
-      { id: 'draft', label: 'Draft 1', icon: PenTool, completed: isDraft1Completed, formKey: 'draft', metaKey: 'draft1_status' },
-      { id: 'reDraft', label: 'Draft 2', icon: PenTool, completed: isDraft2Completed, formKey: 'reDraft', metaKey: 'draft2_status' },
-      { id: 'payRemaining', label: 'Pay Remaining Payment', icon: CreditCard, completed: !!record.payment_remaining_completed, formKey: 'payRemaining', metaKey: 'payment_status' },
-      { id: 'finalPost', label: 'Final Post Date', icon: CheckCircle, completed: isFinalPostCompleted, formKey: 'finalPost', metaKey: 'final_post_status' }
-    ];
-
-    const currentStep = record.current_step || 0;
-
-    return rawStages.map((stage, idx) => {
-      let status: 'NOT_STARTED' | 'CURRENT' | 'COMPLETED' | 'SKIPPED' = 'NOT_STARTED';
-
-      if (stage.completed) {
-        status = 'COMPLETED';
-      } else if (idx === currentStep) {
-        status = 'CURRENT';
-      } else if (idx < currentStep) {
-        status = 'SKIPPED';
-      }
-
-      return {
-        ...stage,
-        status
-      };
+    const result = await saveMilestone(record.id, {
+      status: newStatus,
+      notes: JSON.stringify(metadata)
     });
+    if (result.success) {
+      toast.success(newOnHold ? 'Influencer set to On Hold' : 'Influencer resumed');
+      await refresh();
+      setOpenMenuId(null);
+    }
   };
 
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    toast.success(`Copied code: ${code}`);
+    setOpenMenuId(null);
+  };
+
+  const toggleModal = (recordId: string, stageId: string) => {
+    setActiveModal({ recordId, stageId });
+    setOpenMenuId(null);
+  };
+
+  // Last Updated timestamp formatted
+  const lastUpdatedStr = useMemo(() => {
+    const d = new Date();
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' +
+           d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }, []);
+
   return (
-    <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col h-[700px]">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 gap-4">
-        <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-          <Clock size={20} className="text-emerald-400" />
-          Status Tracking: {campaign.campaign_name}
-        </h3>
-        <div className="flex items-center gap-2">
-          <button onClick={refresh} className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors" title="Refresh Data">
+    <div className="bg-[#070c18] rounded-2xl border border-slate-800/80 overflow-hidden flex flex-col h-[calc(100vh-120px)] min-h-[750px] shadow-2xl p-5 gap-4">
+      
+      {/* 1. PAGE HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800/80 gap-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600/30 to-pink-600/30 border border-purple-500/40 flex items-center justify-center text-purple-400 shadow-md">
+            <Target size={22} className="text-purple-400" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-white tracking-wide">Status Tracking</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Track and manage influencer activity status for this campaign</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-400 bg-[#0c1326] px-3 py-1.5 rounded-lg border border-slate-800">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Last Updated: {lastUpdatedStr}</span>
+          </div>
+          <button 
+            onClick={refresh}
+            className="p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 text-slate-300 rounded-lg transition-colors"
+            title="Refresh Data"
+          >
             <RefreshCcw size={16} />
           </button>
-          <button onClick={onBack} className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm">
+          <button 
+            onClick={onBack}
+            className="px-3.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 text-slate-300 rounded-lg text-xs font-semibold transition-colors"
+          >
             Back to Overview
           </button>
         </div>
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 bg-slate-900/50 scroll-smooth">
-        {isLoading ? (
-          <div className="flex justify-center items-center h-full text-slate-500">
-            <RefreshCcw size={24} className="animate-spin mr-2" /> Loading tracking records...
+      {/* 2. FILTER BAR */}
+      <div className="flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
+        <div className="relative flex-1 w-full">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input 
+            type="text" 
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search influencer name, phone, or order ID..."
+            className="w-full bg-[#0b1329] border border-slate-800/80 rounded-xl pl-10 pr-4 py-2 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+          />
+        </div>
+        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+          <select 
+            value={selectedStatus}
+            onChange={e => setSelectedStatus(e.target.value)}
+            className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+          >
+            <option value="ALL">All Status</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="IN_PROGRESS">In Progress</option>
+            <option value="PENDING">Pending</option>
+            <option value="ALMOST_DONE">Almost Done</option>
+            <option value="ON_HOLD">On Hold</option>
+            <option value="NOT_STARTED">Not Started</option>
+          </select>
+          <select 
+            value={selectedPlatform}
+            onChange={e => setSelectedPlatform(e.target.value)}
+            className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+          >
+            <option value="ALL">All Platforms</option>
+            <option value="Instagram">Instagram</option>
+            <option value="YouTube">YouTube</option>
+            <option value="Facebook">Facebook</option>
+          </select>
+          <select 
+            value={selectedLanguage}
+            onChange={e => setSelectedLanguage(e.target.value)}
+            className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+          >
+            <option value="ALL">All Languages</option>
+            {availableLanguages.map(lang => (
+              <option key={lang} value={lang}>{lang}</option>
+            ))}
+          </select>
+          <button 
+            onClick={handleClearFilters}
+            className="border border-rose-500/50 hover:bg-rose-500/10 text-rose-400 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+          >
+            <Trash2 size={15} />
+            Clear All
+          </button>
+        </div>
+      </div>
+
+      {/* 3. SUMMARY CARDS (6 Cards) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
+        {/* Total Influencers */}
+        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center shrink-0">
+            <Users size={18} />
           </div>
-        ) : activeTrackingRecords.length === 0 ? (
-          <div className="flex flex-col justify-center items-center h-full text-slate-500 italic">
-            <div className="text-4xl mb-4 opacity-50">🛤️</div>
-            <h3 className="text-slate-300 text-lg mb-2 font-semibold">No active tracking records.</h3>
-            <p className="text-sm">Dispatch an influencer first to begin status tracking.</p>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">Total Influencers</span>
+            <span className="text-base sm:text-lg font-black text-white">{kpiCounts.total}</span>
+          </div>
+        </div>
+
+        {/* Completed */}
+        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+            <CheckCircle2 size={18} />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">Completed</span>
+            <span className="text-base sm:text-lg font-black text-white">
+              {kpiCounts.completed} <span className="text-xs font-semibold text-emerald-400/80">({kpiCounts.completedPct}%)</span>
+            </span>
+          </div>
+        </div>
+
+        {/* In Progress */}
+        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center shrink-0">
+            <Target size={18} />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">In Progress</span>
+            <span className="text-base sm:text-lg font-black text-white">
+              {kpiCounts.inProgress} <span className="text-xs font-semibold text-blue-400/80">({kpiCounts.inProgressPct}%)</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Pending */}
+        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+            <Clock size={18} />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">Pending</span>
+            <span className="text-base sm:text-lg font-black text-white">
+              {kpiCounts.pending} <span className="text-xs font-semibold text-amber-400/80">({kpiCounts.pendingPct}%)</span>
+            </span>
+          </div>
+        </div>
+
+        {/* On Hold */}
+        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-slate-700/30 text-slate-400 border border-slate-600/30 flex items-center justify-center shrink-0">
+            <PauseCircle size={18} />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">On Hold</span>
+            <span className="text-base sm:text-lg font-black text-white">
+              {kpiCounts.onHold} <span className="text-xs font-semibold text-slate-400">({kpiCounts.onHoldPct}%)</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Not Started */}
+        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
+            <XCircle size={18} />
+          </div>
+          <div>
+            <span className="text-[11px] font-medium text-slate-400 block">Not Started</span>
+            <span className="text-base sm:text-lg font-black text-white">
+              {kpiCounts.notStarted} <span className="text-xs font-semibold text-rose-400/80">({kpiCounts.notStartedPct}%)</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. DEDICATED INTERNAL VERTICAL SCROLL CONTAINER */}
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3 scroll-smooth">
+        {isLoading ? (
+          <div className="flex justify-center items-center h-64 text-slate-400">
+            <RefreshCcw size={22} className="animate-spin mr-2 text-blue-400" />
+            <span>Loading status tracking records...</span>
+          </div>
+        ) : filteredRecords.length === 0 ? (
+          <div className="flex flex-col justify-center items-center h-64 text-slate-500 italic bg-[#0b1329]/50 rounded-2xl border border-slate-800/60 p-8">
+            <div className="text-4xl mb-3 opacity-60">🎯</div>
+            <h3 className="text-slate-300 text-base font-semibold mb-1">No matching status tracking records</h3>
+            <p className="text-xs text-slate-400">
+              {searchQuery || selectedStatus !== 'ALL' || selectedPlatform !== 'ALL' || selectedLanguage !== 'ALL'
+                ? 'Try clearing your filters to view influencers.'
+                : 'Dispatch an influencer with Delivered shipment status to begin status tracking.'}
+            </p>
           </div>
         ) : (
-          <div className="space-y-6" id="st-cards-container">
-            {activeTrackingRecords.map(record => {
-              const dispatch = record.dispatch as any;
-              const avatarUrl = dispatch.influencer_avatar;
-              const dispatchId = dispatch.influencer_code || record.dispatch_id;
-              
-              const stages = getWorkflowStages(record);
-              const currentStageIndex = record.current_step || 0;
+          filteredRecords.map(record => {
+            const dispatch = record.dispatch || ({} as any);
+            const avatarUrl = dispatch.influencer_avatar;
+            const influencerCode = dispatch.influencer_code || record.influencer_id;
+            const influencerName = dispatch.influencer_name || 'Unknown Influencer';
+            const username = dispatch.username || '—';
 
-              return (
-                <div key={record.id} id={`st-card-${record.dispatch_id}`} className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-lg">
-                  {/* Card Header (Profile & Basic Info) */}
-                  <div className="bg-slate-800/80 p-4 border-b border-slate-700 grid grid-cols-1 lg:grid-cols-3 gap-4 items-center">
-                    
-                    {/* Creator Identity */}
-                    <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 rounded-full overflow-hidden shrink-0 border border-slate-600 bg-slate-900 flex items-center justify-center">
-                         {avatarUrl ? (
-                           <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                         ) : (
-                           <span className="text-slate-500 font-bold text-lg">{dispatch.influencer_name?.charAt(0) || '?'}</span>
-                         )}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-slate-100 font-bold text-lg leading-tight">{dispatch.influencer_name}</h3>
-                          {dispatch.influencer_code && (
-                            <span className="px-2 py-0.5 rounded bg-purple-950/70 border border-purple-700/60 text-purple-300 font-mono font-bold text-xs">
-                              {dispatch.influencer_code}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
-                          {dispatch.username && dispatch.username !== '—' && (
-                            <span className="text-slate-300 font-medium">{dispatch.username}</span>
-                          )}
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
-                            {record.status || 'Active'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+            const stepData = getRecordStepData(record);
+            const overallStatus = getOverallStatus(record, stepData);
+            const isMenuOpen = openMenuId === record.id;
 
-                    {/* Creator Details */}
-                    <div className="col-span-1 lg:col-span-2 grid grid-cols-2 gap-2 text-sm">
-                      <div className="flex items-center gap-2 text-slate-300">
-                        <Phone size={14} className="text-slate-500" />
-                        <span>{dispatch.phone_number || '-'}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-slate-300">
-                        <MapPin size={14} className="text-slate-500" />
-                        <span className="truncate">{dispatch.address || '-'}</span>
-                      </div>
+            return (
+              <div 
+                key={record.id}
+                id={`st-card-${record.dispatch_id || record.id}`}
+                className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-4 transition-all duration-200 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4"
+              >
+                {/* LEFT SECTION: Code, Profile, Name, Username */}
+                <div className="flex items-center gap-3.5 shrink-0 min-w-[280px]">
+                  {/* Influencer Code Box */}
+                  <div className="bg-[#070c18] border border-slate-800/90 rounded-xl px-3 py-1.5 flex flex-col items-center justify-center min-w-[82px] shrink-0 shadow-inner">
+                    <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider block leading-none">Influencer Code</span>
+                    <div className="flex items-center justify-center gap-1.5 text-sm font-black text-white mt-1">
+                      <ArrowUpDown size={11} className="text-slate-400" />
+                      <span>{influencerCode}</span>
                     </div>
                   </div>
 
-                  {/* Horizontal Timeline Workflow Section */}
-                  <div className="p-6 overflow-hidden">
-                    <h4 className="text-white font-bold text-lg mb-8">Workflow Progress</h4>
-                    
-                    <div className="w-full overflow-x-auto pb-12" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                      <div className="flex items-center min-w-max mx-auto px-4 justify-center">
-                        {stages.map((stage: any, idx) => {
-                          const status = stage.status;
+                  {/* Profile Avatar */}
+                  <div className="w-12 h-12 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt={influencerName} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-slate-400 font-extrabold text-base">{influencerName.charAt(0) || '?'}</span>
+                    )}
+                  </div>
 
-                          let circleClass = "bg-slate-700 text-slate-400 border-slate-750";
-                          let lineClass = "bg-slate-700";
-                          let textClass = "text-slate-400";
-
-                          if (status === 'COMPLETED') {
-                            circleClass = "bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.6)] border-emerald-400";
-                            lineClass = "bg-emerald-500";
-                            textClass = "text-emerald-500";
-                          } else if (status === 'CURRENT') {
-                            circleClass = "bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.6)] ring-2 ring-blue-500/50 border-blue-400";
-                            lineClass = "bg-slate-700";
-                            textClass = "text-blue-400";
-                          } else if (status === 'SKIPPED') {
-                            circleClass = "bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.6)] border-orange-400";
-                            lineClass = "bg-slate-700";
-                            textClass = "text-orange-400";
-                          }
-
-                          return (
-                            <React.Fragment key={stage.id}>
-                              <div 
-                                className="flex flex-col items-center relative cursor-pointer group" 
-                                onClick={() => toggleModal(record.id, stage.id)}
-                              >
-                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold transition-all duration-300 ${circleClass} group-hover:ring-2 ring-white ring-offset-2 ring-offset-slate-800`}>
-                                  {idx + 1}
-                                </div>
-                                <div className={`absolute top-14 text-center text-[11px] font-semibold w-28 leading-tight ${textClass}`}>
-                                  {stage.label}
-                                </div>
-                              </div>
-                              
-                              {idx !== stages.length - 1 && (
-                                <div className={`h-[2px] w-12 sm:w-16 mx-1 transition-colors duration-300 ${lineClass}`} />
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Active Modal Form Area */}
-                    {activeModal?.recordId === record.id && (() => {
-                      const activeStageIdx = stages.findIndex(s => s.id === activeModal.stageId);
-                      if (activeStageIdx === -1) return null;
-                      const activeStage = stages[activeStageIdx];
-                      const isCompleted = activeStageIdx < currentStageIndex || activeStage.completed;
-
-                      return (
-                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                          <div className={`bg-slate-900 border border-slate-700 rounded-2xl w-full ${activeStage.formKey === 'finalPost' ? 'max-w-4xl' : 'max-w-2xl'} shadow-2xl overflow-hidden animate-fade-in relative`}>
-                            {/* Modal Header */}
-                            <div className="flex justify-between items-center p-6 border-b border-slate-700 bg-slate-800/50">
-                              <h5 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-                                <activeStage.icon size={24} className="text-emerald-400" /> {activeStage.label}
-                              </h5>
-                              <button 
-                                onClick={() => setActiveModal(null)} 
-                                className="text-slate-400 hover:text-slate-200 transition-colors p-1 bg-slate-800 rounded-lg border border-slate-600 hover:border-slate-500"
-                              >
-                                <X size={20} />
-                              </button>
-                            </div>
-
-                            {/* Modal Content */}
-                            <div className="p-6">
-                              <div className="w-full">
-                                {activeStage.formKey === 'delivered' && (
-                                  <DeliveredForm record={record} onSave={(data: any) => handleFormSave(record.id, data)} />
-                                )}
-                                {activeStage.formKey === 'payAdvance' && (
-                                  <PayAdvanceForm record={record} onSave={(data: any) => handleFormSave(record.id, data)} />
-                                )}
-                                {activeStage.formKey === 'refVideos' && (
-                                  <ReferenceVideosForm record={record} onSave={(data: any) => handleFormSave(record.id, data)} />
-                                )}
-                                {activeStage.formKey === 'expTimeline' && (
-                                  <ExpectedTimelineForm record={record} onSave={(data: any) => handleFormSave(record.id, data)} isRework={false} />
-                                )}
-                                {activeStage.formKey === 'draft' && (
-                                  <DraftForm record={record} onSave={(data: any) => handleFormSave(record.id, data)} isRework={false} />
-                                )}
-                                {activeStage.formKey === 'reDraft' && (
-                                  <DraftForm record={record} onSave={(data: any) => handleFormSave(record.id, data)} isRework={true} />
-                                )}
-                                {activeStage.formKey === 'payRemaining' && (
-                                  <PayRemainingForm record={record} onSave={(data: any) => handleFormSave(record.id, data)} />
-                                )}
-                                {activeStage.formKey === 'finalPost' && (
-                                  <FinalPostForm record={record} onSave={(data: any) => handleFormSave(record.id, data)} />
-                                )}
-                              </div>
-                            </div>
-                            
-                            {/* Modal Footer status info */}
-                            <div className="p-6 pt-0 flex justify-between items-center border-t border-slate-700 bg-slate-800/30 mt-4 h-16">
-                              <span className="text-slate-400 text-sm font-semibold">
-                                {isCompleted ? 'Status: Completed' : 'Status: Pending'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                  {/* Influencer Name & Username */}
+                  <div className="truncate">
+                    <h4 className="text-white font-bold text-sm sm:text-base leading-tight truncate max-w-[190px]" title={influencerName}>
+                      {influencerName}
+                    </h4>
+                    <p className="text-slate-400 text-xs font-medium mt-0.5 truncate max-w-[190px]" title={username}>
+                      {username}
+                    </p>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                {/* CENTER SECTION: 6-Step Horizontal Connected Workflow */}
+                <div className="flex-1 px-2 py-1 max-w-2xl mx-auto w-full">
+                  <div className="flex items-center justify-between w-full">
+                    {WORKFLOW_STEPS.map((step, idx) => {
+                      const isCompleted = stepData.stepsCompleted[idx];
+                      const isCurrent = !isCompleted && idx === stepData.activeIndex && stepData.isDelivered;
+
+                      // Connecting line state
+                      const nextStepCompleted = idx < WORKFLOW_STEPS.length - 1 && stepData.stepsCompleted[idx + 1];
+                      const isLineCompleted = isCompleted && (nextStepCompleted || (idx + 1 === stepData.activeIndex && stepData.isDelivered));
+
+                      // Node visuals
+                      let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200";
+                      let labelStyle = "text-slate-400";
+                      let NodeIcon = step.icon;
+
+                      if (isCompleted) {
+                        circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-110";
+                        labelStyle = "text-emerald-400 font-semibold";
+                      } else if (isCurrent) {
+                        circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400 hover:scale-110";
+                        labelStyle = "text-blue-400 font-bold";
+                      }
+
+                      return (
+                        <React.Fragment key={step.id}>
+                          {/* Node & Label */}
+                          <div 
+                            className="flex flex-col items-center cursor-pointer group relative select-none"
+                            onClick={() => toggleModal(record.id, step.id)}
+                            title={`Click to manage: ${step.label}`}
+                          >
+                            <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
+                              {isCompleted ? (
+                                <Check size={18} strokeWidth={3} className="text-white" />
+                              ) : isCurrent ? (
+                                <NodeIcon size={18} className="text-white" />
+                              ) : (
+                                <span className="font-bold text-xs sm:text-sm text-slate-400">{idx + 1}</span>
+                              )}
+                            </div>
+                            <span className={`text-[10px] sm:text-[11px] text-center w-20 sm:w-24 leading-tight mt-1.5 transition-colors ${labelStyle}`}>
+                              {step.label}
+                            </span>
+                          </div>
+
+                          {/* Connecting Line */}
+                          {idx !== WORKFLOW_STEPS.length - 1 && (
+                            <div className="flex-1 h-[2px] mx-1 sm:mx-2 -mt-4 transition-colors duration-300">
+                              <div className={`h-full w-full rounded-full ${isLineCompleted ? 'bg-emerald-500' : 'bg-slate-700/60'}`} />
+                            </div>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* RIGHT SECTION: Overall Status & Three-Dot Menu */}
+                <div className="flex items-center gap-3 shrink-0 justify-end">
+                  {/* Status Badge */}
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border shadow-sm ${overallStatus.badgeClass}`}>
+                    <span className={`w-2 h-2 rounded-full ${overallStatus.dotClass}`}></span>
+                    <span>{overallStatus.label}</span>
+                  </span>
+
+                  {/* Three-Dot Menu */}
+                  <div className="relative three-dot-menu-container">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId(isMenuOpen ? null : record.id);
+                      }}
+                      className="w-8 h-8 rounded-lg bg-[#070c18] hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+                      title="More actions"
+                    >
+                      <MoreHorizontal size={16} />
+                    </button>
+
+                    {isMenuOpen && (
+                      <div className="absolute right-0 top-10 w-52 bg-[#0c1326] border border-slate-700/80 rounded-xl shadow-2xl z-40 py-1.5 overflow-hidden animate-fade-in text-xs">
+                        <button 
+                          onClick={() => {
+                            setDetailsRecord(record);
+                            setOpenMenuId(null);
+                          }}
+                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                        >
+                          <Eye size={14} className="text-blue-400" />
+                          <span>View Influencer Details</span>
+                        </button>
+                        <button 
+                          onClick={() => handleToggleOnHold(record)}
+                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                        >
+                          <PauseCircle size={14} className="text-amber-400" />
+                          <span>{overallStatus.key === 'ON_HOLD' ? 'Resume Workflow' : 'Toggle On Hold'}</span>
+                        </button>
+                        <button 
+                          onClick={() => toggleModal(record.id, 'payRemaining')}
+                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                        >
+                          <CreditCard size={14} className="text-emerald-400" />
+                          <span>Remaining Payment</span>
+                        </button>
+                        <button 
+                          onClick={() => toggleModal(record.id, 'finalPost')}
+                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                        >
+                          <CheckCircle2 size={14} className="text-purple-400" />
+                          <span>Final Post Date</span>
+                        </button>
+                        <div className="h-[1px] bg-slate-800 my-1" />
+                        <button 
+                          onClick={() => handleCopyCode(influencerCode)}
+                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                        >
+                          <Copy size={14} className="text-slate-400" />
+                          <span>Copy Influencer Code</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            );
+          })
         )}
       </div>
+
+      {/* ========================================================
+          ACTIVE MODAL FORM (Step Modals & Three-Dot Modals)
+      ======================================================== */}
+      {activeModal && (() => {
+        const targetRecord = activeTrackingRecords.find(r => r.id === activeModal.recordId) || trackingRecords.find(r => r.id === activeModal.recordId);
+        if (!targetRecord) return null;
+
+        const stageId = activeModal.stageId;
+        const matchingStep = WORKFLOW_STEPS.find(s => s.id === stageId);
+        const modalTitle = matchingStep?.label || (stageId === 'payRemaining' ? 'Pay Remaining Payment' : stageId === 'finalPost' ? 'Final Post Date' : 'Milestone Form');
+        const ModalIcon = matchingStep?.icon || (stageId === 'payRemaining' ? CreditCard : CheckCircle2);
+
+        return (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className={`bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full ${stageId === 'finalPost' ? 'max-w-4xl' : 'max-w-2xl'} shadow-2xl overflow-hidden animate-fade-in relative`}>
+              
+              {/* Modal Header */}
+              <div className="flex justify-between items-center p-5 border-b border-slate-800 bg-[#070c18]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
+                    <ModalIcon size={18} />
+                  </div>
+                  <div>
+                    <h5 className="text-base sm:text-lg font-bold text-white leading-none">{modalTitle}</h5>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      {targetRecord.dispatch?.influencer_name} ({targetRecord.dispatch?.influencer_code || targetRecord.influencer_id})
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setActiveModal(null)} 
+                  className="text-slate-400 hover:text-white transition-colors p-1.5 bg-slate-800/80 hover:bg-slate-700 rounded-lg border border-slate-700"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 max-h-[calc(85vh-120px)] overflow-y-auto">
+                {stageId === 'delivered' && (
+                  <DeliveredForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
+                )}
+                {stageId === 'callExplain' && (
+                  <CallExplainForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
+                )}
+                {stageId === 'shareScript' && (
+                  <ShareScriptForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
+                )}
+                {stageId === 'payAdvance' && (
+                  <PayAdvanceForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
+                )}
+                {stageId === 'expTimeline' && (
+                  <ExpectedTimelineForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} isRework={false} />
+                )}
+                {stageId === 'draft' && (
+                  <DraftForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} isRework={false} />
+                )}
+                {stageId === 'payRemaining' && (
+                  <PayRemainingForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
+                )}
+                {stageId === 'finalPost' && (
+                  <FinalPostForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
+                )}
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================
+          INFLUENCER DETAILS MODAL (Via Three-Dot Menu)
+      ======================================================== */}
+      {detailsRecord && (() => {
+        const d = detailsRecord.dispatch || ({} as any);
+        const p = detailsRecord.pricing || ({} as any);
+        return (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-fade-in relative">
+              <div className="flex justify-between items-center p-5 border-b border-slate-800 bg-[#070c18]">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-700 bg-slate-900 flex items-center justify-center shrink-0">
+                    {d.influencer_avatar ? (
+                      <img src={d.influencer_avatar} alt={d.influencer_name} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-white font-bold">{d.influencer_name?.charAt(0) || '?'}</span>
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-white leading-tight">{d.influencer_name}</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">{d.username} • Code: {d.influencer_code || detailsRecord.influencer_id}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setDetailsRecord(null)}
+                  className="text-slate-400 hover:text-white p-1.5 bg-slate-800/80 hover:bg-slate-700 rounded-lg border border-slate-700"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto text-xs sm:text-sm">
+                <div className="grid grid-cols-2 gap-4 bg-[#070c18] p-4 rounded-xl border border-slate-800">
+                  <div>
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Phone Number</span>
+                    <span className="text-white font-semibold">{d.phone_number || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Alternative Phone</span>
+                    <span className="text-white font-semibold">{d.alternative_phone_number || '—'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Address</span>
+                    <span className="text-slate-200">{d.address || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Courier Partner</span>
+                    <span className="text-emerald-400 font-semibold">{d.courier_partner || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Tracking ID</span>
+                    <span className="text-white font-mono font-semibold">{d.tracking_id || '—'}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 bg-[#070c18] p-4 rounded-xl border border-slate-800">
+                  <div>
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Product Name</span>
+                    <span className="text-white font-semibold">{d.product_name || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Total Products</span>
+                    <span className="text-white font-semibold">{d.total_products || 1}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Total Agreed Price</span>
+                    <span className="text-white font-semibold">₹{p.final_price || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[11px] uppercase font-bold">Advance Paid</span>
+                    <span className="text-emerald-400 font-semibold">₹{detailsRecord.advance_paid_amount || '0'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-slate-800 bg-[#070c18] flex justify-end">
+                <button 
+                  onClick={() => setDetailsRecord(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
 
-// --- Sub-Form Components (Parity with script.js st-timeline-two-cols) --- //
+// =========================================================================
+// SUB-FORM COMPONENTS (Maintained & Enhanced for all 6 Steps + 3-Dot Modals)
+// =========================================================================
 
+// --- STEP 1: Delivery Confirmation ---
 const DeliveredForm = ({ record, onSave }: any) => {
   const [photo, setPhoto] = useState(record.delivery_photo_url || '');
   const [confirmed, setConfirmed] = useState(record.delivered_confirmed || false);
@@ -567,24 +967,27 @@ const DeliveredForm = ({ record, onSave }: any) => {
       } catch (err) {
         console.error('Error uploading photo:', err);
         setIsUploading(false);
-        return; // Don't save if upload failed
+        return;
       }
     }
 
-    await onSave({ delivery_photo_url: finalUrl, delivered_confirmed: confirmed, current_step: confirmed ? Math.max(record.current_step || 0, 1) : (record.current_step || 0) });
+    await onSave({ 
+      delivery_photo_url: finalUrl, 
+      delivered_confirmed: confirmed, 
+      current_step: confirmed ? Math.max(record.current_step || 0, 1) : (record.current_step || 0) 
+    });
     setIsUploading(false);
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg p-6 space-y-6">
-      
-      <div className="flex items-center gap-3 bg-slate-800 p-4 rounded-lg border border-slate-700">
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
+      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
         <input 
           type="checkbox" 
           id="delivered-confirmed"
           checked={confirmed}
           onChange={(e) => setConfirmed(e.target.checked)}
-          className="w-5 h-5 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-800" 
+          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
         />
         <label htmlFor="delivered-confirmed" className="text-sm font-medium text-slate-200 cursor-pointer">
           Yes, the package has been delivered and confirmed by the creator.
@@ -592,17 +995,17 @@ const DeliveredForm = ({ record, onSave }: any) => {
       </div>
 
       <div>
-        <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
+        <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
           Delivery Proof Photo
         </label>
-        <div className="border-2 border-dashed border-slate-600 rounded-lg p-4 text-center relative hover:border-emerald-500 transition-colors bg-slate-800/50 min-h-[200px] flex items-center justify-center">
+        <div className="border-2 border-dashed border-slate-700/80 rounded-xl p-4 text-center relative hover:border-emerald-500 transition-colors bg-[#0b1329] min-h-[200px] flex items-center justify-center">
           {preview ? (
             <div className="relative w-full aspect-video">
-              <img src={preview} alt="Delivery Proof" className="w-full h-full object-contain rounded" />
+              <img src={preview} alt="Delivery Proof" className="w-full h-full object-contain rounded-lg" />
             </div>
           ) : (
             <div className="py-8 flex flex-col items-center">
-              <UploadCloud className="text-slate-500 mb-3" size={32} />
+              <UploadCloud className="text-slate-500 mb-2" size={32} />
               <span className="text-sm text-slate-300 font-medium mb-1">Click to upload delivery photo</span>
               <span className="text-xs text-slate-500">PNG, JPG up to 5MB</span>
             </div>
@@ -616,11 +1019,11 @@ const DeliveredForm = ({ record, onSave }: any) => {
         </div>
       </div>
       
-      <div className="flex items-end justify-end pt-2 border-t border-slate-800">
+      <div className="flex justify-end pt-2 border-t border-slate-800">
         <button 
           onClick={handleSave} 
           disabled={isUploading}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-500/20"
+          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-500/20"
         >
           {isUploading ? 'Saving...' : 'Save Delivery Details'}
         </button>
@@ -629,9 +1032,245 @@ const DeliveredForm = ({ record, onSave }: any) => {
   );
 };
 
+// --- STEP 2: Call & Explain ---
+const CallExplainForm = ({ record, onSave }: any) => {
+  let metadata: any = {};
+  try {
+    metadata = JSON.parse(record.notes || '{}');
+  } catch (e) {
+    metadata = {};
+  }
+
+  const [callExplained, setCallExplained] = useState(
+    metadata.call_explained !== undefined ? metadata.call_explained : (record.ref_call_explanation_required || false)
+  );
+  const [callNotes, setCallNotes] = useState(metadata.call_notes || '');
+  const [callDatetime, setCallDatetime] = useState(
+    metadata.call_datetime ? formatForDateTimeInput(metadata.call_datetime) : ''
+  );
+  const [phoneCalled, setPhoneCalled] = useState(
+    metadata.phone_called || record.dispatch?.phone_number || ''
+  );
+
+  const handleSave = async () => {
+    const updatedMetadata = {
+      ...metadata,
+      call_explained: callExplained,
+      call_notes: callNotes,
+      call_datetime: callDatetime ? new Date(callDatetime).toISOString() : new Date().toISOString(),
+      phone_called: phoneCalled,
+      call_explanation_pending: !callExplained
+    };
+
+    await onSave({
+      ref_call_explanation_required: callExplained,
+      notes: JSON.stringify(updatedMetadata)
+    });
+  };
+
+  return (
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
+      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+        <input 
+          type="checkbox" 
+          id="call-explained-checkbox"
+          checked={callExplained}
+          onChange={(e) => setCallExplained(e.target.checked)}
+          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
+        />
+        <label htmlFor="call-explained-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer">
+          Call explanation completed with influencer (deliverables, guidelines & creative briefing explained).
+        </label>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Phone Called</label>
+          <input 
+            type="text" 
+            value={phoneCalled} 
+            onChange={e => setPhoneCalled(e.target.value)} 
+            placeholder="Influencer phone number"
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Call Date & Time</label>
+          <input 
+            type="datetime-local" 
+            value={callDatetime} 
+            onChange={e => setCallDatetime(e.target.value)} 
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div className="col-span-1 md:col-span-2">
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Call Notes & Instructions</label>
+          <textarea 
+            value={callNotes} 
+            onChange={e => setCallNotes(e.target.value)} 
+            placeholder="Record influencer agreement, special requests, or instructions discussed during the call..."
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 h-28"
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end pt-2 border-t border-slate-800">
+        <button 
+          onClick={handleSave} 
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+        >
+          Save Call Details
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- STEP 3: Share Script ---
+const ShareScriptForm = ({ record, onSave }: any) => {
+  let metadata: any = {};
+  try {
+    metadata = JSON.parse(record.notes || '{}');
+  } catch (e) {
+    metadata = {};
+  }
+
+  const [concept, setConcept] = useState(record.ref_concept || metadata.concept || '');
+  const [script, setScript] = useState(record.ref_script || metadata.script || '');
+  const [keypoints, setKeypoints] = useState(record.ref_keypoints || metadata.keypoints || '');
+  const [offer, setOffer] = useState(record.ref_offer || metadata.offer || '');
+  const [link, setLink] = useState(record.ref_link || metadata.link || '');
+  const [vids, setVids] = useState<string[]>(record.reference_videos_list?.length ? record.reference_videos_list : ['']);
+  const [scriptShared, setScriptShared] = useState(
+    metadata.script_shared !== undefined ? metadata.script_shared : (!!record.reference_video_received || !!record.ref_script)
+  );
+
+  const handleSave = async () => {
+    const validVids = vids.filter(Boolean);
+    const updatedMetadata = {
+      ...metadata,
+      script_shared: scriptShared,
+      concept,
+      script,
+      keypoints,
+      offer,
+      link
+    };
+
+    await onSave({ 
+      ref_concept: concept || '', 
+      ref_script: script || '', 
+      ref_keypoints: keypoints || '', 
+      ref_offer: offer || '', 
+      ref_link: link || '', 
+      reference_videos_list: validVids,
+      reference_video_received: scriptShared,
+      notes: JSON.stringify(updatedMetadata)
+    });
+  };
+
+  return (
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-5">
+      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+        <input 
+          type="checkbox" 
+          id="script-shared-checkbox"
+          checked={scriptShared}
+          onChange={(e) => setScriptShared(e.target.checked)}
+          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
+        />
+        <label htmlFor="script-shared-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer">
+          Script & reference materials shared and approved with the creator.
+        </label>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Campaign Concept</label>
+          <input 
+            type="text" 
+            value={concept} 
+            onChange={e => setConcept(e.target.value)} 
+            placeholder="e.g. Morning Glow Routine"
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Offer to Mention</label>
+          <input 
+            type="text" 
+            value={offer} 
+            onChange={e => setOffer(e.target.value)} 
+            placeholder="e.g. 15% OFF with code CREATOR15"
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+          />
+        </div>
+        <div className="col-span-1 md:col-span-2">
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Proposed Script</label>
+          <textarea 
+            value={script} 
+            onChange={e => setScript(e.target.value)} 
+            placeholder="Enter the proposed video talking points, hook, body, and call-to-action..."
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 h-24" 
+          />
+        </div>
+        <div className="col-span-1 md:col-span-2">
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Key Points to Cover</label>
+          <textarea 
+            value={keypoints} 
+            onChange={e => setKeypoints(e.target.value)} 
+            placeholder="Key product USPs, ingredients, or brand highlights to emphasize..."
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 h-20" 
+          />
+        </div>
+        <div className="col-span-1 md:col-span-2">
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Creator Product Link</label>
+          <input 
+            type="text" 
+            value={link} 
+            onChange={e => setLink(e.target.value)} 
+            placeholder="https://..."
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+          />
+        </div>
+      </div>
+      
+      <div className="border-t border-slate-800 pt-4">
+        <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Reference Video Links</label>
+        {vids.map((v, i) => (
+          <input 
+            key={i} 
+            type="text" 
+            value={v} 
+            onChange={e => { const nv = [...vids]; nv[i] = e.target.value; setVids(nv); }} 
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white mb-2 focus:outline-none focus:border-blue-500" 
+            placeholder="Paste reference video URL..." 
+          />
+        ))}
+        <button 
+          onClick={() => setVids([...vids, ''])} 
+          className="text-emerald-400 text-xs font-bold hover:underline"
+        >
+          + Add More Video Links
+        </button>
+      </div>
+
+      <div className="flex justify-end pt-2 border-t border-slate-800">
+        <button 
+          onClick={handleSave} 
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+        >
+          Save Script Details
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- STEP 4: Pay Advance ---
 const PayAdvanceForm = ({ record, onSave }: any) => {
   const [gpay, setGpay] = useState(record.advance_gpay_number || '');
-  const [total, setTotal] = useState(record.advance_total_amount || '');
+  const [total, setTotal] = useState(record.advance_total_amount || record.pricing?.final_price || '');
   const [advance, setAdvance] = useState(record.advance_paid_amount || '');
   
   const [photo, setPhoto] = useState(record.pay_advance_photo_url || '');
@@ -670,7 +1309,7 @@ const PayAdvanceForm = ({ record, onSave }: any) => {
       } catch (err) {
         console.error('Error uploading photo:', err);
         setIsUploading(false);
-        return; // Don't save if upload failed
+        return;
       }
     }
 
@@ -678,34 +1317,52 @@ const PayAdvanceForm = ({ record, onSave }: any) => {
       advance_gpay_number: gpay, 
       advance_total_amount: total, 
       advance_paid_amount: advance, 
-      pay_advance_photo_url: finalUrl 
+      pay_advance_photo_url: finalUrl,
+      pay_advance_completed: true
     });
     setIsUploading(false);
   };
 
   return (
-    <div className="bg-[#1B2130] rounded-lg p-6 flex flex-col h-full space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         
-        {/* Left Side: Inputs & Upload Button */}
+        {/* Left: Inputs & Upload */}
         <div className="space-y-4">
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">GPay Number</label>
-            <input type="text" value={gpay} onChange={e=>setGpay(e.target.value)} className="w-full bg-[#151923] border border-slate-700/50 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500" />
+            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">GPay / UPI Number</label>
+            <input 
+              type="text" 
+              value={gpay} 
+              onChange={e => setGpay(e.target.value)} 
+              placeholder="e.g. 9876543210@upi"
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+            />
           </div>
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Total Amount</label>
-            <input type="text" value={total} onChange={e=>setTotal(e.target.value)} className="w-full bg-[#151923] border border-slate-700/50 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500" />
+            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Total Agreed Amount (₹)</label>
+            <input 
+              type="text" 
+              value={total} 
+              onChange={e => setTotal(e.target.value)} 
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+            />
           </div>
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Advance Amount</label>
-            <input type="text" value={advance} onChange={e=>setAdvance(e.target.value)} className="w-full bg-[#151923] border border-slate-700/50 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500" />
+            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Advance Paid Amount (₹)</label>
+            <input 
+              type="text" 
+              value={advance} 
+              onChange={e => setAdvance(e.target.value)} 
+              placeholder="e.g. 2000"
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+            />
           </div>
           
           <div className="pt-2">
-            <div className="relative w-32 h-24 border border-dashed border-indigo-500/40 rounded-xl bg-[#1e2536] flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500 transition-colors">
-              <UploadCloud className="text-indigo-400 mb-1" size={18} />
-              <span className="text-[10px] text-indigo-300 font-medium text-center px-2">Upload Screenshot</span>
+            <div className="relative w-full h-24 border-2 border-dashed border-slate-700/80 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
+              <UploadCloud className="text-blue-400 mb-1" size={20} />
+              <span className="text-xs text-blue-300 font-medium">Upload Payment Screenshot</span>
               <input 
                 type="file" 
                 accept="image/*" 
@@ -716,116 +1373,86 @@ const PayAdvanceForm = ({ record, onSave }: any) => {
           </div>
         </div>
 
-        {/* Right Side: Image Preview */}
-        <div className="flex flex-col items-center justify-center h-full">
+        {/* Right: Screenshot Preview */}
+        <div className="flex flex-col items-center justify-center">
           {preview ? (
-            <div className="flex flex-col items-center">
-              <div className="w-48 h-48 bg-[#151923] rounded-xl border border-slate-700/50 flex items-center justify-center p-2 mb-2 overflow-hidden shadow-lg">
-                <img src={preview} alt="Screenshot Preview" className="max-w-full max-h-full object-contain rounded-md" />
+            <div className="flex flex-col items-center w-full">
+              <div className="w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800 flex items-center justify-center p-2 mb-2 overflow-hidden shadow-lg">
+                <img src={preview} alt="Screenshot Preview" className="max-w-full max-h-full object-contain rounded-lg" />
               </div>
-              <span className="text-xs text-slate-400">Screenshot Preview</span>
+              <span className="text-xs text-slate-400">Payment Screenshot Preview</span>
             </div>
           ) : (
-             <div className="flex flex-col items-center opacity-50">
-                <div className="w-48 h-48 bg-[#151923] rounded-xl border border-slate-700/30 flex flex-col items-center justify-center p-2 mb-2">
-                  <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mb-2"><UploadCloud className="text-slate-500" size={20}/></div>
-                  <span className="text-xs text-slate-500">No Image Selected</span>
-                </div>
+             <div className="flex flex-col items-center justify-center w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800/60 p-4 opacity-50">
+               <UploadCloud className="text-slate-500 mb-2" size={28} />
+               <span className="text-xs text-slate-400">No screenshot selected</span>
              </div>
           )}
         </div>
 
       </div>
 
-      {/* Footer Action */}
-      <div className="flex justify-end pt-4 mt-2">
+      <div className="flex justify-end pt-4 border-t border-slate-800">
         <button 
           onClick={handleSave} 
           disabled={isUploading}
-          className="bg-indigo-500 hover:bg-indigo-400 text-white px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
         >
-          {isUploading ? 'Saving...' : 'Save Details'}
+          {isUploading ? 'Saving...' : 'Save Advance Details'}
         </button>
       </div>
     </div>
   );
 };
 
-const ReferenceVideosForm = ({ record, onSave }: any) => {
-  const [concept, setConcept] = useState(record.ref_concept || '');
-  const [script, setScript] = useState(record.ref_script || '');
-  const [keypoints, setKeypoints] = useState(record.ref_keypoints || '');
-  const [offer, setOffer] = useState(record.ref_offer || '');
-  const [link, setLink] = useState(record.ref_link || '');
-  const [callReq, setCallReq] = useState(record.ref_call_explanation_required || false);
-  const [vids, setVids] = useState<string[]>(record.reference_videos_list?.length ? record.reference_videos_list : ['']);
-  
-  return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div><label className="block text-xs text-slate-400 mb-1">Campaign Concept</label><input type="text" value={concept} onChange={e=>setConcept(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2 text-sm text-white" /></div>
-        <div><label className="block text-xs text-slate-400 mb-1">Offer to Mention</label><input type="text" value={offer} onChange={e=>setOffer(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2 text-sm text-white" /></div>
-        <div className="col-span-1 md:col-span-2"><label className="block text-xs text-slate-400 mb-1">Proposed Script</label><textarea value={script} onChange={e=>setScript(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2 text-sm text-white h-20" /></div>
-        <div className="col-span-1 md:col-span-2"><label className="block text-xs text-slate-400 mb-1">Key Points</label><textarea value={keypoints} onChange={e=>setKeypoints(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2 text-sm text-white h-20" /></div>
-        <div><label className="block text-xs text-slate-400 mb-1">Creator Product Link</label><input type="text" value={link} onChange={e=>setLink(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2 text-sm text-white" /></div>
-        <div className="flex items-center mt-6">
-          <label className="flex items-center cursor-pointer gap-2">
-            <input type="checkbox" checked={callReq} onChange={e=>setCallReq(e.target.checked)} className="rounded border-slate-700 bg-slate-800 text-emerald-500 w-5 h-5" />
-            <span className="text-sm text-slate-300">Call Explanation Required</span>
-          </label>
-        </div>
-      </div>
-      
-      <div className="border-t border-slate-800 pt-4">
-        <label className="block text-xs text-slate-400 mb-2 uppercase">Reference Video Links</label>
-        {vids.map((v, i) => (
-          <input key={i} type="text" value={v} onChange={e => { const nv = [...vids]; nv[i] = e.target.value; setVids(nv); }} className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2 text-sm text-white mb-2" placeholder="Video URL..." />
-        ))}
-        <button onClick={() => setVids([...vids, ''])} className="text-emerald-400 text-xs mt-1 hover:underline">+ Add More</button>
-      </div>
-
-      <div className="flex justify-end pt-2">
-        <button onClick={() => {
-          const validVids = vids.filter(Boolean);
-          onSave({ 
-            ref_concept: concept || '', 
-            ref_script: script || '', 
-            ref_keypoints: keypoints || '', 
-            ref_offer: offer || '', 
-            ref_link: link || '', 
-            ref_call_explanation_required: callReq, 
-            reference_videos_list: validVids 
-          });
-        }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm transition-colors">Save Details</button>
-      </div>
-    </div>
-  );
-};
-
+// --- STEP 5: Time Line ---
 const ExpectedTimelineForm = ({ record, onSave, isRework }: any) => {
   const dateKey = isRework ? 're_draft_expected_date' : 'draft_expected_date';
   const timeKey = isRework ? 're_draft_expected_time' : 'draft_expected_time';
   const [date, setDate] = useState(record[dateKey] || '');
   const [time, setTime] = useState(record[timeKey] || '');
+
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div><label className="block text-xs text-slate-400 mb-1">Expected Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2 text-sm text-white" /></div>
-        <div><label className="block text-xs text-slate-400 mb-1">Expected Time</label><input type="time" value={time} onChange={e=>setTime(e.target.value)} className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2 text-sm text-white" /></div>
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Expected Draft Delivery Date</label>
+          <input 
+            type="date" 
+            value={date} 
+            onChange={e => setDate(e.target.value)} 
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Expected Time</label>
+          <input 
+            type="time" 
+            value={time} 
+            onChange={e => setTime(e.target.value)} 
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+          />
+        </div>
       </div>
-      <div className="flex justify-end">
-        <button onClick={() => {
-          if (!date || !time) {
-            toast.error('Please select both date and time.');
-            return;
-          }
-          onSave({ [dateKey]: date, [timeKey]: time });
-        }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm transition-colors">Save Details</button>
+      <div className="flex justify-end pt-2 border-t border-slate-800">
+        <button 
+          onClick={() => {
+            if (!date || !time) {
+              toast.error('Please select both date and time.');
+              return;
+            }
+            onSave({ [dateKey]: date, [timeKey]: time, expected_delivery_completed: true });
+          }} 
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+        >
+          Save Timeline
+        </button>
       </div>
     </div>
   );
 };
 
+// --- STEP 6: Draft ---
 const DraftForm = ({ record, onSave, isRework }: any) => {
   const vUrl = isRework ? 're_draft_video_url' : 'draft_video_url';
   const status = isRework ? 're_draft_approval_status' : 'draft_approval_status';
@@ -840,7 +1467,6 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
   const metaFileNameKey = isRework ? 'draft2_filename' : 'draft1_filename';
   const metaUploadedAtKey = isRework ? 'draft2_uploaded_at' : 'draft1_uploaded_at';
 
-  // Parse notes JSON to load metadata
   let metadata: any = {};
   try {
     metadata = JSON.parse(record.notes || '{}');
@@ -867,8 +1493,7 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
   const [isUploading, setIsUploading] = useState(false);
   const [calculatedTiming, setCalculatedTiming] = useState(record[timing] || 'Not Submit');
 
-  // Auto-calculate timing status
-  React.useEffect(() => {
+  useEffect(() => {
     if (!vid && !file) {
       setCalculatedTiming('Not Submit');
     } else {
@@ -933,12 +1558,10 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
     }
 
     const isStepCompleted = !!finalUrl;
-
     const nowStr = new Date().toISOString();
     const currentUploadedAt = file ? nowStr : (uploadedAt || (finalUrl ? nowStr : ''));
     const currentFileName = file ? file.name : (fileName || (finalUrl ? 'uploaded_video.mp4' : ''));
 
-    // Merge new metadata with existing notes content
     const updatedMetadata = {
       ...metadata,
       [metaFileNameKey]: currentFileName,
@@ -953,7 +1576,6 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
       updatedMetadata.draft1_received = isStepCompleted;
       updatedMetadata.draft1_completed = isStepCompleted;
       updatedMetadata.draft1_status = isStepCompleted ? 'COMPLETED' : 'CURRENT';
-      // Sync with old key for compatibility
       updatedMetadata.draft_file_name = currentFileName;
       updatedMetadata.draft_uploaded_at = currentUploadedAt;
     }
@@ -968,7 +1590,6 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
       notes: JSON.stringify(updatedMetadata)
     };
 
-    // Mark draft as received when completed
     if (!isRework) {
       data.draft_received = isStepCompleted;
       if (isStepCompleted) {
@@ -980,7 +1601,6 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
       }
     }
     
-    // Automatically prepare the rework fields if "Not Approved"
     if (appStat === 'Not Approved' && !isRework) {
       data['re_draft_expected_date'] = record.re_draft_expected_date || '';
     } else if (appStat === 'Approved' && !isRework) {
@@ -999,153 +1619,126 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
   };
 
   return (
-    <div className="bg-[#151923] p-8 min-h-[500px] flex flex-col justify-between">
-      <div className="space-y-8 max-w-4xl mx-auto w-full">
-        
-        {/* Upload Section */}
-        <div className="flex justify-center gap-6">
-          <div className="relative w-40 h-32 border border-dashed border-indigo-500/40 rounded-xl bg-[#1e2536] flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500 transition-colors">
-            <UploadCloud className="text-indigo-400 mb-2" size={24} />
-            <span className="text-xs text-indigo-300 font-medium">Upload Draft</span>
-            <input 
-              type="file" 
-              accept="video/*,image/*" 
-              onChange={handleFileUpload} 
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-            />
-          </div>
-          <div className="w-64 min-h-32 border border-dashed border-slate-700/50 rounded-xl bg-[#1a1f2c] flex flex-col items-center justify-center p-3">
-            {vid ? (
-              <div className="w-full flex flex-col items-center gap-2">
-                {(vid.startsWith('blob:') || vid.includes('.mp4') || vid.includes('.webm') || vid.includes('video') || vid.includes('drafts')) ? (
-                  <video src={vid} controls className="w-full max-h-24 object-contain rounded bg-black" />
-                ) : (
-                  <div className="text-xs text-slate-400 italic">No video preview available</div>
-                )}
-                {fileName && (
-                  <span className="text-[11px] text-slate-300 font-semibold truncate w-full text-center" title={fileName}>
-                    {fileName}
-                  </span>
-                )}
-                {uploadedAt && (() => {
-                  const formatUploadTimestamp = (tsStr: string) => {
-                    if (!tsStr) return '';
-                    try {
-                      const d = new Date(tsStr);
-                      const day = String(d.getDate()).padStart(2, '0');
-                      const month = String(d.getMonth() + 1).padStart(2, '0');
-                      const year = d.getFullYear();
-                      const hours = String(d.getHours()).padStart(2, '0');
-                      const minutes = String(d.getMinutes()).padStart(2, '0');
-                      return `${day}/${month}/${year} ${hours}:${minutes}`;
-                    } catch (e) {
-                      return '';
-                    }
-                  };
-                  return (
-                    <span className="text-[10px] text-slate-500 font-medium">
-                      Uploaded: {formatUploadTimestamp(uploadedAt)}
-                    </span>
-                  );
-                })()}
-                {!fileName && !uploadedAt && (
-                  <span className="text-xs text-slate-400 font-medium">Draft Uploaded</span>
-                )}
-              </div>
-            ) : (
-               <span className="text-xs text-slate-500 font-medium">No Video</span>
-            )}
-          </div>
-        </div>
-
-        {/* Status Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-b border-slate-800 pb-8">
-          <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-3 tracking-wider uppercase">Approval Status</label>
-            <div className="flex items-center gap-3">
-              <button 
-                onClick={() => setAppStat('Approved')}
-                className={`px-5 py-2 rounded-full text-xs font-semibold border transition-colors ${appStat === 'Approved' ? 'bg-[#151923] text-white border-white shadow-[0_0_10px_rgba(255,255,255,0.2)]' : 'bg-transparent text-slate-400 border-slate-700 hover:border-slate-500'}`}
-              >
-                Approved
-              </button>
-              <button 
-                onClick={() => setAppStat('Not Approved')}
-                className={`px-5 py-2 rounded-full text-xs font-semibold border transition-colors ${appStat === 'Not Approved' ? 'bg-[#151923] text-white border-white shadow-[0_0_10px_rgba(255,255,255,0.2)]' : 'bg-transparent text-slate-400 border-slate-700 hover:border-slate-500'}`}
-              >
-                Not Approved
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-3 tracking-wider uppercase">Timing Status</label>
-            <div className="grid grid-cols-2 gap-3">
-              {['Advance', 'On Time', 'Late', 'Not Submit'].map((ts) => (
-                <div key={ts} className={`flex items-center gap-2 p-2 rounded-lg border ${calculatedTiming === ts ? 'bg-indigo-500/10 border-indigo-500/50' : 'bg-transparent border-slate-800 opacity-60'}`}>
-                  <input type="checkbox" checked={calculatedTiming === ts} readOnly className="w-4 h-4 rounded-sm border-slate-700 bg-slate-900 text-indigo-500 focus:ring-0" />
-                  <span className={`text-xs ${calculatedTiming === ts ? 'text-indigo-400 font-medium' : 'text-slate-500'}`}>{ts}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Dynamic Section based on Approval Status */}
-        {appStat === 'Not Approved' && (
-          <div className="animate-fade-in">
-            <label className="block text-[11px] font-bold text-slate-400 mb-2 tracking-wider uppercase">What Correction Required</label>
-            <textarea 
-              value={corr} 
-              onChange={e=>setCorr(e.target.value)} 
-              placeholder="Enter corrections required..."
-              className="w-full bg-[#1e2536] border border-slate-700/50 rounded-lg px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500 min-h-[100px]" 
-            />
-          </div>
-        )}
-
-        {appStat === 'Approved' && (
-          <div className="animate-fade-in space-y-4">
-            <h6 className="text-sm font-bold text-white mb-4">Approved Details</h6>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-2 tracking-wider uppercase">Final Product Link</label>
-                <input 
-                  type="text" 
-                  value={finalL} 
-                  onChange={e=>setFinalL(e.target.value)} 
-                  placeholder="Enter product link"
-                  className="w-full bg-[#1e2536] border border-slate-700/50 rounded-lg px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500" 
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-2 tracking-wider uppercase">Final Description</label>
-                <input 
-                  type="text" 
-                  value={finalD} 
-                  onChange={e=>setFinalD(e.target.value)} 
-                  placeholder="Enter final description"
-                  className="w-full bg-[#1e2536] border border-slate-700/50 rounded-lg px-4 py-3 text-sm text-slate-300 focus:outline-none focus:border-indigo-500" 
-                />
-              </div>
-            </div>
-          </div>
-        )}
-        
-      </div>
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
       
-      <div className="flex justify-end pt-8 mt-auto w-full max-w-4xl mx-auto">
+      {/* Upload Section */}
+      <div className="flex flex-col sm:flex-row justify-center gap-6">
+        <div className="relative w-full sm:w-44 h-32 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
+          <UploadCloud className="text-blue-400 mb-1" size={24} />
+          <span className="text-xs text-blue-300 font-medium">Upload Draft Video</span>
+          <input 
+            type="file" 
+            accept="video/*,image/*" 
+            onChange={handleFileUpload} 
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+          />
+        </div>
+        <div className="flex-1 min-h-32 border border-slate-800 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center p-3">
+          {vid ? (
+            <div className="w-full flex flex-col items-center gap-2">
+              {(vid.startsWith('blob:') || vid.includes('.mp4') || vid.includes('.webm') || vid.includes('video') || vid.includes('drafts')) ? (
+                <video src={vid} controls className="w-full max-h-28 object-contain rounded bg-black" />
+              ) : (
+                <div className="text-xs text-slate-400 italic">Preview available</div>
+              )}
+              {fileName && (
+                <span className="text-[11px] text-slate-300 font-semibold truncate w-full text-center" title={fileName}>
+                  {fileName}
+                </span>
+              )}
+            </div>
+          ) : (
+             <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
+          )}
+        </div>
+      </div>
+
+      {/* Approval & Timing Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-y border-slate-800 py-6">
+        <div>
+          <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Approval Status</label>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setAppStat('Approved')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${appStat === 'Approved' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-600'}`}
+            >
+              Approved
+            </button>
+            <button 
+              onClick={() => setAppStat('Not Approved')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${appStat === 'Not Approved' ? 'bg-rose-600 border-rose-500 text-white' : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-600'}`}
+            >
+              Not Approved
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Timing Status</label>
+          <div className="grid grid-cols-2 gap-2">
+            {['Advance', 'On Time', 'Late', 'Not Submit'].map((ts) => (
+              <div key={ts} className={`flex items-center gap-2 p-2 rounded-lg border ${calculatedTiming === ts ? 'bg-blue-600/10 border-blue-500/50' : 'bg-[#0b1329] border-slate-800'}`}>
+                <input type="checkbox" checked={calculatedTiming === ts} readOnly className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-0" />
+                <span className={`text-xs ${calculatedTiming === ts ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>{ts}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {appStat === 'Not Approved' && (
+        <div className="animate-fade-in">
+          <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Correction Instructions</label>
+          <textarea 
+            value={corr} 
+            onChange={e => setCorr(e.target.value)} 
+            placeholder="Enter required changes, retakes, or missing guidelines..."
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[90px]" 
+          />
+        </div>
+      )}
+
+      {appStat === 'Approved' && (
+        <div className="animate-fade-in space-y-4">
+          <h6 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Approved Deliverable Info</h6>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Product Link</label>
+              <input 
+                type="text" 
+                value={finalL} 
+                onChange={e => setFinalL(e.target.value)} 
+                placeholder="Product link in video"
+                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Description</label>
+              <input 
+                type="text" 
+                value={finalD} 
+                onChange={e => setFinalD(e.target.value)} 
+                placeholder="Caption / description text"
+                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-end pt-2 border-t border-slate-800">
         <button 
           onClick={handleSave} 
           disabled={isUploading}
-          className="bg-[#6b7bf6] hover:bg-indigo-500 text-white px-8 py-2.5 rounded-lg text-sm font-bold transition-colors disabled:opacity-50"
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
         >
-          {isUploading ? 'Saving...' : 'Save Details'}
+          {isUploading ? 'Saving...' : 'Save Draft Details'}
         </button>
       </div>
     </div>
   );
 };
 
+// --- REMAINING PAYMENT (Three-dot menu) ---
 const PayRemainingForm = ({ record, onSave }: any) => {
   const totalAmount = record.pricing?.final_price || 0;
   const advancePaid = parseFloat(record.advance_paid_amount || '0');
@@ -1155,8 +1748,6 @@ const PayRemainingForm = ({ record, onSave }: any) => {
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
-
-  const isPaid = !!preview || !!record.payment_remaining_completed;
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -1197,34 +1788,26 @@ const PayRemainingForm = ({ record, onSave }: any) => {
   };
 
   return (
-    <div className="bg-[#1B2130] rounded-lg p-6 flex flex-col h-full space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1">
-        
-        {/* Left Side: Inputs & Upload Button */}
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[11px] font-bold text-slate-400 tracking-wider uppercase">Total Amount</label>
-              <div className="flex items-center gap-2 bg-[#151923] px-2 py-1 rounded-md border border-slate-700/50">
-                <input type="checkbox" checked={isPaid} readOnly className="w-3.5 h-3.5 rounded-sm border-slate-700 bg-slate-900 text-indigo-500 focus:ring-0" />
-                <span className="text-[10px] font-bold text-white uppercase tracking-wider">PAID</span>
-              </div>
-            </div>
-            <input type="text" value={Number(totalAmount).toFixed(2)} readOnly className="w-full bg-[#151923] border border-slate-700/50 rounded-md px-3 py-2 text-sm text-white focus:outline-none opacity-80 cursor-not-allowed" />
+            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Total Agreed Amount</label>
+            <input type="text" value={`₹${Number(totalAmount).toFixed(2)}`} readOnly className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white opacity-80 cursor-not-allowed" />
           </div>
           <div>
             <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Advance Paid</label>
-            <input type="text" value={Number(advancePaid).toFixed(2)} readOnly className="w-full bg-[#151923] border border-slate-700/50 rounded-md px-3 py-2 text-sm text-white focus:outline-none opacity-80 cursor-not-allowed" />
+            <input type="text" value={`₹${Number(advancePaid).toFixed(2)}`} readOnly className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white opacity-80 cursor-not-allowed" />
           </div>
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Remaining Payment</label>
-            <input type="text" value={Number(remainingPayment).toFixed(2)} readOnly className="w-full bg-[#151923] border border-slate-700/50 rounded-md px-3 py-2 text-sm text-emerald-400 font-bold focus:outline-none opacity-90 cursor-not-allowed" />
+            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Remaining Payment Due</label>
+            <input type="text" value={`₹${Number(remainingPayment).toFixed(2)}`} readOnly className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-emerald-400 font-black cursor-not-allowed" />
           </div>
           
           <div className="pt-2">
-            <div className="relative w-32 h-24 border border-dashed border-indigo-500/40 rounded-xl bg-[#1e2536] flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500 transition-colors">
-              <UploadCloud className="text-indigo-400 mb-1" size={18} />
-              <span className="text-[10px] text-indigo-300 font-medium text-center px-2">Upload Proof</span>
+            <div className="relative w-full h-24 border-2 border-dashed border-slate-700/80 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-emerald-500 transition-colors">
+              <UploadCloud className="text-emerald-400 mb-1" size={20} />
+              <span className="text-xs text-emerald-300 font-medium">Upload Final Payment Proof</span>
               <input 
                 type="file" 
                 accept="image/*" 
@@ -1235,41 +1818,37 @@ const PayRemainingForm = ({ record, onSave }: any) => {
           </div>
         </div>
 
-        {/* Right Side: Image Preview */}
-        <div className="flex flex-col items-center justify-center h-full">
+        <div className="flex flex-col items-center justify-center">
           {preview ? (
-            <div className="flex flex-col items-center">
-              <div className="w-48 h-48 bg-[#151923] rounded-xl border border-slate-700/50 flex items-center justify-center p-2 mb-2 overflow-hidden shadow-lg">
-                <img src={preview} alt="Proof Preview" className="max-w-full max-h-full object-contain rounded-md" />
+            <div className="flex flex-col items-center w-full">
+              <div className="w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800 flex items-center justify-center p-2 mb-2 overflow-hidden shadow-lg">
+                <img src={preview} alt="Proof Preview" className="max-w-full max-h-full object-contain rounded-lg" />
               </div>
-              <span className="text-xs text-slate-400">Proof Preview</span>
+              <span className="text-xs text-slate-400">Payment Proof Preview</span>
             </div>
           ) : (
-             <div className="flex flex-col items-center opacity-50">
-                <div className="w-48 h-48 bg-[#151923] rounded-xl border border-slate-700/30 flex flex-col items-center justify-center p-2 mb-2">
-                  <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mb-2"><UploadCloud className="text-slate-500" size={20}/></div>
-                  <span className="text-xs text-slate-500">No proof uploaded</span>
-                </div>
+             <div className="flex flex-col items-center justify-center w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800/60 p-4 opacity-50">
+               <UploadCloud className="text-slate-500 mb-2" size={28} />
+               <span className="text-xs text-slate-400">No proof uploaded</span>
              </div>
           )}
         </div>
-
       </div>
 
-      {/* Footer Action */}
-      <div className="flex justify-end pt-4 mt-2">
+      <div className="flex justify-end pt-4 border-t border-slate-800">
         <button 
           onClick={handleSave} 
           disabled={isUploading}
-          className="bg-[#6b7bf6] hover:bg-indigo-500 text-white px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-emerald-500/20"
         >
-          {isUploading ? 'Saving...' : 'Save Details'}
+          {isUploading ? 'Saving...' : 'Save Payment Details'}
         </button>
       </div>
     </div>
   );
 };
 
+// --- FINAL POST DATE (Three-dot menu) ---
 const FinalPostForm = ({ record, onSave }: any) => {
   let metadata: any = {};
   try {
@@ -1278,7 +1857,6 @@ const FinalPostForm = ({ record, onSave }: any) => {
     metadata = {};
   }
 
-  // Load Video 1 initial values
   const rawV1Link = metadata.video1_final_post_link || record.final_post_link || '';
   const initialV1Link = isFakeUrl(rawV1Link) ? '' : rawV1Link;
   const initialV1PostedAt = formatForDateTimeInput(metadata.video1_posted_at || record.final_post_actual_datetime);
@@ -1287,14 +1865,12 @@ const FinalPostForm = ({ record, onSave }: any) => {
     ? metadata.video1_confirmed 
     : (!isFakeUrl(rawV1Link) ? (record.final_post_completed || false) : false);
 
-  // Load Video 2 initial values
   const rawV2Link = metadata.video2_final_post_link || '';
   const initialV2Link = isFakeUrl(rawV2Link) ? '' : rawV2Link;
   const initialV2PostedAt = formatForDateTimeInput(metadata.video2_posted_at);
   const initialV2Platform = metadata.video2_platform || 'Instagram';
   const initialV2Confirmed = metadata.video2_confirmed !== undefined && !isFakeUrl(rawV2Link) ? metadata.video2_confirmed : false;
 
-  // React states
   const [v1Link, setV1Link] = useState(initialV1Link);
   const [v1PostedAt, setV1PostedAt] = useState(initialV1PostedAt);
   const [v1Platform, setV1Platform] = useState(initialV1Platform);
@@ -1306,42 +1882,6 @@ const FinalPostForm = ({ record, onSave }: any) => {
   const [v2Confirmed, setV2Confirmed] = useState(initialV2Confirmed);
 
   const totalVideos = record.pricing?.total_videos || 1;
-
-  const isRework = record.draft_approval_status === 'Not Approved' || record.re_draft_approval_status;
-  const draftDateKey = isRework ? 're_draft_expected_date' : 'draft_expected_date';
-  const draftTimeKey = isRework ? 're_draft_expected_time' : 'draft_expected_time';
-  
-  const expectedDate = record[draftDateKey];
-  const expectedTime = record[draftTimeKey];
-  
-  const formattedExpectedDate = (() => {
-    if (!expectedDate || !expectedTime) return 'Not Set';
-    try {
-      const d = new Date(`${expectedDate}T${expectedTime}`);
-      if (Number.isNaN(d.getTime())) return 'Not Set';
-      return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).replace(',', ' •');
-    } catch {
-      return 'Not Set';
-    }
-  })();
-
-  // Video 1 Status
-  const isV1Completed = !!v1Confirmed && !isFakeUrl(v1Link) && !!v1PostedAt;
-  let v1Status = 'PENDING';
-  let v1StatusColor = 'text-slate-500';
-  if (isV1Completed) {
-    v1Status = 'COMPLETED';
-    v1StatusColor = 'text-emerald-500';
-  }
-
-  // Video 2 Status
-  const isV2Completed = !!v2Confirmed && !isFakeUrl(v2Link) && !!v2PostedAt;
-  let v2Status = 'PENDING';
-  let v2StatusColor = 'text-slate-500';
-  if (isV2Completed) {
-    v2Status = 'COMPLETED';
-    v2StatusColor = 'text-emerald-500';
-  }
 
   const handleSaveVideo1 = async () => {
     if (!v1Link || isFakeUrl(v1Link) || !v1PostedAt) {
@@ -1361,45 +1901,10 @@ const FinalPostForm = ({ record, onSave }: any) => {
       video1_confirmed: v1Confirmed,
     };
 
-    // Calculate final overall status
-    const tempMetadata = { ...updatedMetadata };
-    const pricingTotalVideos = record.pricing?.total_videos || 1;
-    const nextV1Completed = !isFakeUrl(v1Link) && !!v1PostedAt && !!v1Confirmed;
-    const nextV2Completed = !isFakeUrl(tempMetadata.video2_final_post_link) && !!tempMetadata.video2_posted_at && !!tempMetadata.video2_confirmed;
-    const nextFinalPostCompleted = pricingTotalVideos === 2 ? (nextV1Completed && nextV2Completed) : nextV1Completed;
-
-    const stages = [
-      { key: 'delivered_status', completed: !!record.delivered_confirmed },
-      { key: 'pay_advance_status', completed: !!record.pay_advance_completed },
-      { key: 'reference_status', completed: !!record.reference_video_received },
-      { key: 'timeline_status', completed: !!record.expected_delivery_completed },
-      { key: 'draft1_status', completed: !!record.draft_video_url },
-      { key: 'draft2_status', completed: !!record.re_draft_video_url },
-      { key: 'payment_status', completed: !!record.payment_remaining_completed },
-      { key: 'final_post_status', completed: nextFinalPostCompleted }
-    ];
-
-    const currentStep = nextFinalPostCompleted ? Math.max(record.current_step || 0, 7) : 7;
-    const statuses: Record<string, string> = {};
-    stages.forEach((stage, idx) => {
-      if (stage.completed) {
-        statuses[stage.key] = 'COMPLETED';
-      } else if (idx === currentStep) {
-        statuses[stage.key] = 'CURRENT';
-      } else if (idx < currentStep) {
-        statuses[stage.key] = 'SKIPPED';
-      } else {
-        statuses[stage.key] = 'NOT_STARTED';
-      }
-    });
-
-    Object.assign(updatedMetadata, statuses);
-
     await onSave({
       final_post_link: v1Link,
       final_post_actual_datetime: v1PostedAt,
-      final_post_completed: nextFinalPostCompleted,
-      current_step: currentStep,
+      final_post_completed: true,
       notes: JSON.stringify(updatedMetadata)
     });
   };
@@ -1422,43 +1927,8 @@ const FinalPostForm = ({ record, onSave }: any) => {
       video2_confirmed: v2Confirmed,
     };
 
-    // Calculate final overall status
-    const tempMetadata = { ...updatedMetadata };
-    const pricingTotalVideos = record.pricing?.total_videos || 1;
-    const nextV1Completed = !isFakeUrl(tempMetadata.video1_final_post_link) && !!tempMetadata.video1_posted_at && !!tempMetadata.video1_confirmed;
-    const nextV2Completed = !isFakeUrl(v2Link) && !!v2PostedAt && !!v2Confirmed;
-    const nextFinalPostCompleted = pricingTotalVideos === 2 ? (nextV1Completed && nextV2Completed) : nextV1Completed;
-
-    const stages = [
-      { key: 'delivered_status', completed: !!record.delivered_confirmed },
-      { key: 'pay_advance_status', completed: !!record.pay_advance_completed },
-      { key: 'reference_status', completed: !!record.reference_video_received },
-      { key: 'timeline_status', completed: !!record.expected_delivery_completed },
-      { key: 'draft1_status', completed: !!record.draft_video_url },
-      { key: 'draft2_status', completed: !!record.re_draft_video_url },
-      { key: 'payment_status', completed: !!record.payment_remaining_completed },
-      { key: 'final_post_status', completed: nextFinalPostCompleted }
-    ];
-
-    const currentStep = nextFinalPostCompleted ? Math.max(record.current_step || 0, 7) : 7;
-    const statuses: Record<string, string> = {};
-    stages.forEach((stage, idx) => {
-      if (stage.completed) {
-        statuses[stage.key] = 'COMPLETED';
-      } else if (idx === currentStep) {
-        statuses[stage.key] = 'CURRENT';
-      } else if (idx < currentStep) {
-        statuses[stage.key] = 'SKIPPED';
-      } else {
-        statuses[stage.key] = 'NOT_STARTED';
-      }
-    });
-
-    Object.assign(updatedMetadata, statuses);
-
     await onSave({
-      final_post_completed: nextFinalPostCompleted,
-      current_step: currentStep,
+      final_post_completed: true,
       notes: JSON.stringify(updatedMetadata)
     });
   };
@@ -1467,41 +1937,93 @@ const FinalPostForm = ({ record, onSave }: any) => {
 
   return (
     <div className="space-y-6">
-      {/* Draft Delivery Status Header */}
-      <div className="flex items-center justify-between bg-[#151923] border border-slate-700/50 rounded-lg px-4 py-3">
-        <span className="text-[11px] font-bold text-slate-400">
-          Draft Delivery: <span className="text-slate-300 ml-1">{formattedExpectedDate}</span>
-        </span>
-        <span className="text-[11px] font-bold text-slate-400">
-          Required Deliverables: <span className="text-emerald-400 ml-1 font-extrabold">{totalVideos} {totalVideos === 1 ? 'Video' : 'Videos'}</span>
-        </span>
-      </div>
-
       <div className={`grid grid-cols-1 ${totalVideos === 2 ? 'md:grid-cols-2' : ''} gap-6`}>
-        {/* VIDEO 1 CARD */}
-        <div className="bg-[#1B2130] border border-slate-700/65 rounded-xl p-6 flex flex-col justify-between shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 left-0 h-[3px] bg-gradient-to-r from-blue-500 to-indigo-500"></div>
-          <div className="space-y-5">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h4 className="text-sm font-extrabold text-white tracking-wide uppercase">Video 1 Final Post</h4>
-              <span className={`text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded bg-slate-950/60 border border-slate-800/80 ${v1StatusColor}`}>
-                {v1Status}
+        {/* VIDEO 1 */}
+        <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 space-y-4">
+          <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
+            <h4 className="text-sm font-black text-white uppercase">Video 1 Final Post</h4>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${v1Confirmed ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-900 text-slate-400'}`}>
+              {v1Confirmed ? 'LIVE' : 'PENDING'}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Platform</label>
+              <div className="flex gap-2">
+                {platforms.map(p => (
+                  <button
+                    key={p}
+                    onClick={() => setV1Platform(p)}
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold border transition-colors ${v1Platform === p ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#0b1329] border-slate-800 text-slate-400'}`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Final Post Link</label>
+              <input 
+                type="text" 
+                value={v1Link} 
+                onChange={e => setV1Link(e.target.value)} 
+                placeholder="https://..."
+                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" 
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Posting Date/Time</label>
+              <input 
+                type="datetime-local" 
+                value={v1PostedAt} 
+                onChange={e => setV1PostedAt(e.target.value)} 
+                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" 
+              />
+            </div>
+
+            <label className="flex items-center gap-2 pt-1 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={v1Confirmed} 
+                onChange={e => setV1Confirmed(e.target.checked)} 
+                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-500" 
+              />
+              <span className="text-xs font-medium text-slate-300">Confirmed Live on platform</span>
+            </label>
+          </div>
+
+          <div className="pt-2 border-t border-slate-800 flex justify-end">
+            <button 
+              onClick={handleSaveVideo1}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors shadow-md shadow-blue-600/10"
+            >
+              Save Video 1
+            </button>
+          </div>
+        </div>
+
+        {/* VIDEO 2 (if 2 videos required) */}
+        {totalVideos === 2 && (
+          <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
+              <h4 className="text-sm font-black text-white uppercase">Video 2 Final Post</h4>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${v2Confirmed ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-900 text-slate-400'}`}>
+                {v2Confirmed ? 'LIVE' : 'PENDING'}
               </span>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 tracking-wider uppercase">Platform</label>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Platform</label>
                 <div className="flex gap-2">
                   {platforms.map(p => (
                     <button
                       key={p}
-                      onClick={() => setV1Platform(p)}
-                      className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all border ${
-                        v1Platform === p
-                          ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
-                          : 'bg-[#151923] border-slate-700/50 text-slate-400 hover:text-slate-200'
-                      }`}
+                      onClick={() => setV2Platform(p)}
+                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold border transition-colors ${v2Platform === p ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#0b1329] border-slate-800 text-slate-400'}`}
                     >
                       {p}
                     </button>
@@ -1510,131 +2032,43 @@ const FinalPostForm = ({ record, onSave }: any) => {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 tracking-wider uppercase font-sans">Final Post Link</label>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Final Post Link</label>
                 <input 
                   type="text" 
-                  value={v1Link} 
-                  onChange={e=>setV1Link(e.target.value)} 
-                  placeholder="Paste final video link here"
-                  className="w-full bg-[#151923] border border-slate-700/50 rounded-lg px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-medium placeholder-slate-600 transition-colors" 
+                  value={v2Link} 
+                  onChange={e => setV2Link(e.target.value)} 
+                  placeholder="https://..."
+                  className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" 
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-1.5 tracking-wider uppercase">Actual Posting Date/Time</label>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Posting Date/Time</label>
                 <input 
                   type="datetime-local" 
-                  value={v1PostedAt} 
-                  onChange={e=>setV1PostedAt(e.target.value)} 
-                  className="w-full bg-[#151923] border border-slate-700/50 rounded-lg px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-medium transition-colors" 
+                  value={v2PostedAt} 
+                  onChange={e => setV2PostedAt(e.target.value)} 
+                  className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" 
                 />
               </div>
 
-              <div className="pt-2">
-                <label className={`flex items-start gap-2.5 cursor-pointer select-none ${(!v1Link || !v1PostedAt) ? 'opacity-50' : ''}`}>
-                  <input 
-                    type="checkbox" 
-                    checked={v1Confirmed}
-                    disabled={!v1Link || !v1PostedAt}
-                    onChange={e=>setV1Confirmed(e.target.checked)} 
-                    className="mt-0.5 w-4 h-4 rounded border-slate-700 bg-[#151923] text-blue-600 focus:ring-0 focus:ring-offset-0 disabled:cursor-not-allowed" 
-                  />
-                  <div className="flex flex-col">
-                    <span className="text-xs font-bold text-white leading-tight">Confirmed Live</span>
-                    <span className="text-[9px] text-slate-500 mt-0.5">I verify that Video 1 is publicly live on the selected platform.</span>
-                  </div>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-6 mt-6 border-t border-slate-800">
-            <button 
-              onClick={handleSaveVideo1}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-blue-600/10"
-            >
-              Save Video 1 Details
-            </button>
-          </div>
-        </div>
-
-        {/* VIDEO 2 CARD */}
-        {totalVideos === 2 && (
-          <div className="bg-[#1B2130] border border-slate-700/65 rounded-xl p-6 flex flex-col justify-between shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 left-0 h-[3px] bg-gradient-to-r from-blue-500 to-indigo-500"></div>
-            <div className="space-y-5">
-              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                <h4 className="text-sm font-extrabold text-white tracking-wide uppercase">Video 2 Final Post</h4>
-                <span className={`text-[10px] font-black tracking-wider uppercase px-2 py-0.5 rounded bg-slate-950/60 border border-slate-800/80 ${v2StatusColor}`}>
-                  {v2Status}
-                </span>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 tracking-wider uppercase">Platform</label>
-                  <div className="flex gap-2">
-                    {platforms.map(p => (
-                      <button
-                        key={p}
-                        onClick={() => setV2Platform(p)}
-                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all border ${
-                          v2Platform === p
-                            ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
-                            : 'bg-[#151923] border-slate-700/50 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 tracking-wider uppercase font-sans">Final Post Link</label>
-                  <input 
-                    type="text" 
-                    value={v2Link} 
-                    onChange={e=>setV2Link(e.target.value)} 
-                    placeholder="Paste final video link here"
-                    className="w-full bg-[#151923] border border-slate-700/50 rounded-lg px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-medium placeholder-slate-600 transition-colors" 
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 tracking-wider uppercase">Actual Posting Date/Time</label>
-                  <input 
-                    type="datetime-local" 
-                    value={v2PostedAt} 
-                    onChange={e=>setV2PostedAt(e.target.value)} 
-                    className="w-full bg-[#151923] border border-slate-700/50 rounded-lg px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-medium transition-colors" 
-                  />
-                </div>
-
-                <div className="pt-2">
-                  <label className={`flex items-start gap-2.5 cursor-pointer select-none ${(!v2Link || !v2PostedAt) ? 'opacity-50' : ''}`}>
-                    <input 
-                      type="checkbox" 
-                      checked={v2Confirmed}
-                      disabled={!v2Link || !v2PostedAt}
-                      onChange={e=>setV2Confirmed(e.target.checked)} 
-                      className="mt-0.5 w-4 h-4 rounded border-slate-700 bg-[#151923] text-blue-600 focus:ring-0 focus:ring-offset-0 disabled:cursor-not-allowed" 
-                    />
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-white leading-tight">Confirmed Live</span>
-                      <span className="text-[9px] text-slate-500 mt-0.5">I verify that Video 2 is publicly live on the selected platform.</span>
-                    </div>
-                  </label>
-                </div>
-              </div>
+              <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={v2Confirmed} 
+                  onChange={e => setV2Confirmed(e.target.checked)} 
+                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-500" 
+                />
+                <span className="text-xs font-medium text-slate-300">Confirmed Live on platform</span>
+              </label>
             </div>
 
-            <div className="flex justify-end pt-6 mt-6 border-t border-slate-800">
+            <div className="pt-2 border-t border-slate-800 flex justify-end">
               <button 
                 onClick={handleSaveVideo2}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-xs font-bold transition-all shadow-md shadow-blue-600/10"
+                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors shadow-md shadow-blue-600/10"
               >
-                Save Video 2 Details
+                Save Video 2
               </button>
             </div>
           </div>
