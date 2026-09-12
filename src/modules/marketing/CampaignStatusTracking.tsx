@@ -3128,13 +3128,13 @@ const DraftForm: React.FC<DraftFormProps> = ({
       {previewModalAttempt && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
           <div 
-            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl relative"
+            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-[540px] w-full p-4 sm:p-5 space-y-3.5 shadow-2xl relative"
             onClick={e => e.stopPropagation()}
           >
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                <h4 className="text-base font-bold text-white flex items-center gap-2">
+                <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                   <Video size={18} className="text-blue-400" />
                   <span>Draft Attempt {previewModalAttempt.attempt_number} Preview</span>
                 </h4>
@@ -3163,18 +3163,20 @@ const DraftForm: React.FC<DraftFormProps> = ({
               </div>
             </div>
 
-            {/* Video Player in Modal */}
-            <div className="w-full bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
-              {previewModalAttempt.video_url ? (
-                <video 
-                  src={previewModalAttempt.video_url} 
-                  controls 
-                  autoPlay 
-                  className="w-full max-h-[55vh] object-contain" 
-                />
-              ) : (
-                <div className="p-8 text-xs text-slate-500">Video source not found</div>
-              )}
+            {/* Video Player in Modal - Compact Centered 4:3 Aspect Ratio Container */}
+            <div className="w-full flex justify-center">
+              <div className="w-full aspect-[4/3] max-h-[380px] bg-black rounded-xl overflow-hidden border border-slate-800/90 flex items-center justify-center shadow-inner">
+                {previewModalAttempt.video_url ? (
+                  <video 
+                    src={previewModalAttempt.video_url} 
+                    controls 
+                    autoPlay 
+                    className="w-full h-full object-contain" 
+                  />
+                ) : (
+                  <div className="p-8 text-xs text-slate-500">Video source not found</div>
+                )}
+              </div>
             </div>
 
             {/* Details in Modal */}
