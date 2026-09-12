@@ -6,7 +6,7 @@ import {
   Clock, Package, Phone, FileText, Video, Check, 
   XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
-  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3
+  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -63,6 +63,10 @@ const isFakeUrl = (url: string | undefined | null) => {
 
 const formatForDateTimeInput = (dateStr: string | undefined | null) => {
   if (!dateStr) return '';
+  // If already in local YYYY-MM-DDTHH:mm format, return directly to prevent UTC offset shifting
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateStr)) {
+    return dateStr;
+  }
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return '';
@@ -838,8 +842,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     stepData: any, 
     isStepCompleted: boolean
   ) => {
-    const record = activeTrackingRecords.find(r => r.id === recordId) || trackingRecords.find(r => r.id === recordId);
-    if (!record) return;
+    const record = activeTrackingRecords.find(r => String(r.id) === String(recordId)) || trackingRecords.find(r => String(r.id) === String(recordId));
+    if (!record) {
+      console.error('handleSaveVideoStep: record not found for id', recordId);
+      return { success: false, error: 'Tracking record not found' };
+    }
 
     let metadata: any = {};
     try {
@@ -859,9 +866,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     const videoObj = metadata.videos[String(videoNumber)];
     if (!videoObj.steps) videoObj.steps = {};
 
+    const { suppressDefaultToast, ...cleanStepData } = stepData || {};
+
     videoObj.steps[stepId] = {
       completed: isStepCompleted,
-      data: stepData,
+      data: cleanStepData,
       updated_at: new Date().toISOString()
     };
 
@@ -966,7 +975,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
   // Check active record for Level 2 Video Detail View
   const selectedRecord = selectedVideo 
-    ? (activeTrackingRecords.find(r => r.id === selectedVideo.recordId) || trackingRecords.find(r => r.id === selectedVideo.recordId) || null)
+    ? (activeTrackingRecords.find(r => String(r.id) === String(selectedVideo.recordId)) || trackingRecords.find(r => String(r.id) === String(selectedVideo.recordId)) || null)
     : null;
 
   return (
@@ -1844,6 +1853,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
           {activeStepId === 'post_date' && (
             <VideoPostForm 
+              key={`v-${videoNumber}-post-form-${record.id}`}
               videoNumber={videoNumber}
               record={record}
               existingData={activeStepState.data}
@@ -3423,13 +3433,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
     parseToYMD(initialEffectivePostDate, 2026) || initialEffectivePostDate || ''
   );
   const [isSavingDate, setIsSavingDate] = useState<boolean>(false);
-
-  // Synchronize state if props change
-  useEffect(() => {
-    const eff = existingData.scheduled_post_date || scheduledPostDate || '';
-    setEffectivePostDate(eff);
-    setTempPostDate(parseToYMD(eff, 2026) || eff || '');
-  }, [videoNumber, record.id, scheduledPostDate, existingData.scheduled_post_date]);
+  const [isSavingLiveDetails, setIsSavingLiveDetails] = useState<boolean>(false);
 
   // History list
   const historyList: PostDateHistoryEntry[] = Array.isArray(existingData.history) ? existingData.history : [];
@@ -3441,8 +3445,26 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
     existingData.postedAt ? formatForDateTimeInput(existingData.postedAt) : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
   );
   const [confirmedLive, setConfirmedLive] = useState(
-    existingData.confirmed !== undefined ? existingData.confirmed : (videoNumber === 1 ? (record.final_post_completed || false) : false)
+    existingData.confirmed_live !== undefined
+      ? !!existingData.confirmed_live
+      : (existingData.confirmed !== undefined ? !!existingData.confirmed : (videoNumber === 1 ? !!record.final_post_completed : false))
   );
+
+  // Synchronize state if props change
+  useEffect(() => {
+    const eff = existingData.scheduled_post_date || scheduledPostDate || '';
+    setEffectivePostDate(eff);
+    setTempPostDate(parseToYMD(eff, 2026) || eff || '');
+    setPlatform(existingData.platform || 'Instagram');
+    setPostLink(existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''));
+    setPostedAt(
+      existingData.postedAt ? formatForDateTimeInput(existingData.postedAt) : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
+    );
+    const isLive = existingData.confirmed_live !== undefined
+      ? existingData.confirmed_live
+      : (existingData.confirmed !== undefined ? existingData.confirmed : (videoNumber === 1 ? record.final_post_completed : false));
+    setConfirmedLive(!!isLive);
+  }, [videoNumber, record.id, scheduledPostDate, existingData.scheduled_post_date, existingData.link, existingData.postedAt, existingData.confirmed_live, existingData.confirmed, existingData.platform, record.final_post_link, record.final_post_actual_datetime, record.final_post_completed]);
 
   const platforms = ['Instagram', 'YouTube', 'Facebook'];
 
@@ -3506,9 +3528,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
         history: updatedHistory,
         is_modified: true,
         platform,
-        link: postLink,
-        postedAt: postedAt ? new Date(postedAt).toISOString() : existingData.postedAt,
+        link: postLink ? postLink.trim() : '',
+        postedAt: postedAt ? postedAt.trim() : (existingData.postedAt || ''),
         confirmed_live: confirmedLive,
+        confirmed: confirmedLive,
         suppressDefaultToast: true
       }, confirmedLive);
 
@@ -3580,9 +3603,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
         history: updatedHistory,
         is_modified: false,
         platform,
-        link: postLink,
-        postedAt: postedAt ? new Date(postedAt).toISOString() : existingData.postedAt,
+        link: postLink ? postLink.trim() : '',
+        postedAt: postedAt ? postedAt.trim() : (existingData.postedAt || ''),
         confirmed_live: confirmedLive,
+        confirmed: confirmedLive,
         suppressDefaultToast: true
       }, confirmedLive);
 
@@ -3604,11 +3628,11 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
   };
 
   const handleSaveLiveDetails = async () => {
-    if (!postLink || isFakeUrl(postLink)) {
+    if (!postLink || !postLink.trim() || isFakeUrl(postLink)) {
       toast.error(`Please enter the Video ${videoNumber} live post link.`);
       return;
     }
-    if (!postedAt) {
+    if (!postedAt || !postedAt.trim()) {
       toast.error('Please select the posting date and time.');
       return;
     }
@@ -3617,16 +3641,62 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
       return;
     }
 
-    await onSave({
-      ...existingData,
-      scheduled_post_date: effectivePostDate,
-      history: historyList,
-      is_modified: isDateModified,
-      platform,
-      link: postLink,
-      postedAt: new Date(postedAt).toISOString(),
-      confirmed_live: confirmedLive
-    }, confirmedLive);
+    setIsSavingLiveDetails(true);
+    try {
+      // 1. Sync scheduled post date across Supabase tables if an effectivePostDate exists
+      if (effectivePostDate) {
+        const normalizedPostDate = parseToYMD(effectivePostDate, 2026) || effectivePostDate;
+        const syncRes = await syncInfluencerPostDate({
+          influencerId: record.influencer_id,
+          campaignId: record.campaign_id,
+          videoNumber,
+          newPostDate: normalizedPostDate
+        });
+        if (!syncRes.success) {
+          toast.error('Failed to sync scheduled post date: ' + (syncRes.error || 'Database error'));
+          setIsSavingLiveDetails(false);
+          return;
+        }
+      }
+
+      // 2. Prepare payload preserving local date/time without UTC conversion drift
+      const payload = {
+        ...existingData,
+        scheduled_post_date: effectivePostDate ? (parseToYMD(effectivePostDate, 2026) || effectivePostDate) : '',
+        history: historyList,
+        is_modified: isDateModified,
+        platform,
+        link: postLink.trim(),
+        postedAt: postedAt.trim(),
+        confirmed_live: confirmedLive,
+        confirmed: confirmedLive,
+        suppressDefaultToast: true
+      };
+
+      const saveRes = await onSave(payload, confirmedLive);
+
+      if (saveRes && saveRes.success === false) {
+        toast.error('Failed to save Video ' + videoNumber + ' Post Date: ' + (saveRes.error || 'Unknown error'));
+        setIsSavingLiveDetails(false);
+        return;
+      }
+
+      // 3. Activity logging
+      logActivity({
+        department: 'Marketing',
+        action: 'Post Live Confirmed',
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} marked live with link: ${postLink.trim()}`,
+        metadata: { video_number: videoNumber, platform, link: postLink.trim(), posted_at: postedAt.trim() }
+      });
+
+      // 4. Success feedback ONLY after all operations succeed
+      toast.success(`Video ${videoNumber} Post Date saved successfully!`);
+    } catch (err: any) {
+      console.error('Error saving live details:', err);
+      toast.error('Failed to save Video ' + videoNumber + ' Post Date: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSavingLiveDetails(false);
+    }
   };
 
   return (
@@ -3834,10 +3904,17 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
 
         <div className="flex justify-end pt-2 border-t border-slate-800">
           <button 
+            type="button"
             onClick={handleSaveLiveDetails} 
-            className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+            disabled={isSavingLiveDetails}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2"
           >
-            Save Video {videoNumber} Post Date
+            {isSavingLiveDetails && <Loader2 size={16} className="animate-spin text-white" />}
+            <span>
+              {isSavingLiveDetails 
+                ? `Saving Video ${videoNumber} Post Date...` 
+                : `Save Video ${videoNumber} Post Date`}
+            </span>
           </button>
         </div>
       </div>

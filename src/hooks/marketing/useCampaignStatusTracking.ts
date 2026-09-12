@@ -320,7 +320,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
       
       // Update local state without full refetch
       setTrackingRecords(prev => prev.map(record => 
-        record.id === trackingId ? { ...record, ...updates } : record
+        String(record.id) === String(trackingId) ? { ...record, ...updates } : record
       ));
 
       // Non-blocking activity logging
