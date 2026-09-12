@@ -2767,73 +2767,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const isCurrentDraftNotApproved = activeAttempt?.approval_status === 'Not Approved';
   const isCurrentDraftApproved = activeAttempt?.approval_status === 'Approved';
   const isPendingApproval = activeAttempt && !isCurrentDraftApproved && !isCurrentDraftNotApproved;
-
-  // Previous attempts for Draft History list
-  const historyAttempts = attempts.length > 1 ? attempts.slice(0, attempts.length - 1) : [];
-
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
       
-      {/* 1. TOP STATUS BANNER (When Re-Draft is Required or Approved) */}
-      {isCurrentDraftNotApproved && !isReDraftMode && (
-        <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800/70 space-y-3 animate-fade-in">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <AlertTriangle className="text-rose-400 shrink-0" size={20} />
-              <div>
-                <span className="text-sm font-black text-rose-400 tracking-wider block">
-                  RE-DRAFT REQUIRED
-                </span>
-                <span className="text-xs text-rose-300">
-                  Attempt {activeAttempt?.attempt_number || 1} was not approved. A new draft must be submitted and approved before Post Date can become active.
-                </span>
-              </div>
-            </div>
-            <span className="text-xs font-bold px-3 py-1 rounded-full bg-rose-900/70 text-rose-200 border border-rose-700/60 shrink-0 self-start sm:self-center">
-              Status: Not Approved
-            </span>
-          </div>
-
-          {activeAttempt?.corrections && (
-            <div className="bg-rose-950/80 p-3 rounded-lg border border-rose-900/60 text-xs text-rose-200">
-              <span className="font-bold text-rose-300 block mb-1">Correction Instructions:</span>
-              <p className="whitespace-pre-wrap">{activeAttempt.corrections}</p>
-            </div>
-          )}
-
-          <div className="pt-2 flex justify-end">
-            <button
-              type="button"
-              onClick={() => setIsReDraftMode(true)}
-              className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2"
-            >
-              <UploadCloud size={16} />
-              <span>Upload Re-Draft Video</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {isCurrentDraftApproved && (
-        <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-800/70 flex items-center justify-between animate-fade-in">
-          <div className="flex items-center gap-2.5">
-            <Check className="text-emerald-400" size={20} strokeWidth={3} />
-            <div>
-              <span className="text-sm font-bold text-emerald-400 block">
-                Draft Approved (Attempt {activeAttempt?.attempt_number || 1})
-              </span>
-              <span className="text-xs text-emerald-300/80">
-                Reviewed by {activeAttempt?.reviewed_by || 'Admin'} on {formatHistoryTimestamp(activeAttempt?.reviewed_at)}
-              </span>
-            </div>
-          </div>
-          <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-900/70 text-emerald-200 border border-emerald-700/60">
-            ✓ Approved
-          </span>
-        </div>
-      )}
-
-      {/* 2. RE-DRAFT UPLOAD MODAL/PANEL (When user clicked 'Upload Re-Draft Video') */}
+      {/* 1. RE-DRAFT UPLOAD PANEL (When user clicked 'Upload Re-Draft') */}
       {isReDraftMode && (
         <div className="p-5 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-4 animate-fade-in shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -2842,7 +2779,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 Submit Re-Draft (Attempt {(activeAttempt?.attempt_number || 1) + 1})
               </h5>
               <p className="text-xs text-slate-400">
-                Upload revised video addressing the correction feedback. Previous drafts will be preserved in history.
+                Upload revised video addressing the correction feedback. Previous drafts will be permanently preserved in history.
               </p>
             </div>
             <button
@@ -2897,333 +2834,91 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 3. CURRENT DRAFT CARD: COMPACT SQUARE VIDEO (160-200px) */}
-      {!isReDraftMode && (
-        <>
-          {attempts.length === 0 ? (
-            /* First time upload */
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row justify-center gap-6">
-                <div className="relative w-full sm:w-52 h-36 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
-                  <UploadCloud className="text-blue-400 mb-1" size={26} />
-                  <span className="text-xs text-blue-300 font-medium">Upload Draft Video</span>
-                  <input 
-                    type="file" 
-                    accept="video/*,image/*" 
-                    onChange={handleInitialUpload} 
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-                  />
-                </div>
-                <div className="flex-1 min-h-36 border border-slate-800 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center p-3">
-                  {initialUrl ? (
-                    <div className="w-full flex flex-col items-center gap-2">
-                      <div className="w-24 h-24 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
-                        {(initialUrl.startsWith('blob:') || initialUrl.includes('.mp4') || initialUrl.includes('.webm') || initialUrl.includes('video')) ? (
-                          <video src={initialUrl} className="w-full h-full object-cover" />
-                        ) : (
-                          <Video size={24} className="text-blue-400" />
-                        )}
-                      </div>
-                      <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialFile?.name}</span>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
-                  )}
-                </div>
-              </div>
-
-              {initialFile && (
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="button"
-                    disabled={isUploading}
-                    onClick={handleSubmitInitialDraft}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md"
-                  >
-                    {isUploading ? 'Uploading...' : 'Save Uploaded Draft (Attempt 1)'}
-                  </button>
-                </div>
-              )}
+      {/* 2. FIRST-TIME DRAFT UPLOAD (When no draft has ever been uploaded) */}
+      {attempts.length === 0 && !isReDraftMode && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row justify-center gap-6">
+            <div className="relative w-full sm:w-52 h-36 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
+              <UploadCloud className="text-blue-400 mb-1" size={26} />
+              <span className="text-xs text-blue-300 font-medium">Upload Draft Video</span>
+              <input 
+                type="file" 
+                accept="video/*,image/*" 
+                onChange={handleInitialUpload} 
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+              />
             </div>
-          ) : (
-            /* COMPACT SQUARE CURRENT DRAFT CARD */
-            <div className="p-4 sm:p-5 bg-[#0b1329] border border-slate-800 rounded-2xl shadow-md space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-                <div className="flex items-center gap-2">
-                  <Video size={17} className="text-blue-400" />
-                  <h5 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
-                    CURRENT DRAFT: ATTEMPT {activeAttempt?.attempt_number || 1}
-                  </h5>
-                </div>
-                <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${
-                  activeAttempt?.approval_status === 'Approved'
-                    ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
-                    : activeAttempt?.approval_status === 'Not Approved'
-                      ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
-                      : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
-                }`}>
-                  {activeAttempt?.approval_status || 'Pending Approval'}
-                </span>
-              </div>
-
-              {/* Compact Square Video + Details Row */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
-                
-                {/* 1:1 Aspect Ratio Square Video Card (170-200px) */}
-                <div className="relative w-44 h-44 sm:w-48 sm:h-48 rounded-xl overflow-hidden bg-black border border-slate-700/80 shrink-0 flex items-center justify-center group shadow-lg">
-                  {activeAttempt?.video_url ? (
-                    <>
-                      <video 
-                        src={activeAttempt.video_url} 
-                        className="w-full h-full object-cover" 
-                        preload="metadata"
-                      />
-                      {/* Centered Play Button overlay */}
-                      <button
-                        type="button"
-                        onClick={() => setPreviewModalAttempt(activeAttempt)}
-                        className="absolute inset-0 bg-black/40 hover:bg-black/20 flex items-center justify-center transition-all group"
-                        title="Click to view full video"
-                      >
-                        <div className="w-12 h-12 rounded-full bg-blue-600/90 hover:bg-blue-500 text-white flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform">
-                          <Play size={22} className="ml-0.5 fill-white" />
-                        </div>
-                      </button>
-                    </>
-                  ) : (
-                    <span className="text-xs text-slate-500">No Video File</span>
-                  )}
-                </div>
-
-                {/* Metadata beside Square Video */}
-                <div className="flex-1 space-y-2.5 min-w-0">
-                  <div>
-                    <h4 className="text-base font-bold text-white">
-                      Draft Attempt {activeAttempt?.attempt_number || 1}
-                    </h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Uploaded: {formatHistoryTimestamp(activeAttempt?.uploaded_at)}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-slate-400">Status:</span>
-                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded border ${
-                      activeAttempt?.approval_status === 'Approved'
-                        ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
-                        : activeAttempt?.approval_status === 'Not Approved'
-                          ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
-                          : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
-                    }`}>
-                      {activeAttempt?.approval_status || 'Pending Approval'}
-                    </span>
-                    {activeAttempt?.timing_status && (
-                      <span className="text-[10px] text-slate-400 bg-slate-800 border border-slate-700/70 px-2 py-0.5 rounded">
-                        {activeAttempt.timing_status}
-                      </span>
+            <div className="flex-1 min-h-36 border border-slate-800 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center p-3">
+              {initialUrl ? (
+                <div className="w-full flex flex-col items-center gap-2">
+                  <div className="w-24 h-24 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
+                    {(initialUrl.startsWith('blob:') || initialUrl.includes('.mp4') || initialUrl.includes('.webm') || initialUrl.includes('video')) ? (
+                      <video src={initialUrl} className="w-full h-full object-cover" />
+                    ) : (
+                      <Video size={24} className="text-blue-400" />
                     )}
                   </div>
-
-                  {activeAttempt?.corrections && (
-                    <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-900/50 text-xs text-rose-200">
-                      <span className="font-bold text-rose-400 block mb-0.5">Correction Feedback:</span>
-                      <p className="whitespace-pre-wrap">{activeAttempt.corrections}</p>
-                    </div>
-                  )}
-
-                  {activeAttempt?.reviewed_at && (
-                    <p className="text-[11px] text-slate-500">
-                      Reviewed by <span className="text-slate-300 font-semibold">{activeAttempt.reviewed_by || 'Admin'}</span> on {formatHistoryTimestamp(activeAttempt.reviewed_at)}
-                    </p>
-                  )}
-
-                  <div className="pt-1 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setPreviewModalAttempt(activeAttempt)}
-                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-xl border border-slate-700 transition-colors inline-flex items-center gap-2 shadow-sm"
-                    >
-                      <Eye size={15} />
-                      <span>View Video</span>
-                    </button>
-
-                    {isCurrentDraftNotApproved && (
-                      <button
-                        type="button"
-                        onClick={() => setIsReDraftMode(true)}
-                        className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-colors inline-flex items-center gap-2 shadow-sm"
-                      >
-                        <UploadCloud size={15} />
-                        <span>Upload Re-Draft</span>
-                      </button>
-                    )}
-                  </div>
+                  <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialFile?.name}</span>
                 </div>
-
-              </div>
-            </div>
-          )}
-
-          {/* 4. APPROVAL & TIMING CONTROLS (Displayed ONLY when current draft is Pending Approval) */}
-          {isPendingApproval && (
-            <div className="space-y-6 pt-2 animate-fade-in">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-y border-slate-800 py-6">
-                
-                {/* Approval Status Selector */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">
-                    Approval Status (Draft Attempt {activeAttempt?.attempt_number || 1})
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <button 
-                      type="button"
-                      onClick={() => setAppStat('Approved')}
-                      className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${
-                        appStat === 'Approved' 
-                          ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/30' 
-                          : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      <Check size={15} />
-                      <span>Approved</span>
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setAppStat('Not Approved')}
-                      className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${
-                        appStat === 'Not Approved' 
-                          ? 'bg-rose-600 border-rose-500 text-white shadow-lg shadow-rose-600/30' 
-                          : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      <XCircle size={15} />
-                      <span>Not Approved</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Timing Status Selector */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">
-                    Timing Status
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['Advance', 'On Time', 'Late', 'Not Submit'].map((ts) => (
-                      <div 
-                        key={ts} 
-                        onClick={() => setCalculatedTiming(ts)}
-                        className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
-                          calculatedTiming === ts ? 'bg-blue-600/15 border-blue-500/60' : 'bg-[#0b1329] border-slate-800 hover:border-slate-700'
-                        }`}
-                      >
-                        <input 
-                          type="radio" 
-                          name="timingStatus"
-                          checked={calculatedTiming === ts} 
-                          onChange={() => setCalculatedTiming(ts)}
-                          className="w-3.5 h-3.5 rounded-full border-slate-700 bg-slate-900 text-blue-500 focus:ring-0" 
-                        />
-                        <span className={`text-xs ${calculatedTiming === ts ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>
-                          {ts}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Correction Instructions (When Not Approved is selected) */}
-              {appStat === 'Not Approved' && (
-                <div className="animate-fade-in space-y-2">
-                  <label className="block text-[11px] font-bold text-rose-400 uppercase tracking-wider">
-                    Correction Instructions / Re-Draft Guidelines *
-                  </label>
-                  <textarea 
-                    value={corr} 
-                    onChange={e => setCorr(e.target.value)} 
-                    placeholder="Enter specific instructions on what needs to be changed for the re-draft..."
-                    className="w-full bg-[#0b1329] border border-rose-800/80 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-rose-500 min-h-[90px]" 
-                  />
-                  <span className="text-[11px] text-slate-500">
-                    These instructions will be permanently recorded in the draft history and displayed to guide the re-draft.
-                  </span>
-                </div>
+              ) : (
+                <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
               )}
-
-              {/* Approved Deliverables Info (When Approved is selected) */}
-              {appStat === 'Approved' && (
-                <div className="animate-fade-in space-y-4 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
-                  <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                    <Check size={14} /> Approved Deliverable Info
-                  </h6>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Product Link</label>
-                      <input 
-                        type="text" 
-                        value={finalL} 
-                        onChange={e => setFinalL(e.target.value)} 
-                        placeholder="https://..."
-                        className="w-full bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Caption / Description</label>
-                      <input 
-                        type="text" 
-                        value={finalD} 
-                        onChange={e => setFinalD(e.target.value)} 
-                        placeholder="Caption text"
-                        className="w-full bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Save Button */}
-              <div className="flex justify-end pt-2 border-t border-slate-800">
-                <button 
-                  onClick={handleSaveApproval} 
-                  disabled={isUploading}
-                  className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
-                >
-                  {isUploading ? 'Saving...' : 'Save Draft Details'}
-                </button>
-              </div>
             </div>
-          )}
-        </>
-      )}
-
-      {/* 5. DRAFT HISTORY (All Previous Attempts Permanently Preserved in Compact Rows) */}
-      {attempts.length > 0 && (
-        <div className="pt-5 border-t border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <History size={16} className="text-purple-400" />
-              <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                Draft History ({attempts.length} Attempt{attempts.length === 1 ? '' : 's'})
-              </h5>
-            </div>
-            <span className="text-[11px] text-slate-500 font-medium">
-              Permanent Attempt Record
-            </span>
           </div>
 
-          <div className="space-y-2">
+          {initialFile && (
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                disabled={isUploading}
+                onClick={handleSubmitInitialDraft}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md"
+              >
+                {isUploading ? 'Uploading...' : 'Save Uploaded Draft (Attempt 1)'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3. DRAFT HISTORY (The Primary/Only Draft Section) */}
+      {attempts.length > 0 && (
+        <div className="space-y-4">
+          {/* Header with Title on Left and Upload Re-Draft Button on Right */}
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <History size={16} className="text-purple-400" />
+              <h5 className="text-xs sm:text-sm font-bold text-slate-200 uppercase tracking-wider">
+                DRAFT HISTORY ({attempts.length} ATTEMPT{attempts.length === 1 ? '' : 'S'})
+              </h5>
+            </div>
+
+            {/* Re-Draft Button at TOP-RIGHT when active attempt is Not Approved */}
+            {isCurrentDraftNotApproved && !isReDraftMode && (
+              <button
+                type="button"
+                onClick={() => setIsReDraftMode(true)}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2"
+              >
+                <UploadCloud size={15} />
+                <span>Upload Re-Draft</span>
+              </button>
+            )}
+          </div>
+
+          {/* History Items (Compact rows) */}
+          <div className="space-y-2.5">
             {attempts.map((att) => {
               const isCurrent = att.attempt_number === activeAttempt?.attempt_number;
               return (
                 <div 
                   key={att.attempt_number} 
-                  className={`p-3 rounded-xl bg-[#0b1329] border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors ${
+                  className={`p-3 sm:p-3.5 rounded-xl bg-[#0b1329] border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors ${
                     isCurrent ? 'border-blue-500/40 bg-blue-950/10' : 'border-slate-800/80 hover:border-slate-700'
                   }`}
                 >
                   {/* Left: Compact Thumbnail + Attempt Info */}
-                  <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-center gap-3.5 min-w-0">
                     {/* Compact Square Thumbnail (56x56) */}
                     <div 
                       onClick={() => setPreviewModalAttempt(att)}
@@ -3242,17 +2937,17 @@ const DraftForm: React.FC<DraftFormProps> = ({
                       )}
                     </div>
 
-                    <div className="truncate min-w-0 space-y-0.5">
+                    <div className="truncate min-w-0 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-white text-xs sm:text-sm">
                           Draft Attempt {att.attempt_number}
                         </span>
                         {isCurrent && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-950 text-blue-300 border border-blue-800/60">
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60">
                             Current
                           </span>
                         )}
-                        <span className={`text-[10px] font-bold px-2 py-0.2 rounded border ${
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
                           att.approval_status === 'Approved'
                             ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
                             : att.approval_status === 'Not Approved'
@@ -3268,7 +2963,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                       </p>
 
                       {att.corrections && (
-                        <p className="text-rose-300 text-[11px] truncate max-w-md" title={att.corrections}>
+                        <p className="text-rose-300 text-[11px] truncate max-w-lg" title={att.corrections}>
                           <span className="text-rose-400 font-semibold">Feedback:</span> {att.corrections}
                         </p>
                       )}
@@ -3276,7 +2971,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   </div>
 
                   {/* Right: View Button */}
-                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
                     {att.reviewed_at && (
                       <span className="text-[10px] text-slate-500 hidden md:inline">
                         Reviewed: {formatHistoryTimestamp(att.reviewed_at)}
@@ -3285,7 +2980,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     <button
                       type="button"
                       onClick={() => setPreviewModalAttempt(att)}
-                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 shadow-sm"
+                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 shadow-sm"
                     >
                       <Eye size={13} />
                       <span>View</span>
@@ -3294,6 +2989,137 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* 4. APPROVAL & TIMING CONTROLS (Displayed ONLY when active draft is Pending Approval) */}
+      {!isReDraftMode && isPendingApproval && (
+        <div className="space-y-6 pt-2 border-t border-slate-800 animate-fade-in">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-2">
+            
+            {/* Approval Status Selector */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">
+                Approval Status (Draft Attempt {activeAttempt?.attempt_number || 1})
+              </label>
+              <div className="flex items-center gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setAppStat('Approved')}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${
+                    appStat === 'Approved' 
+                      ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/30' 
+                      : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <Check size={15} />
+                  <span>Approved</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setAppStat('Not Approved')}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${
+                    appStat === 'Not Approved' 
+                      ? 'bg-rose-600 border-rose-500 text-white shadow-lg shadow-rose-600/30' 
+                      : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <XCircle size={15} />
+                  <span>Not Approved</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Timing Status Selector */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">
+                Timing Status
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {['Advance', 'On Time', 'Late', 'Not Submit'].map((ts) => (
+                  <div 
+                    key={ts} 
+                    onClick={() => setCalculatedTiming(ts)}
+                    className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                      calculatedTiming === ts ? 'bg-blue-600/15 border-blue-500/60' : 'bg-[#0b1329] border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <input 
+                      type="radio" 
+                      name="timingStatus"
+                      checked={calculatedTiming === ts} 
+                      onChange={() => setCalculatedTiming(ts)}
+                      className="w-3.5 h-3.5 rounded-full border-slate-700 bg-slate-900 text-blue-500 focus:ring-0" 
+                    />
+                    <span className={`text-xs ${calculatedTiming === ts ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>
+                      {ts}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+
+          {/* Correction Instructions (When Not Approved is selected) */}
+          {appStat === 'Not Approved' && (
+            <div className="animate-fade-in space-y-2">
+              <label className="block text-[11px] font-bold text-rose-400 uppercase tracking-wider">
+                Correction Instructions / Re-Draft Guidelines *
+              </label>
+              <textarea 
+                value={corr} 
+                onChange={e => setCorr(e.target.value)} 
+                placeholder="Enter specific instructions on what needs to be changed for the re-draft..."
+                className="w-full bg-[#0b1329] border border-rose-800/80 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-rose-500 min-h-[90px]" 
+              />
+              <span className="text-[11px] text-slate-500">
+                These instructions will be permanently recorded in the draft history and displayed to guide the re-draft.
+              </span>
+            </div>
+          )}
+
+          {/* Approved Deliverables Info (When Approved is selected) */}
+          {appStat === 'Approved' && (
+            <div className="animate-fade-in space-y-4 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+              <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                <Check size={14} /> Approved Deliverable Info
+              </h6>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Product Link</label>
+                  <input 
+                    type="text" 
+                    value={finalL} 
+                    onChange={e => setFinalL(e.target.value)} 
+                    placeholder="https://..."
+                    className="w-full bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Caption / Description</label>
+                  <input 
+                    type="text" 
+                    value={finalD} 
+                    onChange={e => setFinalD(e.target.value)} 
+                    placeholder="Caption text"
+                    className="w-full bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Save Button */}
+          <div className="flex justify-end pt-2 border-t border-slate-800">
+            <button 
+              onClick={handleSaveApproval} 
+              disabled={isUploading}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
+            >
+              {isUploading ? 'Saving...' : 'Save Draft Details'}
+            </button>
           </div>
         </div>
       )}
