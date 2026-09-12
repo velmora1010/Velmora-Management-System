@@ -5,8 +5,10 @@ import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStat
 import { 
   Clock, Package, Phone, FileText, Video, Check, 
   XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
-  RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft
+  RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
+  History, RotateCcw, AlertTriangle, Lock, RefreshCw
 } from 'lucide-react';
+import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
@@ -90,6 +92,60 @@ export const formatDisplayDateLocal = (dateStr: string | null | undefined): stri
 };
 
 // =========================================================================
+// TYPES & HELPERS FOR DRAFT ATTEMPTS, RE-DRAFT & TIMELINE AUDIT HISTORY
+// =========================================================================
+export interface DraftAttempt {
+  attempt_number: number;
+  video_url: string;
+  approval_status: 'Approved' | 'Not Approved' | 'Pending Approval';
+  timing_status?: string;
+  corrections?: string;
+  final_product_link?: string;
+  final_description?: string;
+  uploaded_at: string;
+  reviewed_at?: string;
+  reviewed_by?: string;
+}
+
+export interface TimelineHistoryEntry {
+  id?: string;
+  old_date: string;
+  new_date: string;
+  changed_by: string;
+  changed_at: string;
+  reason?: string;
+}
+
+export const getCurrentUserName = async (): Promise<string> => {
+  try {
+    const { data: { user } } = await supabaseAdmin.auth.getUser();
+    if (user?.email) return user.email.split('@')[0] || user.email;
+    if (user?.user_metadata?.full_name) return user.user_metadata.full_name;
+  } catch (e) {}
+  try {
+    const local = localStorage.getItem('velmora_active_user') || localStorage.getItem('active_account');
+    if (local) return local;
+  } catch (e) {}
+  return 'Admin';
+};
+
+export const formatHistoryTimestamp = (isoStr?: string | null): string => {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    const day = String(d.getDate()).padStart(2, '0');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[d.getMonth()];
+    const year = d.getFullYear();
+    const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${day} ${month} ${year}, ${time}`;
+  } catch (e) {
+    return isoStr || '';
+  }
+};
+
+// =========================================================================
 // HELPER: PARSE & DERIVE VIDEO WORKFLOW STATE
 // =========================================================================
 export interface VideoWorkflowData {
@@ -104,6 +160,8 @@ export interface VideoWorkflowData {
   totalSteps: number;
   status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED';
   activeStepId: string;
+  isReDraftRequired: boolean;
+  draftStatus: 'Approved' | 'Not Approved' | 'Pending Approval' | 'Not Started';
 }
 
 export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number): VideoWorkflowData => {
@@ -152,7 +210,49 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
           data: {
             ...st.data,
             date: effDate,
-            manualOverride: isOver
+            manualOverride: isOver,
+            history: Array.isArray(st.data?.history) ? st.data.history : []
+          }
+        };
+      } else if (cfg.id === 'draft') {
+        const draftData = st.data || {};
+        const attempts: DraftAttempt[] = Array.isArray(draftData.attempts) ? [...draftData.attempts] : [];
+        
+        // Backward compatibility if attempts is empty but draft video was stored
+        if (attempts.length === 0 && (draftData.vid || draftData.video_url || (videoNum === 1 && record.draft_video_url))) {
+          const legacyVid = draftData.vid || draftData.video_url || record.draft_video_url || '';
+          const legacyApp = draftData.appStat || draftData.approval_status || record.draft_approval_status || (st.completed ? 'Approved' : '');
+          attempts.push({
+            attempt_number: 1,
+            video_url: legacyVid,
+            approval_status: legacyApp === 'Approved' ? 'Approved' : (legacyApp === 'Not Approved' ? 'Not Approved' : 'Pending Approval'),
+            timing_status: draftData.timing || record.draft_timing_status || '',
+            corrections: draftData.corr || record.draft_corrections_required || '',
+            final_product_link: draftData.finalL || record.draft_final_product_link || '',
+            final_description: draftData.finalD || record.draft_final_description || '',
+            uploaded_at: st.updated_at || record.created_at || new Date().toISOString(),
+            reviewed_at: st.updated_at,
+            reviewed_by: 'Admin'
+          });
+        }
+
+        const latestAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+        const activeApprovalStatus = latestAttempt ? latestAttempt.approval_status : (draftData.approval_status || (st.completed ? 'Approved' : ''));
+        const isApproved = activeApprovalStatus === 'Approved';
+
+        steps[cfg.id] = {
+          ...st,
+          completed: isApproved, // STRICTLY ONLY COMPLETED IF APPROVED
+          data: {
+            ...draftData,
+            attempts,
+            active_attempt_number: latestAttempt?.attempt_number || 1,
+            approval_status: activeApprovalStatus,
+            vid: latestAttempt?.video_url || draftData.vid || '',
+            timing: latestAttempt?.timing_status || draftData.timing || '',
+            corr: latestAttempt?.corrections || draftData.corr || '',
+            finalL: latestAttempt?.final_product_link || draftData.finalL || '',
+            finalD: latestAttempt?.final_description || draftData.finalD || ''
           }
         };
       } else {
@@ -198,17 +298,37 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
         data = {
           date: scheduledDraftDate || record.draft_expected_date || '',
           time: record.draft_expected_time || '',
-          manualOverride: false
+          manualOverride: false,
+          history: []
         };
       } else if (cfg.id === 'draft') {
-        completed = !!record.draft_received || !!record.draft_video_url || (record.draft_approval_status === 'Approved');
+        const legacyVid = record.draft_video_url || '';
+        const legacyApp = record.draft_approval_status || '';
+        const isApproved = legacyApp === 'Approved';
+        const attempts: DraftAttempt[] = [];
+        if (legacyVid) {
+          attempts.push({
+            attempt_number: 1,
+            video_url: legacyVid,
+            approval_status: isApproved ? 'Approved' : (legacyApp === 'Not Approved' ? 'Not Approved' : 'Pending Approval'),
+            timing_status: record.draft_timing_status || '',
+            corrections: record.draft_corrections_required || '',
+            final_product_link: record.draft_final_product_link || '',
+            final_description: record.draft_final_description || '',
+            uploaded_at: record.created_at || new Date().toISOString()
+          });
+        }
+        completed = isApproved;
         data = {
-          vid: record.draft_video_url || '',
-          appStat: record.draft_approval_status || '',
+          vid: legacyVid,
+          appStat: legacyApp,
           timing: record.draft_timing_status || '',
           corr: record.draft_corrections_required || '',
           finalL: record.draft_final_product_link || '',
-          finalD: record.draft_final_description || ''
+          finalD: record.draft_final_description || '',
+          attempts,
+          active_attempt_number: 1,
+          approval_status: legacyApp
         };
       } else if (cfg.id === 'post_date') {
         completed = !!record.final_post_completed || (!!record.final_post_link && !isFakeUrl(record.final_post_link)) || !!metadata.video1_confirmed;
@@ -224,7 +344,20 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
         data = {
           date: scheduledDraftDate || '',
           time: '',
-          manualOverride: false
+          manualOverride: false,
+          history: []
+        };
+      } else if (cfg.id === 'draft') {
+        data = {
+          vid: '',
+          appStat: '',
+          timing: 'Not Submit',
+          corr: '',
+          finalL: '',
+          finalD: '',
+          attempts: [],
+          active_attempt_number: 1,
+          approval_status: ''
         };
       } else if (videoNum === 2 && cfg.id === 'post_date') {
         if (metadata.video2_final_post_link && !isFakeUrl(metadata.video2_final_post_link)) {
@@ -242,19 +375,32 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
     steps[cfg.id] = { completed, data };
   });
 
+  const draftStep = steps['draft'];
+  const draftApprovalStatus = draftStep?.data?.approval_status || '';
+  const isReDraftRequired = draftApprovalStatus === 'Not Approved';
+  const draftStatus = isReDraftRequired 
+    ? 'Not Approved' 
+    : (draftStep?.completed ? 'Approved' : (draftStep?.data?.vid ? 'Pending Approval' : 'Not Started'));
+
   const completedCount = configs.filter(c => steps[c.id]?.completed).length;
   const totalSteps = configs.length;
 
   let status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' = 'NOT_STARTED';
   if (completedCount === totalSteps) {
     status = 'COMPLETED';
-  } else if (completedCount > 0) {
+  } else if (completedCount > 0 || isReDraftRequired) {
     status = 'IN_PROGRESS';
   }
 
-  // Active step is the first incomplete step, or last step if all complete
-  const firstIncomplete = configs.find(c => !steps[c.id]?.completed);
-  const activeStepId = firstIncomplete ? firstIncomplete.id : configs[configs.length - 1].id;
+  // Active step calculation:
+  // If Re-Draft is required, active step MUST remain 'draft'
+  let activeStepId = configs[0].id;
+  if (isReDraftRequired) {
+    activeStepId = 'draft';
+  } else {
+    const firstIncomplete = configs.find(c => !steps[c.id]?.completed);
+    activeStepId = firstIncomplete ? firstIncomplete.id : configs[configs.length - 1].id;
+  }
 
   return {
     videoNumber: videoNum,
@@ -263,7 +409,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
     completedCount,
     totalSteps,
     status,
-    activeStepId
+    activeStepId,
+    isReDraftRequired,
+    draftStatus
   };
 };
 
@@ -545,11 +693,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       updated_at: new Date().toISOString()
     };
 
+    if (stepId === 'draft') {
+      videoObj.is_re_draft_required = (stepData.approval_status === 'Not Approved');
+    }
+
     // Calculate video completion status
     const configs = videoNumber === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
     const completedStepsCount = configs.filter(c => videoObj.steps[c.id]?.completed).length;
     videoObj.completed_count = completedStepsCount;
-    videoObj.status = completedStepsCount === configs.length ? 'COMPLETED' : (completedStepsCount > 0 ? 'IN_PROGRESS' : 'NOT_STARTED');
+    videoObj.status = completedStepsCount === configs.length ? 'COMPLETED' : ((completedStepsCount > 0 || videoObj.is_re_draft_required) ? 'IN_PROGRESS' : 'NOT_STARTED');
 
     metadata.last_updated = new Date().toISOString();
 
@@ -578,7 +730,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       } else if (stepId === 'draft') {
         updates.draft_received = isStepCompleted;
         if (stepData.vid) updates.draft_video_url = stepData.vid;
-        if (stepData.appStat) updates.draft_approval_status = stepData.appStat;
+        if (stepData.approval_status || stepData.appStat) updates.draft_approval_status = stepData.approval_status || stepData.appStat;
         if (stepData.timing) updates.draft_timing_status = stepData.timing;
         if (stepData.corr) updates.draft_corrections_required = stepData.corr;
         if (stepData.finalL) updates.draft_final_product_link = stepData.finalL;
@@ -930,6 +1082,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           const vNum = vw.videoNumber;
                           const isVCompleted = vw.status === 'COMPLETED';
                           const isVInProgress = vw.status === 'IN_PROGRESS';
+                          const isReDraftReq = vw.isReDraftRequired;
                           const isNextActive = idx < videoWorkflows.length - 1 && (videoWorkflows[idx + 1].status === 'COMPLETED' || videoWorkflows[idx + 1].status === 'IN_PROGRESS');
                           const isLineActive = isVCompleted && (isNextActive || (isDelivered && videoWorkflows[idx + 1]?.status !== 'NOT_STARTED'));
 
@@ -939,6 +1092,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           if (isVCompleted) {
                             circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-110";
                             labelStyle = "text-emerald-400 font-bold";
+                          } else if (isReDraftReq) {
+                            circleStyle = "bg-amber-950/80 text-amber-400 border border-amber-600/80 shadow-[0_0_12px_rgba(245,158,11,0.5)] hover:scale-110 animate-pulse";
+                            labelStyle = "text-amber-400 font-bold";
                           } else if (isVInProgress) {
                             circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400 hover:scale-110";
                             labelStyle = "text-blue-400 font-bold";
@@ -962,15 +1118,24 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
                                   {isVCompleted ? (
                                     <Check size={18} strokeWidth={3} className="text-white" />
+                                  ) : isReDraftReq ? (
+                                    <span className="font-black text-xs text-amber-400 tracking-tight">RD</span>
                                   ) : isVInProgress ? (
                                     <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
                                   ) : (
                                     <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">{vNum}</span>
                                   )}
                                 </div>
-                                <span className={`text-[10px] sm:text-[11px] text-center w-16 sm:w-20 leading-tight mt-1.5 transition-colors ${labelStyle}`}>
-                                  Video {vNum}
-                                </span>
+                                <div className="flex flex-col items-center">
+                                  <span className={`text-[10px] sm:text-[11px] text-center w-16 sm:w-20 leading-tight mt-1.5 transition-colors ${labelStyle}`}>
+                                    Video {vNum}
+                                  </span>
+                                  {isReDraftReq && (
+                                    <span className="text-[9px] font-bold text-amber-400 bg-amber-950/90 border border-amber-800/80 px-1.5 py-0.5 rounded mt-0.5 whitespace-nowrap shadow-sm">
+                                      Re-Draft Req
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
                               {/* Connecting Line between Videos */}
@@ -1236,6 +1401,13 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
         Completed
       </span>
     );
+  } else if (videoData.isReDraftRequired) {
+    videoStatusBadge = (
+      <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-950/90 text-amber-400 border border-amber-700/60 flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+        Re-Draft Required
+      </span>
+    );
   } else if (videoData.status === 'IN_PROGRESS') {
     videoStatusBadge = (
       <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-950/90 text-blue-400 border border-blue-700/60 flex items-center gap-1.5">
@@ -1339,6 +1511,12 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             const isSelected = cfg.id === activeStepId;
             const StepIcon = cfg.icon;
 
+            // Step locking rules: Post Date locked until Draft is Approved; Payment locked until Post Date completed
+            const isDraftApproved = !!videoData.steps['draft']?.completed;
+            const isPostDateCompleted = !!videoData.steps['post_date']?.completed;
+            const isLocked = (cfg.id === 'post_date' && !isDraftApproved) || (cfg.id === 'payment' && !isPostDateCompleted);
+            const isStepReDraftReq = cfg.id === 'draft' && videoData.isReDraftRequired;
+
             const nextStepCompleted = idx < videoData.configs.length - 1 && !!videoData.steps[videoData.configs[idx + 1].id]?.completed;
             const isLineActive = isCompleted && nextStepCompleted;
 
@@ -1348,22 +1526,46 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             if (isCompleted) {
               circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400";
               labelStyle = "text-emerald-400 font-bold";
+            } else if (isStepReDraftReq) {
+              circleStyle = "bg-amber-950/80 text-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.6)] border border-amber-500 ring-2 ring-amber-500/40 animate-pulse";
+              labelStyle = "text-amber-400 font-bold";
             } else if (isSelected) {
               circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400";
               labelStyle = "text-blue-400 font-bold";
+            } else if (isLocked) {
+              circleStyle = "bg-[#050811] text-slate-600 border border-slate-800/80 opacity-60";
+              labelStyle = "text-slate-600";
             }
+
+            const handleNodeClick = () => {
+              if (cfg.id === 'post_date' && !isDraftApproved) {
+                if (videoData.isReDraftRequired) {
+                  toast.error('Post Date is locked. Re-Draft is required and must be Approved first.');
+                } else {
+                  toast.error('Post Date is locked until Draft is Approved.');
+                }
+                return;
+              }
+              if (cfg.id === 'payment' && !isPostDateCompleted) {
+                toast.error('Payment is locked until Post Date is completed.');
+                return;
+              }
+              setActiveStepId(cfg.id);
+            };
 
             return (
               <React.Fragment key={cfg.id}>
                 {/* Step Node */}
                 <div 
-                  onClick={() => setActiveStepId(cfg.id)}
-                  className="flex flex-col items-center cursor-pointer group select-none relative"
-                  title={`Click to open: ${cfg.label}`}
+                  onClick={handleNodeClick}
+                  className={`flex flex-col items-center group select-none relative ${isLocked ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}`}
+                  title={isLocked ? `${cfg.label} is locked` : `Click to open: ${cfg.label}`}
                 >
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
                     {isCompleted ? (
                       <Check size={18} strokeWidth={3} className="text-white" />
+                    ) : isLocked ? (
+                      <Lock size={15} className="text-slate-500" />
                     ) : (
                       <StepIcon size={17} />
                     )}
@@ -1371,6 +1573,11 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
                   <span className={`text-[11px] text-center w-20 leading-tight mt-2 transition-colors ${labelStyle}`}>
                     {cfg.shortLabel}
                   </span>
+                  {isStepReDraftReq && (
+                    <span className="text-[8px] font-bold text-amber-400 bg-amber-950/80 px-1 rounded -mt-0.5">
+                      Re-Draft
+                    </span>
+                  )}
                   {isSelected && (
                     <div className="absolute -bottom-2 w-1.5 h-1.5 rounded-full bg-blue-400"></div>
                   )}
@@ -1452,8 +1659,10 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
           {activeStepId === 'draft' && (
             <DraftForm 
               record={record} 
+              videoNumber={videoNumber}
               existingData={activeStepState.data}
-              onSave={(formData: any) => onSaveStep('draft', formData, formData.draft_received)} 
+              onSave={(formData: any, completed: boolean) => onSaveStep('draft', formData, completed)} 
+              onNavigateToPostDate={() => setActiveStepId('post_date')}
             />
           )}
 
@@ -1932,7 +2141,7 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
   );
 };
 
-// --- STEP: Time Line (Auto-populated from Post Date / Draft Date with manual edit & reset) ---
+// --- STEP: Time Line (Auto-populated from Post Date / Draft Date with manual edit, reset & complete audit history) ---
 interface ExpectedTimelineFormProps {
   record: StatusTrackingRecord;
   videoNumber: number;
@@ -1951,12 +2160,8 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
     (pd: any) => Number(pd.video_number) === Number(videoNumber)
   );
   let scheduledDraftDate = scheduleEntry?.draft_date || '';
-
-  // Fallback to views_data in record.dispatch.languages if postDates was not populated
   if (!scheduledDraftDate && Array.isArray((record.dispatch as any)?.languages)) {
-    const matchViews = (record.dispatch as any).languages.find(
-      (l: string) => typeof l === 'string' && l.startsWith('views_data:')
-    );
+    const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
     if (matchViews) {
       try {
         const vJson = JSON.parse(matchViews.substring('views_data:'.length));
@@ -1970,30 +2175,32 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
     }
   }
 
-  // 2. Determine initial date and override status
-  const isManualOverride = existingData.manualOverride === true;
-  const initialEffectiveDate = isManualOverride 
+  // 2. Active date calculation: manualOverride takes priority, else scheduled draft date
+  const hasManualOverride = existingData.manualOverride === true;
+  const initialEffectiveDate = hasManualOverride
     ? (existingData.date || '')
     : (scheduledDraftDate || existingData.date || (videoNumber === 1 ? (record.draft_expected_date || '') : ''));
 
   const [effectiveDate, setEffectiveDate] = useState<string>(initialEffectiveDate);
-  const [isOverride, setIsOverride] = useState<boolean>(isManualOverride);
-  const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [tempEditDate, setTempEditDate] = useState<string>(initialEffectiveDate);
-  const [time, setTime] = useState<string>(
-    existingData.time || (videoNumber === 1 ? (record.draft_expected_time || '') : '')
-  );
+  const [time, setTime] = useState(existingData.time || (videoNumber === 1 ? (record.draft_expected_time || '') : ''));
+  const [isOverride, setIsOverride] = useState<boolean>(hasManualOverride);
 
-  // Sync state whenever videoNumber, record, or existingData changes
+  // Editing state for date
+  const [isEditing, setIsEditing] = useState(false);
+  const [tempEditDate, setTempEditDate] = useState(parseToYMD(initialEffectiveDate, 2026) || initialEffectiveDate || '');
+
+  // History list
+  const historyList: TimelineHistoryEntry[] = Array.isArray(existingData.history) ? existingData.history : [];
+
+  // Synchronize state if props change
   useEffect(() => {
     const isOver = existingData.manualOverride === true;
-    const eff = isOver 
+    const eff = isOver
       ? (existingData.date || '')
       : (scheduledDraftDate || existingData.date || (videoNumber === 1 ? (record.draft_expected_date || '') : ''));
     setEffectiveDate(eff);
     setIsOverride(isOver);
-    setTempEditDate(eff);
-    setIsEditing(false);
+    setTempEditDate(parseToYMD(eff, 2026) || eff || '');
     setTime(existingData.time || (videoNumber === 1 ? (record.draft_expected_time || '') : ''));
   }, [videoNumber, record.id, scheduledDraftDate, existingData.manualOverride, existingData.date, existingData.time]);
 
@@ -2014,7 +2221,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
     setEffectiveDate(normalizedNew);
     setIsOverride(newIsOverride);
     setIsEditing(false);
-    toast.success('Date updated. Click "Save Timeline" to save.');
+    toast.success('Date updated. Click "Save Timeline" to permanently save & record history.');
   };
 
   const handleCancelEdit = () => {
@@ -2028,6 +2235,21 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       return;
     }
     const normalizedScheduled = parseToYMD(scheduledDraftDate, 2026) || scheduledDraftDate;
+    const previousDateFormatted = formatDisplayDateLocal(effectiveDate);
+    const newDateFormatted = formatDisplayDateLocal(normalizedScheduled);
+
+    const userName = await getCurrentUserName();
+    const resetHistoryEntry: TimelineHistoryEntry = {
+      id: `th-${Date.now()}`,
+      old_date: previousDateFormatted,
+      new_date: newDateFormatted,
+      changed_by: userName,
+      changed_at: new Date().toISOString(),
+      reason: 'Reset to original Draft Date'
+    };
+
+    const updatedHistory = [resetHistoryEntry, ...historyList];
+
     setEffectiveDate(normalizedScheduled);
     setIsOverride(false);
     setIsEditing(false);
@@ -2038,9 +2260,18 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       date: normalizedScheduled,
       time: time || '',
       manualOverride: false,
+      history: updatedHistory,
       expected_delivery_completed: true
     });
-    toast.success(`Reset to scheduled draft date: ${formatDisplayDateLocal(normalizedScheduled)}`);
+
+    logActivity({
+      department: 'Marketing',
+      action: 'Timeline Date Reset',
+      description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} timeline reset to ${newDateFormatted}`,
+      metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
+    });
+
+    toast.success(`Reset to scheduled draft date: ${newDateFormatted}`);
   };
 
   const handleSaveTimeline = async () => {
@@ -2048,10 +2279,37 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       toast.error('Please assign an Expected Draft Delivery Date.');
       return;
     }
+
+    const previousDateFormatted = formatDisplayDateLocal(initialEffectiveDate);
+    const newDateFormatted = formatDisplayDateLocal(effectiveDate);
+    let updatedHistory = [...historyList];
+
+    // If date changed, record in history
+    if (previousDateFormatted !== newDateFormatted || isOverride !== hasManualOverride) {
+      const userName = await getCurrentUserName();
+      const changeEntry: TimelineHistoryEntry = {
+        id: `th-${Date.now()}`,
+        old_date: previousDateFormatted,
+        new_date: newDateFormatted,
+        changed_by: userName,
+        changed_at: new Date().toISOString(),
+        reason: isOverride ? 'Manual Timeline override' : 'Timeline date updated'
+      };
+      updatedHistory = [changeEntry, ...historyList];
+
+      logActivity({
+        department: 'Marketing',
+        action: 'Timeline Date Edited',
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} timeline changed from ${previousDateFormatted} to ${newDateFormatted}`,
+        metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
+      });
+    }
+
     await onSave({
       date: effectiveDate,
       time: time || '',
       manualOverride: isOverride,
+      history: updatedHistory,
       expected_delivery_completed: true
     });
   };
@@ -2111,10 +2369,10 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
             </span>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <input 
-                type="date"
-                value={tempEditDate}
-                onChange={e => setTempEditDate(e.target.value)}
-                className="flex-1 bg-[#070c18] border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                type="date" 
+                value={tempEditDate} 
+                onChange={e => setTempEditDate(e.target.value)} 
+                className="flex-1 bg-[#070c18] border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
               />
               <div className="flex items-center gap-2">
                 <button
@@ -2153,6 +2411,59 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
         />
       </div>
 
+      {/* Timeline Date History Section */}
+      <div className="pt-4 border-t border-slate-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <History size={16} className="text-blue-400" />
+            <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+              Timeline Date History
+            </h5>
+          </div>
+          <span className="text-[11px] text-slate-500 font-medium">
+            {historyList.length} change{historyList.length === 1 ? '' : 's'} recorded
+          </span>
+        </div>
+
+        <div className="space-y-2">
+          {/* Base scheduled origin */}
+          <div className="p-3 rounded-xl bg-[#0b1329] border border-slate-800 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+              <span className="text-slate-400">Initial date from Post Date (Video {videoNumber}):</span>
+              <span className="font-bold text-white">{scheduledDraftDate ? formatDisplayDateLocal(scheduledDraftDate) : 'Not Scheduled'}</span>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50 shrink-0">
+              Source Schedule
+            </span>
+          </div>
+
+          {/* Chronological History entries */}
+          {historyList.map((entry, hIdx) => (
+            <div key={entry.id || hIdx} className="p-3 rounded-xl bg-[#0b1329] border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`w-2 h-2 rounded-full ${entry.reason?.includes('Reset') ? 'bg-rose-400' : 'bg-amber-400'}`}></span>
+                <span className="text-slate-400 font-medium">{entry.old_date}</span>
+                <span className="text-slate-500">→</span>
+                <span className="font-bold text-white">{entry.new_date}</span>
+                <span className="text-slate-500">|</span>
+                <span className="text-slate-400">Changed by: <span className="text-slate-200 font-semibold">{entry.changed_by || 'Admin'}</span></span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-slate-500 text-[11px]">{formatHistoryTimestamp(entry.changed_at)}</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                  entry.reason?.includes('Reset') 
+                    ? 'bg-rose-950/60 text-rose-300 border-rose-800/50' 
+                    : 'bg-amber-950/60 text-amber-300 border-amber-800/50'
+                }`}>
+                  {entry.reason || 'Override'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Save Button */}
       <div className="flex justify-end pt-2 border-t border-slate-800">
         <button 
@@ -2166,26 +2477,81 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
   );
 };
 
-// --- STEP: Draft ---
-const DraftForm = ({ record, existingData = {}, onSave }: any) => {
-  const [vid, setVid] = useState(existingData.vid || record.draft_video_url || '');
-  const [appStat, setAppStat] = useState(existingData.appStat || record.draft_approval_status || '');
-  const [corr, setCorr] = useState(existingData.corr || record.draft_corrections_required || '');
-  const [finalL, setFinalL] = useState(existingData.finalL || record.draft_final_product_link || '');
-  const [finalD, setFinalD] = useState(existingData.finalD || record.draft_final_description || '');
+// --- STEP: Draft (Complete Approval / Re-Draft Loop / Multiple Attempts History) ---
+interface DraftFormProps {
+  record: StatusTrackingRecord;
+  videoNumber: number;
+  existingData?: any;
+  onSave: (data: any, completed: boolean) => Promise<void> | void;
+  onNavigateToPostDate?: () => void;
+}
+
+const DraftForm: React.FC<DraftFormProps> = ({ 
+  record, 
+  videoNumber, 
+  existingData = {}, 
+  onSave, 
+  onNavigateToPostDate 
+}) => {
+  // Extract attempts or initialize
+  const attempts: DraftAttempt[] = useMemo(() => {
+    if (Array.isArray(existingData.attempts) && existingData.attempts.length > 0) {
+      return existingData.attempts;
+    }
+    const legacyVid = existingData.vid || (videoNumber === 1 ? record.draft_video_url : '');
+    const legacyApp = existingData.approval_status || existingData.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
+    if (legacyVid) {
+      return [{
+        attempt_number: 1,
+        video_url: legacyVid,
+        approval_status: legacyApp === 'Approved' ? 'Approved' : (legacyApp === 'Not Approved' ? 'Not Approved' : 'Pending Approval'),
+        timing_status: existingData.timing || (videoNumber === 1 ? record.draft_timing_status : 'On Time'),
+        corrections: existingData.corr || (videoNumber === 1 ? record.draft_corrections_required : ''),
+        final_product_link: existingData.finalL || (videoNumber === 1 ? record.draft_final_product_link : ''),
+        final_description: existingData.finalD || (videoNumber === 1 ? record.draft_final_description : ''),
+        uploaded_at: record.created_at || new Date().toISOString()
+      }];
+    }
+    return [];
+  }, [existingData, record, videoNumber]);
+
+  const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+  // Form State
+  const [appStat, setAppStat] = useState<'Approved' | 'Not Approved' | ''>(
+    (activeAttempt?.approval_status === 'Approved' || activeAttempt?.approval_status === 'Not Approved') 
+      ? activeAttempt.approval_status 
+      : (existingData.approval_status || '')
+  );
+  const [corr, setCorr] = useState(activeAttempt?.corrections || existingData.corr || '');
+  const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
+  const [finalD, setFinalD] = useState(activeAttempt?.final_description || existingData.finalD || '');
   
-  const [file, setFile] = useState<File | null>(null);
+  // Re-Draft Upload Mode State
+  const [isReDraftMode, setIsReDraftMode] = useState(false);
+  const [reDraftFile, setReDraftFile] = useState<File | null>(null);
+  const [reDraftUrl, setReDraftUrl] = useState('');
+
+  // Initial Draft Upload State
+  const [initialFile, setInitialFile] = useState<File | null>(null);
+  const [initialUrl, setInitialUrl] = useState(activeAttempt?.video_url || existingData.vid || '');
+
   const [isUploading, setIsUploading] = useState(false);
-  const [calculatedTiming, setCalculatedTiming] = useState(existingData.timing || record.draft_timing_status || 'Not Submit');
+  const [calculatedTiming, setCalculatedTiming] = useState(
+    activeAttempt?.timing_status || existingData.timing || 'Not Submit'
+  );
 
   const expDate = record.draft_expected_date;
   const expTime = record.draft_expected_time;
 
   useEffect(() => {
-    if (!vid && !file) {
+    const activeVid = activeAttempt?.video_url || initialUrl;
+    if (!activeVid && !initialFile && !reDraftFile) {
       setCalculatedTiming('Not Submit');
     } else {
-      if (existingData.timing) {
+      if (activeAttempt?.timing_status) {
+        setCalculatedTiming(activeAttempt.timing_status);
+      } else if (existingData.timing) {
         setCalculatedTiming(existingData.timing);
       } else if (expDate && expTime) {
         const expectedMs = new Date(`${expDate}T${expTime}`).getTime();
@@ -2199,171 +2565,610 @@ const DraftForm = ({ record, existingData = {}, onSave }: any) => {
         setCalculatedTiming('On Time');
       }
     }
-  }, [vid, file, expDate, expTime, existingData.timing]);
+  }, [activeAttempt, initialUrl, initialFile, reDraftFile, expDate, expTime, existingData.timing]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Initial Draft Upload
+  const handleInitialUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      setVid(URL.createObjectURL(selectedFile));
+      setInitialFile(selectedFile);
+      setInitialUrl(URL.createObjectURL(selectedFile));
     }
   };
 
-  const handleSave = async () => {
-    if (appStat === 'Not Approved' && (!corr || corr.trim() === '')) {
-      toast.error('Please enter correction instructions before rejecting a draft.');
-      return;
+  // Handle Re-Draft File Select
+  const handleReDraftSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      setReDraftFile(selectedFile);
+      setReDraftUrl(URL.createObjectURL(selectedFile));
     }
-    if (!file && !vid) {
+  };
+
+  // Submit Initial Draft (Attempt 1)
+  const handleSubmitInitialDraft = async () => {
+    if (!initialFile && !initialUrl) {
       toast.error('Please upload a draft video first.');
       return;
     }
-
     setIsUploading(true);
-    let finalUrl = vid;
+    let finalUrl = initialUrl;
 
-    if (file) {
+    if (initialFile) {
       try {
-        const fileExt = file.name.split('.').pop();
-        const generatedFileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const fileExt = initialFile.name.split('.').pop();
+        const generatedFileName = `${Date.now()}_v${videoNumber}_att1_${Math.random().toString(36).substring(7)}.${fileExt}`;
         const filePath = `drafts/${generatedFileName}`;
 
-        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, file);
+        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, initialFile);
         if (error) throw error;
 
         const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
         finalUrl = publicData.publicUrl;
-        setVid(finalUrl);
+        setInitialUrl(finalUrl);
       } catch (err) {
         console.error('Error uploading draft video:', err);
+        toast.error('Failed to upload video file.');
         setIsUploading(false);
         return;
       }
     }
 
-    const isStepCompleted = !!finalUrl;
-    await onSave({ 
-      vid: finalUrl, 
-      appStat, 
-      timing: calculatedTiming, 
-      corr, 
-      finalL, 
-      finalD,
-      draft_received: isStepCompleted
-    });
+    const firstAttempt: DraftAttempt = {
+      attempt_number: 1,
+      video_url: finalUrl,
+      approval_status: 'Pending Approval',
+      timing_status: calculatedTiming,
+      uploaded_at: new Date().toISOString()
+    };
+
+    await onSave({
+      attempts: [firstAttempt],
+      active_attempt_number: 1,
+      approval_status: 'Pending Approval',
+      vid: finalUrl,
+      timing: calculatedTiming
+    }, false);
+
     setIsUploading(false);
+    toast.success('Draft uploaded successfully! Please review and select approval status.');
   };
+
+  // Submit Re-Draft (Attempt N + 1)
+  const handleSubmitReDraft = async () => {
+    if (!reDraftFile && !reDraftUrl) {
+      toast.error('Please select a new re-draft video file.');
+      return;
+    }
+    setIsUploading(true);
+    let finalUrl = reDraftUrl;
+    const nextAttemptNumber = attempts.length + 1;
+
+    if (reDraftFile) {
+      try {
+        const fileExt = reDraftFile.name.split('.').pop();
+        const generatedFileName = `${Date.now()}_v${videoNumber}_att${nextAttemptNumber}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const filePath = `drafts/${generatedFileName}`;
+
+        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, reDraftFile);
+        if (error) throw error;
+
+        const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
+        finalUrl = publicData.publicUrl;
+      } catch (err) {
+        console.error('Error uploading re-draft video:', err);
+        toast.error('Failed to upload re-draft video file.');
+        setIsUploading(false);
+        return;
+      }
+    }
+
+    const newAttempt: DraftAttempt = {
+      attempt_number: nextAttemptNumber,
+      video_url: finalUrl,
+      approval_status: 'Pending Approval',
+      timing_status: calculatedTiming,
+      uploaded_at: new Date().toISOString()
+    };
+
+    const updatedAttempts = [...attempts, newAttempt];
+
+    await onSave({
+      attempts: updatedAttempts,
+      active_attempt_number: nextAttemptNumber,
+      approval_status: 'Pending Approval',
+      vid: finalUrl,
+      timing: calculatedTiming,
+      corr: ''
+    }, false);
+
+    setIsUploading(false);
+    setIsReDraftMode(false);
+    setReDraftFile(null);
+    setReDraftUrl('');
+    setAppStat('');
+    setCorr('');
+    toast.success(`Re-Draft Attempt ${nextAttemptNumber} submitted for review!`);
+  };
+
+  // Save Approval Details (Approved or Not Approved)
+  const handleSaveApproval = async () => {
+    if (!activeAttempt && !initialUrl) {
+      toast.error('No draft video submitted yet. Please upload a draft video first.');
+      return;
+    }
+
+    if (!appStat) {
+      toast.error('Please select either "Approved" or "Not Approved".');
+      return;
+    }
+
+    if (appStat === 'Not Approved' && (!corr || corr.trim() === '')) {
+      toast.error('Please enter correction instructions before rejecting a draft.');
+      return;
+    }
+
+    setIsUploading(true);
+    const userName = await getCurrentUserName();
+    const nowIso = new Date().toISOString();
+
+    const isApproved = appStat === 'Approved';
+
+    // Update active attempt in attempts array
+    const updatedAttempts = attempts.map((att, idx) => {
+      if (idx === attempts.length - 1) {
+        return {
+          ...att,
+          approval_status: appStat,
+          corrections: appStat === 'Not Approved' ? corr : '',
+          final_product_link: isApproved ? finalL : att.final_product_link,
+          final_description: isApproved ? finalD : att.final_description,
+          timing_status: calculatedTiming,
+          reviewed_at: nowIso,
+          reviewed_by: userName
+        };
+      }
+      return att;
+    });
+
+    const payload = {
+      attempts: updatedAttempts,
+      active_attempt_number: activeAttempt?.attempt_number || 1,
+      approval_status: appStat,
+      vid: activeAttempt?.video_url || initialUrl,
+      timing: calculatedTiming,
+      corr: appStat === 'Not Approved' ? corr : '',
+      finalL: isApproved ? finalL : '',
+      finalD: isApproved ? finalD : ''
+    };
+
+    // Save to Supabase (completed is true ONLY if Approved!)
+    await onSave(payload, isApproved);
+    setIsUploading(false);
+
+    if (isApproved) {
+      toast.success('Draft approved! Video workflow unlocked and moved to Post Date.');
+      if (onNavigateToPostDate) {
+        onNavigateToPostDate();
+      }
+    } else {
+      toast.error('Draft marked as Not Approved. Re-Draft required.');
+    }
+  };
+
+  const isCurrentDraftNotApproved = activeAttempt?.approval_status === 'Not Approved';
+  const isCurrentDraftApproved = activeAttempt?.approval_status === 'Approved';
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row justify-center gap-6">
-        <div className="relative w-full sm:w-44 h-32 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
-          <UploadCloud className="text-blue-400 mb-1" size={24} />
-          <span className="text-xs text-blue-300 font-medium">Upload Draft Video</span>
-          <input 
-            type="file" 
-            accept="video/*,image/*" 
-            onChange={handleFileUpload} 
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-          />
-        </div>
-        <div className="flex-1 min-h-32 border border-slate-800 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center p-3">
-          {vid ? (
-            <div className="w-full flex flex-col items-center gap-2">
-              {(vid.startsWith('blob:') || vid.includes('.mp4') || vid.includes('.webm') || vid.includes('video') || vid.includes('drafts')) ? (
-                <video src={vid} controls className="w-full max-h-28 object-contain rounded bg-black" />
-              ) : (
-                <div className="text-xs text-slate-400 italic">Preview available</div>
-              )}
+      
+      {/* 1. TOP STATUS BANNER (When Re-Draft is Required or Approved) */}
+      {isCurrentDraftNotApproved && !isReDraftMode && (
+        <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800/70 space-y-3 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="text-rose-400 shrink-0" size={20} />
+              <div>
+                <span className="text-sm font-black text-rose-400 tracking-wider block">
+                  RE-DRAFT REQUIRED
+                </span>
+                <span className="text-xs text-rose-300">
+                  Attempt {activeAttempt?.attempt_number || 1} was not approved. A new draft must be submitted and approved before Post Date can become active.
+                </span>
+              </div>
             </div>
-          ) : (
-             <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
-          )}
-        </div>
-      </div>
+            <span className="text-xs font-bold px-3 py-1 rounded-full bg-rose-900/70 text-rose-200 border border-rose-700/60 shrink-0 self-start sm:self-center">
+              Status: Not Approved
+            </span>
+          </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-y border-slate-800 py-6">
-        <div>
-          <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Approval Status</label>
-          <div className="flex items-center gap-3">
-            <button 
+          {activeAttempt?.corrections && (
+            <div className="bg-rose-950/80 p-3 rounded-lg border border-rose-900/60 text-xs text-rose-200">
+              <span className="font-bold text-rose-300 block mb-1">Correction Instructions:</span>
+              <p className="whitespace-pre-wrap">{activeAttempt.corrections}</p>
+            </div>
+          )}
+
+          <div className="pt-2 flex justify-end">
+            <button
               type="button"
-              onClick={() => setAppStat('Approved')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${appStat === 'Approved' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-600'}`}
+              onClick={() => setIsReDraftMode(true)}
+              className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2"
             >
-              Approved
-            </button>
-            <button 
-              type="button"
-              onClick={() => setAppStat('Not Approved')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${appStat === 'Not Approved' ? 'bg-rose-600 border-rose-500 text-white' : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-600'}`}
-            >
-              Not Approved
+              <UploadCloud size={16} />
+              <span>Upload Re-Draft Video</span>
             </button>
           </div>
         </div>
-        <div>
-          <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Timing Status</label>
-          <div className="grid grid-cols-2 gap-2">
-            {['Advance', 'On Time', 'Late', 'Not Submit'].map((ts) => (
-              <div key={ts} className={`flex items-center gap-2 p-2 rounded-lg border ${calculatedTiming === ts ? 'bg-blue-600/10 border-blue-500/50' : 'bg-[#0b1329] border-slate-800'}`}>
-                <input type="checkbox" checked={calculatedTiming === ts} readOnly className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-0" />
-                <span className={`text-xs ${calculatedTiming === ts ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>{ts}</span>
+      )}
+
+      {isCurrentDraftApproved && (
+        <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-800/70 flex items-center justify-between animate-fade-in">
+          <div className="flex items-center gap-2.5">
+            <Check className="text-emerald-400" size={20} strokeWidth={3} />
+            <div>
+              <span className="text-sm font-bold text-emerald-400 block">
+                Draft Approved (Attempt {activeAttempt?.attempt_number || 1})
+              </span>
+              <span className="text-xs text-emerald-300/80">
+                Reviewed by {activeAttempt?.reviewed_by || 'Admin'} on {formatHistoryTimestamp(activeAttempt?.reviewed_at)}
+              </span>
+            </div>
+          </div>
+          <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-900/70 text-emerald-200 border border-emerald-700/60">
+            ✓ Approved
+          </span>
+        </div>
+      )}
+
+      {/* 2. RE-DRAFT UPLOAD MODAL/PANEL (When user is actively uploading re-draft) */}
+      {isReDraftMode && (
+        <div className="p-5 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-4 animate-fade-in shadow-xl">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div>
+              <h5 className="text-sm font-bold text-white">
+                Submit Re-Draft (Attempt {(activeAttempt?.attempt_number || 1) + 1})
+              </h5>
+              <p className="text-xs text-slate-400">
+                Upload the revised video addressing the correction feedback.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setIsReDraftMode(false); setReDraftFile(null); setReDraftUrl(''); }}
+              className="text-slate-400 hover:text-white text-xs font-semibold px-2 py-1 bg-slate-800 rounded-lg"
+            >
+              Cancel
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-4 items-center">
+            <div className="relative w-full sm:w-56 h-32 border-2 border-dashed border-blue-500/50 rounded-xl bg-[#070c18] flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors">
+              <UploadCloud className="text-blue-400 mb-1" size={26} />
+              <span className="text-xs text-blue-300 font-medium">Select Re-Draft Video</span>
+              <input 
+                type="file" 
+                accept="video/*,image/*" 
+                onChange={handleReDraftSelect} 
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+              />
+            </div>
+
+            <div className="flex-1 w-full min-h-32 border border-slate-800 rounded-xl bg-[#070c18] flex flex-col items-center justify-center p-3">
+              {reDraftUrl ? (
+                <div className="w-full flex flex-col items-center gap-2">
+                  {(reDraftUrl.startsWith('blob:') || reDraftUrl.includes('.mp4') || reDraftUrl.includes('.webm') || reDraftUrl.includes('video')) ? (
+                    <video src={reDraftUrl} controls className="w-full max-h-28 object-contain rounded bg-black" />
+                  ) : (
+                    <span className="text-xs text-blue-400 font-medium">Re-draft video file selected</span>
+                  )}
+                  <span className="text-[11px] text-slate-400">{reDraftFile?.name}</span>
+                </div>
+              ) : (
+                <span className="text-xs text-slate-500">No new re-draft video selected yet</span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <button
+              type="button"
+              disabled={isUploading || (!reDraftFile && !reDraftUrl)}
+              onClick={handleSubmitReDraft}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 shadow-md flex items-center gap-2"
+            >
+              {isUploading ? 'Uploading...' : `Submit Re-Draft Attempt ${(activeAttempt?.attempt_number || 1) + 1}`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3. CURRENT DRAFT PREVIEW & REVIEW PANEL (When not in re-draft upload mode) */}
+      {!isReDraftMode && (
+        <>
+          {/* Draft Upload / Preview Card */}
+          {attempts.length === 0 ? (
+            /* First time upload */
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row justify-center gap-6">
+                <div className="relative w-full sm:w-52 h-32 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
+                  <UploadCloud className="text-blue-400 mb-1" size={26} />
+                  <span className="text-xs text-blue-300 font-medium">Upload Draft Video</span>
+                  <input 
+                    type="file" 
+                    accept="video/*,image/*" 
+                    onChange={handleInitialUpload} 
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                  />
+                </div>
+                <div className="flex-1 min-h-32 border border-slate-800 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center p-3">
+                  {initialUrl ? (
+                    <div className="w-full flex flex-col items-center gap-2">
+                      {(initialUrl.startsWith('blob:') || initialUrl.includes('.mp4') || initialUrl.includes('.webm') || initialUrl.includes('video')) ? (
+                        <video src={initialUrl} controls className="w-full max-h-28 object-contain rounded bg-black" />
+                      ) : (
+                        <span className="text-xs text-blue-400 font-medium">Draft video selected</span>
+                      )}
+                      <span className="text-[11px] text-slate-400">{initialFile?.name}</span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
+                  )}
+                </div>
+              </div>
+
+              {initialFile && (
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    disabled={isUploading}
+                    onClick={handleSubmitInitialDraft}
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-xs font-bold transition-colors shadow-md"
+                  >
+                    {isUploading ? 'Uploading...' : 'Save Uploaded Draft (Attempt 1)'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Current active draft display */
+            <div className="space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                <div className="flex items-center gap-2">
+                  <Video size={17} className="text-blue-400" />
+                  <h5 className="text-xs font-bold text-white uppercase tracking-wider">
+                    Current Draft: Attempt {activeAttempt?.attempt_number || 1}
+                  </h5>
+                  <span className="text-[11px] text-slate-400">
+                    (Uploaded: {formatHistoryTimestamp(activeAttempt?.uploaded_at)})
+                  </span>
+                </div>
+                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                  activeAttempt?.approval_status === 'Approved'
+                    ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
+                    : activeAttempt?.approval_status === 'Not Approved'
+                      ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
+                      : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
+                }`}>
+                  {activeAttempt?.approval_status || 'Pending Approval'}
+                </span>
+              </div>
+
+              <div className="w-full border border-slate-800 rounded-xl bg-[#0b1329] p-4 flex flex-col items-center justify-center">
+                {activeAttempt?.video_url ? (
+                  <div className="w-full flex flex-col items-center gap-3">
+                    {(activeAttempt.video_url.startsWith('blob:') || activeAttempt.video_url.includes('.mp4') || activeAttempt.video_url.includes('.webm') || activeAttempt.video_url.includes('video') || activeAttempt.video_url.includes('drafts')) ? (
+                      <video src={activeAttempt.video_url} controls className="w-full max-h-56 object-contain rounded-lg bg-black" />
+                    ) : (
+                      <div className="flex items-center gap-2 text-xs text-blue-400">
+                        <a href={activeAttempt.video_url} target="_blank" rel="noreferrer" className="underline hover:text-blue-300">
+                          Open Draft Video Link
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-500 font-medium">No video file available</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 4. APPROVAL & TIMING CONTROLS (Only visible if draft exists and is not locked in rejection) */}
+          {attempts.length > 0 && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-y border-slate-800 py-6">
+                
+                {/* Approval Status Selector */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">
+                    Approval Status
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button 
+                      type="button"
+                      onClick={() => setAppStat('Approved')}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${
+                        appStat === 'Approved' 
+                          ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/30' 
+                          : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <Check size={15} />
+                      <span>Approved</span>
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setAppStat('Not Approved')}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${
+                        appStat === 'Not Approved' 
+                          ? 'bg-rose-600 border-rose-500 text-white shadow-lg shadow-rose-600/30' 
+                          : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <XCircle size={15} />
+                      <span>Not Approved</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Timing Status Selector */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">
+                    Timing Status
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Advance', 'On Time', 'Late', 'Not Submit'].map((ts) => (
+                      <div 
+                        key={ts} 
+                        onClick={() => setCalculatedTiming(ts)}
+                        className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                          calculatedTiming === ts ? 'bg-blue-600/15 border-blue-500/60' : 'bg-[#0b1329] border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <input 
+                          type="radio" 
+                          name="timingStatus"
+                          checked={calculatedTiming === ts} 
+                          onChange={() => setCalculatedTiming(ts)}
+                          className="w-3.5 h-3.5 rounded-full border-slate-700 bg-slate-900 text-blue-500 focus:ring-0" 
+                        />
+                        <span className={`text-xs ${calculatedTiming === ts ? 'text-blue-400 font-bold' : 'text-slate-400'}`}>
+                          {ts}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Correction Instructions (When Not Approved is selected) */}
+              {appStat === 'Not Approved' && (
+                <div className="animate-fade-in space-y-2">
+                  <label className="block text-[11px] font-bold text-rose-400 uppercase tracking-wider">
+                    Correction Instructions / Re-Draft Guidelines *
+                  </label>
+                  <textarea 
+                    value={corr} 
+                    onChange={e => setCorr(e.target.value)} 
+                    placeholder="Enter specific instructions on what needs to be changed for the re-draft..."
+                    className="w-full bg-[#0b1329] border border-rose-800/80 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-rose-500 min-h-[90px]" 
+                  />
+                  <span className="text-[11px] text-slate-500">
+                    These instructions will be recorded in the draft history and displayed to guide the re-draft.
+                  </span>
+                </div>
+              )}
+
+              {/* Approved Deliverables Info (When Approved is selected) */}
+              {appStat === 'Approved' && (
+                <div className="animate-fade-in space-y-4 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+                  <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                    <Check size={14} /> Approved Deliverable Info
+                  </h6>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Product Link</label>
+                      <input 
+                        type="text" 
+                        value={finalL} 
+                        onChange={e => setFinalL(e.target.value)} 
+                        placeholder="https://..."
+                        className="w-full bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Caption / Description</label>
+                      <input 
+                        type="text" 
+                        value={finalD} 
+                        onChange={e => setFinalD(e.target.value)} 
+                        placeholder="Caption text"
+                        className="w-full bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Save Button */}
+              <div className="flex justify-end pt-2 border-t border-slate-800">
+                <button 
+                  onClick={handleSaveApproval} 
+                  disabled={isUploading}
+                  className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
+                >
+                  {isUploading ? 'Saving...' : 'Save Draft Details'}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 5. DRAFT HISTORY ACCORDION/LIST (All attempts preserved) */}
+      {attempts.length > 0 && (
+        <div className="pt-5 border-t border-slate-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <History size={16} className="text-purple-400" />
+              <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Draft History ({attempts.length} Attempt{attempts.length === 1 ? '' : 's'})
+              </h5>
+            </div>
+            <span className="text-[11px] text-slate-500 font-medium">
+              Permanent Attempt Record
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {attempts.map((att) => (
+              <div 
+                key={att.attempt_number} 
+                className="p-3.5 rounded-xl bg-[#0b1329] border border-slate-800 flex flex-col gap-2 text-xs"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className="font-bold text-white text-sm">Draft Attempt {att.attempt_number}</span>
+                    <span className="text-slate-500">•</span>
+                    <span className="text-slate-400">Uploaded: {formatHistoryTimestamp(att.uploaded_at)}</span>
+                    {att.timing_status && (
+                      <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                        {att.timing_status}
+                      </span>
+                    )}
+                  </div>
+                  
+                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border shrink-0 ${
+                    att.approval_status === 'Approved'
+                      ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
+                      : att.approval_status === 'Not Approved'
+                        ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
+                        : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
+                  }`}>
+                    {att.approval_status === 'Approved' ? '✓ Approved' : (att.approval_status === 'Not Approved' ? '✕ Not Approved' : 'Pending Approval')}
+                  </span>
+                </div>
+
+                {att.corrections && (
+                  <div className="bg-rose-950/40 p-2.5 rounded-lg border border-rose-900/40 text-xs text-rose-300">
+                    <span className="font-bold block text-rose-400 text-[11px]">Feedback:</span>
+                    {att.corrections}
+                  </div>
+                )}
+
+                {att.reviewed_at && (
+                  <div className="text-[11px] text-slate-500">
+                    Reviewed by {att.reviewed_by || 'Admin'} on {formatHistoryTimestamp(att.reviewed_at)}
+                  </div>
+                )}
               </div>
             ))}
           </div>
         </div>
-      </div>
-
-      {appStat === 'Not Approved' && (
-        <div className="animate-fade-in">
-          <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Correction Instructions</label>
-          <textarea 
-            value={corr} 
-            onChange={e => setCorr(e.target.value)} 
-            placeholder="Enter required changes, retakes, or missing guidelines..."
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[90px]" 
-          />
-        </div>
       )}
 
-      {appStat === 'Approved' && (
-        <div className="animate-fade-in space-y-4">
-          <h6 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Approved Deliverable Info</h6>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Product Link</label>
-              <input 
-                type="text" 
-                value={finalL} 
-                onChange={e => setFinalL(e.target.value)} 
-                placeholder="Product link in video"
-                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Description</label>
-              <input 
-                type="text" 
-                value={finalD} 
-                onChange={e => setFinalD(e.target.value)} 
-                placeholder="Caption / description text"
-                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex justify-end pt-2 border-t border-slate-800">
-        <button 
-          onClick={handleSave} 
-          disabled={isUploading}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
-        >
-          {isUploading ? 'Saving...' : 'Save Draft Details'}
-        </button>
-      </div>
     </div>
   );
 };

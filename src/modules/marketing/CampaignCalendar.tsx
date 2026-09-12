@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
 import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
+import { getVideoWorkflow } from './CampaignStatusTracking';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { isActiveStatus } from '../../utils/marketingUtils';
@@ -674,10 +675,23 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         const pd = postDates[idx];
         const vNum = Number(pd.video_number) || (idx + 1);
 
-        // 1. Draft Date Event (calculate if not stored)
-        const drDate = pd.draft_date ? parseDateOnly(pd.draft_date, 2026) : (pd.post_date ? calculateDraftDate(pd.post_date, 2026) : '');
+        // Resolve Timeline date strictly with priority: manualTimelineDate -> originalVideoDraftDate
+        let effectiveTimelineDate = '';
+        if (matchingRecord) {
+          try {
+            const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
+            const timelineDate = vWorkflow.steps?.timeline?.data?.date;
+            if (timelineDate) {
+              effectiveTimelineDate = parseDateOnly(timelineDate, 2026);
+            }
+          } catch (e) {}
+        }
+
+        const originalDraftDate = pd.draft_date ? parseDateOnly(pd.draft_date, 2026) : (pd.post_date ? calculateDraftDate(pd.post_date, 2026) : '');
+        const drDate = effectiveTimelineDate || originalDraftDate;
+
         if (drDate) {
-          const key = `${infId}_v${vNum}_Draft_${drDate}`;
+          const key = `${infId}_v${vNum}_Timeline`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
             list.push({
