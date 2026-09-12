@@ -6,7 +6,7 @@ import {
   Clock, Package, Phone, FileText, Video, Check, 
   XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
-  History, RotateCcw, AlertTriangle, Lock, RefreshCw
+  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -2493,7 +2493,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
   onSave, 
   onNavigateToPostDate 
 }) => {
-  // Extract attempts or initialize
+  // Extract attempts or initialize with full video preservation
   const attempts: DraftAttempt[] = useMemo(() => {
     if (Array.isArray(existingData.attempts) && existingData.attempts.length > 0) {
       return existingData.attempts;
@@ -2540,6 +2540,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [calculatedTiming, setCalculatedTiming] = useState(
     activeAttempt?.timing_status || existingData.timing || 'Not Submit'
   );
+
+  // Modal Video Preview State
+  const [previewModalAttempt, setPreviewModalAttempt] = useState<DraftAttempt | null>(null);
 
   const expDate = record.draft_expected_date;
   const expTime = record.draft_expected_time;
@@ -2596,9 +2599,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
     if (initialFile) {
       try {
-        const fileExt = initialFile.name.split('.').pop();
-        const generatedFileName = `${Date.now()}_v${videoNumber}_att1_${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const filePath = `drafts/${generatedFileName}`;
+        const fileExt = initialFile.name.split('.').pop() || 'mp4';
+        const campId = record.campaign_id || 'camp';
+        const infId = record.influencer_id || 'inf';
+        const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        const filePath = `drafts/camp_${campId}_inf_${infId}_v${videoNumber}_att1_${uniqueKey}.${fileExt}`;
 
         const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, initialFile);
         if (error) throw error;
@@ -2634,7 +2639,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     toast.success('Draft uploaded successfully! Please review and select approval status.');
   };
 
-  // Submit Re-Draft (Attempt N + 1)
+  // Submit Re-Draft (Attempt N + 1) — Creates new attempt, preserving all previous attempts permanently
   const handleSubmitReDraft = async () => {
     if (!reDraftFile && !reDraftUrl) {
       toast.error('Please select a new re-draft video file.');
@@ -2646,9 +2651,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
     if (reDraftFile) {
       try {
-        const fileExt = reDraftFile.name.split('.').pop();
-        const generatedFileName = `${Date.now()}_v${videoNumber}_att${nextAttemptNumber}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const filePath = `drafts/${generatedFileName}`;
+        const fileExt = reDraftFile.name.split('.').pop() || 'mp4';
+        const campId = record.campaign_id || 'camp';
+        const infId = record.influencer_id || 'inf';
+        const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        const filePath = `drafts/camp_${campId}_inf_${infId}_v${videoNumber}_att${nextAttemptNumber}_${uniqueKey}.${fileExt}`;
 
         const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, reDraftFile);
         if (error) throw error;
@@ -2671,6 +2678,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
       uploaded_at: new Date().toISOString()
     };
 
+    // Permanently append new attempt
     const updatedAttempts = [...attempts, newAttempt];
 
     await onSave({
@@ -2714,7 +2722,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
     const isApproved = appStat === 'Approved';
 
-    // Update active attempt in attempts array
+    // Update active attempt in attempts array while preserving video_url and all history
     const updatedAttempts = attempts.map((att, idx) => {
       if (idx === attempts.length - 1) {
         return {
@@ -2758,6 +2766,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
   const isCurrentDraftNotApproved = activeAttempt?.approval_status === 'Not Approved';
   const isCurrentDraftApproved = activeAttempt?.approval_status === 'Approved';
+  const isPendingApproval = activeAttempt && !isCurrentDraftApproved && !isCurrentDraftNotApproved;
+
+  // Previous attempts for Draft History list
+  const historyAttempts = attempts.length > 1 ? attempts.slice(0, attempts.length - 1) : [];
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
@@ -2793,7 +2805,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
             <button
               type="button"
               onClick={() => setIsReDraftMode(true)}
-              className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2"
+              className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2"
             >
               <UploadCloud size={16} />
               <span>Upload Re-Draft Video</span>
@@ -2821,7 +2833,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 2. RE-DRAFT UPLOAD MODAL/PANEL (When user is actively uploading re-draft) */}
+      {/* 2. RE-DRAFT UPLOAD MODAL/PANEL (When user clicked 'Upload Re-Draft Video') */}
       {isReDraftMode && (
         <div className="p-5 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-4 animate-fade-in shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -2830,20 +2842,20 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 Submit Re-Draft (Attempt {(activeAttempt?.attempt_number || 1) + 1})
               </h5>
               <p className="text-xs text-slate-400">
-                Upload the revised video addressing the correction feedback.
+                Upload revised video addressing the correction feedback. Previous drafts will be preserved in history.
               </p>
             </div>
             <button
               type="button"
               onClick={() => { setIsReDraftMode(false); setReDraftFile(null); setReDraftUrl(''); }}
-              className="text-slate-400 hover:text-white text-xs font-semibold px-2 py-1 bg-slate-800 rounded-lg"
+              className="text-slate-400 hover:text-white text-xs font-semibold px-2.5 py-1 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors"
             >
               Cancel
             </button>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 items-center">
-            <div className="relative w-full sm:w-56 h-32 border-2 border-dashed border-blue-500/50 rounded-xl bg-[#070c18] flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors">
+            <div className="relative w-full sm:w-52 h-32 border-2 border-dashed border-blue-500/50 rounded-xl bg-[#070c18] flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors">
               <UploadCloud className="text-blue-400 mb-1" size={26} />
               <span className="text-xs text-blue-300 font-medium">Select Re-Draft Video</span>
               <input 
@@ -2857,12 +2869,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
             <div className="flex-1 w-full min-h-32 border border-slate-800 rounded-xl bg-[#070c18] flex flex-col items-center justify-center p-3">
               {reDraftUrl ? (
                 <div className="w-full flex flex-col items-center gap-2">
-                  {(reDraftUrl.startsWith('blob:') || reDraftUrl.includes('.mp4') || reDraftUrl.includes('.webm') || reDraftUrl.includes('video')) ? (
-                    <video src={reDraftUrl} controls className="w-full max-h-28 object-contain rounded bg-black" />
-                  ) : (
-                    <span className="text-xs text-blue-400 font-medium">Re-draft video file selected</span>
-                  )}
-                  <span className="text-[11px] text-slate-400">{reDraftFile?.name}</span>
+                  <div className="w-24 h-24 rounded-lg bg-black overflow-hidden flex items-center justify-center">
+                    {(reDraftUrl.startsWith('blob:') || reDraftUrl.includes('.mp4') || reDraftUrl.includes('.webm') || reDraftUrl.includes('video')) ? (
+                      <video src={reDraftUrl} className="w-full h-full object-cover" />
+                    ) : (
+                      <Video size={24} className="text-blue-400" />
+                    )}
+                  </div>
+                  <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{reDraftFile?.name}</span>
                 </div>
               ) : (
                 <span className="text-xs text-slate-500">No new re-draft video selected yet</span>
@@ -2883,15 +2897,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 3. CURRENT DRAFT PREVIEW & REVIEW PANEL (When not in re-draft upload mode) */}
+      {/* 3. CURRENT DRAFT CARD: COMPACT SQUARE VIDEO (160-200px) */}
       {!isReDraftMode && (
         <>
-          {/* Draft Upload / Preview Card */}
           {attempts.length === 0 ? (
             /* First time upload */
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row justify-center gap-6">
-                <div className="relative w-full sm:w-52 h-32 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
+                <div className="relative w-full sm:w-52 h-36 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
                   <UploadCloud className="text-blue-400 mb-1" size={26} />
                   <span className="text-xs text-blue-300 font-medium">Upload Draft Video</span>
                   <input 
@@ -2901,15 +2914,17 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
                   />
                 </div>
-                <div className="flex-1 min-h-32 border border-slate-800 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center p-3">
+                <div className="flex-1 min-h-36 border border-slate-800 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center p-3">
                   {initialUrl ? (
                     <div className="w-full flex flex-col items-center gap-2">
-                      {(initialUrl.startsWith('blob:') || initialUrl.includes('.mp4') || initialUrl.includes('.webm') || initialUrl.includes('video')) ? (
-                        <video src={initialUrl} controls className="w-full max-h-28 object-contain rounded bg-black" />
-                      ) : (
-                        <span className="text-xs text-blue-400 font-medium">Draft video selected</span>
-                      )}
-                      <span className="text-[11px] text-slate-400">{initialFile?.name}</span>
+                      <div className="w-24 h-24 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
+                        {(initialUrl.startsWith('blob:') || initialUrl.includes('.mp4') || initialUrl.includes('.webm') || initialUrl.includes('video')) ? (
+                          <video src={initialUrl} className="w-full h-full object-cover" />
+                        ) : (
+                          <Video size={24} className="text-blue-400" />
+                        )}
+                      </div>
+                      <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialFile?.name}</span>
                     </div>
                   ) : (
                     <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
@@ -2923,7 +2938,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     type="button"
                     disabled={isUploading}
                     onClick={handleSubmitInitialDraft}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-xs font-bold transition-colors shadow-md"
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md"
                   >
                     {isUploading ? 'Uploading...' : 'Save Uploaded Draft (Attempt 1)'}
                   </button>
@@ -2931,19 +2946,16 @@ const DraftForm: React.FC<DraftFormProps> = ({
               )}
             </div>
           ) : (
-            /* Current active draft display */
-            <div className="space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+            /* COMPACT SQUARE CURRENT DRAFT CARD */
+            <div className="p-4 sm:p-5 bg-[#0b1329] border border-slate-800 rounded-2xl shadow-md space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
                 <div className="flex items-center gap-2">
                   <Video size={17} className="text-blue-400" />
-                  <h5 className="text-xs font-bold text-white uppercase tracking-wider">
-                    Current Draft: Attempt {activeAttempt?.attempt_number || 1}
+                  <h5 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
+                    CURRENT DRAFT: ATTEMPT {activeAttempt?.attempt_number || 1}
                   </h5>
-                  <span className="text-[11px] text-slate-400">
-                    (Uploaded: {formatHistoryTimestamp(activeAttempt?.uploaded_at)})
-                  </span>
                 </div>
-                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                <span className={`text-[11px] font-bold px-3 py-1 rounded-full border ${
                   activeAttempt?.approval_status === 'Approved'
                     ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
                     : activeAttempt?.approval_status === 'Not Approved'
@@ -2954,35 +2966,113 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 </span>
               </div>
 
-              <div className="w-full border border-slate-800 rounded-xl bg-[#0b1329] p-4 flex flex-col items-center justify-center">
-                {activeAttempt?.video_url ? (
-                  <div className="w-full flex flex-col items-center gap-3">
-                    {(activeAttempt.video_url.startsWith('blob:') || activeAttempt.video_url.includes('.mp4') || activeAttempt.video_url.includes('.webm') || activeAttempt.video_url.includes('video') || activeAttempt.video_url.includes('drafts')) ? (
-                      <video src={activeAttempt.video_url} controls className="w-full max-h-56 object-contain rounded-lg bg-black" />
-                    ) : (
-                      <div className="flex items-center gap-2 text-xs text-blue-400">
-                        <a href={activeAttempt.video_url} target="_blank" rel="noreferrer" className="underline hover:text-blue-300">
-                          Open Draft Video Link
-                        </a>
-                      </div>
+              {/* Compact Square Video + Details Row */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
+                
+                {/* 1:1 Aspect Ratio Square Video Card (170-200px) */}
+                <div className="relative w-44 h-44 sm:w-48 sm:h-48 rounded-xl overflow-hidden bg-black border border-slate-700/80 shrink-0 flex items-center justify-center group shadow-lg">
+                  {activeAttempt?.video_url ? (
+                    <>
+                      <video 
+                        src={activeAttempt.video_url} 
+                        className="w-full h-full object-cover" 
+                        preload="metadata"
+                      />
+                      {/* Centered Play Button overlay */}
+                      <button
+                        type="button"
+                        onClick={() => setPreviewModalAttempt(activeAttempt)}
+                        className="absolute inset-0 bg-black/40 hover:bg-black/20 flex items-center justify-center transition-all group"
+                        title="Click to view full video"
+                      >
+                        <div className="w-12 h-12 rounded-full bg-blue-600/90 hover:bg-blue-500 text-white flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform">
+                          <Play size={22} className="ml-0.5 fill-white" />
+                        </div>
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-slate-500">No Video File</span>
+                  )}
+                </div>
+
+                {/* Metadata beside Square Video */}
+                <div className="flex-1 space-y-2.5 min-w-0">
+                  <div>
+                    <h4 className="text-base font-bold text-white">
+                      Draft Attempt {activeAttempt?.attempt_number || 1}
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Uploaded: {formatHistoryTimestamp(activeAttempt?.uploaded_at)}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-400">Status:</span>
+                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded border ${
+                      activeAttempt?.approval_status === 'Approved'
+                        ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
+                        : activeAttempt?.approval_status === 'Not Approved'
+                          ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
+                          : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
+                    }`}>
+                      {activeAttempt?.approval_status || 'Pending Approval'}
+                    </span>
+                    {activeAttempt?.timing_status && (
+                      <span className="text-[10px] text-slate-400 bg-slate-800 border border-slate-700/70 px-2 py-0.5 rounded">
+                        {activeAttempt.timing_status}
+                      </span>
                     )}
                   </div>
-                ) : (
-                  <span className="text-xs text-slate-500 font-medium">No video file available</span>
-                )}
+
+                  {activeAttempt?.corrections && (
+                    <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-900/50 text-xs text-rose-200">
+                      <span className="font-bold text-rose-400 block mb-0.5">Correction Feedback:</span>
+                      <p className="whitespace-pre-wrap">{activeAttempt.corrections}</p>
+                    </div>
+                  )}
+
+                  {activeAttempt?.reviewed_at && (
+                    <p className="text-[11px] text-slate-500">
+                      Reviewed by <span className="text-slate-300 font-semibold">{activeAttempt.reviewed_by || 'Admin'}</span> on {formatHistoryTimestamp(activeAttempt.reviewed_at)}
+                    </p>
+                  )}
+
+                  <div className="pt-1 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewModalAttempt(activeAttempt)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-xl border border-slate-700 transition-colors inline-flex items-center gap-2 shadow-sm"
+                    >
+                      <Eye size={15} />
+                      <span>View Video</span>
+                    </button>
+
+                    {isCurrentDraftNotApproved && (
+                      <button
+                        type="button"
+                        onClick={() => setIsReDraftMode(true)}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-colors inline-flex items-center gap-2 shadow-sm"
+                      >
+                        <UploadCloud size={15} />
+                        <span>Upload Re-Draft</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
               </div>
             </div>
           )}
 
-          {/* 4. APPROVAL & TIMING CONTROLS (Only visible if draft exists and is not locked in rejection) */}
-          {attempts.length > 0 && (
-            <div className="space-y-6">
+          {/* 4. APPROVAL & TIMING CONTROLS (Displayed ONLY when current draft is Pending Approval) */}
+          {isPendingApproval && (
+            <div className="space-y-6 pt-2 animate-fade-in">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-y border-slate-800 py-6">
                 
                 {/* Approval Status Selector */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">
-                    Approval Status
+                    Approval Status (Draft Attempt {activeAttempt?.attempt_number || 1})
                   </label>
                   <div className="flex items-center gap-3">
                     <button 
@@ -3056,7 +3146,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     className="w-full bg-[#0b1329] border border-rose-800/80 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-rose-500 min-h-[90px]" 
                   />
                   <span className="text-[11px] text-slate-500">
-                    These instructions will be recorded in the draft history and displayed to guide the re-draft.
+                    These instructions will be permanently recorded in the draft history and displayed to guide the re-draft.
                   </span>
                 </div>
               )}
@@ -3107,7 +3197,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </>
       )}
 
-      {/* 5. DRAFT HISTORY ACCORDION/LIST (All attempts preserved) */}
+      {/* 5. DRAFT HISTORY (All Previous Attempts Permanently Preserved in Compact Rows) */}
       {attempts.length > 0 && (
         <div className="pt-5 border-t border-slate-800 space-y-3">
           <div className="flex items-center justify-between">
@@ -3123,48 +3213,173 @@ const DraftForm: React.FC<DraftFormProps> = ({
           </div>
 
           <div className="space-y-2">
-            {attempts.map((att) => (
-              <div 
-                key={att.attempt_number} 
-                className="p-3.5 rounded-xl bg-[#0b1329] border border-slate-800 flex flex-col gap-2 text-xs"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <span className="font-bold text-white text-sm">Draft Attempt {att.attempt_number}</span>
-                    <span className="text-slate-500">•</span>
-                    <span className="text-slate-400">Uploaded: {formatHistoryTimestamp(att.uploaded_at)}</span>
-                    {att.timing_status && (
-                      <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
-                        {att.timing_status}
+            {attempts.map((att) => {
+              const isCurrent = att.attempt_number === activeAttempt?.attempt_number;
+              return (
+                <div 
+                  key={att.attempt_number} 
+                  className={`p-3 rounded-xl bg-[#0b1329] border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors ${
+                    isCurrent ? 'border-blue-500/40 bg-blue-950/10' : 'border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  {/* Left: Compact Thumbnail + Attempt Info */}
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* Compact Square Thumbnail (56x56) */}
+                    <div 
+                      onClick={() => setPreviewModalAttempt(att)}
+                      className="relative w-14 h-14 rounded-lg bg-black border border-slate-700/80 shrink-0 overflow-hidden cursor-pointer group flex items-center justify-center shadow-sm"
+                      title="Click to view video"
+                    >
+                      {att.video_url ? (
+                        <>
+                          <video src={att.video_url} className="w-full h-full object-cover" preload="metadata" />
+                          <div className="absolute inset-0 bg-black/40 group-hover:bg-black/10 flex items-center justify-center transition-colors">
+                            <Play size={15} className="text-white fill-white group-hover:scale-110 transition-transform" />
+                          </div>
+                        </>
+                      ) : (
+                        <Video size={16} className="text-slate-500" />
+                      )}
+                    </div>
+
+                    <div className="truncate min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-white text-xs sm:text-sm">
+                          Draft Attempt {att.attempt_number}
+                        </span>
+                        {isCurrent && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-950 text-blue-300 border border-blue-800/60">
+                            Current
+                          </span>
+                        )}
+                        <span className={`text-[10px] font-bold px-2 py-0.2 rounded border ${
+                          att.approval_status === 'Approved'
+                            ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
+                            : att.approval_status === 'Not Approved'
+                              ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
+                              : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
+                        }`}>
+                          {att.approval_status === 'Approved' ? '✓ Approved' : (att.approval_status === 'Not Approved' ? '✕ Not Approved' : 'Pending Approval')}
+                        </span>
+                      </div>
+
+                      <p className="text-slate-400 text-[11px]">
+                        Uploaded: {formatHistoryTimestamp(att.uploaded_at)}
+                      </p>
+
+                      {att.corrections && (
+                        <p className="text-rose-300 text-[11px] truncate max-w-md" title={att.corrections}>
+                          <span className="text-rose-400 font-semibold">Feedback:</span> {att.corrections}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right: View Button */}
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    {att.reviewed_at && (
+                      <span className="text-[10px] text-slate-500 hidden md:inline">
+                        Reviewed: {formatHistoryTimestamp(att.reviewed_at)}
                       </span>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => setPreviewModalAttempt(att)}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 shadow-sm"
+                    >
+                      <Eye size={13} />
+                      <span>View</span>
+                    </button>
                   </div>
-                  
-                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border shrink-0 ${
-                    att.approval_status === 'Approved'
-                      ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
-                      : att.approval_status === 'Not Approved'
-                        ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
-                        : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
-                  }`}>
-                    {att.approval_status === 'Approved' ? '✓ Approved' : (att.approval_status === 'Not Approved' ? '✕ Not Approved' : 'Pending Approval')}
-                  </span>
                 </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-                {att.corrections && (
-                  <div className="bg-rose-950/40 p-2.5 rounded-lg border border-rose-900/40 text-xs text-rose-300">
-                    <span className="font-bold block text-rose-400 text-[11px]">Feedback:</span>
-                    {att.corrections}
-                  </div>
-                )}
-
-                {att.reviewed_at && (
-                  <div className="text-[11px] text-slate-500">
-                    Reviewed by {att.reviewed_by || 'Admin'} on {formatHistoryTimestamp(att.reviewed_at)}
-                  </div>
-                )}
+      {/* 6. CENTERED VIDEO PREVIEW MODAL */}
+      {previewModalAttempt && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div 
+            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-2xl w-full p-5 space-y-4 shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h4 className="text-base font-bold text-white flex items-center gap-2">
+                  <Video size={18} className="text-blue-400" />
+                  <span>Draft Attempt {previewModalAttempt.attempt_number} Preview</span>
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Video {videoNumber} • Uploaded {formatHistoryTimestamp(previewModalAttempt.uploaded_at)}
+                </p>
               </div>
-            ))}
+
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                  previewModalAttempt.approval_status === 'Approved'
+                    ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
+                    : previewModalAttempt.approval_status === 'Not Approved'
+                      ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
+                      : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
+                }`}>
+                  {previewModalAttempt.approval_status || 'Pending Approval'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPreviewModalAttempt(null)}
+                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Video Player in Modal */}
+            <div className="w-full bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
+              {previewModalAttempt.video_url ? (
+                <video 
+                  src={previewModalAttempt.video_url} 
+                  controls 
+                  autoPlay 
+                  className="w-full max-h-[55vh] object-contain" 
+                />
+              ) : (
+                <div className="p-8 text-xs text-slate-500">Video source not found</div>
+              )}
+            </div>
+
+            {/* Details in Modal */}
+            {previewModalAttempt.corrections && (
+              <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-xs text-rose-200">
+                <span className="font-bold text-rose-400 block mb-1">Correction Instructions:</span>
+                <p className="whitespace-pre-wrap">{previewModalAttempt.corrections}</p>
+              </div>
+            )}
+
+            {previewModalAttempt.reviewed_at && (
+              <div className="text-xs text-slate-400 flex items-center justify-between">
+                <span>
+                  Reviewed by: <span className="text-white font-semibold">{previewModalAttempt.reviewed_by || 'Admin'}</span>
+                </span>
+                <span>
+                  {formatHistoryTimestamp(previewModalAttempt.reviewed_at)}
+                </span>
+              </div>
+            )}
+
+            {/* Modal Footer */}
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setPreviewModalAttempt(null)}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors"
+              >
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}
