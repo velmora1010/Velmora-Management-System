@@ -6,10 +6,11 @@ import {
   Clock, Package, Phone, FileText, Video, Check, 
   XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
-  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play
+  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
 import { parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
@@ -145,6 +146,158 @@ export const formatHistoryTimestamp = (isoStr?: string | null): string => {
   }
 };
 
+export interface PostDateHistoryEntry {
+  id?: string;
+  old_date: string;
+  new_date: string;
+  changed_by: string;
+  changed_at: string;
+  reason?: string;
+}
+
+/**
+ * Synchronizes a video's Post Date change with Supabase tables:
+ * 1. influencer_post_dates_rows: updates row for (influencer_id, video_number) preserving draft_date
+ * 2. influencers_info_rows: preserves all languages & platform_views in views_data, updating only views_data.post_dates[video_number]
+ */
+export const syncInfluencerPostDate = async ({
+  influencerId,
+  campaignId,
+  videoNumber,
+  newPostDate
+}: {
+  influencerId: string | number;
+  campaignId?: string;
+  videoNumber: number;
+  newPostDate: string;
+}): Promise<{ success: boolean; error?: string }> => {
+  const numericInfId = parseInt(String(influencerId), 10);
+  if (isNaN(numericInfId)) {
+    return { success: false, error: `Invalid influencer ID: ${influencerId}` };
+  }
+
+  try {
+    // 1. Update influencer_post_dates_rows for strictly (influencer_id, video_number)
+    const { data: existingRows, error: fetchPdErr } = await supabaseAdmin
+      .from(SUPABASE_TABLES.influencerPostDates)
+      .select('*')
+      .eq('influencer_id', numericInfId)
+      .eq('video_number', videoNumber);
+
+    if (fetchPdErr) {
+      console.error('Error fetching influencer_post_dates_rows:', fetchPdErr);
+      return { success: false, error: fetchPdErr.message || 'Failed to check existing post dates' };
+    }
+
+    if (existingRows && existingRows.length > 0) {
+      // Modify ONLY post_date on this specific row. Preserve draft_date, campaign_id, etc.
+      const { error: updatePdErr } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerPostDates)
+        .update({
+          post_date: newPostDate,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingRows[0].id);
+
+      if (updatePdErr) {
+        console.error('Error updating influencer_post_dates_rows:', updatePdErr);
+        return { success: false, error: updatePdErr.message || 'Failed to update post dates table' };
+      }
+    } else {
+      let nextId = Date.now();
+      try {
+        const { data: maxRows } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerPostDates)
+          .select('id')
+          .order('id', { ascending: false })
+          .limit(1);
+        if (maxRows && maxRows[0]?.id) nextId = Number(maxRows[0].id) + 1;
+      } catch (e) {}
+
+      const { error: insertPdErr } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerPostDates)
+        .insert([{
+          id: nextId,
+          influencer_id: numericInfId,
+          campaign_id: campaignId || null,
+          video_number: videoNumber,
+          post_date: newPostDate
+        }]);
+
+      if (insertPdErr) {
+        console.error('Error inserting into influencer_post_dates_rows:', insertPdErr);
+        return { success: false, error: insertPdErr.message || 'Failed to insert post dates table' };
+      }
+    }
+
+    // 2. Safely Update views_data in influencers_info_rows
+    const { data: infData, error: fetchInfErr } = await supabaseAdmin
+      .from(SUPABASE_TABLES.influencersInfo)
+      .select('languages')
+      .eq('id', numericInfId)
+      .single();
+
+    if (fetchInfErr) {
+      console.error('Error fetching influencers_info_rows:', fetchInfErr);
+      return { success: false, error: fetchInfErr.message || 'Failed to fetch influencer info' };
+    }
+
+    if (infData) {
+      // Preserve ALL existing properties in languages
+      let rawLangs: string[] = Array.isArray(infData.languages) ? [...infData.languages] : [];
+      let viewsIdx = rawLangs.findIndex(l => typeof l === 'string' && l.startsWith('views_data:'));
+      let viewsJson: any = {};
+
+      if (viewsIdx >= 0) {
+        try {
+          viewsJson = JSON.parse(rawLangs[viewsIdx].substring('views_data:'.length));
+        } catch (e) {
+          viewsJson = {};
+        }
+      }
+
+      // Preserve ALL properties of viewsJson (platform_views, etc.)
+      if (!Array.isArray(viewsJson.post_dates)) {
+        viewsJson.post_dates = [];
+      }
+
+      // Modify ONLY views_data.post_dates for this videoNumber
+      let pdItem = viewsJson.post_dates.find((p: any) => Number(p.video_number) === Number(videoNumber));
+      if (pdItem) {
+        pdItem.post_date = newPostDate;
+        // Do NOT touch pdItem.draft_date or other properties
+      } else {
+        viewsJson.post_dates.push({
+          video_number: videoNumber,
+          post_date: newPostDate
+        });
+      }
+
+      const newViewsStr = `views_data:${JSON.stringify(viewsJson)}`;
+      if (viewsIdx >= 0) {
+        rawLangs[viewsIdx] = newViewsStr;
+      } else {
+        rawLangs.push(newViewsStr);
+      }
+
+      const { error: updateInfErr } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencersInfo)
+        .update({ languages: rawLangs })
+        .eq('id', numericInfId);
+
+      if (updateInfErr) {
+        console.error('Error updating influencers_info_rows languages:', updateInfErr);
+        return { success: false, error: updateInfErr.message || 'Failed to update influencer info' };
+      }
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('syncInfluencerPostDate exception:', err);
+    return { success: false, error: err.message || 'Unknown synchronization error' };
+  }
+};
+
 // =========================================================================
 // HELPER: PARSE & DERIVE VIDEO WORKFLOW STATE
 // =========================================================================
@@ -175,20 +328,24 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
 
   const storedVideo = metadata.videos?.[String(videoNum)] || metadata.videos?.[videoNum];
 
-  // Resolve scheduled draft date for this specific video from record.postDates
+  // Resolve scheduled draft date & post date for this specific video from record.postDates
   const scheduleEntry = (record.postDates || []).find(
     (pd: any) => Number(pd.video_number) === Number(videoNum)
   );
   let scheduledDraftDate = scheduleEntry?.draft_date || '';
-  if (!scheduledDraftDate && Array.isArray((record.dispatch as any)?.languages)) {
+  let scheduledPostDate = scheduleEntry?.post_date || '';
+  if ((!scheduledDraftDate || !scheduledPostDate) && Array.isArray((record.dispatch as any)?.languages)) {
     const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
     if (matchViews) {
       try {
         const vJson = JSON.parse(matchViews.substring('views_data:'.length));
         const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNum));
-        if (found?.draft_date) {
+        if (found?.post_date && !scheduledPostDate) {
+          scheduledPostDate = parseToYMD(found.post_date, 2026) || found.post_date;
+        }
+        if (found?.draft_date && !scheduledDraftDate) {
           scheduledDraftDate = parseToYMD(found.draft_date, 2026);
-        } else if (found?.post_date) {
+        } else if (found?.post_date && !scheduledDraftDate) {
           scheduledDraftDate = calculateDraftDate(found.post_date, 2026);
         }
       } catch (e) {}
@@ -253,6 +410,17 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
             corr: latestAttempt?.corrections || draftData.corr || '',
             finalL: latestAttempt?.final_product_link || draftData.finalL || '',
             finalD: latestAttempt?.final_description || draftData.finalD || ''
+          }
+        };
+      } else if (cfg.id === 'post_date') {
+        const postData = st.data || {};
+        const effPostDate = postData.scheduled_post_date || scheduledPostDate || '';
+        steps[cfg.id] = {
+          ...st,
+          data: {
+            ...postData,
+            scheduled_post_date: effPostDate,
+            history: Array.isArray(postData.history) ? postData.history : []
           }
         };
       } else {
@@ -333,6 +501,8 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
       } else if (cfg.id === 'post_date') {
         completed = !!record.final_post_completed || (!!record.final_post_link && !isFakeUrl(record.final_post_link)) || !!metadata.video1_confirmed;
         data = {
+          scheduled_post_date: scheduledPostDate || '',
+          history: [],
           link: record.final_post_link || metadata.video1_final_post_link || '',
           postedAt: record.final_post_actual_datetime || metadata.video1_posted_at || '',
           platform: metadata.video1_platform || 'Instagram',
@@ -359,16 +529,18 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
           active_attempt_number: 1,
           approval_status: ''
         };
-      } else if (videoNum === 2 && cfg.id === 'post_date') {
-        if (metadata.video2_final_post_link && !isFakeUrl(metadata.video2_final_post_link)) {
+      } else if (cfg.id === 'post_date') {
+        if (videoNum === 2 && metadata.video2_final_post_link && !isFakeUrl(metadata.video2_final_post_link)) {
           completed = !!metadata.video2_confirmed;
-          data = {
-            link: metadata.video2_final_post_link || '',
-            postedAt: metadata.video2_posted_at || '',
-            platform: metadata.video2_platform || 'Instagram',
-            confirmed: completed
-          };
         }
+        data = {
+          scheduled_post_date: scheduledPostDate || '',
+          history: [],
+          link: (videoNum === 2 ? metadata.video2_final_post_link : '') || '',
+          postedAt: (videoNum === 2 ? metadata.video2_posted_at : '') || '',
+          platform: (videoNum === 2 ? metadata.video2_platform : 'Instagram') || 'Instagram',
+          confirmed: completed
+        };
       }
     }
 
@@ -745,10 +917,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
     const result = await saveMilestone(recordId, updates);
     if (result.success) {
-      toast.success(`Video ${videoNumber} step updated successfully!`);
+      if (!stepData?.suppressDefaultToast) {
+        toast.success(`Video ${videoNumber} step updated successfully!`);
+      }
       await refresh();
+      return { success: true };
     } else {
       toast.error('Failed to save step: ' + (result.error?.message || 'Unknown error'));
+      return { success: false, error: result.error?.message };
     }
   };
 
@@ -1359,7 +1535,7 @@ interface VideoDetailViewProps {
   videoNumber: number;
   onBack: () => void;
   onSwitchVideo: (num: number) => void;
-  onSaveStep: (stepId: string, data: any, completed: boolean) => Promise<void>;
+  onSaveStep: (stepId: string, data: any, completed: boolean) => Promise<{ success: boolean; error?: any } | void>;
 }
 
 const VideoDetailView: React.FC<VideoDetailViewProps> = ({
@@ -1652,7 +1828,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               record={record} 
               videoNumber={videoNumber}
               existingData={activeStepState.data}
-              onSave={(formData: any) => onSaveStep('timeline', formData, formData.expected_delivery_completed)} 
+              onSave={async (formData: any) => { await onSaveStep('timeline', formData, formData.expected_delivery_completed); }} 
             />
           )}
 
@@ -1661,7 +1837,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               record={record} 
               videoNumber={videoNumber}
               existingData={activeStepState.data}
-              onSave={(formData: any, completed: boolean) => onSaveStep('draft', formData, completed)} 
+              onSave={async (formData: any, completed: boolean) => { await onSaveStep('draft', formData, completed); }} 
               onNavigateToPostDate={() => setActiveStepId('post_date')}
             />
           )}
@@ -1671,7 +1847,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               videoNumber={videoNumber}
               record={record}
               existingData={activeStepState.data}
-              onSave={(formData: any) => onSaveStep('post_date', formData, formData.confirmed_live)}
+              onSave={(formData: any, completed?: boolean) => onSaveStep('post_date', formData, completed !== undefined ? completed : formData.confirmed_live)}
             />
           )}
 
@@ -3218,6 +3394,47 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
 // --- STEP: Post Date (For Any Video 1 to 6) ---
 const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) => {
+  // 1. Strict 1-to-1 match for Video N from record.postDates
+  const scheduleEntry = (record.postDates || []).find(
+    (pd: any) => Number(pd.video_number) === Number(videoNumber)
+  );
+  let scheduledPostDate = scheduleEntry?.post_date || '';
+
+  // Fallback to views_data inside dispatch.languages
+  if (!scheduledPostDate && Array.isArray((record.dispatch as any)?.languages)) {
+    const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+    if (matchViews) {
+      try {
+        const vJson = JSON.parse(matchViews.substring('views_data:'.length));
+        const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
+        if (found?.post_date) {
+          scheduledPostDate = parseToYMD(found.post_date, 2026) || found.post_date;
+        }
+      } catch (e) {}
+    }
+  }
+
+  const isDateModified = existingData.is_modified === true || (!!existingData.scheduled_post_date && existingData.scheduled_post_date !== scheduledPostDate);
+  const initialEffectivePostDate = existingData.scheduled_post_date || scheduledPostDate || '';
+
+  const [effectivePostDate, setEffectivePostDate] = useState<string>(initialEffectivePostDate);
+  const [isEditingDate, setIsEditingDate] = useState<boolean>(false);
+  const [tempPostDate, setTempPostDate] = useState<string>(
+    parseToYMD(initialEffectivePostDate, 2026) || initialEffectivePostDate || ''
+  );
+  const [isSavingDate, setIsSavingDate] = useState<boolean>(false);
+
+  // Synchronize state if props change
+  useEffect(() => {
+    const eff = existingData.scheduled_post_date || scheduledPostDate || '';
+    setEffectivePostDate(eff);
+    setTempPostDate(parseToYMD(eff, 2026) || eff || '');
+  }, [videoNumber, record.id, scheduledPostDate, existingData.scheduled_post_date]);
+
+  // History list
+  const historyList: PostDateHistoryEntry[] = Array.isArray(existingData.history) ? existingData.history : [];
+
+  // Live post state
   const [platform, setPlatform] = useState(existingData.platform || 'Instagram');
   const [postLink, setPostLink] = useState(existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''));
   const [postedAt, setPostedAt] = useState(
@@ -3229,7 +3446,164 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
 
   const platforms = ['Instagram', 'YouTube', 'Facebook'];
 
-  const handleSave = async () => {
+  const handleStartEditDate = () => {
+    setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
+    setIsEditingDate(true);
+  };
+
+  const handleCancelEditDate = () => {
+    setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
+    setIsEditingDate(false);
+  };
+
+  const handleSavePostDate = async () => {
+    if (!tempPostDate) {
+      toast.error('Please pick a valid Post Date.');
+      return;
+    }
+
+    const normalizedNewYmd = parseToYMD(tempPostDate, 2026) || tempPostDate;
+    const previousDateFormatted = formatDisplayDateLocal(effectivePostDate);
+    const newDateFormatted = formatDisplayDateLocal(normalizedNewYmd);
+
+    if (previousDateFormatted === newDateFormatted && effectivePostDate) {
+      setIsEditingDate(false);
+      return;
+    }
+
+    setIsSavingDate(true);
+    try {
+      const userName = await getCurrentUserName();
+      const changeEntry: PostDateHistoryEntry = {
+        id: `pdh-${Date.now()}`,
+        old_date: previousDateFormatted,
+        new_date: newDateFormatted,
+        changed_by: userName,
+        changed_at: new Date().toISOString(),
+        reason: 'Post Date edited in Status Tracking'
+      };
+
+      const updatedHistory = [changeEntry, ...historyList];
+
+      // 1. Sync Supabase tables: influencer_post_dates_rows & influencers_info_rows
+      const syncRes = await syncInfluencerPostDate({
+        influencerId: record.influencer_id,
+        campaignId: record.campaign_id,
+        videoNumber,
+        newPostDate: normalizedNewYmd
+      });
+
+      if (!syncRes.success) {
+        toast.error('Failed to sync Post Date: ' + (syncRes.error || 'Database error'));
+        setIsSavingDate(false);
+        return;
+      }
+
+      // 2. Save to Status Tracking workflow step
+      const saveRes = await onSave({
+        ...existingData,
+        scheduled_post_date: normalizedNewYmd,
+        history: updatedHistory,
+        is_modified: true,
+        platform,
+        link: postLink,
+        postedAt: postedAt ? new Date(postedAt).toISOString() : existingData.postedAt,
+        confirmed_live: confirmedLive,
+        suppressDefaultToast: true
+      }, confirmedLive);
+
+      if (saveRes && saveRes.success === false) {
+        toast.error('Failed to save Status Tracking: ' + (saveRes.error || 'Unknown error'));
+        setIsSavingDate(false);
+        return;
+      }
+
+      // 3. Log activity
+      logActivity({
+        department: 'Marketing',
+        action: 'Post Date Edited',
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date changed from ${previousDateFormatted} to ${newDateFormatted}`,
+        metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
+      });
+
+      // 4. Update UI only on full success
+      setEffectivePostDate(normalizedNewYmd);
+      setIsEditingDate(false);
+      toast.success(`Video ${videoNumber} Post Date updated to ${newDateFormatted} and synchronized!`);
+    } catch (err: any) {
+      console.error('Error updating post date:', err);
+      toast.error('Failed to update post date: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSavingDate(false);
+    }
+  };
+
+  const handleResetToScheduledDate = async () => {
+    if (!scheduledPostDate) {
+      toast.error('No initial post date found in Influencer schedule.');
+      return;
+    }
+    const normalizedScheduled = parseToYMD(scheduledPostDate, 2026) || scheduledPostDate;
+    const previousDateFormatted = formatDisplayDateLocal(effectivePostDate);
+    const newDateFormatted = formatDisplayDateLocal(normalizedScheduled);
+
+    setIsSavingDate(true);
+    try {
+      const userName = await getCurrentUserName();
+      const resetEntry: PostDateHistoryEntry = {
+        id: `pdh-${Date.now()}`,
+        old_date: previousDateFormatted,
+        new_date: newDateFormatted,
+        changed_by: userName,
+        changed_at: new Date().toISOString(),
+        reason: 'Reset to original Influencer Schedule'
+      };
+
+      const updatedHistory = [resetEntry, ...historyList];
+
+      const syncRes = await syncInfluencerPostDate({
+        influencerId: record.influencer_id,
+        campaignId: record.campaign_id,
+        videoNumber,
+        newPostDate: normalizedScheduled
+      });
+
+      if (!syncRes.success) {
+        toast.error('Failed to sync Post Date: ' + (syncRes.error || 'Database error'));
+        setIsSavingDate(false);
+        return;
+      }
+
+      const saveRes = await onSave({
+        ...existingData,
+        scheduled_post_date: normalizedScheduled,
+        history: updatedHistory,
+        is_modified: false,
+        platform,
+        link: postLink,
+        postedAt: postedAt ? new Date(postedAt).toISOString() : existingData.postedAt,
+        confirmed_live: confirmedLive,
+        suppressDefaultToast: true
+      }, confirmedLive);
+
+      if (saveRes && saveRes.success === false) {
+        toast.error('Failed to save Status Tracking: ' + (saveRes.error || 'Unknown error'));
+        setIsSavingDate(false);
+        return;
+      }
+
+      setEffectivePostDate(normalizedScheduled);
+      setTempPostDate(normalizedScheduled);
+      setIsEditingDate(false);
+      toast.success(`Reset to original schedule: ${newDateFormatted}`);
+    } catch (err: any) {
+      toast.error('Failed to reset: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSavingDate(false);
+    }
+  };
+
+  const handleSaveLiveDetails = async () => {
     if (!postLink || isFakeUrl(postLink)) {
       toast.error(`Please enter the Video ${videoNumber} live post link.`);
       return;
@@ -3244,78 +3618,230 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
     }
 
     await onSave({
+      ...existingData,
+      scheduled_post_date: effectivePostDate,
+      history: historyList,
+      is_modified: isDateModified,
       platform,
       link: postLink,
       postedAt: new Date(postedAt).toISOString(),
       confirmed_live: confirmedLive
-    });
+    }, confirmedLive);
   };
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
-        <input 
-          type="checkbox" 
-          id={`post-live-video-${videoNumber}`}
-          checked={confirmedLive}
-          onChange={(e) => setConfirmedLive(e.target.checked)}
-          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
-        />
-        <label htmlFor={`post-live-video-${videoNumber}`} className="text-sm font-medium text-slate-200 cursor-pointer">
-          Video {videoNumber} is confirmed live and active on the platform.
+      
+      {/* 1. SCHEDULED POST DATE CARD (AUTO-FILLED + EDITABLE) */}
+      <div>
+        <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
+          Scheduled Post Date (Video {videoNumber})
         </label>
-      </div>
 
-      <div className="space-y-4">
-        <div>
-          <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Select Platform</label>
-          <div className="flex gap-3 max-w-md">
-            {platforms.map(p => (
+        {!isEditingDate ? (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b1329] border border-slate-800 rounded-xl gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className={`text-base sm:text-lg font-bold font-mono tracking-wide ${effectivePostDate ? 'text-white' : 'text-slate-500 italic'}`}>
+                {effectivePostDate ? formatDisplayDateLocal(effectivePostDate) : 'Not Assigned'}
+              </span>
+
+              {isDateModified ? (
+                <span className="text-[11px] font-bold text-amber-400 bg-amber-950/70 border border-amber-800/60 px-2.5 py-0.5 rounded-md">
+                  Modified (Manual Edit)
+                </span>
+              ) : scheduledPostDate ? (
+                <span className="text-[11px] font-bold text-blue-300 bg-blue-950/70 border border-blue-800/60 px-2.5 py-0.5 rounded-md">
+                  Auto-filled from Post Date (Video {videoNumber})
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2">
               <button
-                key={p}
                 type="button"
-                onClick={() => setPlatform(p)}
-                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-colors ${
-                  platform === p ? 'bg-blue-600 border-blue-500 text-white shadow-md' : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:border-slate-700'
-                }`}
+                onClick={handleStartEditDate}
+                className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5"
               >
-                {p}
+                <Edit3 size={13} />
+                Edit
               </button>
-            ))}
+
+              {isDateModified && scheduledPostDate && (
+                <button
+                  type="button"
+                  onClick={handleResetToScheduledDate}
+                  disabled={isSavingDate}
+                  className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-rose-400 hover:text-rose-300 rounded-lg text-xs font-bold transition-colors shadow-sm"
+                  title="Restore original scheduled Post Date"
+                >
+                  Reset to Schedule
+                </button>
+              )}
+            </div>
           </div>
+        ) : (
+          <div className="p-4 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-3 animate-fade-in">
+            <span className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
+              Edit Scheduled Post Date (Video {videoNumber})
+            </span>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <input 
+                type="date" 
+                value={tempPostDate} 
+                onChange={e => setTempPostDate(e.target.value)} 
+                className="flex-1 bg-[#070c18] border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSavePostDate}
+                  disabled={isSavingDate}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isSavingDate ? 'Saving...' : 'Save Date'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEditDate}
+                  disabled={isSavingDate}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 2. POST DATE HISTORY SECTION */}
+      <div className="pt-2 border-t border-slate-800/80 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <History size={16} className="text-blue-400" />
+            <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+              Post Date History
+            </h5>
+          </div>
+          <span className="text-[11px] text-slate-500 font-medium">
+            {historyList.length} change{historyList.length === 1 ? '' : 's'} recorded
+          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Final Post Link</label>
-            <input 
-              type="text" 
-              value={postLink} 
-              onChange={e => setPostLink(e.target.value)} 
-              placeholder="https://www.instagram.com/reel/..."
-              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-            />
+        <div className="space-y-2">
+          {/* Base initial schedule reference */}
+          <div className="p-3 rounded-xl bg-[#0b1329] border border-slate-800 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+              <span className="text-slate-400">Initial date from Influencer Info (Video {videoNumber}):</span>
+              <span className="font-bold text-white">
+                {scheduledPostDate ? formatDisplayDateLocal(scheduledPostDate) : 'Not Scheduled'}
+              </span>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-800/50 shrink-0">
+              Source Schedule
+            </span>
           </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Posting Date & Time</label>
-            <input 
-              type="datetime-local" 
-              value={postedAt} 
-              onChange={e => setPostedAt(e.target.value)} 
-              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-            />
-          </div>
+
+          {/* Chronological History entries */}
+          {historyList.length > 0 ? (
+            historyList.map((entry, hIdx) => (
+              <div key={entry.id || hIdx} className="p-3 rounded-xl bg-[#0b1329] border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`w-2 h-2 rounded-full ${entry.reason?.includes('Reset') ? 'bg-rose-400' : 'bg-amber-400'}`}></span>
+                  <span className="text-slate-400 font-medium">{entry.old_date}</span>
+                  <span className="text-slate-500">→</span>
+                  <span className="font-bold text-white">{entry.new_date}</span>
+                  <span className="text-slate-500">|</span>
+                  <span className="text-slate-400">Changed by: <span className="text-slate-200 font-semibold">{entry.changed_by || 'Admin'}</span></span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-slate-500 text-[11px]">{formatHistoryTimestamp(entry.changed_at)}</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                    entry.reason?.includes('Reset') 
+                      ? 'bg-rose-950/60 text-rose-300 border-rose-800/50' 
+                      : 'bg-amber-950/60 text-amber-300 border-amber-800/50'
+                  }`}>
+                    {entry.reason || 'Edited'}
+                  </span>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="p-3 rounded-xl bg-[#0b1329]/50 border border-slate-800/50 text-center">
+              <p className="text-slate-500 text-xs italic">No date changes yet.</p>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="flex justify-end pt-2 border-t border-slate-800">
-        <button 
-          onClick={handleSave} 
-          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
-        >
-          Save Video {videoNumber} Post Date
-        </button>
+      {/* 3. LIVE POST CONFIRMATION & DETAILS */}
+      <div className="pt-4 border-t border-slate-800 space-y-5">
+        <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+          <input 
+            type="checkbox" 
+            id={`post-live-video-${videoNumber}`}
+            checked={confirmedLive}
+            onChange={(e) => setConfirmedLive(e.target.checked)}
+            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
+          />
+          <label htmlFor={`post-live-video-${videoNumber}`} className="text-sm font-medium text-slate-200 cursor-pointer">
+            Video {videoNumber} is confirmed live and active on the platform.
+          </label>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Select Platform</label>
+            <div className="flex gap-3 max-w-md">
+              {platforms.map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPlatform(p)}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-colors ${
+                    platform === p ? 'bg-blue-600 border-blue-500 text-white shadow-md' : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Final Post Link</label>
+              <input 
+                type="text" 
+                value={postLink} 
+                onChange={e => setPostLink(e.target.value)} 
+                placeholder="https://www.instagram.com/reel/..."
+                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Posting Date & Time</label>
+              <input 
+                type="datetime-local" 
+                value={postedAt} 
+                onChange={e => setPostedAt(e.target.value)} 
+                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2 border-t border-slate-800">
+          <button 
+            onClick={handleSaveLiveDetails} 
+            className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+          >
+            Save Video {videoNumber} Post Date
+          </button>
+        </div>
       </div>
+
     </div>
   );
 };

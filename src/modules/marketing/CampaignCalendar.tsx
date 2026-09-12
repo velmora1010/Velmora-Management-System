@@ -715,9 +715,23 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         }
 
         // 2. Final Post Event
-        const fpDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
+        // Resolve Final Post date strictly with priority: Status Tracking post_date -> originalVideoPostDate
+        let effectiveFinalPostDate = '';
+        if (matchingRecord) {
+          try {
+            const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
+            const postDateStepDate = vWorkflow.steps?.post_date?.data?.scheduled_post_date;
+            if (postDateStepDate) {
+              effectiveFinalPostDate = parseDateOnly(postDateStepDate, 2026);
+            }
+          } catch (e) {}
+        }
+
+        const originalPostDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
+        const fpDate = effectiveFinalPostDate || originalPostDate;
+
         if (fpDate) {
-          const key = `${infId}_v${vNum}_FinalPost_${fpDate}`;
+          const key = `${infId}_v${vNum}_FinalPost`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
             list.push({
@@ -734,7 +748,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               avatarUrl,
               record: matchingRecord,
               videoNumber: vNum,
-              postDateStr: pd.post_date,
+              postDateStr: fpDate,
               draftDateStr: drDate
             });
           }
