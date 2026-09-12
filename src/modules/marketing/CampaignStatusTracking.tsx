@@ -5,7 +5,7 @@ import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStat
 import { 
   Clock, Package, Phone, FileText, CreditCard, Video, CheckCircle2, Check, 
   XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
-  ArrowUpDown, RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy
+  RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft
 } from 'lucide-react';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { isActiveStatus } from '../../utils/marketingUtils';
@@ -16,6 +16,36 @@ interface CampaignStatusTrackingProps {
   campaign: Campaign;
   onBack: () => void;
 }
+
+// Configurable default videos count for this campaign
+export const DEFAULT_CAMPAIGN_VIDEOS_COUNT = 6;
+
+export interface VideoStepConfig {
+  id: string;
+  label: string;
+  shortLabel: string;
+  icon: any;
+}
+
+// Video 1 Steps: Call & Explain -> Share Script -> Pay Advance -> Time Line -> Draft -> Post Date
+export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
+  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
+  { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
+  { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: IndianRupee },
+  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
+  { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
+  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: CheckCircle2 },
+];
+
+// Videos 2 through 6 Steps: Call & Explain -> Share Script -> Time Line -> Draft -> Post Date -> Payment
+export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
+  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
+  { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
+  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
+  { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
+  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: CheckCircle2 },
+  { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
+];
 
 const isFakeUrl = (url: string | undefined | null) => {
   if (!url) return true;
@@ -43,15 +73,140 @@ const formatForDateTimeInput = (dateStr: string | undefined | null) => {
   }
 };
 
-// 6 Horizontal Workflow Steps matching reference image
-const WORKFLOW_STEPS = [
-  { id: 'delivered', label: 'Delivery Confirmation', icon: Package, formKey: 'delivered' },
-  { id: 'callExplain', label: 'Call & Explain', icon: Phone, formKey: 'callExplain' },
-  { id: 'shareScript', label: 'Share Script', icon: FileText, formKey: 'shareScript' },
-  { id: 'payAdvance', label: 'Pay Advance', icon: IndianRupee, formKey: 'payAdvance' },
-  { id: 'expTimeline', label: 'Time Line', icon: Clock, formKey: 'expTimeline' },
-  { id: 'draft', label: 'Draft', icon: Video, formKey: 'draft' }
-];
+// =========================================================================
+// HELPER: PARSE & DERIVE VIDEO WORKFLOW STATE
+// =========================================================================
+export interface VideoWorkflowData {
+  videoNumber: number;
+  configs: VideoStepConfig[];
+  steps: Record<string, {
+    completed: boolean;
+    data: any;
+    updated_at?: string;
+  }>;
+  completedCount: number;
+  totalSteps: number;
+  status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED';
+  activeStepId: string;
+}
+
+export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number): VideoWorkflowData => {
+  const configs = videoNum === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
+  let metadata: any = {};
+  try {
+    metadata = JSON.parse(record.notes || '{}');
+  } catch (e) {
+    metadata = {};
+  }
+
+  const storedVideo = metadata.videos?.[String(videoNum)] || metadata.videos?.[videoNum];
+
+  // Initialize steps record
+  const steps: Record<string, { completed: boolean; data: any; updated_at?: string }> = {};
+
+  configs.forEach(cfg => {
+    // If structured in metadata.videos, use that
+    if (storedVideo?.steps?.[cfg.id]) {
+      steps[cfg.id] = storedVideo.steps[cfg.id];
+      return;
+    }
+
+    // Otherwise, backward compatibility with legacy columns / metadata
+    let completed = false;
+    let data: any = {};
+
+    if (videoNum === 1) {
+      if (cfg.id === 'call_explain') {
+        completed = !!metadata.call_explained || (!!record.ref_call_explanation_required && !metadata.call_explanation_pending) || ((record.current_step || 0) >= 2 && !metadata.call_explanation_pending);
+        data = {
+          call_explained: completed,
+          phone_called: metadata.phone_called || record.dispatch?.phone_number || '',
+          call_datetime: metadata.call_datetime || '',
+          call_notes: metadata.call_notes || ''
+        };
+      } else if (cfg.id === 'share_script') {
+        completed = !!metadata.script_shared || !!record.reference_video_received || !!record.ref_script || ((record.current_step || 0) >= 3);
+        data = {
+          script_shared: completed,
+          concept: record.ref_concept || metadata.concept || '',
+          script: record.ref_script || metadata.script || '',
+          keypoints: record.ref_keypoints || metadata.keypoints || '',
+          offer: record.ref_offer || metadata.offer || '',
+          link: record.ref_link || metadata.link || '',
+          reference_videos_list: record.reference_videos_list || []
+        };
+      } else if (cfg.id === 'pay_advance') {
+        completed = !!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0);
+        data = {
+          gpay: record.advance_gpay_number || '',
+          total: record.advance_total_amount || record.pricing?.final_price || '',
+          advance: record.advance_paid_amount || '',
+          photo: record.pay_advance_photo_url || ''
+        };
+      } else if (cfg.id === 'timeline') {
+        completed = !!record.expected_delivery_completed || (!!record.draft_expected_date && !!record.draft_expected_time);
+        data = {
+          date: record.draft_expected_date || '',
+          time: record.draft_expected_time || ''
+        };
+      } else if (cfg.id === 'draft') {
+        completed = !!record.draft_received || !!record.draft_video_url || (record.draft_approval_status === 'Approved');
+        data = {
+          vid: record.draft_video_url || '',
+          appStat: record.draft_approval_status || '',
+          timing: record.draft_timing_status || '',
+          corr: record.draft_corrections_required || '',
+          finalL: record.draft_final_product_link || '',
+          finalD: record.draft_final_description || ''
+        };
+      } else if (cfg.id === 'post_date') {
+        completed = !!record.final_post_completed || (!!record.final_post_link && !isFakeUrl(record.final_post_link)) || !!metadata.video1_confirmed;
+        data = {
+          link: record.final_post_link || metadata.video1_final_post_link || '',
+          postedAt: record.final_post_actual_datetime || metadata.video1_posted_at || '',
+          platform: metadata.video1_platform || 'Instagram',
+          confirmed: completed
+        };
+      }
+    } else if (videoNum === 2) {
+      if (cfg.id === 'post_date' && metadata.video2_final_post_link && !isFakeUrl(metadata.video2_final_post_link)) {
+        completed = !!metadata.video2_confirmed;
+        data = {
+          link: metadata.video2_final_post_link || '',
+          postedAt: metadata.video2_posted_at || '',
+          platform: metadata.video2_platform || 'Instagram',
+          confirmed: completed
+        };
+      }
+    }
+
+    steps[cfg.id] = { completed, data };
+  });
+
+  const completedCount = configs.filter(c => steps[c.id]?.completed).length;
+  const totalSteps = configs.length;
+
+  let status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' = 'NOT_STARTED';
+  if (completedCount === totalSteps) {
+    status = 'COMPLETED';
+  } else if (completedCount > 0) {
+    status = 'IN_PROGRESS';
+  }
+
+  // Active step is the first incomplete step, or last step if all complete
+  const firstIncomplete = configs.find(c => !steps[c.id]?.completed);
+  const activeStepId = firstIncomplete ? firstIncomplete.id : configs[configs.length - 1].id;
+
+  return {
+    videoNumber: videoNum,
+    configs,
+    steps,
+    completedCount,
+    totalSteps,
+    status,
+    activeStepId
+  };
+};
 
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
   const { trackingRecords, isLoading, refresh, saveMilestone } = useCampaignStatusTracking(campaign.id);
@@ -66,6 +221,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const [activeModal, setActiveModal] = useState<{ recordId: string; stageId: string } | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [detailsRecord, setDetailsRecord] = useState<StatusTrackingRecord | null>(null);
+
+  // LEVEL 2 VIEW STATE: null = Main List View; object = Video Detail View
+  const [selectedVideo, setSelectedVideo] = useState<{ recordId: string; videoNumber: number } | null>(null);
 
   // Close menus on click outside
   useEffect(() => {
@@ -90,8 +248,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     });
   }, [trackingRecords]);
 
-  // Derive Step Data for any record
-  const getRecordStepData = (record: StatusTrackingRecord) => {
+  // Derive Overall Status Badge for each influencer
+  const getOverallStatus = (record: StatusTrackingRecord) => {
     let metadata: any = {};
     try {
       metadata = JSON.parse(record.notes || '{}');
@@ -99,41 +257,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       metadata = {};
     }
 
-    const isDelivered = !!record.delivered_confirmed;
-    const isCallExplained = isDelivered && (!!metadata.call_explained || (!!record.ref_call_explanation_required && !metadata.call_explanation_pending) || ((record.current_step || 0) >= 2 && !metadata.call_explanation_pending));
-    const isScriptShared = isDelivered && (!!metadata.script_shared || !!record.reference_video_received || !!record.ref_script || ((record.current_step || 0) >= 3));
-    const isAdvancePaid = isDelivered && (!!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0));
-    const isTimelineSet = isDelivered && (!!record.expected_delivery_completed || (!!record.draft_expected_date && !!record.draft_expected_time));
-    const isDraftDone = isDelivered && (!!record.draft_received || !!record.draft_video_url || (record.draft_approval_status === 'Approved'));
-
-    const stepsCompleted = [
-      isDelivered,
-      isCallExplained,
-      isScriptShared,
-      isAdvancePaid,
-      isTimelineSet,
-      isDraftDone
-    ];
-
-    let activeIndex = stepsCompleted.findIndex(completed => !completed);
-    if (activeIndex === -1) activeIndex = 6;
-
-    return {
-      metadata,
-      stepsCompleted,
-      activeIndex,
-      isDelivered,
-      isCallExplained,
-      isScriptShared,
-      isAdvancePaid,
-      isTimelineSet,
-      isDraftDone
-    };
-  };
-
-  // Derive Overall Status Badge
-  const getOverallStatus = (record: StatusTrackingRecord, stepData: ReturnType<typeof getRecordStepData>) => {
-    const { metadata, stepsCompleted, isDelivered } = stepData;
     const rawStatus = (record.status || '').toLowerCase();
 
     // On Hold
@@ -146,8 +269,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
-    // Not Started: if Step 1 (delivery) is not confirmed yet
-    if (!isDelivered) {
+    // Not Started: if delivery is not confirmed yet
+    if (!record.delivered_confirmed) {
       return {
         key: 'NOT_STARTED',
         label: 'Not Started',
@@ -156,10 +279,18 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
-    const completedCount = stepsCompleted.filter(Boolean).length;
+    // Check all 6 videos status
+    const v1 = getVideoWorkflow(record, 1);
+    const v2 = getVideoWorkflow(record, 2);
+    const v3 = getVideoWorkflow(record, 3);
+    const v4 = getVideoWorkflow(record, 4);
+    const v5 = getVideoWorkflow(record, 5);
+    const v6 = getVideoWorkflow(record, 6);
 
-    // Completed
-    if (stepsCompleted[5] || completedCount === 6) {
+    const allVideos = [v1, v2, v3, v4, v5, v6];
+    const allCompleted = allVideos.every(v => v.status === 'COMPLETED');
+
+    if (allCompleted) {
       return {
         key: 'COMPLETED',
         label: 'Completed',
@@ -168,32 +299,23 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
-    // Almost Done
-    if (stepsCompleted[4]) {
+    const anyInProgressOrCompleted = allVideos.some(v => v.status === 'COMPLETED' || v.status === 'IN_PROGRESS');
+
+    if (anyInProgressOrCompleted) {
       return {
-        key: 'ALMOST_DONE',
-        label: 'Almost Done',
-        badgeClass: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
-        dotClass: 'bg-purple-400'
+        key: 'IN_PROGRESS',
+        label: 'In Progress',
+        badgeClass: 'bg-blue-950/80 text-blue-400 border-blue-700/60',
+        dotClass: 'bg-blue-400'
       };
     }
 
-    // Pending
-    if (record.draft_approval_status === 'Not Approved' || metadata.is_pending || rawStatus === 'pending') {
-      return {
-        key: 'PENDING',
-        label: 'Pending',
-        badgeClass: 'bg-amber-950/80 text-amber-400 border-amber-700/60',
-        dotClass: 'bg-amber-400'
-      };
-    }
-
-    // In Progress
+    // If delivered but videos not started
     return {
       key: 'IN_PROGRESS',
-      label: 'In Progress',
-      badgeClass: 'bg-blue-950/80 text-blue-400 border-blue-700/60',
-      dotClass: 'bg-blue-400'
+      label: 'Delivery Confirmed',
+      badgeClass: 'bg-indigo-950/80 text-indigo-400 border-indigo-700/60',
+      dotClass: 'bg-indigo-400'
     };
   };
 
@@ -218,10 +340,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     let notStarted = 0;
 
     activeTrackingRecords.forEach(r => {
-      const stepData = getRecordStepData(r);
-      const status = getOverallStatus(r, stepData);
+      const status = getOverallStatus(r);
       if (status.key === 'COMPLETED') completed++;
-      else if (status.key === 'IN_PROGRESS' || status.key === 'ALMOST_DONE') inProgress++;
+      else if (status.key === 'IN_PROGRESS') inProgress++;
       else if (status.key === 'PENDING') pending++;
       else if (status.key === 'ON_HOLD') onHold++;
       else if (status.key === 'NOT_STARTED') notStarted++;
@@ -248,13 +369,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const filteredRecords = useMemo(() => {
     return activeTrackingRecords.filter(record => {
       const dispatch = record.dispatch || ({} as any);
-      const stepData = getRecordStepData(record);
-      const overallStatus = getOverallStatus(record, stepData);
+      const overallStatus = getOverallStatus(record);
 
       // Status filter
       if (selectedStatus !== 'ALL') {
         if (selectedStatus === 'IN_PROGRESS') {
-          if (overallStatus.key !== 'IN_PROGRESS' && overallStatus.key !== 'ALMOST_DONE') return false;
+          if (overallStatus.key !== 'IN_PROGRESS') return false;
         } else if (overallStatus.key !== selectedStatus) {
           return false;
         }
@@ -299,12 +419,10 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     setSelectedLanguage('ALL');
   };
 
-  // Milestone Save Handler
-  const handleFormSave = async (recordId: string, data: any) => {
+  // Milestone Save Handler for Top-Level Delivery & Modals
+  const handleDeliverySave = async (recordId: string, data: any) => {
     const record = activeTrackingRecords.find(r => r.id === recordId) || trackingRecords.find(r => r.id === recordId);
     if (!record) return;
-
-    const updates = { ...data };
 
     let metadata: any = {};
     try {
@@ -313,44 +431,113 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       metadata = {};
     }
 
-    if (updates.notes) {
-      try {
-        const newMeta = JSON.parse(updates.notes);
-        metadata = { ...metadata, ...newMeta };
-      } catch (e) {}
-    }
-
-    if (activeModal?.stageId === 'delivered') {
-      updates.delivered_confirmed = true;
-    } else if (activeModal?.stageId === 'callExplain') {
-      metadata.call_explained = true;
-      metadata.call_explanation_pending = false;
-      updates.ref_call_explanation_required = true;
-    } else if (activeModal?.stageId === 'shareScript') {
-      metadata.script_shared = true;
-      updates.reference_video_received = true;
-    } else if (activeModal?.stageId === 'payAdvance') {
-      updates.pay_advance_completed = true;
-    } else if (activeModal?.stageId === 'expTimeline') {
-      updates.expected_delivery_completed = true;
-    } else if (activeModal?.stageId === 'draft') {
-      updates.draft_received = true;
-    } else if (activeModal?.stageId === 'payRemaining') {
-      updates.payment_remaining_completed = true;
-    } else if (activeModal?.stageId === 'finalPost') {
-      updates.final_post_completed = true;
-    }
-
     metadata.last_updated = new Date().toISOString();
-    updates.notes = JSON.stringify(metadata);
+    metadata.delivered_confirmed = data.delivered_confirmed;
+
+    const updates: Partial<StatusTrackingRecord> = {
+      delivered_confirmed: data.delivered_confirmed,
+      delivery_photo_url: data.delivery_photo_url || null,
+      current_step: data.delivered_confirmed ? Math.max(record.current_step || 0, 1) : 0,
+      notes: JSON.stringify(metadata)
+    };
 
     const result = await saveMilestone(recordId, updates);
     if (result.success) {
-      toast.success('Step saved successfully.');
+      toast.success('Delivery confirmation saved successfully.');
       await refresh();
       setActiveModal(null);
     } else {
-      toast.error('Failed to save: ' + (result.error?.message || 'Unknown error'));
+      toast.error('Failed to save delivery: ' + (result.error?.message || 'Unknown error'));
+    }
+  };
+
+  // Dedicated Save Handler for Video Steps (Persists independently inside notes.videos)
+  const handleSaveVideoStep = async (
+    recordId: string, 
+    videoNumber: number, 
+    stepId: string, 
+    stepData: any, 
+    isStepCompleted: boolean
+  ) => {
+    const record = activeTrackingRecords.find(r => r.id === recordId) || trackingRecords.find(r => r.id === recordId);
+    if (!record) return;
+
+    let metadata: any = {};
+    try {
+      metadata = JSON.parse(record.notes || '{}');
+    } catch (e) {
+      metadata = {};
+    }
+
+    if (!metadata.videos) metadata.videos = {};
+    if (!metadata.videos[String(videoNumber)]) {
+      metadata.videos[String(videoNumber)] = {
+        video_number: videoNumber,
+        steps: {}
+      };
+    }
+
+    const videoObj = metadata.videos[String(videoNumber)];
+    if (!videoObj.steps) videoObj.steps = {};
+
+    videoObj.steps[stepId] = {
+      completed: isStepCompleted,
+      data: stepData,
+      updated_at: new Date().toISOString()
+    };
+
+    // Calculate video completion status
+    const configs = videoNumber === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
+    const completedStepsCount = configs.filter(c => videoObj.steps[c.id]?.completed).length;
+    videoObj.completed_count = completedStepsCount;
+    videoObj.status = completedStepsCount === configs.length ? 'COMPLETED' : (completedStepsCount > 0 ? 'IN_PROGRESS' : 'NOT_STARTED');
+
+    metadata.last_updated = new Date().toISOString();
+
+    const updates: Partial<StatusTrackingRecord> = {
+      notes: JSON.stringify(metadata)
+    };
+
+    // For Video 1, mirror corresponding legacy columns to maintain backward compatibility
+    if (videoNumber === 1) {
+      if (stepId === 'call_explain') {
+        updates.ref_call_explanation_required = isStepCompleted;
+        metadata.call_explained = isStepCompleted;
+      } else if (stepId === 'share_script') {
+        updates.reference_video_received = isStepCompleted;
+        metadata.script_shared = isStepCompleted;
+      } else if (stepId === 'pay_advance') {
+        updates.pay_advance_completed = isStepCompleted;
+        if (stepData.gpay) updates.advance_gpay_number = stepData.gpay;
+        if (stepData.total) updates.advance_total_amount = stepData.total;
+        if (stepData.advance) updates.advance_paid_amount = stepData.advance;
+        if (stepData.photo) updates.pay_advance_photo_url = stepData.photo;
+      } else if (stepId === 'timeline') {
+        updates.expected_delivery_completed = isStepCompleted;
+        if (stepData.date) updates.draft_expected_date = stepData.date;
+        if (stepData.time) updates.draft_expected_time = stepData.time;
+      } else if (stepId === 'draft') {
+        updates.draft_received = isStepCompleted;
+        if (stepData.vid) updates.draft_video_url = stepData.vid;
+        if (stepData.appStat) updates.draft_approval_status = stepData.appStat;
+        if (stepData.timing) updates.draft_timing_status = stepData.timing;
+        if (stepData.corr) updates.draft_corrections_required = stepData.corr;
+        if (stepData.finalL) updates.draft_final_product_link = stepData.finalL;
+        if (stepData.finalD) updates.draft_final_description = stepData.finalD;
+      } else if (stepId === 'post_date') {
+        updates.final_post_completed = isStepCompleted;
+        if (stepData.link) updates.final_post_link = stepData.link;
+        if (stepData.postedAt) updates.final_post_actual_datetime = stepData.postedAt;
+      }
+      updates.notes = JSON.stringify(metadata);
+    }
+
+    const result = await saveMilestone(recordId, updates);
+    if (result.success) {
+      toast.success(`Video ${videoNumber} step updated successfully!`);
+      await refresh();
+    } else {
+      toast.error('Failed to save step: ' + (result.error?.message || 'Unknown error'));
     }
   };
 
@@ -383,11 +570,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     setOpenMenuId(null);
   };
 
-  const toggleModal = (recordId: string, stageId: string) => {
-    setActiveModal({ recordId, stageId });
-    setOpenMenuId(null);
-  };
-
   // Last Updated timestamp formatted
   const lastUpdatedStr = useMemo(() => {
     const d = new Date();
@@ -395,394 +577,443 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
            d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
   }, []);
 
+  // Check active record for Level 2 Video Detail View
+  const selectedRecord = selectedVideo 
+    ? (activeTrackingRecords.find(r => r.id === selectedVideo.recordId) || trackingRecords.find(r => r.id === selectedVideo.recordId) || null)
+    : null;
+
   return (
     <div className="bg-[#070c18] rounded-2xl border border-slate-800/80 overflow-hidden flex flex-col h-[calc(100vh-120px)] min-h-[750px] shadow-2xl p-5 gap-4">
       
-      {/* 1. PAGE HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800/80 gap-4 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600/30 to-pink-600/30 border border-purple-500/40 flex items-center justify-center text-purple-400 shadow-md">
-            <Target size={22} className="text-purple-400" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-white tracking-wide">Status Tracking</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Track and manage influencer activity status for this campaign</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs font-medium text-slate-400 bg-[#0c1326] px-3 py-1.5 rounded-lg border border-slate-800">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Last Updated: {lastUpdatedStr}</span>
-          </div>
-          <button 
-            onClick={refresh}
-            className="p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 text-slate-300 rounded-lg transition-colors"
-            title="Refresh Data"
-          >
-            <RefreshCcw size={16} />
-          </button>
-          <button 
-            onClick={onBack}
-            className="px-3.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 text-slate-300 rounded-lg text-xs font-semibold transition-colors"
-          >
-            Back to Overview
-          </button>
-        </div>
-      </div>
-
-      {/* 2. FILTER BAR */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
-        <div className="relative flex-1 w-full">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input 
-            type="text" 
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search influencer name, phone, or order ID..."
-            className="w-full bg-[#0b1329] border border-slate-800/80 rounded-xl pl-10 pr-4 py-2 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
-          />
-        </div>
-        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-          <select 
-            value={selectedStatus}
-            onChange={e => setSelectedStatus(e.target.value)}
-            className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
-          >
-            <option value="ALL">All Status</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="IN_PROGRESS">In Progress</option>
-            <option value="PENDING">Pending</option>
-            <option value="ALMOST_DONE">Almost Done</option>
-            <option value="ON_HOLD">On Hold</option>
-            <option value="NOT_STARTED">Not Started</option>
-          </select>
-          <select 
-            value={selectedPlatform}
-            onChange={e => setSelectedPlatform(e.target.value)}
-            className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
-          >
-            <option value="ALL">All Platforms</option>
-            <option value="Instagram">Instagram</option>
-            <option value="YouTube">YouTube</option>
-            <option value="Facebook">Facebook</option>
-          </select>
-          <select 
-            value={selectedLanguage}
-            onChange={e => setSelectedLanguage(e.target.value)}
-            className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
-          >
-            <option value="ALL">All Languages</option>
-            {availableLanguages.map(lang => (
-              <option key={lang} value={lang}>{lang}</option>
-            ))}
-          </select>
-          <button 
-            onClick={handleClearFilters}
-            className="border border-rose-500/50 hover:bg-rose-500/10 text-rose-400 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
-          >
-            <Trash2 size={15} />
-            Clear All
-          </button>
-        </div>
-      </div>
-
-      {/* 3. SUMMARY CARDS (6 Cards) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
-        {/* Total Influencers */}
-        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center shrink-0">
-            <Users size={18} />
-          </div>
-          <div>
-            <span className="text-[11px] font-medium text-slate-400 block">Total Influencers</span>
-            <span className="text-base sm:text-lg font-black text-white">{kpiCounts.total}</span>
-          </div>
-        </div>
-
-        {/* Completed */}
-        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
-            <CheckCircle2 size={18} />
-          </div>
-          <div>
-            <span className="text-[11px] font-medium text-slate-400 block">Completed</span>
-            <span className="text-base sm:text-lg font-black text-white">
-              {kpiCounts.completed} <span className="text-xs font-semibold text-emerald-400/80">({kpiCounts.completedPct}%)</span>
-            </span>
-          </div>
-        </div>
-
-        {/* In Progress */}
-        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center shrink-0">
-            <Target size={18} />
-          </div>
-          <div>
-            <span className="text-[11px] font-medium text-slate-400 block">In Progress</span>
-            <span className="text-base sm:text-lg font-black text-white">
-              {kpiCounts.inProgress} <span className="text-xs font-semibold text-blue-400/80">({kpiCounts.inProgressPct}%)</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Pending */}
-        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
-            <Clock size={18} />
-          </div>
-          <div>
-            <span className="text-[11px] font-medium text-slate-400 block">Pending</span>
-            <span className="text-base sm:text-lg font-black text-white">
-              {kpiCounts.pending} <span className="text-xs font-semibold text-amber-400/80">({kpiCounts.pendingPct}%)</span>
-            </span>
-          </div>
-        </div>
-
-        {/* On Hold */}
-        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-slate-700/30 text-slate-400 border border-slate-600/30 flex items-center justify-center shrink-0">
-            <PauseCircle size={18} />
-          </div>
-          <div>
-            <span className="text-[11px] font-medium text-slate-400 block">On Hold</span>
-            <span className="text-base sm:text-lg font-black text-white">
-              {kpiCounts.onHold} <span className="text-xs font-semibold text-slate-400">({kpiCounts.onHoldPct}%)</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Not Started */}
-        <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
-            <XCircle size={18} />
-          </div>
-          <div>
-            <span className="text-[11px] font-medium text-slate-400 block">Not Started</span>
-            <span className="text-base sm:text-lg font-black text-white">
-              {kpiCounts.notStarted} <span className="text-xs font-semibold text-rose-400/80">({kpiCounts.notStartedPct}%)</span>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. DEDICATED INTERNAL VERTICAL SCROLL CONTAINER */}
-      <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3 scroll-smooth">
-        {isLoading ? (
-          <div className="flex justify-center items-center h-64 text-slate-400">
-            <RefreshCcw size={22} className="animate-spin mr-2 text-blue-400" />
-            <span>Loading status tracking records...</span>
-          </div>
-        ) : filteredRecords.length === 0 ? (
-          <div className="flex flex-col justify-center items-center h-64 text-slate-500 italic bg-[#0b1329]/50 rounded-2xl border border-slate-800/60 p-8">
-            <div className="text-4xl mb-3 opacity-60">🎯</div>
-            <h3 className="text-slate-300 text-base font-semibold mb-1">No matching status tracking records</h3>
-            <p className="text-xs text-slate-400">
-              {searchQuery || selectedStatus !== 'ALL' || selectedPlatform !== 'ALL' || selectedLanguage !== 'ALL'
-                ? 'Try clearing your filters to view influencers.'
-                : 'Dispatch an influencer with Delivered shipment status to begin status tracking.'}
-            </p>
-          </div>
-        ) : (
-          filteredRecords.map(record => {
-            const dispatch = record.dispatch || ({} as any);
-            const avatarUrl = dispatch.influencer_avatar;
-            const influencerCode = dispatch.influencer_code || record.influencer_id;
-            const influencerName = dispatch.influencer_name || 'Unknown Influencer';
-            const username = dispatch.username || '—';
-
-            const stepData = getRecordStepData(record);
-            const overallStatus = getOverallStatus(record, stepData);
-            const isMenuOpen = openMenuId === record.id;
-
-            return (
-              <div 
-                key={record.id}
-                id={`st-card-${record.dispatch_id || record.id}`}
-                className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-4 transition-all duration-200 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4"
-              >
-                {/* LEFT SECTION: Compact Code Badge, Profile, Name, Username */}
-                <div className="flex items-center gap-3 shrink-0">
-                  {/* Compact Influencer Code Badge */}
-                  <div className="px-2.5 py-1 rounded-lg bg-[#070c18] border border-slate-700/80 text-white font-mono font-bold text-xs tracking-wider shrink-0 shadow-sm text-center">
-                    {influencerCode}
-                  </div>
-
-                  {/* Profile Avatar */}
-                  <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt={influencerName} className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-slate-400 font-extrabold text-sm">{influencerName.charAt(0) || '?'}</span>
-                    )}
-                  </div>
-
-                  {/* Influencer Name & Username */}
-                  <div className="truncate min-w-0">
-                    <h4 className="text-white font-bold text-sm sm:text-base leading-tight truncate max-w-[190px]" title={influencerName}>
-                      {influencerName}
-                    </h4>
-                    <p className="text-slate-400 text-xs font-medium mt-0.5 truncate max-w-[190px]" title={username}>
-                      {username}
-                    </p>
-                  </div>
-                </div>
-
-                {/* CENTER SECTION: 6-Step Horizontal Connected Workflow */}
-                <div className="flex-1 px-2 py-1 max-w-2xl mx-auto w-full">
-                  <div className="flex items-center justify-between w-full">
-                    {WORKFLOW_STEPS.map((step, idx) => {
-                      const hasStarted = stepData.isDelivered;
-                      const isCompleted = stepData.stepsCompleted[idx];
-                      const isCurrent = hasStarted && !isCompleted && idx === stepData.activeIndex;
-
-                      // Connecting line state
-                      const nextStepCompleted = idx < WORKFLOW_STEPS.length - 1 && stepData.stepsCompleted[idx + 1];
-                      const isLineCompleted = isCompleted && (nextStepCompleted || (hasStarted && idx + 1 === stepData.activeIndex));
-
-                      // Node visuals
-                      let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200";
-                      let labelStyle = "text-slate-400";
-                      let NodeIcon = step.icon;
-
-                      if (isCompleted) {
-                        circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-110";
-                        labelStyle = "text-emerald-400 font-semibold";
-                      } else if (isCurrent) {
-                        circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400 hover:scale-110";
-                        labelStyle = "text-blue-400 font-bold";
-                      }
-
-                      return (
-                        <React.Fragment key={step.id}>
-                          {/* Node & Label */}
-                          <div 
-                            className="flex flex-col items-center cursor-pointer group relative select-none"
-                            onClick={() => toggleModal(record.id, step.id)}
-                            title={`Click to manage: ${step.label}`}
-                          >
-                            <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
-                              {isCompleted ? (
-                                <Check size={18} strokeWidth={3} className="text-white" />
-                              ) : isCurrent ? (
-                                <NodeIcon size={18} className="text-white" />
-                              ) : (
-                                <span className="font-bold text-xs sm:text-sm text-slate-400">{idx + 1}</span>
-                              )}
-                            </div>
-                            <span className={`text-[10px] sm:text-[11px] text-center w-20 sm:w-24 leading-tight mt-1.5 transition-colors ${labelStyle}`}>
-                              {step.label}
-                            </span>
-                          </div>
-
-                          {/* Connecting Line */}
-                          {idx !== WORKFLOW_STEPS.length - 1 && (
-                            <div className="flex-1 h-[2px] mx-1 sm:mx-2 -mt-4 transition-colors duration-300">
-                              <div className={`h-full w-full rounded-full ${isLineCompleted ? 'bg-emerald-500' : 'bg-slate-700/60'}`} />
-                            </div>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* RIGHT SECTION: Overall Status & Three-Dot Menu */}
-                <div className="flex items-center gap-3 shrink-0 justify-end">
-                  {/* Status Badge */}
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border shadow-sm ${overallStatus.badgeClass}`}>
-                    <span className={`w-2 h-2 rounded-full ${overallStatus.dotClass}`}></span>
-                    <span>{overallStatus.label}</span>
-                  </span>
-
-                  {/* Three-Dot Menu */}
-                  <div className="relative three-dot-menu-container">
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenMenuId(isMenuOpen ? null : record.id);
-                      }}
-                      className="w-8 h-8 rounded-lg bg-[#070c18] hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
-                      title="More actions"
-                    >
-                      <MoreHorizontal size={16} />
-                    </button>
-
-                    {isMenuOpen && (
-                      <div className="absolute right-0 top-10 w-52 bg-[#0c1326] border border-slate-700/80 rounded-xl shadow-2xl z-40 py-1.5 overflow-hidden animate-fade-in text-xs">
-                        <button 
-                          onClick={() => {
-                            setDetailsRecord(record);
-                            setOpenMenuId(null);
-                          }}
-                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
-                        >
-                          <Eye size={14} className="text-blue-400" />
-                          <span>View Influencer Details</span>
-                        </button>
-                        <button 
-                          onClick={() => handleToggleOnHold(record)}
-                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
-                        >
-                          <PauseCircle size={14} className="text-amber-400" />
-                          <span>{overallStatus.key === 'ON_HOLD' ? 'Resume Workflow' : 'Toggle On Hold'}</span>
-                        </button>
-                        <button 
-                          onClick={() => toggleModal(record.id, 'payRemaining')}
-                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
-                        >
-                          <CreditCard size={14} className="text-emerald-400" />
-                          <span>Remaining Payment</span>
-                        </button>
-                        <button 
-                          onClick={() => toggleModal(record.id, 'finalPost')}
-                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
-                        >
-                          <CheckCircle2 size={14} className="text-purple-400" />
-                          <span>Final Post Date</span>
-                        </button>
-                        <div className="h-[1px] bg-slate-800 my-1" />
-                        <button 
-                          onClick={() => handleCopyCode(influencerCode)}
-                          className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
-                        >
-                          <Copy size={14} className="text-slate-400" />
-                          <span>Copy Influencer Code</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
+      {/* =========================================================================
+          LEVEL 2: DEDICATED VIDEO DETAIL VIEW
+      ========================================================================= */}
+      {selectedVideo && selectedRecord ? (
+        <VideoDetailView 
+          record={selectedRecord}
+          videoNumber={selectedVideo.videoNumber}
+          onBack={() => setSelectedVideo(null)}
+          onSwitchVideo={(num) => setSelectedVideo({ recordId: selectedRecord.id, videoNumber: num })}
+          onSaveStep={(stepId, data, completed) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed)}
+        />
+      ) : (
+        /* =========================================================================
+            LEVEL 1: MAIN STATUS TRACKING LIST VIEW
+        ========================================================================= */
+        <>
+          {/* 1. PAGE HEADER */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800/80 gap-4 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600/30 to-pink-600/30 border border-purple-500/40 flex items-center justify-center text-purple-400 shadow-md">
+                <Target size={22} className="text-purple-400" />
               </div>
-            );
-          })
-        )}
-      </div>
+              <div>
+                <h2 className="text-xl font-bold text-white tracking-wide">Status Tracking</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Track and manage influencer activity status for this campaign</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-400 bg-[#0c1326] px-3 py-1.5 rounded-lg border border-slate-800">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Last Updated: {lastUpdatedStr}</span>
+              </div>
+              <button 
+                onClick={refresh}
+                className="p-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 text-slate-300 rounded-lg transition-colors"
+                title="Refresh Data"
+              >
+                <RefreshCcw size={16} />
+              </button>
+              <button 
+                onClick={onBack}
+                className="px-3.5 py-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 text-slate-300 rounded-lg text-xs font-semibold transition-colors"
+              >
+                Back to Overview
+              </button>
+            </div>
+          </div>
+
+          {/* 2. FILTER BAR */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
+            <div className="relative flex-1 w-full">
+              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input 
+                type="text" 
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search influencer name, phone, code or tracking ID..."
+                className="w-full bg-[#0b1329] border border-slate-800/80 rounded-xl pl-10 pr-4 py-2 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+              />
+            </div>
+            <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+              <select 
+                value={selectedStatus}
+                onChange={e => setSelectedStatus(e.target.value)}
+                className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+              >
+                <option value="ALL">All Status</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="IN_PROGRESS">In Progress</option>
+                <option value="ON_HOLD">On Hold</option>
+                <option value="NOT_STARTED">Not Started</option>
+              </select>
+              <select 
+                value={selectedPlatform}
+                onChange={e => setSelectedPlatform(e.target.value)}
+                className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+              >
+                <option value="ALL">All Platforms</option>
+                <option value="Instagram">Instagram</option>
+                <option value="YouTube">YouTube</option>
+                <option value="Facebook">Facebook</option>
+              </select>
+              <select 
+                value={selectedLanguage}
+                onChange={e => setSelectedLanguage(e.target.value)}
+                className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+              >
+                <option value="ALL">All Languages</option>
+                {availableLanguages.map(lang => (
+                  <option key={lang} value={lang}>{lang}</option>
+                ))}
+              </select>
+              <button 
+                onClick={handleClearFilters}
+                className="border border-rose-500/50 hover:bg-rose-500/10 text-rose-400 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              >
+                <Trash2 size={15} />
+                Clear All
+              </button>
+            </div>
+          </div>
+
+          {/* 3. SUMMARY CARDS (6 Cards) */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
+            {/* Total Influencers */}
+            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center shrink-0">
+                <Users size={18} />
+              </div>
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">Total Influencers</span>
+                <span className="text-base sm:text-lg font-black text-white">{kpiCounts.total}</span>
+              </div>
+            </div>
+
+            {/* Completed */}
+            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                <CheckCircle2 size={18} />
+              </div>
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">Completed</span>
+                <span className="text-base sm:text-lg font-black text-white">
+                  {kpiCounts.completed} <span className="text-xs font-semibold text-emerald-400/80">({kpiCounts.completedPct}%)</span>
+                </span>
+              </div>
+            </div>
+
+            {/* In Progress */}
+            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center shrink-0">
+                <Target size={18} />
+              </div>
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">In Progress</span>
+                <span className="text-base sm:text-lg font-black text-white">
+                  {kpiCounts.inProgress} <span className="text-xs font-semibold text-blue-400/80">({kpiCounts.inProgressPct}%)</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Pending */}
+            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <Clock size={18} />
+              </div>
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">Pending</span>
+                <span className="text-base sm:text-lg font-black text-white">
+                  {kpiCounts.pending} <span className="text-xs font-semibold text-amber-400/80">({kpiCounts.pendingPct}%)</span>
+                </span>
+              </div>
+            </div>
+
+            {/* On Hold */}
+            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-slate-700/30 text-slate-400 border border-slate-600/30 flex items-center justify-center shrink-0">
+                <PauseCircle size={18} />
+              </div>
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">On Hold</span>
+                <span className="text-base sm:text-lg font-black text-white">
+                  {kpiCounts.onHold} <span className="text-xs font-semibold text-slate-400">({kpiCounts.onHoldPct}%)</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Not Started */}
+            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
+                <XCircle size={18} />
+              </div>
+              <div>
+                <span className="text-[11px] font-medium text-slate-400 block">Not Started</span>
+                <span className="text-base sm:text-lg font-black text-white">
+                  {kpiCounts.notStarted} <span className="text-xs font-semibold text-rose-400/80">({kpiCounts.notStartedPct}%)</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. DEDICATED INTERNAL VERTICAL SCROLL CONTAINER */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3 scroll-smooth">
+            {isLoading ? (
+              <div className="flex justify-center items-center h-64 text-slate-400">
+                <RefreshCcw size={22} className="animate-spin mr-2 text-blue-400" />
+                <span>Loading status tracking records...</span>
+              </div>
+            ) : filteredRecords.length === 0 ? (
+              <div className="flex flex-col justify-center items-center h-64 text-slate-500 italic bg-[#0b1329]/50 rounded-2xl border border-slate-800/60 p-8">
+                <div className="text-4xl mb-3 opacity-60">🎯</div>
+                <h3 className="text-slate-300 text-base font-semibold mb-1">No matching status tracking records</h3>
+                <p className="text-xs text-slate-400">
+                  {searchQuery || selectedStatus !== 'ALL' || selectedPlatform !== 'ALL' || selectedLanguage !== 'ALL'
+                    ? 'Try clearing your filters to view influencers.'
+                    : 'Dispatch an influencer with Delivered shipment status to begin status tracking.'}
+                </p>
+              </div>
+            ) : (
+              filteredRecords.map(record => {
+                const dispatch = record.dispatch || ({} as any);
+                const avatarUrl = dispatch.influencer_avatar;
+                const influencerCode = dispatch.influencer_code || record.influencer_id;
+                const influencerName = dispatch.influencer_name || 'Unknown Influencer';
+                const username = dispatch.username || '—';
+
+                const isDelivered = !!record.delivered_confirmed;
+                const overallStatus = getOverallStatus(record);
+                const isMenuOpen = openMenuId === record.id;
+
+                // Derive status for all 6 videos
+                const videoWorkflows = [1, 2, 3, 4, 5, 6].map(num => getVideoWorkflow(record, num));
+
+                return (
+                  <div 
+                    key={record.id}
+                    id={`st-card-${record.dispatch_id || record.id}`}
+                    className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-4 transition-all duration-200 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4"
+                  >
+                    {/* LEFT SECTION: Compact Code Badge, Profile, Name, Username */}
+                    <div className="flex items-center gap-3 shrink-0 min-w-[220px]">
+                      {/* Compact Influencer Code Badge */}
+                      <div className="px-2.5 py-1 rounded-lg bg-[#070c18] border border-slate-700/80 text-white font-mono font-bold text-xs tracking-wider shrink-0 shadow-sm text-center">
+                        {influencerCode}
+                      </div>
+
+                      {/* Profile Avatar */}
+                      <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
+                        {avatarUrl ? (
+                          <img src={avatarUrl} alt={influencerName} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-slate-400 font-extrabold text-sm">{influencerName.charAt(0) || '?'}</span>
+                        )}
+                      </div>
+
+                      {/* Influencer Name & Username */}
+                      <div className="truncate min-w-0">
+                        <h4 className="text-white font-bold text-sm sm:text-base leading-tight truncate max-w-[170px]" title={influencerName}>
+                          {influencerName}
+                        </h4>
+                        <p className="text-slate-400 text-xs font-medium mt-0.5 truncate max-w-[170px]" title={username}>
+                          {username}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* CENTER SECTION: 7 Horizontal Stages (Delivery + 6 Videos) */}
+                    <div className="flex-1 px-2 py-1 max-w-3xl mx-auto w-full">
+                      <div className="flex items-center justify-between w-full">
+                        
+                        {/* 1. DELIVERY CONFIRMATION STAGE */}
+                        <div 
+                          className="flex flex-col items-center cursor-pointer group relative select-none"
+                          onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
+                          title={isDelivered ? 'Delivery Confirmed (Click to view/edit)' : 'Delivery Confirmation: Not Started (Click to confirm)'}
+                        >
+                          <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${
+                            isDelivered 
+                              ? 'bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-110'
+                              : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
+                          }`}>
+                            {isDelivered ? (
+                              <Check size={18} strokeWidth={3} className="text-white" />
+                            ) : (
+                              <Package size={17} className="text-slate-400 group-hover:text-slate-200" />
+                            )}
+                          </div>
+                          <span className={`text-[10px] sm:text-[11px] text-center w-20 sm:w-24 leading-tight mt-1.5 transition-colors ${
+                            isDelivered ? 'text-emerald-400 font-bold' : 'text-slate-400'
+                          }`}>
+                            Delivery
+                          </span>
+                        </div>
+
+                        {/* Connecting Line from Delivery to Video 1 */}
+                        <div className="flex-1 h-[2px] mx-1 sm:mx-2 -mt-4 transition-colors duration-300">
+                          <div className={`h-full w-full rounded-full ${
+                            isDelivered ? 'bg-emerald-500/80' : 'bg-slate-700/60'
+                          }`} />
+                        </div>
+
+                        {/* 2 to 7: VIDEOS 1 THROUGH 6 */}
+                        {videoWorkflows.map((vw, idx) => {
+                          const vNum = vw.videoNumber;
+                          const isVCompleted = vw.status === 'COMPLETED';
+                          const isVInProgress = vw.status === 'IN_PROGRESS';
+                          const isNextActive = idx < videoWorkflows.length - 1 && (videoWorkflows[idx + 1].status === 'COMPLETED' || videoWorkflows[idx + 1].status === 'IN_PROGRESS');
+                          const isLineActive = isVCompleted && (isNextActive || (isDelivered && videoWorkflows[idx + 1]?.status !== 'NOT_STARTED'));
+
+                          let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-blue-500 hover:text-blue-300";
+                          let labelStyle = "text-slate-400";
+
+                          if (isVCompleted) {
+                            circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-110";
+                            labelStyle = "text-emerald-400 font-bold";
+                          } else if (isVInProgress) {
+                            circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400 hover:scale-110";
+                            labelStyle = "text-blue-400 font-bold";
+                          }
+
+                          return (
+                            <React.Fragment key={`v-${vNum}`}>
+                              {/* Video Stage Node */}
+                              <div 
+                                className="flex flex-col items-center cursor-pointer group relative select-none"
+                                onClick={() => {
+                                  if (!isDelivered) {
+                                    toast.error('Please complete Delivery Confirmation first.');
+                                    setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                                    return;
+                                  }
+                                  setSelectedVideo({ recordId: record.id, videoNumber: vNum });
+                                }}
+                                title={`Click to manage Video ${vNum} (${vw.completedCount} of ${vw.totalSteps} completed)`}
+                              >
+                                <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
+                                  {isVCompleted ? (
+                                    <Check size={18} strokeWidth={3} className="text-white" />
+                                  ) : isVInProgress ? (
+                                    <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
+                                  ) : (
+                                    <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">{vNum}</span>
+                                  )}
+                                </div>
+                                <span className={`text-[10px] sm:text-[11px] text-center w-16 sm:w-20 leading-tight mt-1.5 transition-colors ${labelStyle}`}>
+                                  Video {vNum}
+                                </span>
+                              </div>
+
+                              {/* Connecting Line between Videos */}
+                              {idx !== videoWorkflows.length - 1 && (
+                                <div className="flex-1 h-[2px] mx-1 sm:mx-2 -mt-4 transition-colors duration-300">
+                                  <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500' : isVInProgress ? 'bg-blue-500/50' : 'bg-slate-700/60'}`} />
+                                </div>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* RIGHT SECTION: Overall Status & Three-Dot Menu */}
+                    <div className="flex items-center gap-3 shrink-0 justify-end min-w-[150px]">
+                      {/* Status Badge */}
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border shadow-sm ${overallStatus.badgeClass}`}>
+                        <span className={`w-2 h-2 rounded-full ${overallStatus.dotClass}`}></span>
+                        <span>{overallStatus.label}</span>
+                      </span>
+
+                      {/* Three-Dot Menu */}
+                      <div className="relative three-dot-menu-container">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenMenuId(isMenuOpen ? null : record.id);
+                          }}
+                          className="w-8 h-8 rounded-lg bg-[#070c18] hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+                          title="More actions"
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
+
+                        {isMenuOpen && (
+                          <div className="absolute right-0 top-10 w-52 bg-[#0c1326] border border-slate-700/80 rounded-xl shadow-2xl z-40 py-1.5 overflow-hidden animate-fade-in text-xs">
+                            <button 
+                              onClick={() => {
+                                setDetailsRecord(record);
+                                setOpenMenuId(null);
+                              }}
+                              className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                            >
+                              <Eye size={14} className="text-blue-400" />
+                              <span>View Influencer Details</span>
+                            </button>
+                            <button 
+                              onClick={() => handleToggleOnHold(record)}
+                              className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                            >
+                              <PauseCircle size={14} className="text-amber-400" />
+                              <span>{overallStatus.key === 'ON_HOLD' ? 'Resume Workflow' : 'Toggle On Hold'}</span>
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                                setOpenMenuId(null);
+                              }}
+                              className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                            >
+                              <Package size={14} className="text-emerald-400" />
+                              <span>Confirm Delivery</span>
+                            </button>
+                            <div className="h-[1px] bg-slate-800 my-1" />
+                            <button 
+                              onClick={() => handleCopyCode(influencerCode)}
+                              className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
+                            >
+                              <Copy size={14} className="text-slate-400" />
+                              <span>Copy Influencer Code</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
 
       {/* ========================================================
-          ACTIVE MODAL FORM (Step Modals & Three-Dot Modals)
+          DELIVERY CONFIRMATION MODAL
       ======================================================== */}
-      {activeModal && (() => {
+      {activeModal && activeModal.stageId === 'delivered' && (() => {
         const targetRecord = activeTrackingRecords.find(r => r.id === activeModal.recordId) || trackingRecords.find(r => r.id === activeModal.recordId);
         if (!targetRecord) return null;
 
-        const stageId = activeModal.stageId;
-        const matchingStep = WORKFLOW_STEPS.find(s => s.id === stageId);
-        const modalTitle = matchingStep?.label || (stageId === 'payRemaining' ? 'Pay Remaining Payment' : stageId === 'finalPost' ? 'Final Post Date' : 'Milestone Form');
-        const ModalIcon = matchingStep?.icon || (stageId === 'payRemaining' ? CreditCard : CheckCircle2);
-
         return (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className={`bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full ${stageId === 'finalPost' ? 'max-w-4xl' : 'max-w-2xl'} shadow-2xl overflow-hidden animate-fade-in relative`}>
-              
-              {/* Modal Header */}
+            <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-fade-in relative">
               <div className="flex justify-between items-center p-5 border-b border-slate-800 bg-[#070c18]">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
-                    <ModalIcon size={18} />
+                    <Package size={18} />
                   </div>
                   <div>
-                    <h5 className="text-base sm:text-lg font-bold text-white leading-none">{modalTitle}</h5>
+                    <h5 className="text-base sm:text-lg font-bold text-white leading-none">Delivery Confirmation</h5>
                     <p className="text-[11px] text-slate-400 mt-1">
                       {targetRecord.dispatch?.influencer_name} ({targetRecord.dispatch?.influencer_code || targetRecord.influencer_id})
                     </p>
@@ -796,34 +1027,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 </button>
               </div>
 
-              {/* Modal Body */}
               <div className="p-6 max-h-[calc(85vh-120px)] overflow-y-auto">
-                {stageId === 'delivered' && (
-                  <DeliveredForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
-                )}
-                {stageId === 'callExplain' && (
-                  <CallExplainForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
-                )}
-                {stageId === 'shareScript' && (
-                  <ShareScriptForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
-                )}
-                {stageId === 'payAdvance' && (
-                  <PayAdvanceForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
-                )}
-                {stageId === 'expTimeline' && (
-                  <ExpectedTimelineForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} isRework={false} />
-                )}
-                {stageId === 'draft' && (
-                  <DraftForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} isRework={false} />
-                )}
-                {stageId === 'payRemaining' && (
-                  <PayRemainingForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
-                )}
-                {stageId === 'finalPost' && (
-                  <FinalPostForm record={targetRecord} onSave={(data: any) => handleFormSave(targetRecord.id, data)} />
-                )}
+                <DeliveredForm record={targetRecord} onSave={(data: any) => handleDeliverySave(targetRecord.id, data)} />
               </div>
-
             </div>
           </div>
         );
@@ -922,10 +1128,304 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 };
 
 // =========================================================================
-// SUB-FORM COMPONENTS (Maintained & Enhanced for all 6 Steps + 3-Dot Modals)
+// LEVEL 2: DEDICATED VIDEO DETAIL VIEW COMPONENT
+// =========================================================================
+interface VideoDetailViewProps {
+  record: StatusTrackingRecord;
+  videoNumber: number;
+  onBack: () => void;
+  onSwitchVideo: (num: number) => void;
+  onSaveStep: (stepId: string, data: any, completed: boolean) => Promise<void>;
+}
+
+const VideoDetailView: React.FC<VideoDetailViewProps> = ({
+  record,
+  videoNumber,
+  onBack,
+  onSwitchVideo,
+  onSaveStep
+}) => {
+  const dispatch = record.dispatch || ({} as any);
+  const influencerCode = dispatch.influencer_code || record.influencer_id;
+  const influencerName = dispatch.influencer_name || 'Unknown Influencer';
+  const username = dispatch.username || '—';
+  const avatarUrl = dispatch.influencer_avatar;
+
+  // Derive workflow data for this specific video
+  const videoData = useMemo(() => getVideoWorkflow(record, videoNumber), [record, videoNumber]);
+  const [activeStepId, setActiveStepId] = useState<string>(videoData.activeStepId);
+
+  // Sync active step when video changes
+  useEffect(() => {
+    setActiveStepId(videoData.activeStepId);
+  }, [videoNumber, videoData.activeStepId]);
+
+  const activeStepConfig = videoData.configs.find(c => c.id === activeStepId) || videoData.configs[0];
+  const activeStepState = videoData.steps[activeStepId] || { completed: false, data: {} };
+
+  // Status badge style for Video Title
+  let videoStatusBadge = (
+    <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-900 text-slate-400 border border-slate-800 flex items-center gap-1.5">
+      <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+      Not Started
+    </span>
+  );
+  if (videoData.status === 'COMPLETED') {
+    videoStatusBadge = (
+      <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/90 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+        Completed
+      </span>
+    );
+  } else if (videoData.status === 'IN_PROGRESS') {
+    videoStatusBadge = (
+      <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-950/90 text-blue-400 border border-blue-700/60 flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+        In Progress
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full space-y-4 animate-fade-in overflow-hidden">
+      
+      {/* 1. TOP NAVIGATION & INFLUENCER HEADER */}
+      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0 shadow-md">
+        
+        {/* Left: Back button & Influencer Info */}
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={onBack}
+            className="flex items-center gap-2 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm"
+          >
+            <ArrowLeft size={16} />
+            <span>Back to Status Tracking</span>
+          </button>
+
+          <div className="h-8 w-[1px] bg-slate-800 hidden sm:block" />
+
+          {/* Influencer Badge & Info */}
+          <div className="flex items-center gap-3">
+            <div className="px-2.5 py-1 rounded-lg bg-[#070c18] border border-slate-700 text-white font-mono font-bold text-xs tracking-wider">
+              {influencerCode}
+            </div>
+            <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-700 bg-slate-900 flex items-center justify-center shrink-0">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt={influencerName} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white font-bold text-sm">{influencerName.charAt(0) || '?'}</span>
+              )}
+            </div>
+            <div>
+              <h3 className="text-white font-bold text-sm sm:text-base leading-none">{influencerName}</h3>
+              <p className="text-slate-400 text-xs mt-1">{username}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Video Selector Tabs & Current Status */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Video Tabs: 1 to 6 */}
+          <div className="flex items-center bg-[#070c18] p-1 rounded-xl border border-slate-800 gap-1">
+            {[1, 2, 3, 4, 5, 6].map(num => {
+              const vW = getVideoWorkflow(record, num);
+              const isActive = num === videoNumber;
+              let dotColor = 'bg-slate-600';
+              if (vW.status === 'COMPLETED') dotColor = 'bg-emerald-400';
+              else if (vW.status === 'IN_PROGRESS') dotColor = 'bg-blue-400';
+
+              return (
+                <button
+                  key={num}
+                  onClick={() => onSwitchVideo(num)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    isActive 
+                      ? 'bg-blue-600 text-white shadow-md' 
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                  }`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${dotColor}`}></span>
+                  Video {num}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-white uppercase tracking-wider">VIDEO {videoNumber}</span>
+            {videoStatusBadge}
+          </div>
+        </div>
+      </div>
+
+      {/* 2. COMPACT 6-STEP PROGRESS STEPPER CARD */}
+      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-5 shrink-0 shadow-md">
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-black text-white uppercase tracking-wider">VIDEO {videoNumber} WORKFLOW</span>
+            <span className="text-xs text-slate-400">
+              ({videoNumber === 1 ? '6 Steps: with Advance Payment' : '6 Steps: with Final Payment'})
+            </span>
+          </div>
+          <span className="text-xs font-bold text-blue-400 bg-blue-950/60 border border-blue-800/60 px-3 py-1 rounded-full">
+            {videoData.completedCount} of {videoData.totalSteps} completed
+          </span>
+        </div>
+
+        {/* Horizontal Step Stepper */}
+        <div className="flex items-center justify-between w-full max-w-4xl mx-auto py-2">
+          {videoData.configs.map((cfg, idx) => {
+            const stepInfo = videoData.steps[cfg.id];
+            const isCompleted = !!stepInfo?.completed;
+            const isSelected = cfg.id === activeStepId;
+            const StepIcon = cfg.icon;
+
+            const nextStepCompleted = idx < videoData.configs.length - 1 && !!videoData.steps[videoData.configs[idx + 1].id]?.completed;
+            const isLineActive = isCompleted && nextStepCompleted;
+
+            let circleStyle = "bg-[#070c18] text-slate-400 border border-slate-700 hover:border-slate-500 hover:text-white";
+            let labelStyle = "text-slate-400";
+
+            if (isCompleted) {
+              circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400";
+              labelStyle = "text-emerald-400 font-bold";
+            } else if (isSelected) {
+              circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400";
+              labelStyle = "text-blue-400 font-bold";
+            }
+
+            return (
+              <React.Fragment key={cfg.id}>
+                {/* Step Node */}
+                <div 
+                  onClick={() => setActiveStepId(cfg.id)}
+                  className="flex flex-col items-center cursor-pointer group select-none relative"
+                  title={`Click to open: ${cfg.label}`}
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
+                    {isCompleted ? (
+                      <Check size={18} strokeWidth={3} className="text-white" />
+                    ) : (
+                      <StepIcon size={17} />
+                    )}
+                  </div>
+                  <span className={`text-[11px] text-center w-20 leading-tight mt-2 transition-colors ${labelStyle}`}>
+                    {cfg.shortLabel}
+                  </span>
+                  {isSelected && (
+                    <div className="absolute -bottom-2 w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                  )}
+                </div>
+
+                {/* Connecting Line */}
+                {idx !== videoData.configs.length - 1 && (
+                  <div className="flex-1 h-[2px] mx-2 -mt-6 transition-colors duration-300">
+                    <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500' : isCompleted ? 'bg-blue-500/60' : 'bg-slate-800'}`} />
+                  </div>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. ACTIVE STEP INTERACTIVE WORKFLOW PANEL */}
+      <div className="flex-1 min-h-0 bg-[#0b1329] border border-slate-800 rounded-2xl p-5 overflow-y-auto shadow-md">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center">
+              <activeStepConfig.icon size={19} />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-white leading-none">
+                Step {videoData.configs.findIndex(c => c.id === activeStepId) + 1}: {activeStepConfig.label}
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Configure details for Video {videoNumber} • {influencerName} ({influencerCode})
+              </p>
+            </div>
+          </div>
+
+          <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+            activeStepState.completed 
+              ? 'bg-emerald-950/80 text-emerald-400 border-emerald-700/60' 
+              : 'bg-slate-900 text-slate-400 border-slate-800'
+          }`}>
+            {activeStepState.completed ? '✓ Completed' : '○ In Progress / Not Started'}
+          </span>
+        </div>
+
+        {/* Step Component Form */}
+        <div>
+          {activeStepId === 'call_explain' && (
+            <CallExplainForm 
+              record={record} 
+              existingData={activeStepState.data}
+              onSave={(formData: any) => onSaveStep('call_explain', formData, formData.call_explained)} 
+            />
+          )}
+
+          {activeStepId === 'share_script' && (
+            <ShareScriptForm 
+              record={record} 
+              existingData={activeStepState.data}
+              onSave={(formData: any) => onSaveStep('share_script', formData, formData.reference_video_received)} 
+            />
+          )}
+
+          {activeStepId === 'pay_advance' && (
+            <PayAdvanceForm 
+              record={record} 
+              existingData={activeStepState.data}
+              onSave={(formData: any) => onSaveStep('pay_advance', formData, formData.pay_advance_completed)} 
+            />
+          )}
+
+          {activeStepId === 'timeline' && (
+            <ExpectedTimelineForm 
+              record={record} 
+              existingData={activeStepState.data}
+              onSave={(formData: any) => onSaveStep('timeline', formData, formData.expected_delivery_completed)} 
+            />
+          )}
+
+          {activeStepId === 'draft' && (
+            <DraftForm 
+              record={record} 
+              existingData={activeStepState.data}
+              onSave={(formData: any) => onSaveStep('draft', formData, formData.draft_received)} 
+            />
+          )}
+
+          {activeStepId === 'post_date' && (
+            <VideoPostForm 
+              videoNumber={videoNumber}
+              record={record}
+              existingData={activeStepState.data}
+              onSave={(formData: any) => onSaveStep('post_date', formData, formData.confirmed_live)}
+            />
+          )}
+
+          {activeStepId === 'payment' && (
+            <VideoPaymentForm 
+              videoNumber={videoNumber}
+              record={record}
+              existingData={activeStepState.data}
+              onSave={(formData: any) => onSaveStep('payment', formData, formData.payment_completed)}
+            />
+          )}
+        </div>
+      </div>
+
+    </div>
+  );
+};
+
+// =========================================================================
+// SUB-FORM COMPONENTS (Maintained & Enhanced for all Steps)
 // =========================================================================
 
-// --- STEP 1: Delivery Confirmation ---
+// --- STEP: Delivery Confirmation ---
 const DeliveredForm = ({ record, onSave }: any) => {
   const [photo, setPhoto] = useState(record.delivery_photo_url || '');
   const [confirmed, setConfirmed] = useState(record.delivered_confirmed || false);
@@ -970,8 +1470,7 @@ const DeliveredForm = ({ record, onSave }: any) => {
 
     await onSave({ 
       delivery_photo_url: finalUrl, 
-      delivered_confirmed: confirmed, 
-      current_step: confirmed ? Math.max(record.current_step || 0, 1) : (record.current_step || 0) 
+      delivered_confirmed: confirmed
     });
     setIsUploading(false);
   };
@@ -1029,39 +1528,25 @@ const DeliveredForm = ({ record, onSave }: any) => {
   );
 };
 
-// --- STEP 2: Call & Explain ---
-const CallExplainForm = ({ record, onSave }: any) => {
-  let metadata: any = {};
-  try {
-    metadata = JSON.parse(record.notes || '{}');
-  } catch (e) {
-    metadata = {};
-  }
-
+// --- STEP: Call & Explain ---
+const CallExplainForm = ({ record, existingData = {}, onSave }: any) => {
   const [callExplained, setCallExplained] = useState(
-    metadata.call_explained !== undefined ? metadata.call_explained : (record.ref_call_explanation_required || false)
+    existingData.call_explained !== undefined ? existingData.call_explained : (record.ref_call_explanation_required || false)
   );
-  const [callNotes, setCallNotes] = useState(metadata.call_notes || '');
+  const [callNotes, setCallNotes] = useState(existingData.call_notes || '');
   const [callDatetime, setCallDatetime] = useState(
-    metadata.call_datetime ? formatForDateTimeInput(metadata.call_datetime) : ''
+    existingData.call_datetime ? formatForDateTimeInput(existingData.call_datetime) : ''
   );
   const [phoneCalled, setPhoneCalled] = useState(
-    metadata.phone_called || record.dispatch?.phone_number || ''
+    existingData.phone_called || record.dispatch?.phone_number || ''
   );
 
   const handleSave = async () => {
-    const updatedMetadata = {
-      ...metadata,
+    await onSave({
       call_explained: callExplained,
       call_notes: callNotes,
       call_datetime: callDatetime ? new Date(callDatetime).toISOString() : new Date().toISOString(),
-      phone_called: phoneCalled,
-      call_explanation_pending: !callExplained
-    };
-
-    await onSave({
-      ref_call_explanation_required: callExplained,
-      notes: JSON.stringify(updatedMetadata)
+      phone_called: phoneCalled
     });
   };
 
@@ -1123,46 +1608,31 @@ const CallExplainForm = ({ record, onSave }: any) => {
   );
 };
 
-// --- STEP 3: Share Script ---
-const ShareScriptForm = ({ record, onSave }: any) => {
-  let metadata: any = {};
-  try {
-    metadata = JSON.parse(record.notes || '{}');
-  } catch (e) {
-    metadata = {};
-  }
-
-  const [concept, setConcept] = useState(record.ref_concept || metadata.concept || '');
-  const [script, setScript] = useState(record.ref_script || metadata.script || '');
-  const [keypoints, setKeypoints] = useState(record.ref_keypoints || metadata.keypoints || '');
-  const [offer, setOffer] = useState(record.ref_offer || metadata.offer || '');
-  const [link, setLink] = useState(record.ref_link || metadata.link || '');
-  const [vids, setVids] = useState<string[]>(record.reference_videos_list?.length ? record.reference_videos_list : ['']);
+// --- STEP: Share Script ---
+const ShareScriptForm = ({ record, existingData = {}, onSave }: any) => {
+  const [concept, setConcept] = useState(existingData.concept || record.ref_concept || '');
+  const [script, setScript] = useState(existingData.script || record.ref_script || '');
+  const [keypoints, setKeypoints] = useState(existingData.keypoints || record.ref_keypoints || '');
+  const [offer, setOffer] = useState(existingData.offer || record.ref_offer || '');
+  const [link, setLink] = useState(existingData.link || record.ref_link || '');
+  const [vids, setVids] = useState<string[]>(
+    existingData.reference_videos_list?.length ? existingData.reference_videos_list : (record.reference_videos_list?.length ? record.reference_videos_list : [''])
+  );
   const [scriptShared, setScriptShared] = useState(
-    metadata.script_shared !== undefined ? metadata.script_shared : (!!record.reference_video_received || !!record.ref_script)
+    existingData.script_shared !== undefined ? existingData.script_shared : (!!record.reference_video_received || !!record.ref_script)
   );
 
   const handleSave = async () => {
     const validVids = vids.filter(Boolean);
-    const updatedMetadata = {
-      ...metadata,
-      script_shared: scriptShared,
-      concept,
-      script,
-      keypoints,
-      offer,
-      link
-    };
-
     await onSave({ 
-      ref_concept: concept || '', 
-      ref_script: script || '', 
-      ref_keypoints: keypoints || '', 
-      ref_offer: offer || '', 
-      ref_link: link || '', 
-      reference_videos_list: validVids,
       reference_video_received: scriptShared,
-      notes: JSON.stringify(updatedMetadata)
+      script_shared: scriptShared,
+      concept: concept || '', 
+      script: script || '', 
+      keypoints: keypoints || '', 
+      offer: offer || '', 
+      link: link || '', 
+      reference_videos_list: validVids
     });
   };
 
@@ -1264,13 +1734,13 @@ const ShareScriptForm = ({ record, onSave }: any) => {
   );
 };
 
-// --- STEP 4: Pay Advance ---
-const PayAdvanceForm = ({ record, onSave }: any) => {
-  const [gpay, setGpay] = useState(record.advance_gpay_number || '');
-  const [total, setTotal] = useState(record.advance_total_amount || record.pricing?.final_price || '');
-  const [advance, setAdvance] = useState(record.advance_paid_amount || '');
+// --- STEP: Pay Advance (Video 1 Only) ---
+const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
+  const [gpay, setGpay] = useState(existingData.gpay || record.advance_gpay_number || '');
+  const [total, setTotal] = useState(existingData.total || record.advance_total_amount || record.pricing?.final_price || '');
+  const [advance, setAdvance] = useState(existingData.advance || record.advance_paid_amount || '');
   
-  const [photo, setPhoto] = useState(record.pay_advance_photo_url || '');
+  const [photo, setPhoto] = useState(existingData.photo || record.pay_advance_photo_url || '');
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
@@ -1311,10 +1781,10 @@ const PayAdvanceForm = ({ record, onSave }: any) => {
     }
 
     await onSave({ 
-      advance_gpay_number: gpay, 
-      advance_total_amount: total, 
-      advance_paid_amount: advance, 
-      pay_advance_photo_url: finalUrl,
+      gpay, 
+      total, 
+      advance, 
+      photo: finalUrl,
       pay_advance_completed: true
     });
     setIsUploading(false);
@@ -1402,12 +1872,10 @@ const PayAdvanceForm = ({ record, onSave }: any) => {
   );
 };
 
-// --- STEP 5: Time Line ---
-const ExpectedTimelineForm = ({ record, onSave, isRework }: any) => {
-  const dateKey = isRework ? 're_draft_expected_date' : 'draft_expected_date';
-  const timeKey = isRework ? 're_draft_expected_time' : 'draft_expected_time';
-  const [date, setDate] = useState(record[dateKey] || '');
-  const [time, setTime] = useState(record[timeKey] || '');
+// --- STEP: Time Line ---
+const ExpectedTimelineForm = ({ record, existingData = {}, onSave }: any) => {
+  const [date, setDate] = useState(existingData.date || record.draft_expected_date || '');
+  const [time, setTime] = useState(existingData.time || record.draft_expected_time || '');
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
@@ -1438,7 +1906,7 @@ const ExpectedTimelineForm = ({ record, onSave, isRework }: any) => {
               toast.error('Please select both date and time.');
               return;
             }
-            onSave({ [dateKey]: date, [timeKey]: time, expected_delivery_completed: true });
+            onSave({ date, time, expected_delivery_completed: true });
           }} 
           className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
         >
@@ -1449,76 +1917,46 @@ const ExpectedTimelineForm = ({ record, onSave, isRework }: any) => {
   );
 };
 
-// --- STEP 6: Draft ---
-const DraftForm = ({ record, onSave, isRework }: any) => {
-  const vUrl = isRework ? 're_draft_video_url' : 'draft_video_url';
-  const status = isRework ? 're_draft_approval_status' : 'draft_approval_status';
-  const timing = isRework ? 're_draft_timing_status' : 'draft_timing_status';
-  const corrections = isRework ? 're_draft_corrections_required' : 'draft_corrections_required';
-  const fLink = isRework ? 're_draft_final_product_link' : 'draft_final_product_link';
-  const fDesc = isRework ? 're_draft_final_description' : 'draft_final_description';
-
-  const expDate = isRework ? record.re_draft_expected_date : record.draft_expected_date;
-  const expTime = isRework ? record.re_draft_expected_time : record.draft_expected_time;
-
-  const metaFileNameKey = isRework ? 'draft2_filename' : 'draft1_filename';
-  const metaUploadedAtKey = isRework ? 'draft2_uploaded_at' : 'draft1_uploaded_at';
-
-  let metadata: any = {};
-  try {
-    metadata = JSON.parse(record.notes || '{}');
-  } catch (e) {
-    metadata = {};
-  }
-
-  const initialFileName = isRework
-    ? (metadata.draft2_filename || '')
-    : (metadata.draft1_filename || metadata.draft_file_name || '');
-  const initialUploadedAt = isRework
-    ? (metadata.draft2_uploaded_at || '')
-    : (metadata.draft1_uploaded_at || metadata.draft_uploaded_at || '');
-
-  const [vid, setVid] = useState(record[vUrl] || '');
-  const [fileName, setFileName] = useState(initialFileName);
-  const [uploadedAt, setUploadedAt] = useState(initialUploadedAt);
-  const [appStat, setAppStat] = useState(record[status] || '');
-  const [corr, setCorr] = useState(record[corrections] || '');
-  const [finalL, setFinalL] = useState(record[fLink] || '');
-  const [finalD, setFinalD] = useState(record[fDesc] || '');
+// --- STEP: Draft ---
+const DraftForm = ({ record, existingData = {}, onSave }: any) => {
+  const [vid, setVid] = useState(existingData.vid || record.draft_video_url || '');
+  const [appStat, setAppStat] = useState(existingData.appStat || record.draft_approval_status || '');
+  const [corr, setCorr] = useState(existingData.corr || record.draft_corrections_required || '');
+  const [finalL, setFinalL] = useState(existingData.finalL || record.draft_final_product_link || '');
+  const [finalD, setFinalD] = useState(existingData.finalD || record.draft_final_description || '');
   
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [calculatedTiming, setCalculatedTiming] = useState(record[timing] || 'Not Submit');
+  const [calculatedTiming, setCalculatedTiming] = useState(existingData.timing || record.draft_timing_status || 'Not Submit');
+
+  const expDate = record.draft_expected_date;
+  const expTime = record.draft_expected_time;
 
   useEffect(() => {
     if (!vid && !file) {
       setCalculatedTiming('Not Submit');
     } else {
-      if (record[timing] && !file) {
-        setCalculatedTiming(record[timing]);
+      if (existingData.timing) {
+        setCalculatedTiming(existingData.timing);
+      } else if (expDate && expTime) {
+        const expectedMs = new Date(`${expDate}T${expTime}`).getTime();
+        const currentMs = new Date().getTime();
+        const diffMs = currentMs - expectedMs;
+        const tolerance = 5 * 60 * 1000;
+        if (diffMs < -tolerance) setCalculatedTiming('Advance');
+        else if (Math.abs(diffMs) <= tolerance) setCalculatedTiming('On Time');
+        else setCalculatedTiming('Late');
       } else {
-        if (expDate && expTime) {
-          const expectedMs = new Date(`${expDate}T${expTime}`).getTime();
-          const currentMs = new Date().getTime();
-          const diffMs = currentMs - expectedMs;
-          const tolerance = 5 * 60 * 1000;
-          if (diffMs < -tolerance) setCalculatedTiming('Advance');
-          else if (Math.abs(diffMs) <= tolerance) setCalculatedTiming('On Time');
-          else setCalculatedTiming('Late');
-        } else {
-          setCalculatedTiming('On Time');
-        }
+        setCalculatedTiming('On Time');
       }
     }
-  }, [vid, file, expDate, expTime, record, timing]);
+  }, [vid, file, expDate, expTime, existingData.timing]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       setFile(selectedFile);
       setVid(URL.createObjectURL(selectedFile));
-      setFileName(selectedFile.name);
-      setUploadedAt(new Date().toISOString());
     }
   };
 
@@ -1555,70 +1993,20 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
     }
 
     const isStepCompleted = !!finalUrl;
-    const nowStr = new Date().toISOString();
-    const currentUploadedAt = file ? nowStr : (uploadedAt || (finalUrl ? nowStr : ''));
-    const currentFileName = file ? file.name : (fileName || (finalUrl ? 'uploaded_video.mp4' : ''));
-
-    const updatedMetadata = {
-      ...metadata,
-      [metaFileNameKey]: currentFileName,
-      [metaUploadedAtKey]: currentUploadedAt,
-    };
-
-    if (isRework) {
-      updatedMetadata.draft2_received = isStepCompleted;
-      updatedMetadata.draft2_completed = isStepCompleted;
-      updatedMetadata.draft2_status = isStepCompleted ? 'COMPLETED' : 'CURRENT';
-    } else {
-      updatedMetadata.draft1_received = isStepCompleted;
-      updatedMetadata.draft1_completed = isStepCompleted;
-      updatedMetadata.draft1_status = isStepCompleted ? 'COMPLETED' : 'CURRENT';
-      updatedMetadata.draft_file_name = currentFileName;
-      updatedMetadata.draft_uploaded_at = currentUploadedAt;
-    }
-
-    const data: any = { 
-      [vUrl]: finalUrl, 
-      [status]: appStat, 
-      [timing]: calculatedTiming, 
-      [corrections]: corr, 
-      [fLink]: finalL, 
-      [fDesc]: finalD,
-      notes: JSON.stringify(updatedMetadata)
-    };
-
-    if (!isRework) {
-      data.draft_received = isStepCompleted;
-      if (isStepCompleted) {
-        data.current_step = Math.max(record.current_step || 0, 5);
-      }
-    } else {
-      if (isStepCompleted) {
-        data.current_step = Math.max(record.current_step || 0, 6);
-      }
-    }
-    
-    if (appStat === 'Not Approved' && !isRework) {
-      data['re_draft_expected_date'] = record.re_draft_expected_date || '';
-    } else if (appStat === 'Approved' && !isRework) {
-      data['re_draft_expected_date'] = null;
-      data['re_draft_expected_time'] = null;
-      data['re_draft_video_url'] = null;
-      data['re_draft_approval_status'] = null;
-      data['re_draft_timing_status'] = null;
-      data['re_draft_corrections_required'] = null;
-      data['re_draft_final_product_link'] = null;
-      data['re_draft_final_description'] = null;
-    }
-
-    await onSave(data);
+    await onSave({ 
+      vid: finalUrl, 
+      appStat, 
+      timing: calculatedTiming, 
+      corr, 
+      finalL, 
+      finalD,
+      draft_received: isStepCompleted
+    });
     setIsUploading(false);
   };
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      
-      {/* Upload Section */}
       <div className="flex flex-col sm:flex-row justify-center gap-6">
         <div className="relative w-full sm:w-44 h-32 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
           <UploadCloud className="text-blue-400 mb-1" size={24} />
@@ -1638,11 +2026,6 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
               ) : (
                 <div className="text-xs text-slate-400 italic">Preview available</div>
               )}
-              {fileName && (
-                <span className="text-[11px] text-slate-300 font-semibold truncate w-full text-center" title={fileName}>
-                  {fileName}
-                </span>
-              )}
             </div>
           ) : (
              <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
@@ -1650,18 +2033,19 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
         </div>
       </div>
 
-      {/* Approval & Timing Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-y border-slate-800 py-6">
         <div>
           <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">Approval Status</label>
           <div className="flex items-center gap-3">
             <button 
+              type="button"
               onClick={() => setAppStat('Approved')}
               className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${appStat === 'Approved' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-600'}`}
             >
               Approved
             </button>
             <button 
+              type="button"
               onClick={() => setAppStat('Not Approved')}
               className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${appStat === 'Not Approved' ? 'bg-rose-600 border-rose-500 text-white' : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-600'}`}
             >
@@ -1735,13 +2119,115 @@ const DraftForm = ({ record, onSave, isRework }: any) => {
   );
 };
 
-// --- REMAINING PAYMENT (Three-dot menu) ---
-const PayRemainingForm = ({ record, onSave }: any) => {
-  const totalAmount = record.pricing?.final_price || 0;
-  const advancePaid = parseFloat(record.advance_paid_amount || '0');
-  const remainingPayment = totalAmount - advancePaid;
+// --- STEP: Post Date (For Any Video 1 to 6) ---
+const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) => {
+  const [platform, setPlatform] = useState(existingData.platform || 'Instagram');
+  const [postLink, setPostLink] = useState(existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''));
+  const [postedAt, setPostedAt] = useState(
+    existingData.postedAt ? formatForDateTimeInput(existingData.postedAt) : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
+  );
+  const [confirmedLive, setConfirmedLive] = useState(
+    existingData.confirmed !== undefined ? existingData.confirmed : (videoNumber === 1 ? (record.final_post_completed || false) : false)
+  );
 
-  const [photo, setPhoto] = useState(record.payment_remaining_photo_url || '');
+  const platforms = ['Instagram', 'YouTube', 'Facebook'];
+
+  const handleSave = async () => {
+    if (!postLink || isFakeUrl(postLink)) {
+      toast.error(`Please enter the Video ${videoNumber} live post link.`);
+      return;
+    }
+    if (!postedAt) {
+      toast.error('Please select the posting date and time.');
+      return;
+    }
+    if (!confirmedLive) {
+      toast.error('Please check the Confirmed Live checkbox.');
+      return;
+    }
+
+    await onSave({
+      platform,
+      link: postLink,
+      postedAt: new Date(postedAt).toISOString(),
+      confirmed_live: confirmedLive
+    });
+  };
+
+  return (
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
+      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+        <input 
+          type="checkbox" 
+          id={`post-live-video-${videoNumber}`}
+          checked={confirmedLive}
+          onChange={(e) => setConfirmedLive(e.target.checked)}
+          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
+        />
+        <label htmlFor={`post-live-video-${videoNumber}`} className="text-sm font-medium text-slate-200 cursor-pointer">
+          Video {videoNumber} is confirmed live and active on the platform.
+        </label>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Select Platform</label>
+          <div className="flex gap-3 max-w-md">
+            {platforms.map(p => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPlatform(p)}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-colors ${
+                  platform === p ? 'bg-blue-600 border-blue-500 text-white shadow-md' : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Final Post Link</label>
+            <input 
+              type="text" 
+              value={postLink} 
+              onChange={e => setPostLink(e.target.value)} 
+              placeholder="https://www.instagram.com/reel/..."
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Posting Date & Time</label>
+            <input 
+              type="datetime-local" 
+              value={postedAt} 
+              onChange={e => setPostedAt(e.target.value)} 
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end pt-2 border-t border-slate-800">
+        <button 
+          onClick={handleSave} 
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+        >
+          Save Video {videoNumber} Post Date
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- STEP: Payment (Final step for Videos 2 to 6; NO Pay Advance) ---
+const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: any) => {
+  const [amount, setAmount] = useState(existingData.amount || '');
+  const [paymentConfirmed, setPaymentConfirmed] = useState(existingData.payment_completed || false);
+  const [photo, setPhoto] = useState(existingData.photo || '');
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
@@ -1755,6 +2241,15 @@ const PayRemainingForm = ({ record, onSave }: any) => {
   };
 
   const handleSave = async () => {
+    if (!amount) {
+      toast.error(`Please enter the payment amount for Video ${videoNumber}.`);
+      return;
+    }
+    if (!paymentConfirmed) {
+      toast.error('Please check the Payment Confirmed checkbox.');
+      return;
+    }
+
     setIsUploading(true);
     let finalUrl = photo;
 
@@ -1771,40 +2266,52 @@ const PayRemainingForm = ({ record, onSave }: any) => {
         finalUrl = publicData.publicUrl;
         setPhoto(finalUrl);
       } catch (err) {
-        console.error('Error uploading photo:', err);
+        console.error('Error uploading payment photo:', err);
         setIsUploading(false);
         return;
       }
     }
 
-    await onSave({ 
-      payment_remaining_photo_url: finalUrl || '',
-      payment_remaining_completed: true 
+    await onSave({
+      amount,
+      photo: finalUrl,
+      payment_completed: paymentConfirmed
     });
     setIsUploading(false);
   };
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
+      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+        <input 
+          type="checkbox" 
+          id={`payment-confirmed-video-${videoNumber}`}
+          checked={paymentConfirmed}
+          onChange={(e) => setPaymentConfirmed(e.target.checked)}
+          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
+        />
+        <label htmlFor={`payment-confirmed-video-${videoNumber}`} className="text-sm font-medium text-slate-200 cursor-pointer">
+          Payment for Video {videoNumber} has been completed and sent to the influencer.
+        </label>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Total Agreed Amount</label>
-            <input type="text" value={`₹${Number(totalAmount).toFixed(2)}`} readOnly className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white opacity-80 cursor-not-allowed" />
+            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Video {videoNumber} Payment Amount (₹)</label>
+            <input 
+              type="text" 
+              value={amount} 
+              onChange={e => setAmount(e.target.value)} 
+              placeholder="e.g. 5000"
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+            />
           </div>
-          <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Advance Paid</label>
-            <input type="text" value={`₹${Number(advancePaid).toFixed(2)}`} readOnly className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white opacity-80 cursor-not-allowed" />
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Remaining Payment Due</label>
-            <input type="text" value={`₹${Number(remainingPayment).toFixed(2)}`} readOnly className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-emerald-400 font-black cursor-not-allowed" />
-          </div>
-          
+
           <div className="pt-2">
-            <div className="relative w-full h-24 border-2 border-dashed border-slate-700/80 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-emerald-500 transition-colors">
-              <UploadCloud className="text-emerald-400 mb-1" size={20} />
-              <span className="text-xs text-emerald-300 font-medium">Upload Final Payment Proof</span>
+            <div className="relative w-full h-24 border-2 border-dashed border-slate-700/80 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
+              <UploadCloud className="text-blue-400 mb-1" size={20} />
+              <span className="text-xs text-blue-300 font-medium">Upload Payment Screenshot</span>
               <input 
                 type="file" 
                 accept="image/*" 
@@ -1819,14 +2326,14 @@ const PayRemainingForm = ({ record, onSave }: any) => {
           {preview ? (
             <div className="flex flex-col items-center w-full">
               <div className="w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800 flex items-center justify-center p-2 mb-2 overflow-hidden shadow-lg">
-                <img src={preview} alt="Proof Preview" className="max-w-full max-h-full object-contain rounded-lg" />
+                <img src={preview} alt="Payment Screenshot" className="max-w-full max-h-full object-contain rounded-lg" />
               </div>
-              <span className="text-xs text-slate-400">Payment Proof Preview</span>
+              <span className="text-xs text-slate-400">Payment Screenshot Preview</span>
             </div>
           ) : (
              <div className="flex flex-col items-center justify-center w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800/60 p-4 opacity-50">
                <UploadCloud className="text-slate-500 mb-2" size={28} />
-               <span className="text-xs text-slate-400">No proof uploaded</span>
+               <span className="text-xs text-slate-400">No screenshot selected</span>
              </div>
           )}
         </div>
@@ -1838,238 +2345,8 @@ const PayRemainingForm = ({ record, onSave }: any) => {
           disabled={isUploading}
           className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-emerald-500/20"
         >
-          {isUploading ? 'Saving...' : 'Save Payment Details'}
+          {isUploading ? 'Saving...' : `Save Video ${videoNumber} Payment`}
         </button>
-      </div>
-    </div>
-  );
-};
-
-// --- FINAL POST DATE (Three-dot menu) ---
-const FinalPostForm = ({ record, onSave }: any) => {
-  let metadata: any = {};
-  try {
-    metadata = JSON.parse(record.notes || '{}');
-  } catch (e) {
-    metadata = {};
-  }
-
-  const rawV1Link = metadata.video1_final_post_link || record.final_post_link || '';
-  const initialV1Link = isFakeUrl(rawV1Link) ? '' : rawV1Link;
-  const initialV1PostedAt = formatForDateTimeInput(metadata.video1_posted_at || record.final_post_actual_datetime);
-  const initialV1Platform = metadata.video1_platform || 'Instagram';
-  const initialV1Confirmed = metadata.video1_confirmed !== undefined && !isFakeUrl(rawV1Link)
-    ? metadata.video1_confirmed 
-    : (!isFakeUrl(rawV1Link) ? (record.final_post_completed || false) : false);
-
-  const rawV2Link = metadata.video2_final_post_link || '';
-  const initialV2Link = isFakeUrl(rawV2Link) ? '' : rawV2Link;
-  const initialV2PostedAt = formatForDateTimeInput(metadata.video2_posted_at);
-  const initialV2Platform = metadata.video2_platform || 'Instagram';
-  const initialV2Confirmed = metadata.video2_confirmed !== undefined && !isFakeUrl(rawV2Link) ? metadata.video2_confirmed : false;
-
-  const [v1Link, setV1Link] = useState(initialV1Link);
-  const [v1PostedAt, setV1PostedAt] = useState(initialV1PostedAt);
-  const [v1Platform, setV1Platform] = useState(initialV1Platform);
-  const [v1Confirmed, setV1Confirmed] = useState(initialV1Confirmed);
-
-  const [v2Link, setV2Link] = useState(initialV2Link);
-  const [v2PostedAt, setV2PostedAt] = useState(initialV2PostedAt);
-  const [v2Platform, setV2Platform] = useState(initialV2Platform);
-  const [v2Confirmed, setV2Confirmed] = useState(initialV2Confirmed);
-
-  const totalVideos = record.pricing?.total_videos || 1;
-
-  const handleSaveVideo1 = async () => {
-    if (!v1Link || isFakeUrl(v1Link) || !v1PostedAt) {
-      toast.error('Please fill in both the Video 1 Post Link and Posting Date & Time.');
-      return;
-    }
-    if (!v1Confirmed) {
-      toast.error('Please check the Confirmed Live checkbox for Video 1.');
-      return;
-    }
-
-    const updatedMetadata = {
-      ...metadata,
-      video1_final_post_link: v1Link,
-      video1_posted_at: v1PostedAt,
-      video1_platform: v1Platform,
-      video1_confirmed: v1Confirmed,
-    };
-
-    await onSave({
-      final_post_link: v1Link,
-      final_post_actual_datetime: v1PostedAt,
-      final_post_completed: true,
-      notes: JSON.stringify(updatedMetadata)
-    });
-  };
-
-  const handleSaveVideo2 = async () => {
-    if (!v2Link || isFakeUrl(v2Link) || !v2PostedAt) {
-      toast.error('Please fill in both the Video 2 Post Link and Posting Date & Time.');
-      return;
-    }
-    if (!v2Confirmed) {
-      toast.error('Please check the Confirmed Live checkbox for Video 2.');
-      return;
-    }
-
-    const updatedMetadata = {
-      ...metadata,
-      video2_final_post_link: v2Link,
-      video2_posted_at: v2PostedAt,
-      video2_platform: v2Platform,
-      video2_confirmed: v2Confirmed,
-    };
-
-    await onSave({
-      final_post_completed: true,
-      notes: JSON.stringify(updatedMetadata)
-    });
-  };
-
-  const platforms = ['Instagram', 'YouTube', 'Facebook'];
-
-  return (
-    <div className="space-y-6">
-      <div className={`grid grid-cols-1 ${totalVideos === 2 ? 'md:grid-cols-2' : ''} gap-6`}>
-        {/* VIDEO 1 */}
-        <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 space-y-4">
-          <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
-            <h4 className="text-sm font-black text-white uppercase">Video 1 Final Post</h4>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${v1Confirmed ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-900 text-slate-400'}`}>
-              {v1Confirmed ? 'LIVE' : 'PENDING'}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Platform</label>
-              <div className="flex gap-2">
-                {platforms.map(p => (
-                  <button
-                    key={p}
-                    onClick={() => setV1Platform(p)}
-                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold border transition-colors ${v1Platform === p ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#0b1329] border-slate-800 text-slate-400'}`}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Final Post Link</label>
-              <input 
-                type="text" 
-                value={v1Link} 
-                onChange={e => setV1Link(e.target.value)} 
-                placeholder="https://..."
-                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" 
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Posting Date/Time</label>
-              <input 
-                type="datetime-local" 
-                value={v1PostedAt} 
-                onChange={e => setV1PostedAt(e.target.value)} 
-                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" 
-              />
-            </div>
-
-            <label className="flex items-center gap-2 pt-1 cursor-pointer">
-              <input 
-                type="checkbox" 
-                checked={v1Confirmed} 
-                onChange={e => setV1Confirmed(e.target.checked)} 
-                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-500" 
-              />
-              <span className="text-xs font-medium text-slate-300">Confirmed Live on platform</span>
-            </label>
-          </div>
-
-          <div className="pt-2 border-t border-slate-800 flex justify-end">
-            <button 
-              onClick={handleSaveVideo1}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors shadow-md shadow-blue-600/10"
-            >
-              Save Video 1
-            </button>
-          </div>
-        </div>
-
-        {/* VIDEO 2 (if 2 videos required) */}
-        {totalVideos === 2 && (
-          <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
-              <h4 className="text-sm font-black text-white uppercase">Video 2 Final Post</h4>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${v2Confirmed ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-900 text-slate-400'}`}>
-                {v2Confirmed ? 'LIVE' : 'PENDING'}
-              </span>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Platform</label>
-                <div className="flex gap-2">
-                  {platforms.map(p => (
-                    <button
-                      key={p}
-                      onClick={() => setV2Platform(p)}
-                      className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold border transition-colors ${v2Platform === p ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#0b1329] border-slate-800 text-slate-400'}`}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Final Post Link</label>
-                <input 
-                  type="text" 
-                  value={v2Link} 
-                  onChange={e => setV2Link(e.target.value)} 
-                  placeholder="https://..."
-                  className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" 
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-wider">Posting Date/Time</label>
-                <input 
-                  type="datetime-local" 
-                  value={v2PostedAt} 
-                  onChange={e => setV2PostedAt(e.target.value)} 
-                  className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500" 
-                />
-              </div>
-
-              <label className="flex items-center gap-2 pt-1 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={v2Confirmed} 
-                  onChange={e => setV2Confirmed(e.target.checked)} 
-                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-500" 
-                />
-                <span className="text-xs font-medium text-slate-300">Confirmed Live on platform</span>
-              </label>
-            </div>
-
-            <div className="pt-2 border-t border-slate-800 flex justify-end">
-              <button 
-                onClick={handleSaveVideo2}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors shadow-md shadow-blue-600/10"
-              >
-                Save Video 2
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
