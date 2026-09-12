@@ -100,11 +100,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }
 
     const isDelivered = !!record.delivered_confirmed;
-    const isCallExplained = !!metadata.call_explained || (!!record.ref_call_explanation_required && !metadata.call_explanation_pending) || ((record.current_step || 0) >= 2 && !metadata.call_explanation_pending);
-    const isScriptShared = !!metadata.script_shared || !!record.reference_video_received || !!record.ref_script || ((record.current_step || 0) >= 3);
-    const isAdvancePaid = !!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0);
-    const isTimelineSet = !!record.expected_delivery_completed || (!!record.draft_expected_date && !!record.draft_expected_time);
-    const isDraftDone = !!record.draft_received || !!record.draft_video_url || (record.draft_approval_status === 'Approved');
+    const isCallExplained = isDelivered && (!!metadata.call_explained || (!!record.ref_call_explanation_required && !metadata.call_explanation_pending) || ((record.current_step || 0) >= 2 && !metadata.call_explanation_pending));
+    const isScriptShared = isDelivered && (!!metadata.script_shared || !!record.reference_video_received || !!record.ref_script || ((record.current_step || 0) >= 3));
+    const isAdvancePaid = isDelivered && (!!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0));
+    const isTimelineSet = isDelivered && (!!record.expected_delivery_completed || (!!record.draft_expected_date && !!record.draft_expected_time));
+    const isDraftDone = isDelivered && (!!record.draft_received || !!record.draft_video_url || (record.draft_approval_status === 'Approved'));
 
     const stepsCompleted = [
       isDelivered,
@@ -146,6 +146,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
+    // Not Started: if Step 1 (delivery) is not confirmed yet
+    if (!isDelivered) {
+      return {
+        key: 'NOT_STARTED',
+        label: 'Not Started',
+        badgeClass: 'bg-slate-900 text-slate-400 border-slate-800',
+        dotClass: 'bg-slate-500'
+      };
+    }
+
     const completedCount = stepsCompleted.filter(Boolean).length;
 
     // Completed
@@ -165,16 +175,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         label: 'Almost Done',
         badgeClass: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
         dotClass: 'bg-purple-400'
-      };
-    }
-
-    // Not Started
-    if (!isDelivered && completedCount === 0) {
-      return {
-        key: 'NOT_STARTED',
-        label: 'Not Started',
-        badgeClass: 'bg-slate-900 text-slate-400 border-slate-800',
-        dotClass: 'bg-slate-500'
       };
     }
 
@@ -600,28 +600,24 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 id={`st-card-${record.dispatch_id || record.id}`}
                 className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-4 transition-all duration-200 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4"
               >
-                {/* LEFT SECTION: Code, Profile, Name, Username */}
-                <div className="flex items-center gap-3.5 shrink-0 min-w-[280px]">
-                  {/* Influencer Code Box */}
-                  <div className="bg-[#070c18] border border-slate-800/90 rounded-xl px-3 py-1.5 flex flex-col items-center justify-center min-w-[82px] shrink-0 shadow-inner">
-                    <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider block leading-none">Influencer Code</span>
-                    <div className="flex items-center justify-center gap-1.5 text-sm font-black text-white mt-1">
-                      <ArrowUpDown size={11} className="text-slate-400" />
-                      <span>{influencerCode}</span>
-                    </div>
+                {/* LEFT SECTION: Compact Code Badge, Profile, Name, Username */}
+                <div className="flex items-center gap-3 shrink-0">
+                  {/* Compact Influencer Code Badge */}
+                  <div className="px-2.5 py-1 rounded-lg bg-[#070c18] border border-slate-700/80 text-white font-mono font-bold text-xs tracking-wider shrink-0 shadow-sm text-center">
+                    {influencerCode}
                   </div>
 
                   {/* Profile Avatar */}
-                  <div className="w-12 h-12 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
+                  <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
                     {avatarUrl ? (
                       <img src={avatarUrl} alt={influencerName} className="w-full h-full object-cover" />
                     ) : (
-                      <span className="text-slate-400 font-extrabold text-base">{influencerName.charAt(0) || '?'}</span>
+                      <span className="text-slate-400 font-extrabold text-sm">{influencerName.charAt(0) || '?'}</span>
                     )}
                   </div>
 
                   {/* Influencer Name & Username */}
-                  <div className="truncate">
+                  <div className="truncate min-w-0">
                     <h4 className="text-white font-bold text-sm sm:text-base leading-tight truncate max-w-[190px]" title={influencerName}>
                       {influencerName}
                     </h4>
@@ -635,12 +631,13 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 <div className="flex-1 px-2 py-1 max-w-2xl mx-auto w-full">
                   <div className="flex items-center justify-between w-full">
                     {WORKFLOW_STEPS.map((step, idx) => {
+                      const hasStarted = stepData.isDelivered;
                       const isCompleted = stepData.stepsCompleted[idx];
-                      const isCurrent = !isCompleted && idx === stepData.activeIndex && stepData.isDelivered;
+                      const isCurrent = hasStarted && !isCompleted && idx === stepData.activeIndex;
 
                       // Connecting line state
                       const nextStepCompleted = idx < WORKFLOW_STEPS.length - 1 && stepData.stepsCompleted[idx + 1];
-                      const isLineCompleted = isCompleted && (nextStepCompleted || (idx + 1 === stepData.activeIndex && stepData.isDelivered));
+                      const isLineCompleted = isCompleted && (nextStepCompleted || (hasStarted && idx + 1 === stepData.activeIndex));
 
                       // Node visuals
                       let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200";

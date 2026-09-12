@@ -276,15 +276,6 @@ export async function handoffDeliveredShipmentToStatusTracking(
     if (existing && existing.length > 0) {
       // Idempotent: preserve all existing progress!
       const existingRow = existing[0];
-      if (!existingRow.delivered_confirmed) {
-        await supabaseAdmin
-          .from(SUPABASE_TABLES.influencerStatus)
-          .update({
-            delivered_confirmed: true,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingRow.id);
-      }
       return {
         success: true,
         alreadyExisted: true,
@@ -373,14 +364,14 @@ export async function handoffDeliveredShipmentToStatusTracking(
       influencer_id: isNaN(Number(cleanInfId)) ? cleanInfId : Number(cleanInfId),
       dispatch_id: dispatchId ? (isNaN(Number(dispatchId)) ? dispatchId : Number(dispatchId)) : null,
       current_step: 0,
-      delivered_confirmed: true,
+      delivered_confirmed: false,
       pay_advance_completed: false,
       reference_video_received: false,
       expected_delivery_completed: false,
       draft_received: false,
       payment_remaining_completed: false,
       final_post_completed: false,
-      status: 'Active',
+      status: 'Not Started',
       created_at: nowIso,
       updated_at: nowIso
     };
