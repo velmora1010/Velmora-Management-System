@@ -6,6 +6,7 @@ import { MapPin, Phone, RefreshCcw, Clock, Package, Video, CreditCard, PenTool, 
 import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { isActiveStatus } from '../../utils/marketingUtils';
+import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
 import toast from 'react-hot-toast';
 
 interface CampaignStatusTrackingProps {
@@ -42,7 +43,13 @@ const formatForDateTimeInput = (dateStr: string | undefined | null) => {
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
   const { trackingRecords, isLoading, refresh, saveMilestone } = useCampaignStatusTracking(campaign.id);
   const activeTrackingRecords = React.useMemo(() => {
-    return (trackingRecords || []).filter(r => isActiveStatus(r.dispatch?.is_archived));
+    const list = (trackingRecords || []).filter(r => isActiveStatus(r.dispatch?.is_archived));
+    return list.sort((a, b) => {
+      return naturalCompareCodes(
+        a.dispatch?.influencer_code || a.influencer_id,
+        b.dispatch?.influencer_code || b.influencer_id
+      );
+    });
   }, [trackingRecords]);
   const [activeModal, setActiveModal] = useState<{ recordId: string, stageId: string } | null>(null);
 
@@ -279,7 +286,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       : isVideo1Completed;
 
     const rawStages = [
-      { id: 'delivered', label: 'Delivered', icon: Package, completed: !!record.delivered_confirmed, formKey: 'delivered', metaKey: 'delivered_status' },
+      { id: 'delivered', label: 'Delivery Confirmation', icon: Package, completed: !!record.delivered_confirmed, formKey: 'delivered', metaKey: 'delivered_status' },
       { id: 'payAdvance', label: 'Pay Advance', icon: CreditCard, completed: !!record.pay_advance_completed, formKey: 'payAdvance', metaKey: 'pay_advance_status' },
       { id: 'refVideos', label: 'Send Reference Videos', icon: Video, completed: !!record.reference_video_received, formKey: 'refVideos', metaKey: 'reference_status' },
       { id: 'expTimeline', label: 'Expected Delivery Timeline', icon: Clock, completed: !!record.expected_delivery_completed, formKey: 'expTimeline', metaKey: 'timeline_status' },
@@ -364,8 +371,22 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                          )}
                       </div>
                       <div>
-                        <h3 className="text-slate-100 font-bold text-lg leading-tight">{dispatch.influencer_name}</h3>
-                        <span className="text-slate-400 text-xs font-mono">ID: {dispatchId}</span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-slate-100 font-bold text-lg leading-tight">{dispatch.influencer_name}</h3>
+                          {dispatch.influencer_code && (
+                            <span className="px-2 py-0.5 rounded bg-purple-950/70 border border-purple-700/60 text-purple-300 font-mono font-bold text-xs">
+                              {dispatch.influencer_code}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
+                          {dispatch.username && dispatch.username !== '—' && (
+                            <span className="text-slate-300 font-medium">{dispatch.username}</span>
+                          )}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider bg-emerald-950/60 border border-emerald-800/60 text-emerald-300">
+                            {record.status || 'Active'}
+                          </span>
+                        </div>
                       </div>
                     </div>
 

@@ -46,10 +46,17 @@ import {
   Target,
   Upload,
   ChevronDown,
-  Eye
+  Eye,
+  ArrowRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { UploadCourierShipmentModal } from '../../components/marketing/UploadCourierShipmentModal';
+import {
+  handoffDeliveredShipmentToStatusTracking,
+  bulkHandoffDeliveredShipments,
+  fetchCampaignStatusTrackingInfluencerIds,
+  matchShipmentToInfluencer
+} from '../../services/influencerStatusHandoffService';
 
 interface CampaignTrackingSystemProps {
   campaign: Campaign;
@@ -154,6 +161,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [activeTrackingModalShipment, setActiveTrackingModalShipment] = useState<InfluencerDispatchedShipment | null>(null);
   const [copiedAwb, setCopiedAwb] = useState<string | null>(null);
 
+  // Set of influencer IDs that already exist in Status Tracking for this campaign
+  const [existingStatusInfluencerIds, setExistingStatusInfluencerIds] = useState<Set<string>>(new Set());
+  const [isMovingToStatus, setIsMovingToStatus] = useState(false);
+  const [movingShipmentId, setMovingShipmentId] = useState<string | null>(null);
+
+  // Load Status Tracking influencer IDs
+  const loadStatusTrackingInfluencerIds = useCallback(async () => {
+    if (!campaign?.id) return;
+    try {
+      const set = await fetchCampaignStatusTrackingInfluencerIds(campaign.id);
+      setExistingStatusInfluencerIds(set);
+    } catch (e) {
+      console.error('Failed loading status tracking influencer IDs:', e);
+    }
+  }, [campaign?.id]);
+
   // Campaign imported shipments (ST Courier + Delhivery) - loads from DB with local storage cache fallback
   const [campaignShipments, setCampaignShipments] = useState<InfluencerDispatchedShipment[]>(() => getCampaignShipments(campaign.id));
   const [isLoadingDb, setIsLoadingDb] = useState(false);
@@ -169,12 +192,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       setCampaignShipments(dbShipments);
       setTrackingCache(getTrackingCache(campaign.id));
       setLastSyncTime(getLastCampaignSyncTime(campaign.id));
+      await loadStatusTrackingInfluencerIds();
     } catch (err) {
       console.error('Failed to load campaign shipments from Supabase:', err);
     } finally {
       setIsLoadingDb(false);
     }
-  }, [campaign.id]);
+  }, [campaign.id, loadStatusTrackingInfluencerIds]);
 
   // Reload cache and shipments when campaign changes
   useEffect(() => {
@@ -182,8 +206,20 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     setCurrentPage(1);
   }, [loadShipments]);
 
+  // Candidate influencers: pool all active influencers and dispatched influencers for the campaign
+  const candidateInfluencers = useMemo(() => {
+    const map = new Map<string, CampaignInfluencer>();
+    (allActiveInfluencers || []).forEach(inf => {
+      if (inf?.id) map.set(String(inf.id), inf);
+    });
+    (dispatchedInfluencers || []).forEach(inf => {
+      if (inf?.id && !map.has(String(inf.id))) map.set(String(inf.id), inf);
+    });
+    return Array.from(map.values());
+  }, [allActiveInfluencers, dispatchedInfluencers]);
+
   // Build unified dispatched shipments strictly for the current campaign
-  // Combines uploaded campaign shipments (ST Courier & Delhivery) and dispatched influencers
+  // Combines uploaded campaign shipments (ST Courier & Delhivery) and matched campaign influencers
   const allShipments: InfluencerDispatchedShipment[] = useMemo(() => {
     const shipmentMap = new Map<string, InfluencerDispatchedShipment>();
 
@@ -218,7 +254,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
 
     // 2. Enrich uploaded campaign tracking shipments with matched influencer details
-    for (const inf of dispatchedInfluencers) {
+    for (const inf of candidateInfluencers) {
       const infId = String(inf.id);
       const dispatch = inf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === infId);
       const batch = savedBatches.find(b => b.members && b.members.some(m => String(m.influencer_id) === infId));
@@ -265,7 +301,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
 
     return Array.from(shipmentMap.values());
-  }, [dispatchedInfluencers, dispatchRecords, savedBatches, campaignShipments, trackingCache]);
+  }, [candidateInfluencers, dispatchRecords, savedBatches, campaignShipments, trackingCache]);
 
   // True if valid campaign tracking shipments exist in the database
   const hasTrackingData = allShipments.length > 0;
@@ -472,6 +508,113 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     setTimeout(() => setCopiedAwb(null), 2000);
   };
 
+  // Delivered shipments eligible to move to Status Tracking (not yet added)
+  const eligibleForStatusTrackingCount = useMemo(() => {
+    let count = 0;
+    const seen = new Set<string>();
+    for (const s of allShipments) {
+      if (s.status === 'Delivered') {
+        const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
+        if (matchedInfluencer) {
+          const infId = String(matchedInfluencer.id);
+          if (!existingStatusInfluencerIds.has(infId) && !seen.has(infId)) {
+            count++;
+            seen.add(infId);
+          }
+        }
+      }
+    }
+    return count;
+  }, [allShipments, candidateInfluencers, dispatchRecords, existingStatusInfluencerIds]);
+
+  // Move single delivered shipment to Status Tracking
+  const handleMoveToStatusTracking = async (shipment: InfluencerDispatchedShipment) => {
+    if (shipment.status !== 'Delivered') {
+      toast.error(`Shipment status is ${shipment.status}. Only Delivered shipments qualify for Status Tracking.`);
+      return;
+    }
+
+    setMovingShipmentId(shipment.id);
+    const toastId = toast.loading('Moving to Status Tracking...');
+
+    try {
+      const res = await handoffDeliveredShipmentToStatusTracking(
+        campaign.id,
+        shipment,
+        candidateInfluencers,
+        dispatchRecords
+      );
+
+      if (!res.success) {
+        toast.error(res.error || 'Failed to move to Status Tracking.', { id: toastId });
+        return;
+      }
+
+      if (res.matchedInfluencer) {
+        const infId = String(res.matchedInfluencer.id);
+        setExistingStatusInfluencerIds(prev => new Set(prev).add(infId));
+      }
+
+      if (res.alreadyExisted) {
+        toast.success(`Influencer is already in Status Tracking. Progress preserved.`, { id: toastId });
+      } else {
+        const infName = res.matchedInfluencer?.code || res.matchedInfluencer?.influencer_name || 'Influencer';
+        toast.success(`Moved ${infName} to Status Tracking!`, { id: toastId });
+      }
+
+      await loadStatusTrackingInfluencerIds();
+
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err?.message || String(err)}`, { id: toastId });
+    } finally {
+      setMovingShipmentId(null);
+    }
+  };
+
+  // Bulk move all eligible delivered shipments to Status Tracking
+  const handleBulkMoveToStatusTracking = async () => {
+    const delivered = allShipments.filter(s => s.status === 'Delivered');
+    if (delivered.length === 0) {
+      toast.error('No Delivered shipments found.');
+      return;
+    }
+
+    setIsMovingToStatus(true);
+    const toastId = toast.loading(`Moving delivered influencers to Status Tracking...`);
+
+    try {
+      const summary = await bulkHandoffDeliveredShipments(
+        campaign.id,
+        delivered,
+        candidateInfluencers,
+        dispatchRecords
+      );
+
+      await loadStatusTrackingInfluencerIds();
+
+      if (summary.addedCount > 0) {
+        toast.success(`Added ${summary.addedCount} influencer(s) to Status Tracking (${summary.alreadyPresentCount} already present).`, { id: toastId, duration: 5000 });
+      } else if (summary.alreadyPresentCount > 0) {
+        toast.success(`All ${summary.alreadyPresentCount} delivered influencer(s) are already in Status Tracking.`, { id: toastId });
+      } else if (summary.unmatchedCount > 0) {
+        toast.error(`Could not match ${summary.unmatchedCount} shipment(s) to influencers in this campaign.`, { id: toastId });
+      } else {
+        toast('No new influencers to move.', { id: toastId, icon: 'ℹ️' });
+      }
+
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (err: any) {
+      toast.error(`Bulk move error: ${err?.message || String(err)}`, { id: toastId });
+    } finally {
+      setIsMovingToStatus(false);
+    }
+  };
+
   // Single Shipment Sync
   const handleSyncShipment = async (shipment: InfluencerDispatchedShipment) => {
     if ((shipment.courier || '').toLowerCase().includes('delhivery')) {
@@ -495,6 +638,20 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         toast.error(`Sync: ${updated.syncError}`, { id: toastId });
       } else {
         toast.success(`Synced: ${updated.status}`, { id: toastId });
+      }
+
+      // Automatic handoff if shipment became Delivered
+      if (updated.status === 'Delivered') {
+        const handoffRes = await handoffDeliveredShipmentToStatusTracking(
+          campaign.id,
+          updated,
+          candidateInfluencers,
+          dispatchRecords
+        );
+        if (handoffRes.success && !handoffRes.alreadyExisted) {
+          toast.success(`Automatically added ${handoffRes.matchedInfluencer?.code || 'influencer'} to Status Tracking!`, { duration: 4000 });
+        }
+        await loadStatusTrackingInfluencerIds();
       }
 
       if (activeTrackingModalShipment && activeTrackingModalShipment.id === shipment.id) {
@@ -538,6 +695,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       });
 
       await loadShipments();
+
+      // Automatic handoff for all delivered shipments
+      const refreshedShipments = await fetchCampaignShipmentsFromDb(campaign.id);
+      const deliveredAfterSync = refreshedShipments.filter(s => s.status === 'Delivered');
+      if (deliveredAfterSync.length > 0) {
+        const handoffSummary = await bulkHandoffDeliveredShipments(
+          campaign.id,
+          deliveredAfterSync,
+          candidateInfluencers,
+          dispatchRecords
+        );
+        if (handoffSummary.addedCount > 0) {
+          toast.success(`Handoff: Added ${handoffSummary.addedCount} newly delivered influencer(s) to Status Tracking!`, { duration: 5000 });
+        }
+        await loadStatusTrackingInfluencerIds();
+      }
 
       toast.dismiss(progressToastId);
       const summary = delhiveryCount > 0
@@ -741,59 +914,77 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       ) : (
         <>
 
-      {/* 4. STATUS FILTER PILLS (Matching Screenshot order & color schemes) */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
-        {STATUS_PILLS.map((pill) => {
-          const count = statusTabCounts[pill] || 0;
-          const isActive = selectedStatusTab === pill;
+      {/* 4. STATUS FILTER PILLS (Matching Screenshot order & color schemes) + BULK MOVE */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 overflow-x-auto pb-1 [scrollbar-width:none]">
+        <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none]">
+          {STATUS_PILLS.map((pill) => {
+            const count = statusTabCounts[pill] || 0;
+            const isActive = selectedStatusTab === pill;
 
-          let badgeBorderClass = 'border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200';
-          if (pill === 'All') {
-            badgeBorderClass = isActive
-              ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-              : 'border-purple-800/40 text-purple-300 hover:border-purple-600';
-          } else if (pill === 'Exception') {
-            badgeBorderClass = isActive
-              ? 'bg-rose-600 text-white border-rose-500'
-              : 'border-rose-800/40 text-rose-400 hover:border-rose-600';
-          } else if (pill === 'Failed Attempt') {
-            badgeBorderClass = isActive
-              ? 'bg-amber-600 text-white border-amber-500'
-              : 'border-amber-800/40 text-amber-400 hover:border-amber-600';
-          } else if (pill === 'Pending') {
-            badgeBorderClass = isActive
-              ? 'bg-amber-500 text-white border-amber-400'
-              : 'border-amber-700/40 text-amber-300 hover:border-amber-500';
-          } else if (pill === 'In Transit') {
-            badgeBorderClass = isActive
-              ? 'bg-blue-600 text-white border-blue-500'
-              : 'border-blue-800/40 text-blue-400 hover:border-blue-600';
-          } else if (pill === 'Delivered') {
-            badgeBorderClass = isActive
-              ? 'bg-emerald-600 text-white border-emerald-500'
-              : 'border-emerald-800/40 text-emerald-400 hover:border-emerald-600';
-          } else if (pill === 'Out for Delivery') {
-            badgeBorderClass = isActive
-              ? 'bg-cyan-600 text-white border-cyan-500'
-              : 'border-cyan-800/40 text-cyan-400 hover:border-cyan-600';
-          }
+            let badgeBorderClass = 'border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200';
+            if (pill === 'All') {
+              badgeBorderClass = isActive
+                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                : 'border-purple-800/40 text-purple-300 hover:border-purple-600';
+            } else if (pill === 'Exception') {
+              badgeBorderClass = isActive
+                ? 'bg-rose-600 text-white border-rose-500'
+                : 'border-rose-800/40 text-rose-400 hover:border-rose-600';
+            } else if (pill === 'Failed Attempt') {
+              badgeBorderClass = isActive
+                ? 'bg-amber-600 text-white border-amber-500'
+                : 'border-amber-800/40 text-amber-400 hover:border-amber-600';
+            } else if (pill === 'Pending') {
+              badgeBorderClass = isActive
+                ? 'bg-amber-500 text-white border-amber-400'
+                : 'border-amber-700/40 text-amber-300 hover:border-amber-500';
+            } else if (pill === 'In Transit') {
+              badgeBorderClass = isActive
+                ? 'bg-blue-600 text-white border-blue-500'
+                : 'border-blue-800/40 text-blue-400 hover:border-blue-600';
+            } else if (pill === 'Delivered') {
+              badgeBorderClass = isActive
+                ? 'bg-emerald-600 text-white border-emerald-500'
+                : 'border-emerald-800/40 text-emerald-400 hover:border-emerald-600';
+            } else if (pill === 'Out for Delivery') {
+              badgeBorderClass = isActive
+                ? 'bg-cyan-600 text-white border-cyan-500'
+                : 'border-cyan-800/40 text-cyan-400 hover:border-cyan-600';
+            }
 
-          return (
-            <button
-              key={pill}
-              type="button"
-              onClick={() => setSelectedStatusTab(pill)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${badgeBorderClass}`}
-            >
-              <span>{pill}</span>
-              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
-                isActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
-              }`}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
+            return (
+              <button
+                key={pill}
+                type="button"
+                onClick={() => setSelectedStatusTab(pill)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${badgeBorderClass}`}
+              >
+                <span>{pill}</span>
+                <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Bulk Move to Status Tracking (N) Button */}
+        <button
+          type="button"
+          onClick={handleBulkMoveToStatusTracking}
+          disabled={isMovingToStatus || eligibleForStatusTrackingCount === 0}
+          className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            eligibleForStatusTrackingCount > 0
+              ? 'bg-purple-600 hover:bg-purple-500 text-white border-purple-500 shadow-sm shadow-purple-600/30'
+              : 'bg-slate-900/80 text-slate-500 border-slate-800 cursor-not-allowed'
+          }`}
+          title={eligibleForStatusTrackingCount > 0 ? `Move all ${eligibleForStatusTrackingCount} eligible delivered influencers to Status Tracking` : 'No delivered influencers waiting to be added'}
+        >
+          <RefreshCw size={13} className={isMovingToStatus ? 'animate-spin' : ''} />
+          <span>Move to Status Tracking ({eligibleForStatusTrackingCount})</span>
+        </button>
       </div>
 
       {/* 5. SHIPMENT TABLE + PAGINATION (FULL WIDTH) */}
@@ -807,7 +998,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">AWB NUMBER</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">COURIER</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">STATUS</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-right w-24">ACTIONS</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-right min-w-[240px]">ACTIONS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
@@ -874,17 +1065,63 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         </td>
 
                         {/* 5. ACTIONS */}
-                        <td className="px-5 py-3.5 text-right">
-                          <div className="flex items-center justify-end">
+                        <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-2">
                             <button
                               type="button"
                               onClick={() => setActiveTrackingModalShipment(s)}
-                              className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group"
+                              className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
                               title="View Shipment Details"
                               aria-label="View Shipment Details"
                             >
                               <Eye size={15} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
                             </button>
+
+                            {(() => {
+                              const isDelivered = s.status === 'Delivered';
+                              const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
+                              const isAlreadyAdded = matchedInfluencer && existingStatusInfluencerIds.has(String(matchedInfluencer.id));
+                              const isMoving = movingShipmentId === s.id;
+
+                              if (isDelivered) {
+                                if (isAlreadyAdded) {
+                                  return (
+                                    <div
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-950/60 border border-emerald-700/60 text-emerald-300 whitespace-nowrap shadow-sm"
+                                      title={`Added to Status Tracking (${matchedInfluencer?.code || matchedInfluencer?.influencer_name})`}
+                                    >
+                                      <Check size={13} className="text-emerald-400" />
+                                      <span>Added to Status Tracking</span>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveToStatusTracking(s)}
+                                    disabled={isMoving || isMovingToStatus}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white shadow-sm hover:shadow-purple-600/30 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                    title={matchedInfluencer ? `Move ${matchedInfluencer.code || matchedInfluencer.influencer_name} to Status Tracking` : 'Move to Status Tracking'}
+                                  >
+                                    <span>{isMoving ? 'Moving...' : 'Move to Status Tracking'}</span>
+                                    <ArrowRight size={13} />
+                                  </button>
+                                );
+                              }
+
+                              return (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/60 text-slate-600 border border-slate-800/80 cursor-not-allowed whitespace-nowrap"
+                                  title="Only Delivered shipments qualify for Status Tracking"
+                                >
+                                  <span>Move to Status Tracking</span>
+                                  <ArrowRight size={13} className="opacity-40" />
+                                </button>
+                              );
+                            })()}
                           </div>
                         </td>
                       </tr>

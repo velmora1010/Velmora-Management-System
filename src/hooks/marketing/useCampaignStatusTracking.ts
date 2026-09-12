@@ -4,6 +4,9 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import { isActiveStatus } from '../../utils/marketingUtils';
+import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
+
+export { naturalCompareCodes };
 
 export interface StatusTrackingRecord {
   id: string;
@@ -117,7 +120,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         
         const { data: infoData, error: infoError } = await supabase
           .from(SUPABASE_TABLES.influencersInfo)
-          .select('id, name, profile_file_url, code, is_archived')
+          .select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived')
           .in('id', influencerIds);
           
         if (infoError) throw infoError;
@@ -128,6 +131,21 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           .in('influencer_id', influencerIds);
           
         if (pricingError) throw pricingError;
+
+        let platformMap: Record<string, string> = {};
+        try {
+          const { data: platformData } = await supabase
+            .from(SUPABASE_TABLES.influencerPlatform)
+            .select('influencer_id, username')
+            .in('influencer_id', influencerIds);
+          (platformData || []).forEach(pl => {
+            if (pl.username && !platformMap[pl.influencer_id]) {
+              platformMap[pl.influencer_id] = pl.username;
+            }
+          });
+        } catch (e) {
+          // Ignore platform query error if table unavailable
+        }
 
         // Map dictionaries
         const dispatchMap = (dispatchData || []).reduce((acc: any, d: any) => {
@@ -151,15 +169,17 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
             const dispatch = dispatchMap[r.dispatch_id] || {};
             const info = infoMap[r.influencer_id] || {};
             const pricing = pricingMap[r.influencer_id] || {};
+            const rawUser = platformMap[r.influencer_id] || info.name || '';
+            const cleanUser = rawUser ? (rawUser.startsWith('@') ? rawUser : `@${rawUser}`) : '—';
             
             return {
               ...r,
               dispatch: {
                 campaign_name: dispatch.campaign_name,
-                address: dispatch.address,
-                state: dispatch.state,
-                phone_number: dispatch.phone_number,
-                alternative_phone_number: dispatch.alternative_phone_number,
+                address: dispatch.address || info.complete_address || '',
+                state: dispatch.state || info.state || '',
+                phone_number: dispatch.phone_number || info.phone_number || '',
+                alternative_phone_number: dispatch.alternative_phone_number || '',
                 dispatch_date: dispatch.dispatch_date,
                 expected_delivery_date: dispatch.expected_delivery_date,
                 product_name: dispatch.product_name,
@@ -167,8 +187,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 total_product_value: dispatch.total_product_value,
                 courier_partner: dispatch.courier_partner,
                 tracking_id: dispatch.tracking_id,
-                influencer_name: info.name || dispatch.creator_name,
-                influencer_code: info.code,
+                influencer_name: info.influencer_name || info.name || dispatch.creator_name || 'Unknown Influencer',
+                influencer_code: info.code || dispatch.influencer_code || '',
+                username: cleanUser,
                 influencer_avatar: info.profile_file_url,
                 is_archived: info.is_archived
               },
@@ -183,6 +204,14 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
             return isActiveStatus(r.dispatch.is_archived);
           });
         
+        // Ascending natural sort by Influencer Code (J2, J10, J61, J174, J203)
+        combined.sort((a, b) => {
+          return naturalCompareCodes(
+            a.dispatch?.influencer_code || a.influencer_id,
+            b.dispatch?.influencer_code || b.influencer_id
+          );
+        });
+
         setTrackingRecords(combined);
       } else {
         setTrackingRecords([]);
