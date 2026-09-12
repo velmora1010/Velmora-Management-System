@@ -5,8 +5,9 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
+import { parseToYMD, calculateDraftDate } from './useCampaignInfluencers';
 
-export { naturalCompareCodes };
+export { naturalCompareCodes, parseToYMD, calculateDraftDate };
 
 export interface StatusTrackingRecord {
   id: string;
@@ -85,6 +86,12 @@ export interface StatusTrackingRecord {
   pricing?: {
     final_price: number;
   };
+  postDates?: Array<{
+    id?: any;
+    video_number: number;
+    post_date?: string | null;
+    draft_date?: string | null;
+  }>;
 }
 
 export const useCampaignStatusTracking = (campaignId?: string) => {
@@ -113,26 +120,17 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
       if (records.length > 0) {
         const dispatchIds = Array.from(new Set(records.map(r => r.dispatch_id).filter(Boolean)));
         const influencerIds = Array.from(new Set(records.map(r => r.influencer_id).filter(Boolean)));
-        const { data: dispatchData, error: dispatchError } = await supabase
-          .from(SUPABASE_TABLES.influencerDispatch)
-          .select('*')
-          .in('id', dispatchIds);
-          
-        if (dispatchError) throw dispatchError;
-        
-        const { data: infoData, error: infoError } = await supabase
-          .from(SUPABASE_TABLES.influencersInfo)
-          .select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages')
-          .in('id', influencerIds);
-          
-        if (infoError) throw infoError;
-
-        const { data: pricingData, error: pricingError } = await supabase
-          .from(SUPABASE_TABLES.influencerPricing)
-          .select('influencer_id, final_price, total_videos')
-          .in('influencer_id', influencerIds);
-          
-        if (pricingError) throw pricingError;
+        const [
+          { data: dispatchData, error: dispatchError },
+          { data: infoData, error: infoError },
+          { data: pricingData, error: pricingError },
+          { data: postDatesData }
+        ] = await Promise.all([
+          supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('id', dispatchIds),
+          supabase.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages').in('id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerPricing).select('influencer_id, final_price, total_videos').in('influencer_id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', influencerIds)
+        ]);
 
         let platformMap: Record<string, string> = {};
         let rawPlatformsData: any[] = [];
@@ -189,8 +187,68 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
               ? info.languages.filter((l: string) => typeof l === 'string' && !l.startsWith('views_data:'))
               : (typeof info.languages === 'string' ? info.languages.split(/[,/]+/).map((s: string) => s.trim()).filter(Boolean) : []);
 
+            // Process Post Dates from views_data and influencer_post_dates table
+            const postDatesMap = new Map<number, any>();
+            const matchViewsElement = Array.isArray(info.languages)
+              ? info.languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'))
+              : null;
+            if (matchViewsElement) {
+              try {
+                const viewsJson = JSON.parse(matchViewsElement.substring('views_data:'.length));
+                (viewsJson?.post_dates || []).forEach((pd: any, pIdx: number) => {
+                  const hasPost = pd.post_date && String(pd.post_date).trim() !== '';
+                  const hasDraft = pd.draft_date && String(pd.draft_date).trim() !== '';
+                  if (hasPost || hasDraft) {
+                    const vNum = Number(pd.video_number) || (pIdx + 1);
+                    const postYmd = hasPost ? parseToYMD(pd.post_date, 2026) : null;
+                    const draftYmd = hasDraft
+                      ? parseToYMD(pd.draft_date, 2026)
+                      : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
+                    postDatesMap.set(vNum, {
+                      video_number: vNum,
+                      post_date: postYmd || pd.post_date || null,
+                      draft_date: draftYmd || null
+                    });
+                  }
+                });
+              } catch (e) {}
+            }
+
+            (postDatesData || [])
+              .filter((pd: any) => String(pd.influencer_id) === String(r.influencer_id))
+              .forEach((pd: any, pIdx: number) => {
+                const hasPost = pd.post_date && String(pd.post_date).trim() !== '';
+                const hasDraft = pd.draft_date && String(pd.draft_date).trim() !== '';
+                if (hasPost || hasDraft) {
+                  const vNum = Number(pd.video_number) || (pIdx + 1);
+                  const postYmd = hasPost ? parseToYMD(pd.post_date, 2026) : null;
+                  const draftYmd = hasDraft
+                    ? parseToYMD(pd.draft_date, 2026)
+                    : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
+                  postDatesMap.set(vNum, {
+                    id: pd.id,
+                    influencer_id: pd.influencer_id,
+                    campaign_id: pd.campaign_id,
+                    video_number: vNum,
+                    post_date: postYmd || pd.post_date || null,
+                    draft_date: draftYmd || null
+                  });
+                }
+              });
+
+            const postDates = Array.from(postDatesMap.values()).map((pd: any) => {
+              const postYmd = pd.post_date ? parseToYMD(pd.post_date, 2026) : null;
+              const draftYmd = pd.draft_date ? parseToYMD(pd.draft_date, 2026) : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
+              return {
+                ...pd,
+                post_date: postYmd || pd.post_date || null,
+                draft_date: draftYmd || null
+              };
+            }).sort((a: any, b: any) => (a.video_number || 0) - (b.video_number || 0));
+
             return {
               ...r,
+              postDates,
               dispatch: {
                 campaign_name: dispatch.campaign_name,
                 address: dispatch.address || info.complete_address || '',

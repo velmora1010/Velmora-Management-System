@@ -3,13 +3,14 @@ import type { Campaign } from '../../types';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
 import { 
-  Clock, Package, Phone, FileText, CreditCard, Video, CheckCircle2, Check, 
+  Clock, Package, Phone, FileText, Video, Check, 
   XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft
 } from 'lucide-react';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
+import { parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
 import toast from 'react-hot-toast';
 
 interface CampaignStatusTrackingProps {
@@ -34,7 +35,7 @@ export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: IndianRupee },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
-  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: CheckCircle2 },
+  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
 ];
 
 // Videos 2 through 6 Steps: Call & Explain -> Share Script -> Time Line -> Draft -> Post Date -> Payment
@@ -43,7 +44,7 @@ export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
-  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: CheckCircle2 },
+  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
 
@@ -71,6 +72,21 @@ const formatForDateTimeInput = (dateStr: string | undefined | null) => {
   } catch (e) {
     return '';
   }
+};
+
+export const formatDisplayDateLocal = (dateStr: string | null | undefined): string => {
+  if (!dateStr || !dateStr.trim()) return 'Not Assigned';
+  const ymd = parseToYMD(dateStr, 2026);
+  if (!ymd) return dateStr;
+  const parts = ymd.split('-');
+  if (parts.length !== 3) return dateStr;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthName = months[month - 1] || '';
+  const dd = String(day).padStart(2, '0');
+  return `${dd} ${monthName} ${year}`;
 };
 
 // =========================================================================
@@ -101,13 +117,47 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
 
   const storedVideo = metadata.videos?.[String(videoNum)] || metadata.videos?.[videoNum];
 
+  // Resolve scheduled draft date for this specific video from record.postDates
+  const scheduleEntry = (record.postDates || []).find(
+    (pd: any) => Number(pd.video_number) === Number(videoNum)
+  );
+  let scheduledDraftDate = scheduleEntry?.draft_date || '';
+  if (!scheduledDraftDate && Array.isArray((record.dispatch as any)?.languages)) {
+    const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+    if (matchViews) {
+      try {
+        const vJson = JSON.parse(matchViews.substring('views_data:'.length));
+        const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNum));
+        if (found?.draft_date) {
+          scheduledDraftDate = parseToYMD(found.draft_date, 2026);
+        } else if (found?.post_date) {
+          scheduledDraftDate = calculateDraftDate(found.post_date, 2026);
+        }
+      } catch (e) {}
+    }
+  }
+
   // Initialize steps record
   const steps: Record<string, { completed: boolean; data: any; updated_at?: string }> = {};
 
   configs.forEach(cfg => {
     // If structured in metadata.videos, use that
     if (storedVideo?.steps?.[cfg.id]) {
-      steps[cfg.id] = storedVideo.steps[cfg.id];
+      const st = storedVideo.steps[cfg.id];
+      if (cfg.id === 'timeline') {
+        const isOver = st.data?.manualOverride === true;
+        const effDate = isOver ? (st.data?.date || '') : (scheduledDraftDate || st.data?.date || (videoNum === 1 ? (record.draft_expected_date || '') : ''));
+        steps[cfg.id] = {
+          ...st,
+          data: {
+            ...st.data,
+            date: effDate,
+            manualOverride: isOver
+          }
+        };
+      } else {
+        steps[cfg.id] = st;
+      }
       return;
     }
 
@@ -146,8 +196,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
       } else if (cfg.id === 'timeline') {
         completed = !!record.expected_delivery_completed || (!!record.draft_expected_date && !!record.draft_expected_time);
         data = {
-          date: record.draft_expected_date || '',
-          time: record.draft_expected_time || ''
+          date: scheduledDraftDate || record.draft_expected_date || '',
+          time: record.draft_expected_time || '',
+          manualOverride: false
         };
       } else if (cfg.id === 'draft') {
         completed = !!record.draft_received || !!record.draft_video_url || (record.draft_approval_status === 'Approved');
@@ -168,15 +219,23 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
           confirmed: completed
         };
       }
-    } else if (videoNum === 2) {
-      if (cfg.id === 'post_date' && metadata.video2_final_post_link && !isFakeUrl(metadata.video2_final_post_link)) {
-        completed = !!metadata.video2_confirmed;
+    } else {
+      if (cfg.id === 'timeline') {
         data = {
-          link: metadata.video2_final_post_link || '',
-          postedAt: metadata.video2_posted_at || '',
-          platform: metadata.video2_platform || 'Instagram',
-          confirmed: completed
+          date: scheduledDraftDate || '',
+          time: '',
+          manualOverride: false
         };
+      } else if (videoNum === 2 && cfg.id === 'post_date') {
+        if (metadata.video2_final_post_link && !isFakeUrl(metadata.video2_final_post_link)) {
+          completed = !!metadata.video2_confirmed;
+          data = {
+            link: metadata.video2_final_post_link || '',
+            postedAt: metadata.video2_posted_at || '',
+            platform: metadata.video2_platform || 'Instagram',
+            confirmed: completed
+          };
+        }
       }
     }
 
@@ -703,7 +762,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             {/* Completed */}
             <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-3 flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                <CheckCircle2 size={18} />
+                <Check size={18} strokeWidth={3} />
               </div>
               <div>
                 <span className="text-[11px] font-medium text-slate-400 block">Completed</span>
@@ -1384,6 +1443,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
           {activeStepId === 'timeline' && (
             <ExpectedTimelineForm 
               record={record} 
+              videoNumber={videoNumber}
               existingData={activeStepState.data}
               onSave={(formData: any) => onSaveStep('timeline', formData, formData.expected_delivery_completed)} 
             />
@@ -1872,42 +1932,231 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
   );
 };
 
-// --- STEP: Time Line ---
-const ExpectedTimelineForm = ({ record, existingData = {}, onSave }: any) => {
-  const [date, setDate] = useState(existingData.date || record.draft_expected_date || '');
-  const [time, setTime] = useState(existingData.time || record.draft_expected_time || '');
+// --- STEP: Time Line (Auto-populated from Post Date / Draft Date with manual edit & reset) ---
+interface ExpectedTimelineFormProps {
+  record: StatusTrackingRecord;
+  videoNumber: number;
+  existingData?: any;
+  onSave: (data: any) => Promise<void> | void;
+}
+
+const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({ 
+  record, 
+  videoNumber, 
+  existingData = {}, 
+  onSave 
+}) => {
+  // 1. Resolve scheduled draft date strictly for this videoNumber
+  const scheduleEntry = (record.postDates || []).find(
+    (pd: any) => Number(pd.video_number) === Number(videoNumber)
+  );
+  let scheduledDraftDate = scheduleEntry?.draft_date || '';
+
+  // Fallback to views_data in record.dispatch.languages if postDates was not populated
+  if (!scheduledDraftDate && Array.isArray((record.dispatch as any)?.languages)) {
+    const matchViews = (record.dispatch as any).languages.find(
+      (l: string) => typeof l === 'string' && l.startsWith('views_data:')
+    );
+    if (matchViews) {
+      try {
+        const vJson = JSON.parse(matchViews.substring('views_data:'.length));
+        const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
+        if (found?.draft_date) {
+          scheduledDraftDate = parseToYMD(found.draft_date, 2026);
+        } else if (found?.post_date) {
+          scheduledDraftDate = calculateDraftDate(found.post_date, 2026);
+        }
+      } catch (e) {}
+    }
+  }
+
+  // 2. Determine initial date and override status
+  const isManualOverride = existingData.manualOverride === true;
+  const initialEffectiveDate = isManualOverride 
+    ? (existingData.date || '')
+    : (scheduledDraftDate || existingData.date || (videoNumber === 1 ? (record.draft_expected_date || '') : ''));
+
+  const [effectiveDate, setEffectiveDate] = useState<string>(initialEffectiveDate);
+  const [isOverride, setIsOverride] = useState<boolean>(isManualOverride);
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [tempEditDate, setTempEditDate] = useState<string>(initialEffectiveDate);
+  const [time, setTime] = useState<string>(
+    existingData.time || (videoNumber === 1 ? (record.draft_expected_time || '') : '')
+  );
+
+  // Sync state whenever videoNumber, record, or existingData changes
+  useEffect(() => {
+    const isOver = existingData.manualOverride === true;
+    const eff = isOver 
+      ? (existingData.date || '')
+      : (scheduledDraftDate || existingData.date || (videoNumber === 1 ? (record.draft_expected_date || '') : ''));
+    setEffectiveDate(eff);
+    setIsOverride(isOver);
+    setTempEditDate(eff);
+    setIsEditing(false);
+    setTime(existingData.time || (videoNumber === 1 ? (record.draft_expected_time || '') : ''));
+  }, [videoNumber, record.id, scheduledDraftDate, existingData.manualOverride, existingData.date, existingData.time]);
+
+  const handleStartEdit = () => {
+    setTempEditDate(parseToYMD(effectiveDate, 2026) || effectiveDate || '');
+    setIsEditing(true);
+  };
+
+  const handleApplyEdit = () => {
+    if (!tempEditDate) {
+      toast.error('Please pick a valid date.');
+      return;
+    }
+    const normalizedNew = parseToYMD(tempEditDate, 2026) || tempEditDate;
+    const normalizedScheduled = parseToYMD(scheduledDraftDate, 2026) || scheduledDraftDate;
+    const newIsOverride = normalizedNew !== normalizedScheduled;
+
+    setEffectiveDate(normalizedNew);
+    setIsOverride(newIsOverride);
+    setIsEditing(false);
+    toast.success('Date updated. Click "Save Timeline" to save.');
+  };
+
+  const handleCancelEdit = () => {
+    setTempEditDate(effectiveDate);
+    setIsEditing(false);
+  };
+
+  const handleResetToDraftDate = async () => {
+    if (!scheduledDraftDate) {
+      toast.error('No scheduled draft date found for this video.');
+      return;
+    }
+    const normalizedScheduled = parseToYMD(scheduledDraftDate, 2026) || scheduledDraftDate;
+    setEffectiveDate(normalizedScheduled);
+    setIsOverride(false);
+    setIsEditing(false);
+    setTempEditDate(normalizedScheduled);
+
+    // Persist reset state immediately
+    await onSave({
+      date: normalizedScheduled,
+      time: time || '',
+      manualOverride: false,
+      expected_delivery_completed: true
+    });
+    toast.success(`Reset to scheduled draft date: ${formatDisplayDateLocal(normalizedScheduled)}`);
+  };
+
+  const handleSaveTimeline = async () => {
+    if (!effectiveDate) {
+      toast.error('Please assign an Expected Draft Delivery Date.');
+      return;
+    }
+    await onSave({
+      date: effectiveDate,
+      time: time || '',
+      manualOverride: isOverride,
+      expected_delivery_completed: true
+    });
+  };
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Expected Draft Delivery Date</label>
-          <input 
-            type="date" 
-            value={date} 
-            onChange={e => setDate(e.target.value)} 
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Expected Time</label>
-          <input 
-            type="time" 
-            value={time} 
-            onChange={e => setTime(e.target.value)} 
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-          />
-        </div>
+      
+      {/* Date Display or Inline Edit Card */}
+      <div>
+        <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
+          Expected Draft Delivery Date
+        </label>
+        
+        {!isEditing ? (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b1329] border border-slate-800 rounded-xl gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className={`text-base sm:text-lg font-bold font-mono tracking-wide ${effectiveDate ? 'text-white' : 'text-slate-500 italic'}`}>
+                {effectiveDate ? formatDisplayDateLocal(effectiveDate) : 'Not Assigned'}
+              </span>
+
+              {isOverride ? (
+                <span className="text-[11px] font-bold text-amber-400 bg-amber-950/70 border border-amber-800/60 px-2.5 py-0.5 rounded-md">
+                  Manual Override
+                </span>
+              ) : scheduledDraftDate ? (
+                <span className="text-[11px] font-bold text-purple-300 bg-purple-950/70 border border-purple-800/60 px-2.5 py-0.5 rounded-md">
+                  Auto-filled from Post Date (Video {videoNumber})
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleStartEdit}
+                className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition-colors shadow-sm"
+              >
+                Edit
+              </button>
+
+              {isOverride && scheduledDraftDate && (
+                <button
+                  type="button"
+                  onClick={handleResetToDraftDate}
+                  className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-rose-400 hover:text-rose-300 rounded-lg text-xs font-bold transition-colors shadow-sm"
+                  title="Restore original scheduled Draft Date"
+                >
+                  Reset to Draft Date
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-3 animate-fade-in">
+            <span className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
+              Edit Expected Draft Delivery Date (Video {videoNumber})
+            </span>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <input 
+                type="date"
+                value={tempEditDate}
+                onChange={e => setTempEditDate(e.target.value)}
+                className="flex-1 bg-[#070c18] border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleApplyEdit}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md"
+                >
+                  Done
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Expected Time Input */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+            Expected Time
+          </label>
+          <span className="text-[11px] text-slate-500 font-medium">[optional]</span>
+        </div>
+        <input 
+          type="time" 
+          value={time} 
+          onChange={e => setTime(e.target.value)} 
+          className="w-full sm:w-64 bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+        />
+      </div>
+
+      {/* Save Button */}
       <div className="flex justify-end pt-2 border-t border-slate-800">
         <button 
-          onClick={() => {
-            if (!date || !time) {
-              toast.error('Please select both date and time.');
-              return;
-            }
-            onSave({ date, time, expected_delivery_completed: true });
-          }} 
+          onClick={handleSaveTimeline} 
           className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
         >
           Save Timeline
