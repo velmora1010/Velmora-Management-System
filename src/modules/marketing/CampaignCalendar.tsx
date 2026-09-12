@@ -677,12 +677,17 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
         // Resolve Timeline date strictly with priority: manualTimelineDate -> originalVideoDraftDate
         let effectiveTimelineDate = '';
+        let isReDraftTimeline = false;
         if (matchingRecord) {
           try {
             const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
-            const timelineDate = vWorkflow.steps?.timeline?.data?.date;
+            const tlStep = vWorkflow.steps?.timeline;
+            const timelineDate = tlStep?.data?.date;
             if (timelineDate) {
               effectiveTimelineDate = parseDateOnly(timelineDate, 2026);
+            }
+            if (tlStep?.data?.is_re_upload_timeline === true || !!tlStep?.data?.re_draft_submit_date || vWorkflow.isReDraftRequired) {
+              isReDraftTimeline = true;
             }
           } catch (e) {}
         }
@@ -698,9 +703,11 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               id: `inf-${inf.id}-v${vNum}-draft`,
               recordId: infId,
               type: 'Draft',
-              label: `Video ${vNum} Draft`,
-              icon: '🎬',
-              colorClass: 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
+              label: isReDraftTimeline ? `Video ${vNum} Re-Draft` : `Video ${vNum} Draft`,
+              icon: isReDraftTimeline ? '🔄' : '🎬',
+              colorClass: isReDraftTimeline 
+                ? 'bg-rose-500/10 border border-rose-500/30 text-rose-400' 
+                : 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
               dateStr: drDate,
               influencerName,
               influencerUsername,

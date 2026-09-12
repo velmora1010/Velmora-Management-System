@@ -105,6 +105,8 @@ export interface DraftAttempt {
   approval_status: 'Approved' | 'Not Approved' | 'Pending Approval';
   timing_status?: string;
   corrections?: string;
+  re_draft_submit_date?: string;
+  expected_submit_date?: string;
   final_product_link?: string;
   final_description?: string;
   uploaded_at: string;
@@ -364,13 +366,20 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
     if (storedVideo?.steps?.[cfg.id]) {
       const st = storedVideo.steps[cfg.id];
       if (cfg.id === 'timeline') {
+        const isReUpload = st.data?.is_re_upload_timeline === true || !!st.data?.re_draft_submit_date;
         const isOver = st.data?.manualOverride === true;
-        const effDate = isOver ? (st.data?.date || '') : (scheduledDraftDate || st.data?.date || (videoNum === 1 ? (record.draft_expected_date || '') : ''));
+        const effDate = isReUpload 
+          ? (st.data?.date || st.data?.re_draft_submit_date || '') 
+          : (isOver ? (st.data?.date || '') : (scheduledDraftDate || st.data?.date || (videoNum === 1 ? (record.draft_expected_date || '') : '')));
         steps[cfg.id] = {
           ...st,
+          completed: isReUpload ? (st.data?.re_upload_status === 'Completed') : st.completed,
           data: {
             ...st.data,
             date: effDate,
+            scheduled_draft_date: scheduledDraftDate,
+            is_re_upload_timeline: isReUpload,
+            re_upload_status: st.data?.re_upload_status || (isReUpload ? 'Scheduled' : 'Completed'),
             manualOverride: isOver,
             history: Array.isArray(st.data?.history) ? st.data.history : []
           }
@@ -874,8 +883,61 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       updated_at: new Date().toISOString()
     };
 
+    const updates: Partial<StatusTrackingRecord> = {};
+
     if (stepId === 'draft') {
       videoObj.is_re_draft_required = (stepData.approval_status === 'Not Approved');
+
+      if (stepData.approval_status === 'Not Approved' && stepData.re_draft_submit_date) {
+        // Automatically populate / update timeline step for Re-Upload
+        if (!videoObj.steps.timeline) {
+          videoObj.steps.timeline = { completed: false, data: {} };
+        }
+        const tlData = videoObj.steps.timeline.data || {};
+        const prevTlDate = tlData.date;
+        const newTlDate = stepData.re_draft_submit_date;
+        const currentAttemptNum = stepData.active_attempt_number || 1;
+
+        let tlHistory = Array.isArray(tlData.history) ? [...tlData.history] : [];
+        if (prevTlDate && prevTlDate !== newTlDate) {
+          tlHistory = [{
+            id: `th-${Date.now()}`,
+            old_date: formatDisplayDateLocal(prevTlDate),
+            new_date: formatDisplayDateLocal(newTlDate),
+            changed_by: stepData.reviewed_by || 'Admin',
+            changed_at: new Date().toISOString(),
+            reason: `Draft Attempt ${currentAttemptNum}`
+          }, ...tlHistory];
+        }
+
+        // Entering the date sets progression to 'Scheduled', NOT completed yet
+        videoObj.steps.timeline.completed = false;
+        videoObj.steps.timeline.data = {
+          ...tlData,
+          date: newTlDate,
+          re_draft_submit_date: newTlDate,
+          is_re_upload_timeline: true,
+          re_upload_status: 'Scheduled',
+          source_attempt_number: currentAttemptNum,
+          history: tlHistory
+        };
+
+        if (videoNumber === 1) {
+          updates.re_draft_expected_date = newTlDate;
+        }
+      } else if (stepData.approval_status === 'Pending Approval' && videoObj.steps.timeline?.data?.is_re_upload_timeline) {
+        videoObj.steps.timeline.data.re_upload_status = 'Submitted';
+      } else if (stepData.approval_status === 'Approved' && videoObj.steps.timeline?.data?.is_re_upload_timeline) {
+        videoObj.steps.timeline.completed = true;
+        videoObj.steps.timeline.data.re_upload_status = 'Completed';
+      }
+    } else if (stepId === 'timeline') {
+      if (stepData.is_re_upload_timeline && stepData.date && videoObj.steps.draft?.data) {
+        videoObj.steps.draft.data.latest_re_draft_submit_date = stepData.date;
+        if (videoNumber === 1) {
+          updates.re_draft_expected_date = stepData.date;
+        }
+      }
     }
 
     // Calculate video completion status
@@ -885,10 +947,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     videoObj.status = completedStepsCount === configs.length ? 'COMPLETED' : ((completedStepsCount > 0 || videoObj.is_re_draft_required) ? 'IN_PROGRESS' : 'NOT_STARTED');
 
     metadata.last_updated = new Date().toISOString();
-
-    const updates: Partial<StatusTrackingRecord> = {
-      notes: JSON.stringify(metadata)
-    };
+    updates.notes = JSON.stringify(metadata);
 
     // For Video 1, mirror corresponding legacy columns to maintain backward compatibility
     if (videoNumber === 1) {
@@ -1756,7 +1815,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
                     )}
                   </div>
                   <span className={`text-[11px] text-center w-20 leading-tight mt-2 transition-colors ${labelStyle}`}>
-                    {cfg.shortLabel}
+                    {cfg.id === 'timeline' && (stepInfo?.data?.is_re_upload_timeline === true || !!stepInfo?.data?.re_draft_submit_date)
+                      ? 'Re-Upload Timeline'
+                      : cfg.shortLabel}
                   </span>
                   {isStepReDraftReq && (
                     <span className="text-[8px] font-bold text-amber-400 bg-amber-950/80 px-1 rounded -mt-0.5">
@@ -1789,7 +1850,11 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             </div>
             <div>
               <h4 className="text-base font-bold text-white leading-none">
-                Step {videoData.configs.findIndex(c => c.id === activeStepId) + 1}: {activeStepConfig.label}
+                Step {videoData.configs.findIndex(c => c.id === activeStepId) + 1}: {
+                  activeStepId === 'timeline' && (activeStepState.data?.is_re_upload_timeline === true || !!activeStepState.data?.re_draft_submit_date)
+                    ? 'Re-Upload Timeline'
+                    : activeStepConfig.label
+                }
               </h4>
               <p className="text-xs text-slate-400 mt-1">
                 Configure details for Video {videoNumber} • {influencerName} ({influencerCode})
@@ -1836,6 +1901,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             <ExpectedTimelineForm 
               record={record} 
               videoNumber={videoNumber}
+              stepNumber={videoData.configs.findIndex(c => c.id === 'timeline') + 1}
               existingData={activeStepState.data}
               onSave={async (formData: any) => { await onSaveStep('timeline', formData, formData.expected_delivery_completed); }} 
             />
@@ -2331,16 +2397,25 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
 interface ExpectedTimelineFormProps {
   record: StatusTrackingRecord;
   videoNumber: number;
+  stepNumber?: number;
   existingData?: any;
-  onSave: (data: any) => Promise<void> | void;
+  onSave: (data: any) => Promise<any> | void;
 }
 
 const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({ 
   record, 
   videoNumber, 
+  stepNumber,
   existingData = {}, 
   onSave 
 }) => {
+  const dynamicStepNumber = stepNumber || (videoNumber === 1 ? 4 : 3);
+
+  // Check if this is a Re-Upload Timeline (from rejected draft)
+  const isReUploadTimeline = existingData.is_re_upload_timeline === true || !!existingData.re_draft_submit_date;
+  const sourceAttemptNum = existingData.source_attempt_number || 1;
+  const reUploadStatus: 'Scheduled' | 'Submitted' | 'Completed' = existingData.re_upload_status || (isReUploadTimeline ? 'Scheduled' : 'Completed');
+
   // 1. Resolve scheduled draft date strictly for this videoNumber
   const scheduleEntry = (record.postDates || []).find(
     (pd: any) => Number(pd.video_number) === Number(videoNumber)
@@ -2361,11 +2436,13 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
     }
   }
 
-  // 2. Active date calculation: manualOverride takes priority, else scheduled draft date
+  // 2. Active date calculation
   const hasManualOverride = existingData.manualOverride === true;
-  const initialEffectiveDate = hasManualOverride
-    ? (existingData.date || '')
-    : (scheduledDraftDate || existingData.date || (videoNumber === 1 ? (record.draft_expected_date || '') : ''));
+  const initialEffectiveDate = isReUploadTimeline
+    ? (existingData.date || existingData.re_draft_submit_date || '')
+    : (hasManualOverride
+        ? (existingData.date || '')
+        : (scheduledDraftDate || existingData.date || (videoNumber === 1 ? (record.draft_expected_date || '') : '')));
 
   const [effectiveDate, setEffectiveDate] = useState<string>(initialEffectiveDate);
   const [time, setTime] = useState(existingData.time || (videoNumber === 1 ? (record.draft_expected_time || '') : ''));
@@ -2381,33 +2458,75 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
   // Synchronize state if props change
   useEffect(() => {
     const isOver = existingData.manualOverride === true;
-    const eff = isOver
-      ? (existingData.date || '')
-      : (scheduledDraftDate || existingData.date || (videoNumber === 1 ? (record.draft_expected_date || '') : ''));
+    const eff = isReUploadTimeline
+      ? (existingData.date || existingData.re_draft_submit_date || '')
+      : (isOver
+          ? (existingData.date || '')
+          : (scheduledDraftDate || existingData.date || (videoNumber === 1 ? (record.draft_expected_date || '') : '')));
     setEffectiveDate(eff);
     setIsOverride(isOver);
     setTempEditDate(parseToYMD(eff, 2026) || eff || '');
     setTime(existingData.time || (videoNumber === 1 ? (record.draft_expected_time || '') : ''));
-  }, [videoNumber, record.id, scheduledDraftDate, existingData.manualOverride, existingData.date, existingData.time]);
+  }, [videoNumber, record.id, scheduledDraftDate, isReUploadTimeline, existingData.re_draft_submit_date, existingData.manualOverride, existingData.date, existingData.time]);
 
   const handleStartEdit = () => {
     setTempEditDate(parseToYMD(effectiveDate, 2026) || effectiveDate || '');
     setIsEditing(true);
   };
 
-  const handleApplyEdit = () => {
+  const handleApplyEdit = async () => {
     if (!tempEditDate) {
       toast.error('Please pick a valid date.');
       return;
     }
     const normalizedNew = parseToYMD(tempEditDate, 2026) || tempEditDate;
-    const normalizedScheduled = parseToYMD(scheduledDraftDate, 2026) || scheduledDraftDate;
-    const newIsOverride = normalizedNew !== normalizedScheduled;
+    const previousDateFormatted = formatDisplayDateLocal(effectiveDate);
+    const newDateFormatted = formatDisplayDateLocal(normalizedNew);
+
+    if (previousDateFormatted === newDateFormatted) {
+      setIsEditing(false);
+      return;
+    }
+
+    const userName = await getCurrentUserName();
+    const changeEntry: TimelineHistoryEntry = {
+      id: `th-${Date.now()}`,
+      old_date: previousDateFormatted,
+      new_date: newDateFormatted,
+      changed_by: userName,
+      changed_at: new Date().toISOString(),
+      reason: isReUploadTimeline 
+        ? `Draft Attempt ${sourceAttemptNum}` 
+        : (isOverride ? 'Manual Timeline override' : 'Timeline date updated')
+    };
+
+    const updatedHistory = [changeEntry, ...historyList];
 
     setEffectiveDate(normalizedNew);
-    setIsOverride(newIsOverride);
     setIsEditing(false);
-    toast.success('Date updated. Click "Save Timeline" to permanently save & record history.');
+
+    // Save immediately to persist and update database
+    await onSave({
+      ...existingData,
+      date: normalizedNew,
+      time: time || '',
+      is_re_upload_timeline: isReUploadTimeline,
+      re_draft_submit_date: isReUploadTimeline ? normalizedNew : existingData.re_draft_submit_date,
+      source_attempt_number: sourceAttemptNum,
+      re_upload_status: reUploadStatus,
+      manualOverride: !isReUploadTimeline,
+      history: updatedHistory,
+      expected_delivery_completed: !isReUploadTimeline
+    });
+
+    logActivity({
+      department: 'Marketing',
+      action: isReUploadTimeline ? 'Re-Upload Timeline Edited' : 'Timeline Date Edited',
+      description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} ${isReUploadTimeline ? 're-upload timeline' : 'timeline'} changed from ${previousDateFormatted} to ${newDateFormatted}`,
+      metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
+    });
+
+    toast.success(`Timeline date updated to ${newDateFormatted} and recorded in history.`);
   };
 
   const handleCancelEdit = () => {
@@ -2446,6 +2565,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       date: normalizedScheduled,
       time: time || '',
       manualOverride: false,
+      is_re_upload_timeline: false,
       history: updatedHistory,
       expected_delivery_completed: true
     });
@@ -2462,7 +2582,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
 
   const handleSaveTimeline = async () => {
     if (!effectiveDate) {
-      toast.error('Please assign an Expected Draft Delivery Date.');
+      toast.error(isReUploadTimeline ? 'Please assign an Expected Re-Draft Submit Date.' : 'Please assign an Expected Draft Delivery Date.');
       return;
     }
 
@@ -2479,25 +2599,34 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
         new_date: newDateFormatted,
         changed_by: userName,
         changed_at: new Date().toISOString(),
-        reason: isOverride ? 'Manual Timeline override' : 'Timeline date updated'
+        reason: isReUploadTimeline 
+          ? `Draft Attempt ${sourceAttemptNum}` 
+          : (isOverride ? 'Manual Timeline override' : 'Timeline date updated')
       };
       updatedHistory = [changeEntry, ...historyList];
 
       logActivity({
         department: 'Marketing',
-        action: 'Timeline Date Edited',
+        action: isReUploadTimeline ? 'Re-Upload Timeline Saved' : 'Timeline Date Edited',
         description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} timeline changed from ${previousDateFormatted} to ${newDateFormatted}`,
         metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
       });
     }
 
     await onSave({
+      ...existingData,
       date: effectiveDate,
       time: time || '',
-      manualOverride: isOverride,
+      is_re_upload_timeline: isReUploadTimeline,
+      re_draft_submit_date: isReUploadTimeline ? effectiveDate : existingData.re_draft_submit_date,
+      source_attempt_number: sourceAttemptNum,
+      re_upload_status: reUploadStatus,
+      manualOverride: !isReUploadTimeline && isOverride,
       history: updatedHistory,
-      expected_delivery_completed: true
+      expected_delivery_completed: !isReUploadTimeline
     });
+
+    toast.success(isReUploadTimeline ? 'Re-Upload Timeline details saved!' : 'Timeline details saved!');
   };
 
   return (
@@ -2505,9 +2634,22 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       
       {/* Date Display or Inline Edit Card */}
       <div>
-        <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
-          Expected Draft Delivery Date
-        </label>
+        <div className="flex items-center justify-between mb-2">
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+            {isReUploadTimeline ? `Step ${dynamicStepNumber}: Re-Upload Timeline` : 'Expected Draft Delivery Date'}
+          </label>
+          {isReUploadTimeline && (
+            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded border ${
+              reUploadStatus === 'Completed'
+                ? 'bg-emerald-950/80 text-emerald-400 border-emerald-700/60'
+                : reUploadStatus === 'Submitted'
+                  ? 'bg-blue-950/80 text-blue-400 border-blue-700/60'
+                  : 'bg-amber-950/80 text-amber-300 border-amber-700/60'
+            }`}>
+              {reUploadStatus === 'Completed' ? '✓ Completed' : (reUploadStatus === 'Submitted' ? '● Submitted' : '○ Scheduled')}
+            </span>
+          )}
+        </div>
         
         {!isEditing ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b1329] border border-slate-800 rounded-xl gap-3">
@@ -2516,7 +2658,16 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
                 {effectiveDate ? formatDisplayDateLocal(effectiveDate) : 'Not Assigned'}
               </span>
 
-              {isOverride ? (
+              {isReUploadTimeline ? (
+                <>
+                  <span className="text-[11px] font-bold text-rose-400 bg-rose-950/70 border border-rose-800/60 px-2.5 py-0.5 rounded-md">
+                    Re-Upload Timeline
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    Source: <strong className="text-slate-200 font-semibold">Draft Attempt {sourceAttemptNum}</strong>
+                  </span>
+                </>
+              ) : isOverride ? (
                 <span className="text-[11px] font-bold text-amber-400 bg-amber-950/70 border border-amber-800/60 px-2.5 py-0.5 rounded-md">
                   Manual Override
                 </span>
@@ -2536,7 +2687,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
                 Edit
               </button>
 
-              {isOverride && scheduledDraftDate && (
+              {!isReUploadTimeline && isOverride && scheduledDraftDate && (
                 <button
                   type="button"
                   onClick={handleResetToDraftDate}
@@ -2551,7 +2702,9 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
         ) : (
           <div className="p-4 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-3 animate-fade-in">
             <span className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
-              Edit Expected Draft Delivery Date (Video {videoNumber})
+              {isReUploadTimeline 
+                ? `Edit Expected Re-Draft Submit Date (Video ${videoNumber})` 
+                : `Edit Expected Draft Delivery Date (Video ${videoNumber})`}
             </span>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <input 
@@ -2601,9 +2754,9 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       <div className="pt-4 border-t border-slate-800 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <History size={16} className="text-blue-400" />
+            <History size={16} className={isReUploadTimeline ? "text-rose-400" : "text-blue-400"} />
             <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-              Timeline Date History
+              {isReUploadTimeline ? 'RE-DRAFT DATE HISTORY' : 'Timeline Date History'}
             </h5>
           </div>
           <span className="text-[11px] text-slate-500 font-medium">
@@ -2612,15 +2765,27 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
         </div>
 
         <div className="space-y-2">
-          {/* Base scheduled origin */}
+          {/* Base initial schedule reference */}
           <div className="p-3 rounded-xl bg-[#0b1329] border border-slate-800 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-              <span className="text-slate-400">Initial date from Post Date (Video {videoNumber}):</span>
-              <span className="font-bold text-white">{scheduledDraftDate ? formatDisplayDateLocal(scheduledDraftDate) : 'Not Scheduled'}</span>
+              <span className={`w-2 h-2 rounded-full ${isReUploadTimeline ? 'bg-rose-400' : 'bg-purple-400'}`}></span>
+              <span className="text-slate-400">
+                {isReUploadTimeline 
+                  ? `Initial Re-Draft Date from Draft Attempt ${sourceAttemptNum}:` 
+                  : `Initial date from Post Date (Video ${videoNumber}):`}
+              </span>
+              <span className="font-bold text-white">
+                {isReUploadTimeline 
+                  ? formatDisplayDateLocal(existingData.re_draft_submit_date || effectiveDate) 
+                  : (scheduledDraftDate ? formatDisplayDateLocal(scheduledDraftDate) : 'Not Scheduled')}
+              </span>
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50 shrink-0">
-              Source Schedule
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border shrink-0 ${
+              isReUploadTimeline 
+                ? 'bg-rose-950/60 text-rose-300 border-rose-800/50' 
+                : 'bg-purple-950/60 text-purple-300 border-purple-800/50'
+            }`}>
+              {isReUploadTimeline ? `Draft Attempt ${sourceAttemptNum}` : 'Source Schedule'}
             </span>
           </div>
 
@@ -2642,7 +2807,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
                     ? 'bg-rose-950/60 text-rose-300 border-rose-800/50' 
                     : 'bg-amber-950/60 text-amber-300 border-amber-800/50'
                 }`}>
-                  {entry.reason || 'Override'}
+                  {entry.reason || (isReUploadTimeline ? `Draft Attempt ${sourceAttemptNum}` : 'Override')}
                 </span>
               </div>
             </div>
@@ -2656,7 +2821,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
           onClick={handleSaveTimeline} 
           className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
         >
-          Save Timeline
+          {isReUploadTimeline ? 'Save Re-Upload Timeline' : 'Save Timeline'}
         </button>
       </div>
     </div>
@@ -2712,6 +2877,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [corr, setCorr] = useState(activeAttempt?.corrections || existingData.corr || '');
   const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
   const [finalD, setFinalD] = useState(activeAttempt?.final_description || existingData.finalD || '');
+
+  // Re-Draft Submit Date for Not Approved
+  const [reDraftSubmitDate, setReDraftSubmitDate] = useState<string>(
+    activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date || ''
+  );
+
+  useEffect(() => {
+    if (activeAttempt?.re_draft_submit_date) {
+      setReDraftSubmitDate(activeAttempt.re_draft_submit_date);
+    } else if (existingData.latest_re_draft_submit_date) {
+      setReDraftSubmitDate(existingData.latest_re_draft_submit_date);
+    } else if (existingData.re_draft_submit_date) {
+      setReDraftSubmitDate(existingData.re_draft_submit_date);
+    }
+  }, [activeAttempt, existingData.latest_re_draft_submit_date, existingData.re_draft_submit_date]);
   
   // Re-Draft Upload Mode State
   const [isReDraftMode, setIsReDraftMode] = useState(false);
@@ -2856,11 +3036,13 @@ const DraftForm: React.FC<DraftFormProps> = ({
       }
     }
 
+    const expectedSubmit = activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date || '';
     const newAttempt: DraftAttempt = {
       attempt_number: nextAttemptNumber,
       video_url: finalUrl,
       approval_status: 'Pending Approval',
       timing_status: calculatedTiming,
+      expected_submit_date: expectedSubmit,
       uploaded_at: new Date().toISOString()
     };
 
@@ -2897,9 +3079,15 @@ const DraftForm: React.FC<DraftFormProps> = ({
       return;
     }
 
-    if (appStat === 'Not Approved' && (!corr || corr.trim() === '')) {
-      toast.error('Please enter correction instructions before rejecting a draft.');
-      return;
+    if (appStat === 'Not Approved') {
+      if (!corr || corr.trim() === '') {
+        toast.error('Please enter correction instructions before rejecting a draft.');
+        return;
+      }
+      if (!reDraftSubmitDate || reDraftSubmitDate.trim() === '') {
+        toast.error('Please select the Re-Draft Submit Date before submitting the Not Approved status.');
+        return;
+      }
     }
 
     setIsUploading(true);
@@ -2915,6 +3103,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
           ...att,
           approval_status: appStat,
           corrections: appStat === 'Not Approved' ? corr : '',
+          re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : undefined,
           final_product_link: isApproved ? finalL : att.final_product_link,
           final_description: isApproved ? finalD : att.final_description,
           timing_status: calculatedTiming,
@@ -2932,6 +3121,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
       vid: activeAttempt?.video_url || initialUrl,
       timing: calculatedTiming,
       corr: appStat === 'Not Approved' ? corr : '',
+      re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : '',
+      latest_re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : (existingData.latest_re_draft_submit_date || ''),
       finalL: isApproved ? finalL : '',
       finalD: isApproved ? finalD : ''
     };
@@ -3083,8 +3274,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
             {isCurrentDraftNotApproved && !isReDraftMode && (
               <button
                 type="button"
-                onClick={() => setIsReDraftMode(true)}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2"
+                onClick={() => {
+                  const hasSavedDate = !!(activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date);
+                  if (!hasSavedDate) {
+                    toast.error('Please select and save the Re-Draft Submit Date before uploading a re-draft.');
+                    return;
+                  }
+                  setIsReDraftMode(true);
+                }}
+                disabled={!(activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 ${
+                  !(activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date)
+                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/60 opacity-60'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30'
+                }`}
+                title={!(activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date) ? 'Re-Draft Submit Date required first' : 'Upload revised video'}
               >
                 <UploadCloud size={15} />
                 <span>Upload Re-Draft</span>
@@ -3144,9 +3348,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
                         </span>
                       </div>
 
-                      <p className="text-slate-400 text-[11px]">
-                        Uploaded: {formatHistoryTimestamp(att.uploaded_at)}
-                      </p>
+                      <div className="flex items-center gap-2 text-[11px] text-slate-400 flex-wrap">
+                        <span>
+                          Uploaded: {formatHistoryTimestamp(att.uploaded_at)}
+                        </span>
+                        {att.expected_submit_date && (
+                          <span className="text-blue-300 font-medium">
+                            • Expected: {formatDisplayDateLocal(att.expected_submit_date)}
+                          </span>
+                        )}
+                        {att.re_draft_submit_date && att.approval_status === 'Not Approved' && (
+                          <span className="text-rose-300 font-semibold bg-rose-950/60 border border-rose-800/60 px-1.5 py-0.5 rounded">
+                            Re-Draft Due: {formatDisplayDateLocal(att.re_draft_submit_date)}
+                          </span>
+                        )}
+                      </div>
 
                       {att.corrections && (
                         <p className="text-rose-300 text-[11px] truncate max-w-lg" title={att.corrections}>
@@ -3248,21 +3464,45 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
           </div>
 
-          {/* Correction Instructions (When Not Approved is selected) */}
+          {/* Correction Instructions & Re-Draft Submit Date (When Not Approved is selected) */}
           {appStat === 'Not Approved' && (
-            <div className="animate-fade-in space-y-2">
-              <label className="block text-[11px] font-bold text-rose-400 uppercase tracking-wider">
-                Correction Instructions / Re-Draft Guidelines *
-              </label>
-              <textarea 
-                value={corr} 
-                onChange={e => setCorr(e.target.value)} 
-                placeholder="Enter specific instructions on what needs to be changed for the re-draft..."
-                className="w-full bg-[#0b1329] border border-rose-800/80 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-rose-500 min-h-[90px]" 
-              />
-              <span className="text-[11px] text-slate-500">
-                These instructions will be permanently recorded in the draft history and displayed to guide the re-draft.
-              </span>
+            <div className="animate-fade-in space-y-4">
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-rose-400 uppercase tracking-wider">
+                  Correction Instructions / Re-Draft Guidelines *
+                </label>
+                <textarea 
+                  value={corr} 
+                  onChange={e => setCorr(e.target.value)} 
+                  placeholder="Enter specific instructions on what needs to be changed for the re-draft..."
+                  className="w-full bg-[#0b1329] border border-rose-800/80 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-rose-500 min-h-[90px]" 
+                />
+                <span className="text-[11px] text-slate-500">
+                  These instructions will be permanently recorded in the draft history and displayed to guide the re-draft.
+                </span>
+              </div>
+
+              {/* Mandatory Re-Draft Submit Date */}
+              <div className="p-4 bg-rose-950/25 border border-rose-800/60 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-rose-300 uppercase tracking-wider">
+                    Re-Draft Submit Date *
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-900/60 text-rose-200 border border-rose-700/60 uppercase">
+                    Required
+                  </span>
+                </div>
+                <input 
+                  type="date"
+                  value={reDraftSubmitDate}
+                  onChange={e => setReDraftSubmitDate(e.target.value)}
+                  className="w-full bg-[#070c18] border border-rose-700/70 focus:border-rose-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors"
+                  required
+                />
+                <span className="text-[11px] text-slate-400 block">
+                  The expected submission date for Draft Attempt {(activeAttempt?.attempt_number || 1) + 1}. This date will automatically populate the Re-Upload Timeline.
+                </span>
+              </div>
             </div>
           )}
 
@@ -3370,6 +3610,13 @@ const DraftForm: React.FC<DraftFormProps> = ({
               <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-xs text-rose-200">
                 <span className="font-bold text-rose-400 block mb-1">Correction Instructions:</span>
                 <p className="whitespace-pre-wrap">{previewModalAttempt.corrections}</p>
+              </div>
+            )}
+
+            {previewModalAttempt.re_draft_submit_date && (
+              <div className="p-2.5 bg-rose-950/30 border border-rose-800/40 rounded-xl text-xs flex items-center justify-between text-rose-200">
+                <span className="text-rose-400 font-semibold">Expected Re-Draft Submit Date:</span>
+                <span className="font-bold">{formatDisplayDateLocal(previewModalAttempt.re_draft_submit_date)}</span>
               </div>
             )}
 
