@@ -303,6 +303,18 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
 
   useEffect(() => {
     loadTrackingRecords();
+
+    const handleSync = () => {
+      loadTrackingRecords();
+    };
+
+    window.addEventListener('status_tracking_updated', handleSync);
+    window.addEventListener('influencer_tracking_updated', handleSync);
+
+    return () => {
+      window.removeEventListener('status_tracking_updated', handleSync);
+      window.removeEventListener('influencer_tracking_updated', handleSync);
+    };
   }, [loadTrackingRecords]);
 
   // Save specific milestone data (PATCH only the provided fields)

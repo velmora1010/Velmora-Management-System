@@ -268,22 +268,10 @@ export const TrackingStatus: React.FC = () => {
     setIsClearModalOpen(false);
     const toastId = toast.loading('Clearing tracking records...');
     try {
-      const ordersToClear = await db.logistics_orders.where('stage').equals('tracking').toArray();
-      
-      for (const order of ordersToClear) {
-        if (order.id) {
-          await db.logistics_orders.update(order.id, {
-            stage: 'order_data',
-            awbNumber: undefined,
-            courier: undefined,
-            status: undefined,
-            trackingError: undefined,
-            syncedAt: undefined
-          });
-        }
-      }
-
+      await db.logistics_orders.where('stage').equals('tracking').delete();
       await db.tracking_logs.clear();
+      setSearchTerm('');
+      setActiveTab('All');
       toast.success('Tracking records cleared successfully.', { id: toastId });
     } catch (err: any) {
       toast.error(`Failed to clear tracking records: ${err.message || String(err)}`, { id: toastId });

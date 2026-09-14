@@ -1,6 +1,7 @@
 import db from '../lib/db';
 import { trackingService } from './trackingService';
 import { supabase } from '../lib/supabase';
+import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 
 export type TrackingStatusCategory = 
@@ -521,7 +522,7 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
     let hasMore = true;
 
     while (hasMore) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerTrackingShipments)
         .select('*')
         .eq('campaign_id', cleanCampaignId)
@@ -552,16 +553,9 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
       return shipments;
     }
 
-    // If Supabase table has no rows yet for this campaign, check if local storage has shipments
-    const local = getCampaignShipments(cleanCampaignId);
-    if (local && local.length > 0) {
-      // Migrate local records to Supabase asynchronously in background
-      upsertCampaignShipmentsToDb(cleanCampaignId, local).catch(err => {
-        console.warn('Background migration of local shipments to Supabase:', err);
-      });
-      return local;
-    }
-
+    // Database is the source of truth: 0 records found in Supabase.
+    // Ensure localStorage is also empty so cleared/deleted shipments do not resurrect.
+    saveCampaignShipments(cleanCampaignId, []);
     return [];
   } catch (err) {
     console.error('fetchCampaignShipmentsFromDb exception:', err);
@@ -981,8 +975,19 @@ export async function deleteCampaignShipmentsFromDb(
   }
 
   try {
-    // 1. Delete all shipment records scoped strictly to current campaign_id
-    const { data, error } = await supabase
+    // 1. Immediately wipe local storage and caches strictly for this campaign
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(`influencer_campaign_shipments_${cleanCampaignId}`);
+        localStorage.removeItem(`influencer_tracking_cache_${cleanCampaignId}`);
+        localStorage.removeItem(`influencer_tracking_last_sync_${cleanCampaignId}`);
+      } catch (e) {
+        console.warn('Error clearing localStorage for campaign:', e);
+      }
+    }
+
+    // 2. Delete all shipment records scoped strictly to current campaign_id using supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from(SUPABASE_TABLES.influencerTrackingShipments)
       .delete()
       .eq('campaign_id', cleanCampaignId)
@@ -993,8 +998,8 @@ export async function deleteCampaignShipmentsFromDb(
       return { success: false, error: error.message || 'Database deletion failed' };
     }
 
-    // 2. Safety verification: query the table again using current campaign_id to verify 0 records remain
-    const { count, error: verifyError } = await supabase
+    // 3. Safety verification: query the table again using current campaign_id to verify 0 records remain
+    const { count, error: verifyError } = await supabaseAdmin
       .from(SUPABASE_TABLES.influencerTrackingShipments)
       .select('id', { count: 'exact', head: true })
       .eq('campaign_id', cleanCampaignId);
@@ -1005,15 +1010,12 @@ export async function deleteCampaignShipmentsFromDb(
       return { success: false, error: `Verification failed: ${count} tracking records still remain in database.` };
     }
 
-    // 3. Clear local storage and caches strictly for this campaign
+    // 4. Ensure local cache stays strictly empty
+    saveCampaignShipments(cleanCampaignId, []);
+    saveTrackingCache(cleanCampaignId, {});
+
     if (typeof window !== 'undefined') {
-      try {
-        localStorage.removeItem(`influencer_campaign_shipments_${cleanCampaignId}`);
-        localStorage.removeItem(`influencer_tracking_cache_${cleanCampaignId}`);
-        localStorage.removeItem(`influencer_tracking_last_sync_${cleanCampaignId}`);
-      } catch (e) {
-        console.warn('Error clearing localStorage for campaign:', e);
-      }
+      window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
     }
 
     return {
@@ -1026,6 +1028,66 @@ export async function deleteCampaignShipmentsFromDb(
       success: false,
       error: err?.message || 'An unexpected error occurred while deleting tracking data'
     };
+  }
+}
+
+/**
+ * Permanently deletes a single tracking shipment record from Supabase
+ * and removes it from local storage and cache.
+ */
+export async function deleteSingleCampaignShipmentFromDb(
+  campaignId: string | number,
+  shipment: InfluencerDispatchedShipment
+): Promise<{ success: boolean; error?: string }> {
+  const cleanCampaignId = String(campaignId).trim();
+  if (!cleanCampaignId) {
+    return { success: false, error: 'Campaign ID is required' };
+  }
+
+  try {
+    const isUuid = shipment.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shipment.id);
+    const awb = (shipment.awbNumber || '').trim();
+
+    let query = supabaseAdmin.from(SUPABASE_TABLES.influencerTrackingShipments).delete();
+
+    if (isUuid) {
+      query = query.eq('id', shipment.id);
+    } else if (awb) {
+      query = query.eq('campaign_id', cleanCampaignId).eq('awb_number', awb);
+    } else {
+      return { success: false, error: 'Shipment has neither valid UUID nor AWB number' };
+    }
+
+    const { error } = await query;
+    if (error) {
+      console.error('Failed to delete single shipment from Supabase:', error);
+      return { success: false, error: error.message };
+    }
+
+    // Update local storage
+    const local = getCampaignShipments(cleanCampaignId);
+    const filtered = local.filter(s => {
+      if (isUuid && s.id === shipment.id) return false;
+      if (awb && (s.awbNumber || '').trim().toLowerCase() === awb.toLowerCase()) return false;
+      return true;
+    });
+    saveCampaignShipments(cleanCampaignId, filtered);
+
+    // Clear tracking cache for this AWB if exists
+    if (awb) {
+      const cache = getTrackingCache(cleanCampaignId);
+      delete cache[awb];
+      saveTrackingCache(cleanCampaignId, cache);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('deleteSingleCampaignShipmentFromDb exception:', err);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 

@@ -3,7 +3,12 @@ import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer } from '../types';
 import type { DispatchDetails } from '../hooks/marketing/useCampaignDispatch';
-import type { InfluencerDispatchedShipment } from './influencerTrackingService';
+import {
+  type InfluencerDispatchedShipment,
+  deleteCampaignShipmentsFromDb,
+  deleteSingleCampaignShipmentFromDb,
+  fetchCampaignShipmentsFromDb
+} from './influencerTrackingService';
 
 /**
  * Natural/code sorting for influencer codes (e.g. J2, J10, J61, J174, J203).
@@ -524,4 +529,162 @@ export async function bulkHandoffDeliveredShipments(
   }
 
   return summary;
+}
+
+/**
+ * Permanently deletes a single tracking shipment from Supabase & localStorage,
+ * and if that shipment was linked to a Status Tracking row, removes the corresponding
+ * row from influencer_status_tracking_rows (provided no other tracking shipments for this influencer remain).
+ * MASTER INFLUENCER RECORDS IN influencers_info_rows ARE NEVER DELETED.
+ */
+export async function deleteShipmentWithStatusTrackingSync(
+  campaignId: string | number,
+  shipment: InfluencerDispatchedShipment,
+  candidateInfluencers: CampaignInfluencer[],
+  dispatchRecords: DispatchDetails[]
+): Promise<{ success: boolean; error?: string; deletedStatusTracking: boolean }> {
+  const cleanCampaignId = String(campaignId).trim();
+  if (!cleanCampaignId) {
+    return { success: false, error: 'Campaign ID required', deletedStatusTracking: false };
+  }
+
+  try {
+    // 1. Resolve matched influencer using canonical 5-priority matching
+    const { matchedInfluencer } = matchShipmentToInfluencer(shipment, candidateInfluencers, dispatchRecords);
+    const targetInfluencerId = shipment.influencerId || (matchedInfluencer ? String(matchedInfluencer.id) : null);
+
+    // 2. Delete the shipment from influencer_tracking_shipments & localStorage
+    const deleteShipmentRes = await deleteSingleCampaignShipmentFromDb(cleanCampaignId, shipment);
+    if (!deleteShipmentRes.success) {
+      return { success: false, error: deleteShipmentRes.error, deletedStatusTracking: false };
+    }
+
+    let deletedStatusTracking = false;
+
+    // 3. If there is a targetInfluencerId, verify if any remaining tracking shipment in this campaign links to this influencer
+    if (targetInfluencerId) {
+      const remainingShipments = await fetchCampaignShipmentsFromDb(cleanCampaignId);
+      const otherShipmentForSameInfluencer = remainingShipments.some(s => {
+        if (s.id === shipment.id) return false;
+        if (s.influencerId && String(s.influencerId) === String(targetInfluencerId)) return true;
+        const match = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
+        return match.matchedInfluencer && String(match.matchedInfluencer.id) === String(targetInfluencerId);
+      });
+
+      // If no other shipment links to this influencer, safely remove the status tracking row
+      if (!otherShipmentForSameInfluencer) {
+        const { error: statusDeleteError } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerStatus)
+          .delete()
+          .eq('campaign_id', cleanCampaignId)
+          .eq('influencer_id', String(targetInfluencerId));
+
+        if (statusDeleteError) {
+          console.warn('Could not delete corresponding status tracking row:', statusDeleteError);
+        } else {
+          deletedStatusTracking = true;
+        }
+      }
+    }
+
+    // 4. Dispatch sync events to refresh UI reactively
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+      window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+    }
+
+    return { success: true, deletedStatusTracking };
+  } catch (err: any) {
+    console.error('deleteShipmentWithStatusTrackingSync exception:', err);
+    return { success: false, error: err?.message || String(err), deletedStatusTracking: false };
+  }
+}
+
+/**
+ * Permanently deletes ALL tracking shipments for a campaign from Supabase & localStorage,
+ * and automatically removes ONLY the corresponding Status Tracking rows for those influencers
+ * who belonged to the tracking dataset being cleared.
+ *
+ * SAFETY RULES:
+ * - Unrelated Status Tracking records (e.g. HIS2, HIS5) are completely preserved.
+ * - Master influencer records in influencers_info_rows are NEVER deleted.
+ */
+export async function clearAllCampaignTrackingWithStatusSync(
+  campaignId: string | number,
+  candidateInfluencers: CampaignInfluencer[],
+  dispatchRecords: DispatchDetails[]
+): Promise<{ success: boolean; deletedShipmentCount: number; deletedStatusCount: number; error?: string }> {
+  const cleanCampaignId = String(campaignId).trim();
+  if (!cleanCampaignId) {
+    return { success: false, deletedShipmentCount: 0, deletedStatusCount: 0, error: 'Campaign ID required' };
+  }
+
+  try {
+    // 1. Fetch current tracking shipments to identify exactly which influencers belong to this tracking dataset
+    const currentShipments = await fetchCampaignShipmentsFromDb(cleanCampaignId);
+
+    // 2. Identify all influencer IDs that are linked to these shipments
+    const linkedInfluencerIds = new Set<string>();
+    for (const s of currentShipments) {
+      if (s.influencerId) {
+        linkedInfluencerIds.add(String(s.influencerId));
+      }
+      const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
+      if (matchedInfluencer?.id) {
+        linkedInfluencerIds.add(String(matchedInfluencer.id));
+      }
+    }
+
+    // 3. Delete all tracking shipments from influencer_tracking_shipments & localStorage
+    const deleteRes = await deleteCampaignShipmentsFromDb(cleanCampaignId);
+    if (!deleteRes.success) {
+      return {
+        success: false,
+        deletedShipmentCount: 0,
+        deletedStatusCount: 0,
+        error: deleteRes.error
+      };
+    }
+
+    let deletedStatusCount = 0;
+
+    // 4. Delete ONLY those Status Tracking rows belonging to the linked influencers
+    // (Leaves unrelated influencers like HIS2, HIS5 untouched!)
+    // NEVER deletes from influencers_info_rows!
+    if (linkedInfluencerIds.size > 0) {
+      const influencerIdArray = Array.from(linkedInfluencerIds);
+      const { data: deletedStatusRows, error: statusErr } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerStatus)
+        .delete()
+        .eq('campaign_id', cleanCampaignId)
+        .in('influencer_id', influencerIdArray)
+        .select('id');
+
+      if (statusErr) {
+        console.warn('Error deleting linked status tracking records:', statusErr);
+      } else if (deletedStatusRows) {
+        deletedStatusCount = deletedStatusRows.length;
+      }
+    }
+
+    // 5. Dispatch sync events
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+      window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+    }
+
+    return {
+      success: true,
+      deletedShipmentCount: deleteRes.deletedCount || 0,
+      deletedStatusCount
+    };
+  } catch (err: any) {
+    console.error('clearAllCampaignTrackingWithStatusSync exception:', err);
+    return {
+      success: false,
+      deletedShipmentCount: 0,
+      deletedStatusCount: 0,
+      error: err?.message || String(err)
+    };
+  }
 }

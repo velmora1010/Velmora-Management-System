@@ -55,7 +55,9 @@ import {
   handoffDeliveredShipmentToStatusTracking,
   bulkHandoffDeliveredShipments,
   fetchCampaignStatusTrackingInfluencerIds,
-  matchShipmentToInfluencer
+  matchShipmentToInfluencer,
+  deleteShipmentWithStatusTrackingSync,
+  clearAllCampaignTrackingWithStatusSync
 } from '../../services/influencerStatusHandoffService';
 
 interface CampaignTrackingSystemProps {
@@ -447,7 +449,12 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Single Shipment Deletion Modal State
+  const [shipmentToDelete, setShipmentToDelete] = useState<InfluencerDispatchedShipment | null>(null);
+  const [isDeletingSingle, setIsDeletingSingle] = useState(false);
+
   // Clear All: Permanently deletes all tracking records for this campaign from Supabase
+  // and removes corresponding Status Tracking records for these tracking influencers
   const handleClearAllTrackingData = async () => {
     if (!campaign?.id) {
       toast.error('Unable to clear tracking data because the current campaign could not be identified.');
@@ -455,10 +462,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
 
     setIsDeleting(true);
-    const toastId = toast.loading('Deleting tracking data...');
+    const toastId = toast.loading('Deleting tracking data and syncing status tracking...');
 
     try {
-      const result = await deleteCampaignShipmentsFromDb(campaign.id);
+      const result = await clearAllCampaignTrackingWithStatusSync(
+        campaign.id,
+        candidateInfluencers,
+        dispatchRecords
+      );
 
       if (!result.success) {
         toast.error(`Failed to clear tracking data: ${result.error || 'Unknown error'}`, { id: toastId });
@@ -484,7 +495,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       // Re-verify from DB
       await loadShipments();
 
-      toast.success('Tracking data cleared successfully.', { id: toastId });
+      const statusMsg = result.deletedStatusCount > 0
+        ? `Tracking data cleared (${result.deletedShipmentCount} shipments, ${result.deletedStatusCount} status tracking records removed).`
+        : `Tracking data cleared (${result.deletedShipmentCount} shipments removed).`;
+      toast.success(statusMsg, { id: toastId });
 
       if (onRefreshData) {
         await onRefreshData();
@@ -496,6 +510,43 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     } finally {
       setIsDeleting(false);
       setIsDeleteModalOpen(false);
+    }
+  };
+
+  // Delete Single Shipment
+  const handleDeleteSingleShipment = async () => {
+    if (!shipmentToDelete || !campaign?.id) return;
+    setIsDeletingSingle(true);
+    const toastId = toast.loading('Deleting tracking shipment...');
+
+    try {
+      const res = await deleteShipmentWithStatusTrackingSync(
+        campaign.id,
+        shipmentToDelete,
+        candidateInfluencers,
+        dispatchRecords
+      );
+
+      if (!res.success) {
+        toast.error(`Failed to delete shipment: ${res.error || 'Unknown error'}`, { id: toastId });
+      } else {
+        toast.success(
+          res.deletedStatusTracking
+            ? 'Tracking shipment and corresponding Status Tracking record deleted.'
+            : 'Tracking shipment deleted successfully.',
+          { id: toastId }
+        );
+        await loadShipments();
+        if (onRefreshData) {
+          await onRefreshData();
+        }
+      }
+    } catch (err: any) {
+      console.error('Delete single shipment error:', err);
+      toast.error(`Failed to delete shipment: ${err?.message || String(err)}`, { id: toastId });
+    } finally {
+      setIsDeletingSingle(false);
+      setShipmentToDelete(null);
     }
   };
 
@@ -1077,6 +1128,16 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                               <Eye size={15} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
                             </button>
 
+                            <button
+                              type="button"
+                              onClick={() => setShipmentToDelete(s)}
+                              className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 border border-slate-700/80 hover:border-rose-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                              title="Delete Shipment"
+                              aria-label="Delete Shipment"
+                            >
+                              <Trash2 size={14} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-rose-400" />
+                            </button>
+
                             {(() => {
                               const isDelivered = s.status === 'Delivered';
                               const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
@@ -1479,7 +1540,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       <ConfirmModal
         isOpen={isDeleteModalOpen}
         title="Delete All Tracking Data?"
-        message="This will permanently delete all imported ST Courier and Delhivery shipment tracking records for this campaign. This action cannot be undone."
+        message="This will permanently delete all tracking shipment records for this campaign from Supabase and local storage. Corresponding Status Tracking records for these shipments will also be automatically removed. Master influencer profiles will NOT be deleted. This action cannot be undone."
         confirmText={isDeleting ? "Deleting..." : "Delete All"}
         cancelText="Cancel"
         isDestructive={true}
@@ -1489,6 +1550,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           }
         }}
         onConfirm={handleClearAllTrackingData}
+      />
+
+      {/* Confirmation Modal for Deleting a Single Tracking Record */}
+      <ConfirmModal
+        isOpen={Boolean(shipmentToDelete)}
+        title="Delete Tracking Shipment?"
+        message={`Are you sure you want to delete tracking shipment ${shipmentToDelete?.awbNumber || shipmentToDelete?.influencerCode || shipmentToDelete?.orderId || ''}? If this shipment was added to Status Tracking, its status tracking record will also be removed. Master influencer profiles will NOT be deleted.`}
+        confirmText={isDeletingSingle ? "Deleting..." : "Delete Shipment"}
+        cancelText="Cancel"
+        isDestructive={true}
+        onClose={() => {
+          if (!isDeletingSingle) {
+            setShipmentToDelete(null);
+          }
+        }}
+        onConfirm={handleDeleteSingleShipment}
       />
     </div>
   );
