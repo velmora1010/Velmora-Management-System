@@ -15,6 +15,7 @@ import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
 import { parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
 import toast from 'react-hot-toast';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
@@ -601,7 +602,20 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
 };
 
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
-  const { trackingRecords, isLoading, refresh, saveMilestone } = useCampaignStatusTracking(campaign.id);
+  const { 
+    trackingRecords, 
+    isLoading, 
+    refresh, 
+    saveMilestone,
+    clearAllStatusTracking,
+    deleteStatusTrackingRecord
+  } = useCampaignStatusTracking(campaign.id);
+
+  // Clear All & Single Delete Confirmation States
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [recordToDelete, setRecordToDelete] = useState<StatusTrackingRecord | null>(null);
+  const [isDeletingSingle, setIsDeletingSingle] = useState(false);
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -809,6 +823,56 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     setSelectedStatus('ALL');
     setSelectedPlatform('ALL');
     setSelectedLanguage('ALL');
+  };
+
+  // Clear All Status Tracking Records for Current Campaign
+  const handleConfirmClearAll = async () => {
+    if (isClearing) return;
+    setIsClearing(true);
+    const toastId = toast.loading('Clearing all Status Tracking records...');
+
+    try {
+      const res = await clearAllStatusTracking();
+      if (!res.success) {
+        toast.error(`Failed to clear Status Tracking: ${res.error || 'Unknown error'}`, { id: toastId });
+      } else {
+        // Reset search/filter states
+        setSearchQuery('');
+        setSelectedStatus('ALL');
+        setSelectedPlatform('ALL');
+        setSelectedLanguage('ALL');
+
+        toast.success('All Status Tracking records cleared successfully.', { id: toastId });
+      }
+    } catch (err: any) {
+      console.error('Clear all status tracking error:', err);
+      toast.error(`Failed to clear Status Tracking: ${err?.message || String(err)}`, { id: toastId });
+    } finally {
+      setIsClearing(false);
+      setIsClearModalOpen(false);
+    }
+  };
+
+  // Remove Single Influencer from Status Tracking
+  const handleConfirmDeleteSingle = async () => {
+    if (!recordToDelete || isDeletingSingle) return;
+    setIsDeletingSingle(true);
+    const toastId = toast.loading('Removing influencer from Status Tracking...');
+
+    try {
+      const res = await deleteStatusTrackingRecord(recordToDelete.id);
+      if (!res.success) {
+        toast.error(`Failed to remove: ${res.error || 'Unknown error'}`, { id: toastId });
+      } else {
+        toast.success('Influencer removed from Status Tracking successfully.', { id: toastId });
+      }
+    } catch (err: any) {
+      console.error('Delete single status record error:', err);
+      toast.error(`Failed to remove: ${err?.message || String(err)}`, { id: toastId });
+    } finally {
+      setIsDeletingSingle(false);
+      setRecordToDelete(null);
+    }
   };
 
   // Milestone Save Handler for Top-Level Delivery & Modals
@@ -1132,12 +1196,25 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   <option key={lang} value={lang}>{lang}</option>
                 ))}
               </select>
+              {(searchQuery || selectedStatus !== 'ALL' || selectedPlatform !== 'ALL' || selectedLanguage !== 'ALL') && (
+                <button 
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="text-slate-400 hover:text-slate-200 text-xs px-2.5 py-2 rounded-xl hover:bg-slate-800/60 transition-colors"
+                  title="Reset active search and filter dropdowns"
+                >
+                  Reset Filters
+                </button>
+              )}
               <button 
-                onClick={handleClearFilters}
-                className="border border-rose-500/50 hover:bg-rose-500/10 text-rose-400 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                type="button"
+                onClick={() => setIsClearModalOpen(true)}
+                disabled={isClearing || activeTrackingRecords.length === 0}
+                className="border border-rose-500/50 hover:bg-rose-500/10 disabled:opacity-40 disabled:hover:bg-transparent text-rose-400 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer disabled:cursor-not-allowed"
+                title="Clear all Status Tracking records for this campaign"
               >
-                <Trash2 size={15} />
-                Clear All
+                <Trash2 size={15} className={isClearing ? 'animate-spin' : ''} />
+                {isClearing ? 'Clearing...' : 'Clear All'}
               </button>
             </div>
           </div>
@@ -1452,6 +1529,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               <Copy size={14} className="text-slate-400" />
                               <span>Copy Influencer Code</span>
                             </button>
+                            <div className="h-[1px] bg-slate-800 my-1" />
+                            <button 
+                              onClick={() => {
+                                setRecordToDelete(record);
+                                setOpenMenuId(null);
+                              }}
+                              className="w-full px-3.5 py-2 text-left text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 transition-colors"
+                            >
+                              <Trash2 size={14} className="text-rose-400" />
+                              <span>Remove from Status Tracking</span>
+                            </button>
                           </div>
                         )}
                       </div>
@@ -1590,6 +1678,42 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           </div>
         );
       })()}
+
+      {/* ========================================================
+          CONFIRMATION MODAL: CLEAR ALL STATUS TRACKING RECORDS
+      ======================================================== */}
+      <ConfirmModal
+        isOpen={isClearModalOpen}
+        title="Clear All Status Tracking Records?"
+        message="This will permanently delete all Status Tracking records for this campaign from the database. Master influencer profiles in Campaign Influencer will NOT be deleted. This action cannot be undone."
+        confirmText={isClearing ? "Clearing..." : "Clear All"}
+        cancelText="Cancel"
+        isDestructive={true}
+        onClose={() => {
+          if (!isClearing) {
+            setIsClearModalOpen(false);
+          }
+        }}
+        onConfirm={handleConfirmClearAll}
+      />
+
+      {/* ========================================================
+          CONFIRMATION MODAL: REMOVE SINGLE INFLUENCER
+      ======================================================== */}
+      <ConfirmModal
+        isOpen={Boolean(recordToDelete)}
+        title="Remove Influencer from Status Tracking?"
+        message={`Are you sure you want to remove ${recordToDelete?.dispatch?.influencer_name || 'this influencer'} (${recordToDelete?.dispatch?.influencer_code || recordToDelete?.influencer_id || ''}) from Status Tracking? Master influencer profiles in Campaign Influencer will NOT be deleted.`}
+        confirmText={isDeletingSingle ? "Removing..." : "Remove"}
+        cancelText="Cancel"
+        isDestructive={true}
+        onClose={() => {
+          if (!isDeletingSingle) {
+            setRecordToDelete(null);
+          }
+        }}
+        onConfirm={handleConfirmDeleteSingle}
+      />
 
     </div>
   );

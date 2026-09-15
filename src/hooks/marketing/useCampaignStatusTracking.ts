@@ -353,11 +353,103 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
     }
   };
 
+  // Permanently clear all Status Tracking records for this campaign from Supabase
+  const clearAllStatusTracking = async (): Promise<{ success: boolean; deletedCount?: number; error?: string }> => {
+    if (!campaignId) {
+      return { success: false, error: 'No campaign ID provided' };
+    }
+
+    const cleanCampaignId = String(campaignId).trim();
+    if (!cleanCampaignId) {
+      return { success: false, error: 'Campaign ID is empty' };
+    }
+
+    try {
+      const numCampId = Number(cleanCampaignId);
+      const campVal = !isNaN(numCampId) ? numCampId : cleanCampaignId;
+
+      // 1. Delete all records for this campaign from influencer_status_tracking_rows
+      const { data, error: delError } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerStatus)
+        .delete()
+        .eq('campaign_id', campVal)
+        .select('id');
+
+      if (delError) {
+        console.error('Failed to clear status tracking rows from database:', delError);
+        return { success: false, error: delError.message };
+      }
+
+      // 2. Clear local React state immediately
+      setTrackingRecords([]);
+
+      // 3. Invalidate/clear any Status Tracking specific local storage cache if any exists
+      try {
+        if (typeof window !== 'undefined') {
+          const prefix = `status_tracking_${cleanCampaignId}`;
+          Object.keys(localStorage).forEach(key => {
+            if (key.startsWith(prefix) || key.startsWith(`influencer_status_${cleanCampaignId}`)) {
+              localStorage.removeItem(key);
+            }
+          });
+        }
+      } catch (storageErr) {
+        console.warn('Status tracking localStorage cleanup warning:', storageErr);
+      }
+
+      // 4. Re-verify directly from DB
+      await loadTrackingRecords();
+
+      // 5. Dispatch sync events
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+      }
+
+      return {
+        success: true,
+        deletedCount: data ? data.length : 0
+      };
+    } catch (err: any) {
+      console.error('clearAllStatusTracking exception:', err);
+      await loadTrackingRecords();
+      return {
+        success: false,
+        error: err?.message || String(err)
+      };
+    }
+  };
+
+  // Delete an individual status tracking record
+  const deleteStatusTrackingRecord = async (recordId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { error: delErr } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerStatus)
+        .delete()
+        .eq('id', recordId);
+
+      if (delErr) throw delErr;
+
+      setTrackingRecords(prev => prev.filter(r => String(r.id) !== String(recordId)));
+      await loadTrackingRecords();
+
+      if (typeof window !== 'undefined' && campaignId) {
+        window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: String(campaignId) } }));
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error deleting status tracking record:', err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
   return {
     trackingRecords,
     isLoading,
     error,
     refresh: loadTrackingRecords,
-    saveMilestone
+    saveMilestone,
+    clearAllStatusTracking,
+    deleteStatusTrackingRecord
   };
 };
