@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { supabase } from '../lib/supabase';
+import db from '../lib/db';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer } from '../types';
 import type { DispatchDetails } from '../hooks/marketing/useCampaignDispatch';
@@ -213,6 +214,152 @@ export async function fetchCampaignStatusTrackingInfluencerIds(campaignId: strin
   }
 }
 
+/**
+ * Ensures candidate influencers and dispatch records for the campaign are loaded.
+ * If not provided or empty (e.g. during async React render/mount), automatically fetches
+ * all influencers and dispatches directly from Supabase to prevent empty-state matching bugs.
+ */
+export async function ensureCampaignInfluencersAndDispatches(
+  campaignId: string | number,
+  candidateInfluencers?: CampaignInfluencer[],
+  dispatchRecords?: DispatchDetails[]
+): Promise<{ influencers: CampaignInfluencer[]; dispatches: DispatchDetails[] }> {
+  const cleanCampaignId = String(campaignId).trim();
+  const numericCampaignId = Number(cleanCampaignId);
+
+  let influencers = candidateInfluencers && candidateInfluencers.length > 0 ? [...candidateInfluencers] : [];
+  let dispatches = dispatchRecords && dispatchRecords.length > 0 ? [...dispatchRecords] : [];
+
+  if (influencers.length === 0 && cleanCampaignId) {
+    try {
+      let query = supabaseAdmin
+        .from(SUPABASE_TABLES.influencersInfo)
+        .select('*');
+
+      if (!isNaN(numericCampaignId)) {
+        query = query.or(`campaign_id.eq.${cleanCampaignId},campaign_id.eq.${numericCampaignId}`);
+      } else {
+        query = query.eq('campaign_id', cleanCampaignId);
+      }
+
+      const { data: dbInfs, error } = await query;
+      if (!error && dbInfs) {
+        influencers = dbInfs as unknown as CampaignInfluencer[];
+      }
+    } catch (e) {
+      console.warn('Could not auto-fetch campaign influencers:', e);
+    }
+  }
+
+  if (dispatches.length === 0 && cleanCampaignId) {
+    try {
+      let query = supabaseAdmin
+        .from(SUPABASE_TABLES.influencerDispatch)
+        .select('*');
+
+      if (!isNaN(numericCampaignId)) {
+        query = query.or(`campaign_id.eq.${cleanCampaignId},campaign_id.eq.${numericCampaignId}`);
+      } else {
+        query = query.eq('campaign_id', cleanCampaignId);
+      }
+
+      const { data: dbDispatches, error } = await query;
+      if (!error && dbDispatches) {
+        dispatches = dbDispatches as unknown as DispatchDetails[];
+      }
+    } catch (e) {
+      console.warn('Could not auto-fetch campaign dispatches:', e);
+    }
+  }
+
+  return { influencers, dispatches };
+}
+
+/**
+ * Resolves the influencer ID associated with a shipment using 4 layers of resolution:
+ * 1. shipment.influencerId (if already populated)
+ * 2. matchShipmentToInfluencer using campaignInfluencers & dispatchRecords
+ * 3. Database lookup in influencer_dispatch_details_rows matching tracking_id = shipment.awbNumber
+ * 4. Database lookup in influencers_info_rows matching code = shipment.influencerCode or orderId
+ */
+export async function resolveShipmentInfluencerId(
+  campaignId: string | number,
+  shipment: InfluencerDispatchedShipment,
+  campaignInfluencers: CampaignInfluencer[],
+  dispatchRecords: DispatchDetails[]
+): Promise<string | null> {
+  // Layer 1: Direct property on shipment
+  if (shipment.influencerId) {
+    return String(shipment.influencerId);
+  }
+
+  // Layer 2: 5-priority matching using candidate influencers & dispatches
+  const { matchedInfluencer } = matchShipmentToInfluencer(shipment, campaignInfluencers, dispatchRecords);
+  if (matchedInfluencer?.id) {
+    return String(matchedInfluencer.id);
+  }
+
+  const cleanCampaignId = String(campaignId).trim();
+  const numericCampaignId = Number(cleanCampaignId);
+  const cleanAwb = (shipment.awbNumber || '').trim();
+  const cleanCode = (shipment.influencerCode || '').replace(/^#+/, '').trim();
+  const cleanOrderId = (shipment.orderId || '').replace(/^#+/, '').trim();
+
+  // Layer 3: Direct DB lookup in influencer_dispatch_details_rows by AWB / tracking_id
+  if (cleanAwb) {
+    try {
+      let query = supabaseAdmin
+        .from(SUPABASE_TABLES.influencerDispatch)
+        .select('influencer_id')
+        .ilike('tracking_id', cleanAwb);
+
+      if (!isNaN(numericCampaignId)) {
+        query = query.or(`campaign_id.eq.${cleanCampaignId},campaign_id.eq.${numericCampaignId}`);
+      } else {
+        query = query.eq('campaign_id', cleanCampaignId);
+      }
+
+      const { data: dispRows, error: dispErr } = await query.limit(1);
+      if (!dispErr && dispRows && dispRows.length > 0 && dispRows[0].influencer_id) {
+        return String(dispRows[0].influencer_id);
+      }
+    } catch (e) {
+      console.warn('Fallback dispatch lookup failed:', e);
+    }
+  }
+
+  // Layer 4: Direct DB lookup in influencers_info_rows by code or orderId
+  const searchCodes = [cleanCode, cleanOrderId].filter(Boolean);
+  if (searchCodes.length > 0) {
+    try {
+      let query = supabaseAdmin
+        .from(SUPABASE_TABLES.influencersInfo)
+        .select('id, code');
+
+      if (!isNaN(numericCampaignId)) {
+        query = query.or(`campaign_id.eq.${cleanCampaignId},campaign_id.eq.${numericCampaignId}`);
+      } else {
+        query = query.eq('campaign_id', cleanCampaignId);
+      }
+
+      const { data: infRows, error: infErr } = await query;
+      if (!infErr && infRows && infRows.length > 0) {
+        const matched = infRows.find(inf => {
+          const infCode = (inf.code || '').replace(/^#+/, '').trim().toLowerCase();
+          return searchCodes.some(sc => sc.toLowerCase() === infCode || sc === String(inf.id));
+        });
+        if (matched?.id) {
+          return String(matched.id);
+        }
+      }
+    } catch (e) {
+      console.warn('Fallback influencer info lookup failed:', e);
+    }
+  }
+
+  return null;
+}
+
 export interface HandoffResult {
   success: boolean;
   alreadyExisted: boolean;
@@ -232,8 +379,8 @@ export interface HandoffResult {
 export async function handoffDeliveredShipmentToStatusTracking(
   campaignId: string | number,
   shipment: InfluencerDispatchedShipment,
-  campaignInfluencers: CampaignInfluencer[],
-  dispatchRecords: DispatchDetails[]
+  campaignInfluencers?: CampaignInfluencer[],
+  dispatchRecords?: DispatchDetails[]
 ): Promise<HandoffResult> {
   const cleanCampaignId = String(campaignId).trim();
   if (!cleanCampaignId) {
@@ -248,11 +395,18 @@ export async function handoffDeliveredShipmentToStatusTracking(
     };
   }
 
+  // Ensure campaign influencers and dispatches are available (auto-fetches from Supabase if empty)
+  const { influencers, dispatches } = await ensureCampaignInfluencersAndDispatches(
+    cleanCampaignId,
+    campaignInfluencers,
+    dispatchRecords
+  );
+
   // Match influencer safely
   const { matchedInfluencer, matchedDispatch, matchReason } = matchShipmentToInfluencer(
     shipment,
-    campaignInfluencers,
-    dispatchRecords
+    influencers,
+    dispatches
   );
 
   if (!matchedInfluencer) {
@@ -429,11 +583,12 @@ export interface BulkHandoffSummary {
 export async function bulkHandoffDeliveredShipments(
   campaignId: string | number,
   shipments: InfluencerDispatchedShipment[],
-  campaignInfluencers: CampaignInfluencer[],
-  dispatchRecords: DispatchDetails[]
+  campaignInfluencers?: CampaignInfluencer[],
+  dispatchRecords?: DispatchDetails[]
 ): Promise<BulkHandoffSummary> {
+  const cleanCampaignId = String(campaignId).trim();
   const delivered = shipments.filter(s => s.status === 'Delivered');
-  const existingSet = await fetchCampaignStatusTrackingInfluencerIds(campaignId);
+  const existingSet = await fetchCampaignStatusTrackingInfluencerIds(cleanCampaignId);
 
   const summary: BulkHandoffSummary = {
     totalDelivered: delivered.length,
@@ -444,11 +599,18 @@ export async function bulkHandoffDeliveredShipments(
     results: []
   };
 
+  // Ensure campaign influencers and dispatches are available (auto-fetches from Supabase if empty)
+  const { influencers, dispatches } = await ensureCampaignInfluencersAndDispatches(
+    cleanCampaignId,
+    campaignInfluencers,
+    dispatchRecords
+  );
+
   // Group delivered shipments by matched influencer to avoid duplicate work
   const processedInfluencerIds = new Set<string>();
 
   for (const s of delivered) {
-    const { matchedInfluencer } = matchShipmentToInfluencer(s, campaignInfluencers, dispatchRecords);
+    const { matchedInfluencer } = matchShipmentToInfluencer(s, influencers, dispatches);
 
     if (!matchedInfluencer) {
       summary.unmatchedCount++;
@@ -490,10 +652,10 @@ export async function bulkHandoffDeliveredShipments(
 
     // Execute handoff
     const res = await handoffDeliveredShipmentToStatusTracking(
-      campaignId,
+      cleanCampaignId,
       s,
-      campaignInfluencers,
-      dispatchRecords
+      influencers,
+      dispatches
     );
 
     if (res.success) {
@@ -540,8 +702,8 @@ export async function bulkHandoffDeliveredShipments(
 export async function deleteShipmentWithStatusTrackingSync(
   campaignId: string | number,
   shipment: InfluencerDispatchedShipment,
-  candidateInfluencers: CampaignInfluencer[],
-  dispatchRecords: DispatchDetails[]
+  candidateInfluencers?: CampaignInfluencer[],
+  dispatchRecords?: DispatchDetails[]
 ): Promise<{ success: boolean; error?: string; deletedStatusTracking: boolean }> {
   const cleanCampaignId = String(campaignId).trim();
   if (!cleanCampaignId) {
@@ -549,9 +711,20 @@ export async function deleteShipmentWithStatusTrackingSync(
   }
 
   try {
-    // 1. Resolve matched influencer using canonical 5-priority matching
-    const { matchedInfluencer } = matchShipmentToInfluencer(shipment, candidateInfluencers, dispatchRecords);
-    const targetInfluencerId = shipment.influencerId || (matchedInfluencer ? String(matchedInfluencer.id) : null);
+    // 0. Ensure influencers and dispatches are available (auto-fetches from Supabase if empty)
+    const { influencers, dispatches } = await ensureCampaignInfluencersAndDispatches(
+      cleanCampaignId,
+      candidateInfluencers,
+      dispatchRecords
+    );
+
+    // 1. Resolve matched influencer using canonical 4-layer resolution
+    const targetInfluencerId = await resolveShipmentInfluencerId(
+      cleanCampaignId,
+      shipment,
+      influencers,
+      dispatches
+    );
 
     // 2. Delete the shipment from influencer_tracking_shipments & localStorage
     const deleteShipmentRes = await deleteSingleCampaignShipmentFromDb(cleanCampaignId, shipment);
@@ -564,20 +737,32 @@ export async function deleteShipmentWithStatusTrackingSync(
     // 3. If there is a targetInfluencerId, verify if any remaining tracking shipment in this campaign links to this influencer
     if (targetInfluencerId) {
       const remainingShipments = await fetchCampaignShipmentsFromDb(cleanCampaignId);
-      const otherShipmentForSameInfluencer = remainingShipments.some(s => {
-        if (s.id === shipment.id) return false;
-        if (s.influencerId && String(s.influencerId) === String(targetInfluencerId)) return true;
-        const match = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
-        return match.matchedInfluencer && String(match.matchedInfluencer.id) === String(targetInfluencerId);
-      });
+      let otherShipmentForSameInfluencer = false;
+      for (const s of remainingShipments) {
+        if (s.id === shipment.id) continue;
+        if (s.influencerId && String(s.influencerId) === String(targetInfluencerId)) {
+          otherShipmentForSameInfluencer = true;
+          break;
+        }
+        const otherInfId = await resolveShipmentInfluencerId(cleanCampaignId, s, influencers, dispatches);
+        if (otherInfId && String(otherInfId) === String(targetInfluencerId)) {
+          otherShipmentForSameInfluencer = true;
+          break;
+        }
+      }
 
       // If no other shipment links to this influencer, safely remove the status tracking row
       if (!otherShipmentForSameInfluencer) {
+        const numericCampaignId = Number(cleanCampaignId);
+        const numericInfId = Number(targetInfluencerId);
+        const campQuery = !isNaN(numericCampaignId) ? numericCampaignId : cleanCampaignId;
+        const infQuery = !isNaN(numericInfId) ? numericInfId : String(targetInfluencerId);
+
         const { error: statusDeleteError } = await supabaseAdmin
           .from(SUPABASE_TABLES.influencerStatus)
           .delete()
-          .eq('campaign_id', cleanCampaignId)
-          .eq('influencer_id', String(targetInfluencerId));
+          .eq('campaign_id', campQuery)
+          .eq('influencer_id', infQuery);
 
         if (statusDeleteError) {
           console.warn('Could not delete corresponding status tracking row:', statusDeleteError);
@@ -611,8 +796,8 @@ export async function deleteShipmentWithStatusTrackingSync(
  */
 export async function clearAllCampaignTrackingWithStatusSync(
   campaignId: string | number,
-  candidateInfluencers: CampaignInfluencer[],
-  dispatchRecords: DispatchDetails[]
+  candidateInfluencers?: CampaignInfluencer[],
+  dispatchRecords?: DispatchDetails[]
 ): Promise<{ success: boolean; deletedShipmentCount: number; deletedStatusCount: number; error?: string }> {
   const cleanCampaignId = String(campaignId).trim();
   if (!cleanCampaignId) {
@@ -623,19 +808,23 @@ export async function clearAllCampaignTrackingWithStatusSync(
     // 1. Fetch current tracking shipments to identify exactly which influencers belong to this tracking dataset
     const currentShipments = await fetchCampaignShipmentsFromDb(cleanCampaignId);
 
-    // 2. Identify all influencer IDs that are linked to these shipments
+    // 2. Ensure influencers and dispatches are available (auto-fetches from Supabase if empty)
+    const { influencers, dispatches } = await ensureCampaignInfluencersAndDispatches(
+      cleanCampaignId,
+      candidateInfluencers,
+      dispatchRecords
+    );
+
+    // 3. Identify all influencer IDs that are linked to these shipments
     const linkedInfluencerIds = new Set<string>();
     for (const s of currentShipments) {
-      if (s.influencerId) {
-        linkedInfluencerIds.add(String(s.influencerId));
-      }
-      const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
-      if (matchedInfluencer?.id) {
-        linkedInfluencerIds.add(String(matchedInfluencer.id));
+      const infId = await resolveShipmentInfluencerId(cleanCampaignId, s, influencers, dispatches);
+      if (infId) {
+        linkedInfluencerIds.add(String(infId));
       }
     }
 
-    // 3. Delete all tracking shipments from influencer_tracking_shipments & localStorage
+    // 4. Delete all tracking shipments from influencer_tracking_shipments & localStorage
     const deleteRes = await deleteCampaignShipmentsFromDb(cleanCampaignId);
     if (!deleteRes.success) {
       return {
@@ -648,16 +837,22 @@ export async function clearAllCampaignTrackingWithStatusSync(
 
     let deletedStatusCount = 0;
 
-    // 4. Delete ONLY those Status Tracking rows belonging to the linked influencers
+    // 5. Delete ONLY those Status Tracking rows belonging to the linked influencers
     // (Leaves unrelated influencers like HIS2, HIS5 untouched!)
     // NEVER deletes from influencers_info_rows!
     if (linkedInfluencerIds.size > 0) {
+      const numericCampaignId = Number(cleanCampaignId);
+      const campQuery = !isNaN(numericCampaignId) ? numericCampaignId : cleanCampaignId;
+
       const influencerIdArray = Array.from(linkedInfluencerIds);
+      const numericInfIds = influencerIdArray.map(id => Number(id)).filter(n => !isNaN(n));
+      const idsToDelete = numericInfIds.length === influencerIdArray.length ? numericInfIds : influencerIdArray;
+
       const { data: deletedStatusRows, error: statusErr } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerStatus)
         .delete()
-        .eq('campaign_id', cleanCampaignId)
-        .in('influencer_id', influencerIdArray)
+        .eq('campaign_id', campQuery)
+        .in('influencer_id', idsToDelete)
         .select('id');
 
       if (statusErr) {
@@ -667,7 +862,19 @@ export async function clearAllCampaignTrackingWithStatusSync(
       }
     }
 
-    // 5. Dispatch sync events
+    // 6. Clean up Dexie tracking-stage orders if present
+    try {
+      if (db?.logistics_orders) {
+        await db.logistics_orders.where('stage').equals('tracking').delete();
+      }
+      if (db?.tracking_logs) {
+        await db.tracking_logs.clear();
+      }
+    } catch (dexieErr) {
+      console.warn('Dexie tracking cleanup warning:', dexieErr);
+    }
+
+    // 7. Dispatch sync events to refresh all views reactively
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
       window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));

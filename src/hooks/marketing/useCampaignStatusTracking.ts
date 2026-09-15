@@ -108,10 +108,14 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
     setIsLoading(true);
     setError(null);
     try {
+      const cleanCampaignId = String(campaignId).trim();
+      const numCampId = Number(cleanCampaignId);
+      const campQuery = !isNaN(numCampId) ? numCampId : cleanCampaignId;
+
       const { data: trackingData, error: trackingError } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerStatus)
         .select('*')
-        .eq('campaign_id', campaignId);
+        .eq('campaign_id', campQuery);
         
       if (trackingError) throw trackingError;
       

@@ -12,7 +12,6 @@ import {
   getLastCampaignSyncTime,
   getCampaignShipments,
   fetchCampaignShipmentsFromDb,
-  deleteCampaignShipmentsFromDb,
   TrackingStatusCategory,
   InfluencerDispatchedShipment
 } from '../../services/influencerTrackingService';
@@ -207,6 +206,20 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     loadShipments();
     setCurrentPage(1);
   }, [loadShipments]);
+
+  // Listen to external tracking updates across tabs or modules
+  useEffect(() => {
+    const handleTrackingUpdated = (e: any) => {
+      const updatedCampaignId = e?.detail?.campaignId;
+      if (!updatedCampaignId || String(updatedCampaignId) === String(campaign.id)) {
+        loadShipments();
+      }
+    };
+    window.addEventListener('influencer_tracking_updated', handleTrackingUpdated);
+    return () => {
+      window.removeEventListener('influencer_tracking_updated', handleTrackingUpdated);
+    };
+  }, [campaign.id, loadShipments]);
 
   // Candidate influencers: pool all active influencers and dispatched influencers for the campaign
   const candidateInfluencers = useMemo(() => {
