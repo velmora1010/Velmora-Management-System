@@ -11,16 +11,22 @@ export interface PaymentDetailsInfo {
   bank_name?: string | null;
 }
 
-interface StatusTrackingPaymentCardProps {
+export interface StatusTrackingPaymentCardProps {
   paymentInfo?: PaymentDetailsInfo | null;
   className?: string;
   isHistorical?: boolean;
+  videoNumber?: number;
+  perVideoAmount?: number | null;
+  totalCampaignAmount?: number | null;
 }
 
 export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps> = ({
   paymentInfo,
   className = '',
-  isHistorical = false
+  isHistorical = false,
+  videoNumber,
+  perVideoAmount,
+  totalCampaignAmount
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
@@ -55,6 +61,37 @@ export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps>
           <ShieldCheck size={11} className={isHistorical ? "text-emerald-400" : "text-blue-400"} />
           <span>{isHistorical ? 'Historical Record' : 'From Campaign Influencer'}</span>
         </div>
+      </div>
+
+      {/* Primary Focus: PER-VIDEO AGREED AMOUNT Banner */}
+      <div className="bg-[#070c18] border border-slate-800/90 rounded-xl p-3 mb-3.5 flex items-center justify-between">
+        <div>
+          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+            {videoNumber ? `Video ${videoNumber} Agreed Amount` : 'Per Video Agreed Amount'}
+          </span>
+          <div className="flex items-baseline gap-2">
+            {perVideoAmount !== null && perVideoAmount !== undefined ? (
+              <span className="text-xl font-bold font-mono text-emerald-400">
+                ₹{Number(perVideoAmount).toLocaleString('en-IN')}
+              </span>
+            ) : (
+              <span className="text-sm font-semibold text-slate-400 italic">
+                Not assigned
+              </span>
+            )}
+          </div>
+        </div>
+
+        {totalCampaignAmount !== null && totalCampaignAmount !== undefined && (
+          <div className="text-right">
+            <span className="block text-[10px] font-medium uppercase tracking-wider text-slate-500">
+              Total Campaign Amount
+            </span>
+            <span className="text-xs font-semibold font-mono text-slate-300">
+              ₹{Number(totalCampaignAmount).toLocaleString('en-IN')}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Conditional Content */}

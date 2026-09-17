@@ -153,6 +153,59 @@ export const getResolvedProductForVideo = (
 };
 
 // =========================================================================
+// PER-VIDEO PRICING RESOLUTION HELPERS
+// =========================================================================
+export const getInfluencerVideoPrice = (influencer: any, videoNumber: number): number | null => {
+  if (!influencer) return null;
+
+  // Priority 1: Check canonical resolved video items
+  try {
+    const resolvedList = getInfluencerResolvedVideoProducts(influencer);
+    const found = (resolvedList || []).find(v => Number(v.videoNumber) === Number(videoNumber));
+    if (found && found.amount !== undefined && found.amount !== null && !isNaN(Number(found.amount)) && Number(found.amount) > 0) {
+      return Number(found.amount);
+    }
+  } catch (e) {
+    // Ignore and fall through
+  }
+
+  // Priority 2: Direct lookup in pricing.product_pricing.videos
+  const pricingObj = influencer.pricing || {};
+  const pricingVideos = Array.isArray(pricingObj.product_pricing?.videos)
+    ? pricingObj.product_pricing.videos
+    : [];
+  if (pricingVideos[videoNumber - 1]) {
+    const vEntry = pricingVideos[videoNumber - 1];
+    const amt = (vEntry && typeof vEntry === 'object' && vEntry.amount !== undefined && vEntry.amount !== null)
+      ? Number(vEntry.amount)
+      : Number(vEntry);
+    if (!isNaN(amt) && amt > 0) {
+      return amt;
+    }
+  }
+
+  // Priority 3: Check legacy video1_price / video2_price columns
+  if (Number(videoNumber) === 1 && pricingObj.video1_price) {
+    const v1 = Number(pricingObj.video1_price);
+    if (!isNaN(v1) && v1 > 0) return v1;
+  }
+  if (Number(videoNumber) === 2 && pricingObj.video2_price) {
+    const v2 = Number(pricingObj.video2_price);
+    if (!isNaN(v2) && v2 > 0) return v2;
+  }
+
+  return null;
+};
+
+export const getInfluencerCampaignTotalPrice = (influencer: any, recordPricing?: any): number | null => {
+  const finalPrice = recordPricing?.final_price ?? influencer?.pricing?.final_price;
+  if (finalPrice !== undefined && finalPrice !== null && !isNaN(Number(finalPrice)) && Number(finalPrice) > 0) {
+    return Number(finalPrice);
+  }
+  return null;
+};
+
+// =========================================================================
 // TYPES & HELPERS FOR DRAFT ATTEMPTS, RE-DRAFT & TIMELINE AUDIT HISTORY
 // =========================================================================
 export interface DraftAttempt {
@@ -551,9 +604,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
         };
       } else if (cfg.id === 'pay_advance') {
         completed = !!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0);
+        const v1Price = getInfluencerVideoPrice(record.influencer, 1);
         data = {
           gpay: record.advance_gpay_number || '',
-          total: record.advance_total_amount || record.pricing?.final_price || '',
+          total: record.advance_total_amount || (v1Price !== null ? String(v1Price) : ''),
           advance: record.advance_paid_amount || '',
           photo: record.pay_advance_photo_url || ''
         };
@@ -1920,8 +1974,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   const videoData = useMemo(() => getVideoWorkflow(record, videoNumber), [record, videoNumber]);
   const [activeStepId, setActiveStepId] = useState<string>(videoData.activeStepId);
 
-  // Derive resolved product for this specific video from Campaign Influencer data
+  // Derive resolved product & per-video price for this specific video from Campaign Influencer data
   const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
+  const currentVideoPrice = useMemo(() => getInfluencerVideoPrice(record.influencer, videoNumber), [record.influencer, videoNumber]);
 
   // Sync active step when video changes
   useEffect(() => {
@@ -2035,6 +2090,18 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               }`}>
                 {resolvedProductInfo.productName}
               </span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-[#070c18] px-2.5 py-1 rounded-lg border border-slate-800">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Amount:</span>
+              {currentVideoPrice !== null ? (
+                <span className="text-xs font-mono font-bold text-emerald-400">
+                  ₹{Number(currentVideoPrice).toLocaleString('en-IN')}
+                </span>
+              ) : (
+                <span className="text-xs text-slate-500 italic">
+                  Not assigned
+                </span>
+              )}
             </div>
             {videoStatusBadge}
           </div>
@@ -2200,6 +2267,8 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
           {activeStepId === 'pay_advance' && (
             <PayAdvanceForm 
+              key={`v1-pay-advance-${record.id}`}
+              videoNumber={1}
               record={record} 
               existingData={activeStepState.data}
               onSave={(formData: any) => onSaveStep('pay_advance', formData, formData.pay_advance_completed)} 
@@ -2238,8 +2307,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
           {activeStepId === 'payment' && (
             <VideoPaymentForm 
+              key={`v-${videoNumber}-payment-${record.id}`}
               videoNumber={videoNumber}
-              record={record}
+              record={record} 
               existingData={activeStepState.data}
               onSave={(formData: any) => onSaveStep('payment', formData, formData.payment_completed)}
             />
@@ -2597,7 +2667,7 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
 };
 
 // --- STEP: Pay Advance (Video 1 Only) ---
-const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
+const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: any) => {
   const influencer = record.influencer || {};
   const dispatch = record.dispatch || {};
 
@@ -2612,9 +2682,23 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
   const isUPI = currentPaymentMethod === 'UPI' || (!currentPaymentMethod && Boolean(currentUpi));
   const isHistorical = Boolean(existingData.pay_advance_completed || record.pay_advance_completed);
 
+  const v1Price = useMemo(() => getInfluencerVideoPrice(influencer, 1), [influencer]);
+  const totalCampaignPrice = useMemo(() => getInfluencerCampaignTotalPrice(influencer, record.pricing), [influencer, record.pricing]);
+
+  const defaultTotal = isHistorical 
+    ? (existingData.total || record.advance_total_amount || (v1Price !== null ? String(v1Price) : ''))
+    : (v1Price !== null ? String(v1Price) : (existingData.total || record.advance_total_amount || ''));
+
   const [gpay, setGpay] = useState(existingData.gpay || record.advance_gpay_number || currentUpi || '');
-  const [total, setTotal] = useState(existingData.total || record.advance_total_amount || record.pricing?.final_price || '');
+  const [total, setTotal] = useState(defaultTotal);
   const [advance, setAdvance] = useState(existingData.advance || record.advance_paid_amount || '');
+
+  // Keep total in sync if not historical and v1Price changes in Campaign Influencer
+  useEffect(() => {
+    if (!isHistorical && v1Price !== null) {
+      setTotal(String(v1Price));
+    }
+  }, [v1Price, isHistorical]);
   
   const [photo, setPhoto] = useState(existingData.photo || record.pay_advance_photo_url || '');
   const [file, setFile] = useState<File | null>(null);
@@ -2642,7 +2726,7 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
 
   const handleSave = async () => {
     if (!total || !advance) {
-      toast.error('Please enter both Total Amount and Advance Amount.');
+      toast.error('Please enter both Video 1 Agreed Amount and Advance Amount.');
       return;
     }
     setIsUploading(true);
@@ -2681,7 +2765,13 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
       {/* Compact Payment Details Card */}
-      <StatusTrackingPaymentCard paymentInfo={paymentInfoForCard} isHistorical={isHistorical} />
+      <StatusTrackingPaymentCard 
+        paymentInfo={paymentInfoForCard} 
+        isHistorical={isHistorical}
+        videoNumber={1}
+        perVideoAmount={v1Price}
+        totalCampaignAmount={totalCampaignPrice}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         
@@ -2702,12 +2792,22 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
             </div>
           )}
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Total Agreed Amount (₹)</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                Video 1 Agreed Amount (₹)
+              </label>
+              {totalCampaignPrice !== null && (
+                <span className="text-[10px] text-slate-500">
+                  Total Campaign: <span className="font-mono text-slate-400">₹{totalCampaignPrice.toLocaleString('en-IN')}</span>
+                </span>
+              )}
+            </div>
             <input 
               type="text" 
               value={total} 
               onChange={e => setTotal(e.target.value)} 
-              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+              placeholder={v1Price !== null ? String(v1Price) : "Not assigned"}
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono" 
             />
           </div>
           <div>
@@ -2717,9 +2817,25 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
               value={advance} 
               onChange={e => setAdvance(e.target.value)} 
               placeholder="e.g. 2000"
-              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono" 
             />
           </div>
+
+          {/* Remaining Balance Indicator for Video 1 */}
+          {(() => {
+            const numTotal = parseFloat(total);
+            const numAdv = parseFloat(advance);
+            if (!isNaN(numTotal) && !isNaN(numAdv) && numTotal > 0 && numAdv > 0) {
+              const remaining = Math.max(0, numTotal - numAdv);
+              return (
+                <div className="bg-[#0b1329]/60 border border-slate-800/80 rounded-lg px-3 py-2 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Remaining Balance for Video 1:</span>
+                  <span className="font-mono font-bold text-amber-400">₹{remaining.toLocaleString('en-IN')}</span>
+                </div>
+              );
+            }
+            return null;
+          })()}
           
           <div className="pt-2">
             <div className="relative w-full h-24 border-2 border-dashed border-slate-700/80 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
@@ -4603,18 +4719,27 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
     bank_name: currentBankName
   };
 
-  // Resolve video product & expected payment amount
-  const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
-  const defaultExpectedAmount = (resolvedProductInfo.amount && resolvedProductInfo.amount > 0)
-    ? String(resolvedProductInfo.amount)
-    : (record.pricing?.[`video${videoNumber}_price`] || '');
+  // Resolve video product & expected payment amount for THIS video
+  const perVideoPrice = useMemo(() => getInfluencerVideoPrice(record.influencer, videoNumber), [record.influencer, videoNumber]);
+  const totalCampaignPrice = useMemo(() => getInfluencerCampaignTotalPrice(record.influencer, record.pricing), [record.influencer, record.pricing]);
 
-  const [amount, setAmount] = useState(existingData.amount || defaultExpectedAmount || '');
+  const defaultExpectedAmount = isHistorical
+    ? (existingData.amount || (perVideoPrice !== null && perVideoPrice > 0 ? String(perVideoPrice) : ''))
+    : (perVideoPrice !== null && perVideoPrice > 0 ? String(perVideoPrice) : (existingData.amount || ''));
+
+  const [amount, setAmount] = useState(defaultExpectedAmount);
   const [paymentConfirmed, setPaymentConfirmed] = useState(existingData.payment_completed || false);
   const [photo, setPhoto] = useState(existingData.photo || '');
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
+
+  // Sync if not historical and perVideoPrice updates
+  useEffect(() => {
+    if (!isHistorical && perVideoPrice !== null) {
+      setAmount(String(perVideoPrice));
+    }
+  }, [perVideoPrice, isHistorical]);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -4670,7 +4795,13 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
       {/* Compact Payment Details Card from Campaign Influencer */}
-      <StatusTrackingPaymentCard paymentInfo={paymentInfoForCard} isHistorical={isHistorical} />
+      <StatusTrackingPaymentCard 
+        paymentInfo={paymentInfoForCard} 
+        isHistorical={isHistorical}
+        videoNumber={videoNumber}
+        perVideoAmount={perVideoPrice}
+        totalCampaignAmount={totalCampaignPrice}
+      />
 
       <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
         <input 
@@ -4688,13 +4819,22 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Video {videoNumber} Payment Amount (₹)</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                Video {videoNumber} Agreed Amount (₹)
+              </label>
+              {totalCampaignPrice !== null && (
+                <span className="text-[10px] text-slate-500">
+                  Total Campaign: <span className="font-mono text-slate-400">₹{totalCampaignPrice.toLocaleString('en-IN')}</span>
+                </span>
+              )}
+            </div>
             <input 
               type="text" 
               value={amount} 
               onChange={e => setAmount(e.target.value)} 
-              placeholder="e.g. 5000"
-              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+              placeholder={perVideoPrice !== null ? String(perVideoPrice) : "Not assigned"}
+              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono" 
             />
           </div>
 
