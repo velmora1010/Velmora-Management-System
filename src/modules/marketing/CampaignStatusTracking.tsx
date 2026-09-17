@@ -2909,16 +2909,9 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
             </div>
           )}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-                Video 1 Agreed Amount (₹)
-              </label>
-              {totalCampaignPrice !== null && (
-                <span className="text-[10px] text-slate-500">
-                  Total Campaign: <span className="font-mono text-slate-400">₹{totalCampaignPrice.toLocaleString('en-IN')}</span>
-                </span>
-              )}
-            </div>
+            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">
+              Video 1 Agreed Amount (₹)
+            </label>
             <input 
               type="text" 
               value={total} 
@@ -4955,16 +4948,9 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="space-y-4">
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-                Video {videoNumber} Agreed Amount (₹)
-              </label>
-              {totalCampaignPrice !== null && (
-                <span className="text-[10px] text-slate-500">
-                  Total Campaign: <span className="font-mono text-slate-400">₹{totalCampaignPrice.toLocaleString('en-IN')}</span>
-                </span>
-              )}
-            </div>
+            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">
+              Video {videoNumber} Agreed Amount (₹)
+            </label>
             <input 
               type="text" 
               value={amount} 
