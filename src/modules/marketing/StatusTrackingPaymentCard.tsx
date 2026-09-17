@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { Copy, Check, ShieldCheck, CreditCard, Smartphone, History } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { 
+  normalizePaymentMethod, 
+  isAccountPaymentMethod, 
+  isUpiPaymentMethod 
+} from '../../utils/influencerPaymentUtils';
 
 export interface PaymentDetailsInfo {
   payment_method?: string | null;
@@ -9,6 +14,7 @@ export interface PaymentDetailsInfo {
   account_number?: string | null;
   ifsc_code?: string | null;
   bank_name?: string | null;
+  pan_number?: string | null;
 }
 
 export interface StatusTrackingPaymentCardProps {
@@ -42,9 +48,8 @@ export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps>
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const rawMethod = (paymentInfo?.payment_method || '').toUpperCase().trim();
-  const isAccount = rawMethod === 'ACCOUNT_DETAILS' || rawMethod.includes('ACCOUNT');
-  const isUPI = rawMethod === 'UPI' || (!rawMethod && Boolean(paymentInfo?.upi_number && paymentInfo.upi_number.trim()));
+  const isAccount = isAccountPaymentMethod(paymentInfo?.payment_method) || Boolean(!paymentInfo?.payment_method && (paymentInfo?.account_number || paymentInfo?.account_holder_name));
+  const isUPI = isUpiPaymentMethod(paymentInfo?.payment_method) || Boolean(!paymentInfo?.payment_method && paymentInfo?.upi_number?.trim());
   const isConfigured = Boolean(paymentInfo?.payment_method || paymentInfo?.upi_number || paymentInfo?.account_number);
 
   return (
@@ -239,6 +244,29 @@ export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps>
                   <span className="font-semibold text-slate-200">
                     {paymentInfo.bank_name}
                   </span>
+                </div>
+              )}
+
+              {paymentInfo.pan_number && (
+                <div className="flex items-center justify-between border-t border-slate-800/60 pt-1.5">
+                  <span className="text-slate-400 text-[11px]">PAN Number</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-bold text-white uppercase tracking-wider">
+                      {paymentInfo.pan_number}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(paymentInfo.pan_number!, 'PAN Number')}
+                      className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                      title="Copy PAN Number"
+                    >
+                      {copiedField === 'PAN Number' ? (
+                        <Check size={13} className="text-emerald-400" />
+                      ) : (
+                        <Copy size={13} />
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

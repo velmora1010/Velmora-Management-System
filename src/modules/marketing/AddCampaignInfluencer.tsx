@@ -7,6 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
+import { normalizePaymentMethod } from '../../utils/influencerPaymentUtils';
 
 export const formatDisplayProductName = (name?: string | null): string => {
   if (!name) return '';
@@ -644,10 +645,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       const cleanBHistory = bHistory.length > 0 ? bHistory : [{ creator_request: 0, brand_request: 0 }];
 
       const initialPaymentMethod: 'UPI' | 'ACCOUNT_DETAILS' = (function() {
-        const pm = (initialData.payment_method || '').toUpperCase();
-        if (pm === 'ACCOUNT_DETAILS' || pm === 'ACCOUNT DETAILS') {
-          return 'ACCOUNT_DETAILS';
-        }
+        const norm = normalizePaymentMethod(initialData.payment_method);
+        if (norm === 'ACCOUNT_DETAILS') return 'ACCOUNT_DETAILS';
+        if (norm === 'UPI') return 'UPI';
         if (initialData.account_number || initialData.account_holder_name || initialData.ifsc_code || initialData.bank_name) {
           return 'ACCOUNT_DETAILS';
         }
@@ -667,6 +667,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           account_number: initialData.account_number || '',
           ifsc_code: initialData.ifsc_code || '',
           bank_name: initialData.bank_name || '',
+          pan_number: initialData.pan_number || '',
           city: initialData.city || '',
           complete_address: initialData.complete_address || (initialData as any).address || '',
           state: (function(input?: string | null) {
@@ -744,6 +745,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         account_number: '',
         ifsc_code: '',
         bank_name: '',
+        pan_number: '',
         city: '',
         complete_address: '',
         state: '',
@@ -1276,7 +1278,8 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         account_holder_name: isAccountDetails ? (basicInfo.account_holder_name ? basicInfo.account_holder_name.trim() : null) : null,
         account_number: isAccountDetails ? (basicInfo.account_number ? String(basicInfo.account_number).trim() : null) : null,
         ifsc_code: isAccountDetails ? (basicInfo.ifsc_code ? basicInfo.ifsc_code.trim().toUpperCase() : null) : null,
-        bank_name: isAccountDetails ? (basicInfo.bank_name ? basicInfo.bank_name.trim() : null) : null
+        bank_name: isAccountDetails ? (basicInfo.bank_name ? basicInfo.bank_name.trim() : null) : null,
+        pan_number: isAccountDetails ? (basicInfo.pan_number ? basicInfo.pan_number.trim().toUpperCase() : null) : null
       };
 
       const payload = {
@@ -1524,6 +1527,23 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                         onChange={handleBasicChange}
                         className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200" 
                         placeholder="Enter bank name"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-400 mb-1">PAN Number <span className="text-slate-500">(Optional)</span></label>
+                      <input 
+                        type="text" 
+                        name="pan_number" 
+                        value={basicInfo.pan_number || ''} 
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase();
+                          setFormState(prev => ({
+                            ...prev,
+                            basicInfo: { ...prev.basicInfo, pan_number: val }
+                          }));
+                        }}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 uppercase" 
+                        placeholder="Enter PAN number"
                       />
                     </div>
                   </div>

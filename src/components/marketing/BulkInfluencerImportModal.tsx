@@ -18,6 +18,12 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import toast from 'react-hot-toast';
 import { isActiveStatus } from '../../utils/marketingUtils';
+import { 
+  parseExcelPaymentDetails, 
+  normalizePaymentMethod,
+  type NormalizedPaymentMethod 
+} from '../../utils/influencerPaymentUtils';
+import { CreditCard, Smartphone } from 'lucide-react';
 
 interface BulkInfluencerImportModalProps {
   campaign: Campaign;
@@ -39,6 +45,14 @@ interface ParsedRow {
   languages: string | null;
   autoDm: boolean | null;
   profileImg: string | null;
+  paymentMethod: NormalizedPaymentMethod;
+  upiNumber: string | null;
+  accountHolderName: string | null;
+  accountNumber: string | null;
+  ifscCode: string | null;
+  bankName: string | null;
+  panNumber: string | null;
+  hasExcelPaymentData: boolean;
   status: 'New' | 'Existing' | 'Invalid';
   reason?: string;
   existingId?: string | number;
@@ -51,6 +65,9 @@ interface ColumnMapping {
   phoneCol: string;
   altPhoneCol: string;
   upiCol: string;
+  paymentModeCol: string;
+  paymentsCol: string;
+  detailsCol: string;
   cityCol: string;
   stateCol: string;
   addressCol: string;
@@ -76,6 +93,9 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     phoneCol: '',
     altPhoneCol: '',
     upiCol: '',
+    paymentModeCol: '',
+    paymentsCol: '',
+    detailsCol: '',
     cityCol: '',
     stateCol: '',
     addressCol: '',
@@ -139,6 +159,9 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     let phoneCol = '';
     let altPhoneCol = '';
     let upiCol = '';
+    let paymentModeCol = '';
+    let paymentsCol = '';
+    let detailsCol = '';
     let cityCol = '';
     let stateCol = '';
     let addressCol = '';
@@ -169,31 +192,43 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       else if (!altPhoneCol && (clean === 'alternativenumber' || clean === 'altnumber' || clean === 'alternatephone' || clean === 'altphone' || clean === 'alternatemobilenumber')) {
         altPhoneCol = h;
       }
-      // 6. UPI Number / UPI ID
+      // 6. Payment Mode (e.g. Payment Mode, Mode, Payment Method, Pay Mode)
+      else if (!paymentModeCol && (clean === 'paymentmode' || clean === 'mode' || clean === 'paymentmethod' || clean === 'paymode' || clean === 'paymethod')) {
+        paymentModeCol = h;
+      }
+      // 7. Payments (e.g. Payments, Payment, UPI ID, UPI, UPI Number)
+      else if (!paymentsCol && (clean === 'payments' || clean === 'payment' || clean === 'paymentinfo')) {
+        paymentsCol = h;
+      }
+      // 8. UPI ID / UPI Number (Direct UPI column)
       else if (!upiCol && (clean === 'upinumber' || clean === 'upi' || clean === 'upiid' || clean === 'upihandle')) {
         upiCol = h;
       }
-      // 7. City
+      // 9. Details (e.g. Details, Bank Details, Account Details, Payment Details)
+      else if (!detailsCol && (clean === 'details' || clean === 'detail' || clean === 'bankdetails' || clean === 'accountdetails' || clean === 'bankdetail' || clean === 'accountdetail' || clean === 'paymentdetails')) {
+        detailsCol = h;
+      }
+      // 10. City
       else if (!cityCol && (clean === 'city' || clean === 'district' || clean === 'town')) {
         cityCol = h;
       }
-      // 8. State
+      // 11. State
       else if (!stateCol && (clean === 'state' || clean === 'statename' || clean === 'province')) {
         stateCol = h;
       }
-      // 9. Complete Address / Address
+      // 12. Complete Address / Address
       else if (!addressCol && (clean === 'completeaddress' || clean === 'address' || clean === 'fulladdress' || clean === 'streetaddress' || clean === 'locationaddress' || clean === 'location')) {
         addressCol = h;
       }
-      // 10. Languages
+      // 13. Languages
       else if (!languagesCol && (clean === 'languages' || clean === 'language' || clean === 'lang' || clean === 'targetlanguages' || clean === 'spokenlanguages')) {
         languagesCol = h;
       }
-      // 11. Auto DM Tool
+      // 14. Auto DM Tool
       else if (!autoDmCol && (clean === 'autodmtool' || clean === 'autodm' || clean === 'dmtool' || clean === 'autodmstatus')) {
         autoDmCol = h;
       }
-      // 12. Profile Image / Photo
+      // 15. Profile Image / Photo
       else if (!profileImgCol && (clean === 'influencerprofileimage' || clean === 'profileimage' || clean === 'profilephoto' || clean === 'profileurl' || clean === 'imageurl' || clean === 'photo')) {
         profileImgCol = h;
       }
@@ -212,7 +247,28 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       });
     }
 
-    return { codeCol, nameCol, userIdCol, phoneCol, altPhoneCol, upiCol, cityCol, stateCol, addressCol, languagesCol, autoDmCol, profileImgCol };
+    // Fallback: If paymentsCol not detected but upiCol detected, assign to paymentsCol
+    if (!paymentsCol && upiCol) {
+      paymentsCol = upiCol;
+    }
+
+    return { 
+      codeCol, 
+      nameCol, 
+      userIdCol, 
+      phoneCol, 
+      altPhoneCol, 
+      upiCol, 
+      paymentModeCol, 
+      paymentsCol, 
+      detailsCol, 
+      cityCol, 
+      stateCol, 
+      addressCol, 
+      languagesCol, 
+      autoDmCol, 
+      profileImgCol 
+    };
   };
 
   // Process rows into ParsedRow objects based on column mapping
@@ -238,9 +294,6 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       let altPhone: string | null = normalize(row[map.altPhoneCol]);
       if (altPhone === '' || altPhone.toLowerCase() === 'null' || altPhone.toLowerCase() === 'undefined' || altPhone === '—') altPhone = null;
 
-      let upi: string | null = normalize(row[map.upiCol]);
-      if (upi === '' || upi.toLowerCase() === 'null' || upi.toLowerCase() === 'undefined' || upi === '—') upi = null;
-
       let city: string | null = normalize(row[map.cityCol]);
       if (city === '' || city.toLowerCase() === 'null' || city.toLowerCase() === 'undefined' || city === '—') city = null;
 
@@ -265,6 +318,26 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       let profileImg: string | null = normalize(row[map.profileImgCol]);
       if (profileImg === '' || profileImg.toLowerCase() === 'null' || profileImg.toLowerCase() === 'undefined' || profileImg === '—') profileImg = null;
 
+      // Robust payment resolution using parseExcelPaymentDetails
+      const rawPaymentMode = map.paymentModeCol ? row[map.paymentModeCol] : '';
+      const rawPayments = (map.paymentsCol ? row[map.paymentsCol] : '') || (map.upiCol ? row[map.upiCol] : '');
+      const rawDetails = map.detailsCol ? row[map.detailsCol] : '';
+
+      const parsedPayment = parseExcelPaymentDetails({
+        paymentMode: rawPaymentMode,
+        payments: rawPayments,
+        details: rawDetails,
+      });
+
+      const hasExcelPaymentData = Boolean(
+        (rawPaymentMode && String(rawPaymentMode).trim()) ||
+        (rawPayments && String(rawPayments).trim()) ||
+        (rawDetails && String(rawDetails).trim())
+      );
+
+      let upi: string | null = parsedPayment.upi_number || (map.upiCol ? normalize(row[map.upiCol]) : null);
+      if (upi === '' || upi?.toLowerCase() === 'null' || upi?.toLowerCase() === 'undefined' || upi === '—') upi = null;
+
       // Validation
       if (!code && !name && !userId) {
         return {
@@ -280,6 +353,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           languages,
           autoDm,
           profileImg,
+          paymentMethod: parsedPayment.payment_method,
+          upiNumber: parsedPayment.upi_number,
+          accountHolderName: parsedPayment.account_holder_name,
+          accountNumber: parsedPayment.account_number,
+          ifscCode: parsedPayment.ifsc_code,
+          bankName: parsedPayment.bank_name,
+          panNumber: parsedPayment.pan_number,
+          hasExcelPaymentData,
           status: 'Invalid',
           reason: 'Row is empty'
         };
@@ -299,6 +380,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           languages,
           autoDm,
           profileImg,
+          paymentMethod: parsedPayment.payment_method,
+          upiNumber: parsedPayment.upi_number,
+          accountHolderName: parsedPayment.account_holder_name,
+          accountNumber: parsedPayment.account_number,
+          ifscCode: parsedPayment.ifsc_code,
+          bankName: parsedPayment.bank_name,
+          panNumber: parsedPayment.pan_number,
+          hasExcelPaymentData,
           status: 'Invalid',
           reason: 'Missing required Influencer Code'
         };
@@ -319,6 +408,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           languages,
           autoDm,
           profileImg,
+          paymentMethod: parsedPayment.payment_method,
+          upiNumber: parsedPayment.upi_number,
+          accountHolderName: parsedPayment.account_holder_name,
+          accountNumber: parsedPayment.account_number,
+          ifscCode: parsedPayment.ifsc_code,
+          bankName: parsedPayment.bank_name,
+          panNumber: parsedPayment.pan_number,
+          hasExcelPaymentData,
           status: 'Invalid',
           reason: 'Duplicate Influencer Code in file'
         };
@@ -328,19 +425,56 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       const existingRecord = existingCodeMap.get(lowerCode);
 
       if (existingRecord) {
+        // Priority: Explicit Excel data > Existing Record
+        const resolvedMethod = hasExcelPaymentData && parsedPayment.payment_method
+          ? parsedPayment.payment_method
+          : (normalizePaymentMethod(existingRecord.payment_method) || (existingRecord.upi_number ? 'UPI' : (existingRecord.account_number ? 'ACCOUNT_DETAILS' : null)));
+
+        const resolvedUpi = (hasExcelPaymentData && parsedPayment.upi_number)
+          ? parsedPayment.upi_number
+          : (existingRecord.upi_number || null);
+
+        const resolvedAccHolder = (hasExcelPaymentData && parsedPayment.account_holder_name)
+          ? parsedPayment.account_holder_name
+          : (existingRecord.account_holder_name || null);
+
+        const resolvedAccNum = (hasExcelPaymentData && parsedPayment.account_number)
+          ? parsedPayment.account_number
+          : (existingRecord.account_number || null);
+
+        const resolvedIfsc = (hasExcelPaymentData && parsedPayment.ifsc_code)
+          ? parsedPayment.ifsc_code
+          : (existingRecord.ifsc_code || null);
+
+        const resolvedBankName = (hasExcelPaymentData && parsedPayment.bank_name)
+          ? parsedPayment.bank_name
+          : (existingRecord.bank_name || null);
+
+        const resolvedPan = (hasExcelPaymentData && parsedPayment.pan_number)
+          ? parsedPayment.pan_number
+          : ((existingRecord as any).pan_number || null);
+
         return {
           code,
           name,
           userId,
           phone: phone || (existingRecord.phone_number || null),
           altPhone: altPhone || (existingRecord.alternative_number || null),
-          upi: upi || (existingRecord.upi_number || null),
+          upi: resolvedUpi,
           city: city || (existingRecord.city || null),
           state: state || (existingRecord.state || null),
           address: address || (existingRecord.complete_address || null),
           languages: languages || (Array.isArray(existingRecord.languages) ? existingRecord.languages.join(', ') : null),
           autoDm: autoDm ?? (existingRecord.auto_dm ?? null),
           profileImg: profileImg || (existingRecord.profile_file_url || null),
+          paymentMethod: resolvedMethod,
+          upiNumber: resolvedUpi,
+          accountHolderName: resolvedAccHolder,
+          accountNumber: resolvedAccNum,
+          ifscCode: resolvedIfsc,
+          bankName: resolvedBankName,
+          panNumber: resolvedPan,
+          hasExcelPaymentData,
           status: 'Existing',
           reason: 'Influencer already exists in this campaign',
           existingId: existingRecord.id
@@ -353,13 +487,21 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         userId,
         phone,
         altPhone,
-        upi,
+        upi: parsedPayment.upi_number || upi,
         city,
         state,
         address,
         languages,
         autoDm,
         profileImg,
+        paymentMethod: parsedPayment.payment_method,
+        upiNumber: parsedPayment.upi_number,
+        accountHolderName: parsedPayment.account_holder_name,
+        accountNumber: parsedPayment.account_number,
+        ifscCode: parsedPayment.ifsc_code,
+        bankName: parsedPayment.bank_name,
+        panNumber: parsedPayment.pan_number,
+        hasExcelPaymentData,
         status: 'New'
       };
     });
@@ -474,6 +616,9 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         phoneCol: 'Phone Number',
         altPhoneCol: '',
         upiCol: '',
+        paymentModeCol: '',
+        paymentsCol: '',
+        detailsCol: '',
         cityCol: '',
         stateCol: 'State',
         addressCol: 'Complete Address',
@@ -574,8 +719,13 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
             name: row.userId,
             phone_number: row.phone || null,
             alternative_number: row.altPhone || null,
-            upi_number: row.upi || null,
-            payment_method: row.upi ? 'UPI' : null,
+            payment_method: row.paymentMethod || null,
+            upi_number: row.upiNumber || null,
+            account_holder_name: row.accountHolderName || null,
+            account_number: row.accountNumber || null,
+            ifsc_code: row.ifscCode || null,
+            bank_name: row.bankName || null,
+            pan_number: row.panNumber || null,
             city: row.city || null,
             state: normStateVal || null,
             complete_address: row.address || null,
@@ -602,17 +752,12 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       // 2. Safe Update for Existing Influencers (Never overwrite non-empty DB value with empty Excel cell!)
       for (const row of existingRows) {
         if (row.existingId) {
-          const existingRec = existingInfluencers.find(i => String(i.id) === String(row.existingId));
           const updates: Record<string, any> = {};
 
           if (row.name && row.name.trim() !== '') updates.influencer_name = row.name;
           if (row.userId && row.userId.trim() !== '') updates.name = row.userId;
           if (row.phone && row.phone.trim() !== '') updates.phone_number = row.phone;
           if (row.altPhone && row.altPhone.trim() !== '') updates.alternative_number = row.altPhone;
-          if (row.upi && row.upi.trim() !== '') {
-            updates.upi_number = row.upi;
-            updates.payment_method = 'UPI';
-          }
           if (row.city && row.city.trim() !== '') updates.city = row.city;
 
           const normStateVal = normalizeState(row.state);
@@ -625,6 +770,35 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
           if (row.autoDm !== null && row.autoDm !== undefined) updates.auto_dm = row.autoDm;
           if (row.profileImg && row.profileImg.trim() !== '') updates.profile_file_url = row.profileImg;
+
+          // Safe Payment Updates: Only update if Excel provided payment information!
+          // Do not overwrite valid existing payment data with blank Excel values!
+          if (row.hasExcelPaymentData) {
+            if (row.paymentMethod) {
+              updates.payment_method = row.paymentMethod;
+            }
+            if (row.paymentMethod === 'UPI') {
+              if (row.upiNumber && row.upiNumber.trim() !== '') {
+                updates.upi_number = row.upiNumber.trim();
+              }
+            } else if (row.paymentMethod === 'ACCOUNT_DETAILS') {
+              if (row.accountHolderName && row.accountHolderName.trim() !== '') {
+                updates.account_holder_name = row.accountHolderName.trim();
+              }
+              if (row.accountNumber && row.accountNumber.trim() !== '') {
+                updates.account_number = row.accountNumber.trim();
+              }
+              if (row.ifscCode && row.ifscCode.trim() !== '') {
+                updates.ifsc_code = row.ifscCode.trim().toUpperCase();
+              }
+              if (row.bankName && row.bankName.trim() !== '') {
+                updates.bank_name = row.bankName.trim();
+              }
+              if (row.panNumber && row.panNumber.trim() !== '') {
+                updates.pan_number = row.panNumber.trim().toUpperCase();
+              }
+            }
+          }
 
           if (Object.keys(updates).length > 0) {
             const { error: updateErr } = await supabase
@@ -739,10 +913,13 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                   <li><strong className="text-slate-300">Influencer Code</strong> (e.g. DDS1, OD5188) — Required</li>
                   <li><strong className="text-slate-300">User Name</strong> (e.g. DINESH_11) — Required</li>
                   <li><strong className="text-slate-300">Influencer Name</strong> (e.g. DINESH) — Required</li>
+                  <li><strong className="text-slate-300">Payment Mode</strong> (e.g. UPI, GPay, ACC, Bank) — Optional</li>
+                  <li><strong className="text-slate-300">Payments</strong> (e.g. UPI ID / 8180890209@axl) — Optional</li>
+                  <li><strong className="text-slate-300">Details</strong> (e.g. A/C, IFSC, Name, PAN) — Optional</li>
                   <li><strong className="text-slate-300">Phone Number</strong> (e.g. 9876543210) — Optional</li>
                   <li><strong className="text-slate-300">Languages</strong> (e.g. TAMIL, ODIA) — Optional</li>
                   <li><strong className="text-slate-300">State</strong> (e.g. TAMIL NADU, TELANGANA) — Optional</li>
-                  <li><strong className="text-slate-300">Complete Address / Address</strong> (e.g. Abc) — Optional</li>
+                  <li><strong className="text-slate-300">Complete Address / Address</strong> — Optional</li>
                   <li><strong className="text-slate-300">City</strong> — Optional</li>
                   <li><strong className="text-slate-300">Alternative Number</strong> — Optional</li>
                 </ul>
@@ -797,6 +974,48 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
                   >
                     <option value="">Select Column</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Payment Mode <span className="text-slate-500">(Optional - UPI / GPay / ACC)</span>
+                  </label>
+                  <select
+                    value={mapping.paymentModeCol}
+                    onChange={(e) => setMapping(m => ({ ...m, paymentModeCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Payments / UPI <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.paymentsCol}
+                    onChange={(e) => setMapping(m => ({ ...m, paymentsCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Details / Bank Info <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.detailsCol}
+                    onChange={(e) => setMapping(m => ({ ...m, detailsCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
                     {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>
@@ -935,6 +1154,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                         <th className="p-3">Code</th>
                         <th className="p-3">Influencer Name</th>
                         <th className="p-3">User ID</th>
+                        <th className="p-3">Payment Info</th>
                         <th className="p-3">Phone</th>
                         <th className="p-3">Languages</th>
                         <th className="p-3">State</th>
@@ -948,6 +1168,35 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                           <td className="p-3 font-semibold text-purple-300">{row.code}</td>
                           <td className="p-3 text-white font-sans">{row.name || '—'}</td>
                           <td className="p-3 text-slate-300">{row.userId ? `@${row.userId}` : '—'}</td>
+                          <td className="p-3 font-sans">
+                            {row.paymentMethod === 'UPI' ? (
+                              <div className="flex flex-col gap-0.5">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-950/60 border border-purple-800/60 text-purple-300 font-mono text-[10px] w-fit">
+                                  <Smartphone size={10} className="text-purple-400" />
+                                  <span className="font-bold">UPI</span>
+                                </span>
+                                <span className="text-[11px] text-slate-300 font-mono truncate max-w-[140px]" title={row.upiNumber || undefined}>
+                                  {row.upiNumber || <span className="text-slate-500 italic">No UPI ID</span>}
+                                </span>
+                              </div>
+                            ) : row.paymentMethod === 'ACCOUNT_DETAILS' ? (
+                              <div 
+                                className="flex flex-col gap-0.5 text-[11px]" 
+                                title={`Name: ${row.accountHolderName || '—'}\nBank: ${row.bankName || '—'}\nIFSC: ${row.ifscCode || '—'}\nPAN: ${row.panNumber || '—'}`}
+                              >
+                                <span className="inline-flex items-center gap-1 text-blue-400 font-semibold font-mono text-[10px]">
+                                  <CreditCard size={10} />
+                                  <span>{row.accountNumber ? `A/C: ${row.accountNumber}` : 'Account Details'}</span>
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {row.ifscCode ? row.ifscCode : ''}
+                                  {row.bankName ? ` (${row.bankName})` : ''}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 font-mono text-xs">—</span>
+                            )}
+                          </td>
                           <td className="p-3 text-slate-400">{row.phone || '—'}</td>
                           <td className="p-3 text-slate-300 font-sans">{row.languages || '—'}</td>
                           <td className="p-3 text-slate-300 font-sans">{row.state || '—'}</td>

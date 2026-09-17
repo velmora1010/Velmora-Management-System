@@ -322,6 +322,7 @@ export interface CampaignInfluencer {
   account_number?: string | null;
   ifsc_code?: string | null;
   bank_name?: string | null;
+  pan_number?: string | null;
   complete_address: string;
   city: string;
   pincode?: string;
