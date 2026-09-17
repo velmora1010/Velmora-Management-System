@@ -24,6 +24,12 @@ export interface ParseExcelPaymentParams {
   paymentMode?: any;
   payments?: any;
   details?: any;
+  upiNumber?: any;
+  accountHolderName?: any;
+  accountNumber?: any;
+  ifscCode?: any;
+  bankName?: any;
+  panNumber?: any;
 }
 
 /**
@@ -65,7 +71,7 @@ const IFSC_BANK_MAP: Record<string, string> = {
 /**
  * Normalizes payment mode / method string to 'UPI' or 'ACCOUNT_DETAILS'
  * Case-insensitive, trims whitespace and punctuation.
- * Treats UPI, GPay, Google Pay as UPI.
+ * Treats UPI, GPay, Google Pay, PhonePe, Paytm as UPI.
  * Treats Account, Bank, Bank Details as ACCOUNT_DETAILS.
  */
 export function normalizePaymentMethod(rawMethod: any): NormalizedPaymentMethod {
@@ -76,6 +82,11 @@ export function normalizePaymentMethod(rawMethod: any): NormalizedPaymentMethod 
   // Clean alphanumeric + lowercase
   const clean = str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+  // Combined mode like "bank / upi"
+  if (clean.includes('bank') && clean.includes('upi')) {
+    return 'UPI';
+  }
+
   // 1. UPI / GPay / Google Pay (Must all normalize to 'UPI')
   if (
     clean === 'upi' ||
@@ -84,13 +95,19 @@ export function normalizePaymentMethod(rawMethod: any): NormalizedPaymentMethod 
     clean === 'gpayupi' ||
     clean === 'upigpay' ||
     clean === 'phonepe' ||
+    clean === 'phonepay' ||
+    clean === 'phonepaynumber' ||
+    clean === 'phonepenumber' ||
     clean === 'paytm' ||
     clean === 'bhim' ||
     clean === 'bhimupi' ||
     clean === 'upiid' ||
     clean === 'upinumber' ||
+    clean === 'gpaynumber' ||
     clean.includes('googlepay') ||
     clean.includes('gpay') ||
+    clean.includes('phonepe') ||
+    clean.includes('phonepay') ||
     clean.includes('upi')
   ) {
     return 'UPI';
@@ -138,19 +155,22 @@ export function isAccountPaymentMethod(rawMethod: any): boolean {
  * Detect and extract a valid UPI ID from text
  * Matches patterns like example@okaxis, 8180890209@axl, user@upi, etc.
  */
-export function detectUpiId(input: any): string | null {
+export function detectUpiId(input?: any): string | null {
   if (!input) return null;
   const str = String(input).trim();
   if (!str) return null;
 
-  // Standard UPI ID pattern: [handle]@[provider]
-  const upiRegex = /[a-zA-Z0-9.\-_]{2,}@[a-zA-Z0-9.\-_]{2,}/;
+  // 1. Standard UPI ID format: username@bank / number@bank
+  const upiRegex = /([a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64})/i;
   const match = str.match(upiRegex);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
 
-  if (match) {
-    let upi = match[0].trim();
-    upi = upi.replace(/[.,;:]+$/, '');
-    return upi;
+  // 2. 10-digit mobile number in a UPI field
+  const phoneOnly = str.replace(/[^0-9]/g, '');
+  if (phoneOnly.length === 10 && /^[6-9]\d{9}$/.test(phoneOnly)) {
+    return phoneOnly;
   }
 
   return null;
@@ -164,7 +184,7 @@ export function detectUpiId(input: any): string | null {
  * IFSC code: SBIN0011872
  * PAN NUMBER: AMRPY7859G
  */
-export function parseBankDetailsText(input: any): {
+export function parseBankDetailsText(input?: any): {
   account_holder_name: string | null;
   account_number: string | null;
   ifsc_code: string | null;
@@ -271,104 +291,120 @@ export function parseBankDetailsText(input: any): {
 /**
  * Main Centralized Parser for Excel Upload Payment Information
  * Evaluates:
- * 1. Payment Mode column
- * 2. Payments column
- * 3. Details column
- * Returns canonical NormalizedPaymentDetails
+ * 1. Payment Details / Payment Mode column
+ * 2. UPI Number / Payments column
+ * 3. Name (Account Holder Name) column
+ * 4. Account No column
+ * 5. IFSC Code column
+ * 6. Bank Name column
+ * 7. PAN Number column
+ * 8. Details column (composite unstructured text)
+ * Returns canonical NormalizedPaymentDetails preserving both UPI and Bank fields if present.
  */
 export function parseExcelPaymentDetails(params: ParseExcelPaymentParams): NormalizedPaymentDetails {
   const rawMode = params.paymentMode !== undefined && params.paymentMode !== null ? String(params.paymentMode).trim() : '';
-  const rawPayments = params.payments !== undefined && params.payments !== null ? String(params.payments).trim() : '';
+  
+  // Safe string coercion for financial identifiers
+  let rawUpi = params.upiNumber !== undefined && params.upiNumber !== null
+    ? String(params.upiNumber).trim()
+    : (params.payments !== undefined && params.payments !== null ? String(params.payments).trim() : '');
+  if (rawUpi.toLowerCase() === 'null' || rawUpi.toLowerCase() === 'undefined' || rawUpi === '—') {
+    rawUpi = '';
+  }
+
+  let rawAccNum = params.accountNumber !== undefined && params.accountNumber !== null ? String(params.accountNumber).trim() : '';
+  if (rawAccNum.toLowerCase() === 'null' || rawAccNum.toLowerCase() === 'undefined' || rawAccNum === '—' || rawAccNum.toLowerCase() === 'available') {
+    rawAccNum = '';
+  }
+
+  let rawAccHolder = params.accountHolderName !== undefined && params.accountHolderName !== null ? String(params.accountHolderName).trim() : '';
+  if (rawAccHolder.toLowerCase() === 'null' || rawAccHolder.toLowerCase() === 'undefined' || rawAccHolder === '—') {
+    rawAccHolder = '';
+  }
+
+  let rawIfsc = params.ifscCode !== undefined && params.ifscCode !== null ? String(params.ifscCode).trim().toUpperCase() : '';
+  if (rawIfsc.toLowerCase() === 'null' || rawIfsc.toLowerCase() === 'undefined' || rawIfsc === '—') {
+    rawIfsc = '';
+  }
+
+  let rawBank = params.bankName !== undefined && params.bankName !== null ? String(params.bankName).trim() : '';
+  if (rawBank.toLowerCase() === 'null' || rawBank.toLowerCase() === 'undefined' || rawBank === '—') {
+    rawBank = '';
+  }
+
+  let rawPan = params.panNumber !== undefined && params.panNumber !== null ? String(params.panNumber).trim().toUpperCase() : '';
+  if (rawPan.toLowerCase() === 'null' || rawPan.toLowerCase() === 'undefined' || rawPan === '—') {
+    rawPan = '';
+  }
+
   const rawDetails = params.details !== undefined && params.details !== null ? String(params.details).trim() : '';
 
-  const explicitMethod = normalizePaymentMethod(rawMode);
+  // If unstructured details string is provided and structured fields are missing, extract from details:
+  if (rawDetails) {
+    const parsedBank = parseBankDetailsText(rawDetails);
+    if (!rawAccNum && parsedBank.account_number) rawAccNum = parsedBank.account_number;
+    if (!rawIfsc && parsedBank.ifsc_code) rawIfsc = parsedBank.ifsc_code;
+    if (!rawAccHolder && parsedBank.account_holder_name) rawAccHolder = parsedBank.account_holder_name;
+    if (!rawBank && parsedBank.bank_name) rawBank = parsedBank.bank_name;
+    if (!rawPan && parsedBank.pan_number) rawPan = parsedBank.pan_number;
 
-  // -------------------------------------------------------------
-  // RULE 1: Explicit Payment Mode is recognized as UPI (or GPay/Google Pay)
-  // -------------------------------------------------------------
-  if (explicitMethod === 'UPI') {
-    const upiId = detectUpiId(rawPayments) || detectUpiId(rawDetails) || (rawPayments ? rawPayments.trim() : null);
-
-    return {
-      payment_method: 'UPI',
-      upi_number: upiId || null,
-      account_holder_name: null,
-      account_number: null,
-      ifsc_code: null,
-      bank_name: null,
-      pan_number: null
-    };
+    if (!rawUpi) {
+      const detected = detectUpiId(rawDetails);
+      if (detected) rawUpi = detected;
+    }
   }
 
-  // -------------------------------------------------------------
-  // RULE 2: Explicit Payment Mode is recognized as Account Details / Bank
-  // -------------------------------------------------------------
-  if (explicitMethod === 'ACCOUNT_DETAILS') {
-    const combinedBankText = [rawDetails, rawPayments].filter(Boolean).join('\n');
-    const parsedBank = parseBankDetailsText(combinedBankText);
-
-    return {
-      payment_method: 'ACCOUNT_DETAILS',
-      upi_number: null,
-      account_holder_name: parsedBank.account_holder_name || null,
-      account_number: parsedBank.account_number || null,
-      ifsc_code: parsedBank.ifsc_code || null,
-      bank_name: parsedBank.bank_name || null,
-      pan_number: parsedBank.pan_number || null
-    };
+  // Infer bank name from IFSC prefix if bank is still missing
+  if (!rawBank && rawIfsc && rawIfsc.length >= 4) {
+    const prefix = rawIfsc.substring(0, 4);
+    if (IFSC_BANK_MAP[prefix]) {
+      rawBank = IFSC_BANK_MAP[prefix];
+    }
   }
 
-  // -------------------------------------------------------------
-  // RULE 3: Empty / Unknown Payment Mode - Inferred from Payments & Details
-  // -------------------------------------------------------------
-  // 3A. Check if Payments or Details clearly contains a valid UPI ID
-  const detectedUpi = detectUpiId(rawPayments) || detectUpiId(rawDetails);
-  if (detectedUpi) {
-    return {
-      payment_method: 'UPI',
-      upi_number: detectedUpi,
-      account_holder_name: null,
-      account_number: null,
-      ifsc_code: null,
-      bank_name: null,
-      pan_number: null
-    };
+  // Check if rawUpi can be refined with detectUpiId
+  if (rawUpi) {
+    const refinedUpi = detectUpiId(rawUpi);
+    if (refinedUpi) {
+      rawUpi = refinedUpi;
+    }
   }
 
-  // 3B. Check if Details or Payments clearly contains bank account fields
-  const combinedText = [rawDetails, rawPayments].filter(Boolean).join('\n');
-  const parsedBank = parseBankDetailsText(combinedText);
+  // Determine the primary payment_method
+  let payment_method: NormalizedPaymentMethod = null;
+  const cleanMode = rawMode.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  const hasClearBankInfo = Boolean(
-    (parsedBank.account_number && (parsedBank.ifsc_code || parsedBank.account_holder_name || parsedBank.bank_name)) ||
-    (parsedBank.ifsc_code && (parsedBank.account_holder_name || parsedBank.account_number)) ||
-    (parsedBank.account_number && parsedBank.pan_number)
-  );
+  const hasUpiInfo = Boolean(rawUpi && rawUpi.trim());
+  const hasBankInfo = Boolean(rawAccNum || rawIfsc || rawAccHolder || rawBank);
 
-  if (hasClearBankInfo) {
-    return {
-      payment_method: 'ACCOUNT_DETAILS',
-      upi_number: null,
-      account_holder_name: parsedBank.account_holder_name || null,
-      account_number: parsedBank.account_number || null,
-      ifsc_code: parsedBank.ifsc_code || null,
-      bank_name: parsedBank.bank_name || null,
-      pan_number: parsedBank.pan_number || null
-    };
+  const isExplicitUpi = cleanMode === 'upi' || cleanMode === 'gpay' || cleanMode === 'googlepay' || cleanMode === 'gpaynumber' || cleanMode === 'phonepe' || cleanMode === 'phonepaynumber' || cleanMode === 'paytm' || cleanMode.includes('upi') || cleanMode.includes('gpay');
+  const isExplicitBank = cleanMode === 'bank' || cleanMode === 'acc' || cleanMode === 'account' || cleanMode === 'bankaccount' || cleanMode === 'bankdetails' || cleanMode === 'accountdetails' || cleanMode.includes('bank') || cleanMode.includes('account');
+
+  if (isExplicitUpi && isExplicitBank) {
+    // Mixed mode like "bank / upi": prefer UPI when valid UPI exists, else ACCOUNT_DETAILS
+    payment_method = hasUpiInfo ? 'UPI' : (hasBankInfo ? 'ACCOUNT_DETAILS' : 'UPI');
+  } else if (isExplicitUpi) {
+    payment_method = 'UPI';
+  } else if (isExplicitBank) {
+    payment_method = 'ACCOUNT_DETAILS';
+  } else if (hasUpiInfo && !hasBankInfo) {
+    payment_method = 'UPI';
+  } else if (hasBankInfo && !hasUpiInfo) {
+    payment_method = 'ACCOUNT_DETAILS';
+  } else if (hasUpiInfo && hasBankInfo) {
+    payment_method = 'UPI';
+  } else {
+    payment_method = null;
   }
 
-  // -------------------------------------------------------------
-  // RULE 4: Insufficient information / Unconfigured
-  // Do NOT guess. Leave payment method unconfigured.
-  // -------------------------------------------------------------
   return {
-    payment_method: null,
-    upi_number: null,
-    account_holder_name: null,
-    account_number: null,
-    ifsc_code: null,
-    bank_name: null,
-    pan_number: null
+    payment_method,
+    upi_number: rawUpi || null,
+    account_holder_name: rawAccHolder || null,
+    account_number: rawAccNum || null,
+    ifsc_code: rawIfsc || null,
+    bank_name: rawBank || null,
+    pan_number: rawPan || null
   };
 }
 

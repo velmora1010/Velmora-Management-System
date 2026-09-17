@@ -68,6 +68,11 @@ interface ColumnMapping {
   paymentModeCol: string;
   paymentsCol: string;
   detailsCol: string;
+  accountHolderCol: string;
+  accountNumberCol: string;
+  ifscCol: string;
+  bankNameCol: string;
+  panNumberCol: string;
   cityCol: string;
   stateCol: string;
   addressCol: string;
@@ -96,6 +101,11 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     paymentModeCol: '',
     paymentsCol: '',
     detailsCol: '',
+    accountHolderCol: '',
+    accountNumberCol: '',
+    ifscCol: '',
+    bankNameCol: '',
+    panNumberCol: '',
     cityCol: '',
     stateCol: '',
     addressCol: '',
@@ -162,12 +172,22 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     let paymentModeCol = '';
     let paymentsCol = '';
     let detailsCol = '';
+    let accountHolderCol = '';
+    let accountNumberCol = '';
+    let ifscCol = '';
+    let bankNameCol = '';
+    let panNumberCol = '';
     let cityCol = '';
     let stateCol = '';
     let addressCol = '';
     let languagesCol = '';
     let autoDmCol = '';
     let profileImgCol = '';
+
+    const hasInfluencerNameHeader = headers.some(h => {
+      const c = h.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      return c === 'influencername' || c === 'creatorname';
+    });
 
     headers.forEach(h => {
       const clean = h.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -181,54 +201,81 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         userIdCol = h;
       }
       // 3. Influencer Name / Name
-      else if (!nameCol && (clean === 'influencername' || clean === 'name' || clean === 'fullname' || clean === 'influencer_name')) {
+      else if (!nameCol && (clean === 'influencername' || clean === 'creatorname' || clean === 'fullname' || clean === 'influencer_name')) {
         nameCol = h;
       }
-      // 4. Phone Number / Mobile Number
+      // 4. Account Holder Name vs Name
+      else if (!accountHolderCol && (clean === 'accountholdername' || clean === 'accountholder' || clean === 'accountname' || clean === 'beneficiaryname' || clean === 'holdername' || clean === 'beneficiary')) {
+        accountHolderCol = h;
+      }
+      else if (clean === 'name') {
+        if (hasInfluencerNameHeader || nameCol) {
+          accountHolderCol = h;
+        } else {
+          nameCol = h;
+        }
+      }
+      // 5. Phone Number / Mobile Number
       else if (!phoneCol && (clean === 'phonenumber' || clean === 'phone' || clean === 'mobile' || clean === 'mobilenumber' || clean === 'contact' || clean === 'contactnumber')) {
         phoneCol = h;
       }
-      // 5. Alternative Number / Alt Phone
+      // 6. Alternative Number / Alt Phone
       else if (!altPhoneCol && (clean === 'alternativenumber' || clean === 'altnumber' || clean === 'alternatephone' || clean === 'altphone' || clean === 'alternatemobilenumber')) {
         altPhoneCol = h;
       }
-      // 6. Payment Mode (e.g. Payment Mode, Mode, Payment Method, Pay Mode)
-      else if (!paymentModeCol && (clean === 'paymentmode' || clean === 'mode' || clean === 'paymentmethod' || clean === 'paymode' || clean === 'paymethod')) {
+      // 7. Payment Mode (e.g. Payment Mode, Mode, Payment Method, Pay Mode, Payment Details)
+      else if (!paymentModeCol && (clean === 'paymentmode' || clean === 'mode' || clean === 'paymentmethod' || clean === 'paymode' || clean === 'paymethod' || clean === 'paymentdetails')) {
         paymentModeCol = h;
       }
-      // 7. Payments (e.g. Payments, Payment, UPI ID, UPI, UPI Number)
+      // 8. UPI ID / UPI Number (Direct UPI column)
+      else if (!upiCol && (clean === 'upinumber' || clean === 'upi' || clean === 'upiid' || clean === 'upihandle' || clean === 'gpaynumber' || clean === 'phonepenumber')) {
+        upiCol = h;
+      }
+      // 9. Account Number
+      else if (!accountNumberCol && (clean === 'accountno' || clean === 'accountnumber' || clean === 'accountnum' || clean === 'accno' || clean === 'accnumber' || clean === 'acno' || clean === 'acnumber' || clean === 'bankaccount' || clean === 'bankaccountno')) {
+        accountNumberCol = h;
+      }
+      // 10. IFSC Code
+      else if (!ifscCol && (clean === 'ifsccode' || clean === 'ifsc' || clean === 'ifscode' || clean === 'ifs')) {
+        ifscCol = h;
+      }
+      // 11. Bank Name
+      else if (!bankNameCol && (clean === 'bankname' || clean === 'bank' || clean === 'banktitle')) {
+        bankNameCol = h;
+      }
+      // 12. PAN Number
+      else if (!panNumberCol && (clean === 'pannumber' || clean === 'panno' || clean === 'pan' || clean === 'pancard' || clean === 'pancardno')) {
+        panNumberCol = h;
+      }
+      // 13. Payments (e.g. Payments, Payment, Payment Info)
       else if (!paymentsCol && (clean === 'payments' || clean === 'payment' || clean === 'paymentinfo')) {
         paymentsCol = h;
       }
-      // 8. UPI ID / UPI Number (Direct UPI column)
-      else if (!upiCol && (clean === 'upinumber' || clean === 'upi' || clean === 'upiid' || clean === 'upihandle')) {
-        upiCol = h;
-      }
-      // 9. Details (e.g. Details, Bank Details, Account Details, Payment Details)
-      else if (!detailsCol && (clean === 'details' || clean === 'detail' || clean === 'bankdetails' || clean === 'accountdetails' || clean === 'bankdetail' || clean === 'accountdetail' || clean === 'paymentdetails')) {
+      // 14. Details (composite unstructured text)
+      else if (!detailsCol && (clean === 'details' || clean === 'detail' || clean === 'bankdetails' || clean === 'accountdetails' || clean === 'otherdetails')) {
         detailsCol = h;
       }
-      // 10. City
+      // 15. City
       else if (!cityCol && (clean === 'city' || clean === 'district' || clean === 'town')) {
         cityCol = h;
       }
-      // 11. State
+      // 16. State
       else if (!stateCol && (clean === 'state' || clean === 'statename' || clean === 'province')) {
         stateCol = h;
       }
-      // 12. Complete Address / Address
+      // 17. Complete Address / Address
       else if (!addressCol && (clean === 'completeaddress' || clean === 'address' || clean === 'fulladdress' || clean === 'streetaddress' || clean === 'locationaddress' || clean === 'location')) {
         addressCol = h;
       }
-      // 13. Languages
+      // 18. Languages
       else if (!languagesCol && (clean === 'languages' || clean === 'language' || clean === 'lang' || clean === 'targetlanguages' || clean === 'spokenlanguages')) {
         languagesCol = h;
       }
-      // 14. Auto DM Tool
+      // 19. Auto DM Tool
       else if (!autoDmCol && (clean === 'autodmtool' || clean === 'autodm' || clean === 'dmtool' || clean === 'autodmstatus')) {
         autoDmCol = h;
       }
-      // 15. Profile Image / Photo
+      // 20. Profile Image / Photo
       else if (!profileImgCol && (clean === 'influencerprofileimage' || clean === 'profileimage' || clean === 'profilephoto' || clean === 'profileurl' || clean === 'imageurl' || clean === 'photo')) {
         profileImgCol = h;
       }
@@ -241,7 +288,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         if (!userIdCol && (clean.includes('user') || clean.includes('username') || clean.includes('user id'))) {
           userIdCol = h;
         }
-        if (!nameCol && (clean.includes('influencer name') || (clean.includes('name') && !clean.includes('user')))) {
+        if (!nameCol && (clean.includes('influencer name') || (clean.includes('name') && !clean.includes('user') && h !== accountHolderCol))) {
           nameCol = h;
         }
       });
@@ -262,6 +309,11 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       paymentModeCol, 
       paymentsCol, 
       detailsCol, 
+      accountHolderCol,
+      accountNumberCol,
+      ifscCol,
+      bankNameCol,
+      panNumberCol,
       cityCol, 
       stateCol, 
       addressCol, 
@@ -322,17 +374,35 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       const rawPaymentMode = map.paymentModeCol ? row[map.paymentModeCol] : '';
       const rawPayments = (map.paymentsCol ? row[map.paymentsCol] : '') || (map.upiCol ? row[map.upiCol] : '');
       const rawDetails = map.detailsCol ? row[map.detailsCol] : '';
+      const rawUpiNumber = map.upiCol ? row[map.upiCol] : '';
+      const rawAccountHolder = map.accountHolderCol ? row[map.accountHolderCol] : '';
+      const rawAccountNumber = map.accountNumberCol ? row[map.accountNumberCol] : '';
+      const rawIfscCode = map.ifscCol ? row[map.ifscCol] : '';
+      const rawBankName = map.bankNameCol ? row[map.bankNameCol] : '';
+      const rawPanNumber = map.panNumberCol ? row[map.panNumberCol] : '';
 
       const parsedPayment = parseExcelPaymentDetails({
         paymentMode: rawPaymentMode,
         payments: rawPayments,
         details: rawDetails,
+        upiNumber: rawUpiNumber,
+        accountHolderName: rawAccountHolder,
+        accountNumber: rawAccountNumber,
+        ifscCode: rawIfscCode,
+        bankName: rawBankName,
+        panNumber: rawPanNumber,
       });
 
       const hasExcelPaymentData = Boolean(
         (rawPaymentMode && String(rawPaymentMode).trim()) ||
         (rawPayments && String(rawPayments).trim()) ||
-        (rawDetails && String(rawDetails).trim())
+        (rawDetails && String(rawDetails).trim()) ||
+        (rawUpiNumber && String(rawUpiNumber).trim()) ||
+        (rawAccountHolder && String(rawAccountHolder).trim()) ||
+        (rawAccountNumber && String(rawAccountNumber).trim()) ||
+        (rawIfscCode && String(rawIfscCode).trim()) ||
+        (rawBankName && String(rawBankName).trim()) ||
+        (rawPanNumber && String(rawPanNumber).trim())
       );
 
       let upi: string | null = parsedPayment.upi_number || (map.upiCol ? normalize(row[map.upiCol]) : null);
@@ -619,6 +689,11 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         paymentModeCol: '',
         paymentsCol: '',
         detailsCol: '',
+        accountHolderCol: '',
+        accountNumberCol: '',
+        ifscCol: '',
+        bankNameCol: '',
+        panNumberCol: '',
         cityCol: '',
         stateCol: 'State',
         addressCol: 'Complete Address',
@@ -754,49 +829,47 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         if (row.existingId) {
           const updates: Record<string, any> = {};
 
-          if (row.name && row.name.trim() !== '') updates.influencer_name = row.name;
-          if (row.userId && row.userId.trim() !== '') updates.name = row.userId;
-          if (row.phone && row.phone.trim() !== '') updates.phone_number = row.phone;
-          if (row.altPhone && row.altPhone.trim() !== '') updates.alternative_number = row.altPhone;
-          if (row.city && row.city.trim() !== '') updates.city = row.city;
+          if (row.name && row.name.trim() !== '' && row.name !== '—') updates.influencer_name = row.name;
+          if (row.userId && row.userId.trim() !== '' && row.userId !== '—') updates.name = row.userId;
+          if (row.phone && row.phone.trim() !== '' && row.phone !== '—') updates.phone_number = row.phone;
+          if (row.altPhone && row.altPhone.trim() !== '' && row.altPhone !== '—') updates.alternative_number = row.altPhone;
+          if (row.city && row.city.trim() !== '' && row.city !== '—') updates.city = row.city;
 
           const normStateVal = normalizeState(row.state);
           if (normStateVal && normStateVal.trim() !== '') updates.state = normStateVal;
 
-          if (row.address && row.address.trim() !== '') updates.complete_address = row.address;
+          if (row.address && row.address.trim() !== '' && row.address !== '—') updates.complete_address = row.address;
 
           const normLangs = normalizeLanguages(row.languages);
           if (normLangs.length > 0) updates.languages = normLangs;
 
           if (row.autoDm !== null && row.autoDm !== undefined) updates.auto_dm = row.autoDm;
-          if (row.profileImg && row.profileImg.trim() !== '') updates.profile_file_url = row.profileImg;
+          if (row.profileImg && row.profileImg.trim() !== '' && row.profileImg !== '—') updates.profile_file_url = row.profileImg;
 
           // Safe Payment Updates: Only update if Excel provided payment information!
           // Do not overwrite valid existing payment data with blank Excel values!
+          // When mixed credentials exist (e.g. bank / upi), preserve both in DB!
           if (row.hasExcelPaymentData) {
             if (row.paymentMethod) {
               updates.payment_method = row.paymentMethod;
             }
-            if (row.paymentMethod === 'UPI') {
-              if (row.upiNumber && row.upiNumber.trim() !== '') {
-                updates.upi_number = row.upiNumber.trim();
-              }
-            } else if (row.paymentMethod === 'ACCOUNT_DETAILS') {
-              if (row.accountHolderName && row.accountHolderName.trim() !== '') {
-                updates.account_holder_name = row.accountHolderName.trim();
-              }
-              if (row.accountNumber && row.accountNumber.trim() !== '') {
-                updates.account_number = row.accountNumber.trim();
-              }
-              if (row.ifscCode && row.ifscCode.trim() !== '') {
-                updates.ifsc_code = row.ifscCode.trim().toUpperCase();
-              }
-              if (row.bankName && row.bankName.trim() !== '') {
-                updates.bank_name = row.bankName.trim();
-              }
-              if (row.panNumber && row.panNumber.trim() !== '') {
-                updates.pan_number = row.panNumber.trim().toUpperCase();
-              }
+            if (row.upiNumber && row.upiNumber.trim() !== '' && row.upiNumber !== '—') {
+              updates.upi_number = row.upiNumber.trim();
+            }
+            if (row.accountHolderName && row.accountHolderName.trim() !== '' && row.accountHolderName !== '—') {
+              updates.account_holder_name = row.accountHolderName.trim();
+            }
+            if (row.accountNumber && row.accountNumber.trim() !== '' && row.accountNumber !== '—') {
+              updates.account_number = row.accountNumber.trim();
+            }
+            if (row.ifscCode && row.ifscCode.trim() !== '' && row.ifscCode !== '—') {
+              updates.ifsc_code = row.ifscCode.trim().toUpperCase();
+            }
+            if (row.bankName && row.bankName.trim() !== '' && row.bankName !== '—') {
+              updates.bank_name = row.bankName.trim();
+            }
+            if (row.panNumber && row.panNumber.trim() !== '' && row.panNumber !== '—') {
+              updates.pan_number = row.panNumber.trim().toUpperCase();
             }
           }
 
@@ -815,15 +888,22 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         }
       }
 
-      // Log activity
+      // Prepare concise activity and toast messages
+      const summaryParts = [];
+      if (insertedCount > 0) summaryParts.push(`${insertedCount} new influencer${insertedCount !== 1 ? 's' : ''} imported`);
+      if (updatedCount > 0) summaryParts.push(`${updatedCount} existing influencer${updatedCount !== 1 ? 's' : ''} updated`);
+      if (insertedCount === 0 && updatedCount === 0 && existingRows.length > 0) summaryParts.push(`${existingRows.length} existing influencers verified (up to date)`);
+      const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'No influencers changed';
+      const invalidText = invalidCount > 0 ? ` (${invalidCount} invalid rows skipped)` : '';
+
       logActivity(
         'Marketing',
         'Bulk Influencer Import',
-        `Imported ${insertedCount} new influencers (${existingRows.length} already existed, ${invalidCount} skipped) into ${campaign.campaign_name}.`
+        `Completed import for ${campaign.campaign_name}: ${summaryText}${invalidText}.`
       );
 
       toast.success(
-        `Import completed: ${insertedCount} new influencers imported, ${existingRows.length} already existed, ${invalidCount} skipped.`
+        `Import completed: ${summaryText}${invalidText}.`
       );
 
       notifyInfluencerChange(campaign.id);
@@ -980,7 +1060,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Payment Mode <span className="text-slate-500">(Optional - UPI / GPay / ACC)</span>
+                    Payment Mode <span className="text-slate-500">(Optional - UPI / GPay / ACC / Details)</span>
                   </label>
                   <select
                     value={mapping.paymentModeCol}
@@ -994,11 +1074,11 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Payments / UPI <span className="text-slate-500">(Optional)</span>
+                    UPI Number / ID <span className="text-slate-500">(Optional)</span>
                   </label>
                   <select
-                    value={mapping.paymentsCol}
-                    onChange={(e) => setMapping(m => ({ ...m, paymentsCol: e.target.value }))}
+                    value={mapping.upiCol}
+                    onChange={(e) => setMapping(m => ({ ...m, upiCol: e.target.value }))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
                   >
                     <option value="">None / Skip</option>
@@ -1008,7 +1088,77 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Details / Bank Info <span className="text-slate-500">(Optional)</span>
+                    Account Holder Name <span className="text-slate-500">(Optional - Name / Beneficiary)</span>
+                  </label>
+                  <select
+                    value={mapping.accountHolderCol}
+                    onChange={(e) => setMapping(m => ({ ...m, accountHolderCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Account Number <span className="text-slate-500">(Optional - A/C No)</span>
+                  </label>
+                  <select
+                    value={mapping.accountNumberCol}
+                    onChange={(e) => setMapping(m => ({ ...m, accountNumberCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    IFSC Code <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.ifscCol}
+                    onChange={(e) => setMapping(m => ({ ...m, ifscCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Bank Name <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.bankNameCol}
+                    onChange={(e) => setMapping(m => ({ ...m, bankNameCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    PAN Number <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.panNumberCol}
+                    onChange={(e) => setMapping(m => ({ ...m, panNumberCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Composite Details <span className="text-slate-500">(Optional - Unstructured Bank Text)</span>
                   </label>
                   <select
                     value={mapping.detailsCol}
@@ -1036,11 +1186,25 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Languages <span className="text-slate-500">(Optional)</span>
+                    Alternative Number <span className="text-slate-500">(Optional)</span>
                   </label>
                   <select
-                    value={mapping.languagesCol}
-                    onChange={(e) => setMapping(m => ({ ...m, languagesCol: e.target.value }))}
+                    value={mapping.altPhoneCol}
+                    onChange={(e) => setMapping(m => ({ ...m, altPhoneCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    City <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.cityCol}
+                    onChange={(e) => setMapping(m => ({ ...m, cityCol: e.target.value }))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
                   >
                     <option value="">None / Skip</option>
@@ -1069,6 +1233,20 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                   <select
                     value={mapping.addressCol}
                     onChange={(e) => setMapping(m => ({ ...m, addressCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Languages <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.languagesCol}
+                    onChange={(e) => setMapping(m => ({ ...m, languagesCol: e.target.value }))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
                   >
                     <option value="">None / Skip</option>
@@ -1178,6 +1356,11 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                                 <span className="text-[11px] text-slate-300 font-mono truncate max-w-[140px]" title={row.upiNumber || undefined}>
                                   {row.upiNumber || <span className="text-slate-500 italic">No UPI ID</span>}
                                 </span>
+                                {row.accountNumber && (
+                                  <span className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]" title={`A/C: ${row.accountNumber}${row.ifscCode ? ' ' + row.ifscCode : ''}${row.bankName ? ' (' + row.bankName + ')' : ''}`}>
+                                    + Bank: ••••{String(row.accountNumber).slice(-4)}
+                                  </span>
+                                )}
                               </div>
                             ) : row.paymentMethod === 'ACCOUNT_DETAILS' ? (
                               <div 
@@ -1188,10 +1371,15 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                                   <CreditCard size={10} />
                                   <span>{row.accountNumber ? `A/C: ${row.accountNumber}` : 'Account Details'}</span>
                                 </span>
-                                <span className="text-[10px] text-slate-400 font-mono">
+                                <span className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
                                   {row.ifscCode ? row.ifscCode : ''}
                                   {row.bankName ? ` (${row.bankName})` : ''}
                                 </span>
+                                {row.upiNumber && (
+                                  <span className="text-[10px] text-purple-400 font-mono truncate max-w-[140px]" title={`UPI: ${row.upiNumber}`}>
+                                    + UPI: {row.upiNumber}
+                                  </span>
+                                )}
                               </div>
                             ) : (
                               <span className="text-slate-500 font-mono text-xs">—</span>
@@ -1254,7 +1442,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                       </>
                     ) : (
                       <>
-                        <FileCheck size={14} /> Import {newCount} Influencer{newCount !== 1 ? 's' : ''}
+                        <FileCheck size={14} />
+                        {newCount > 0 && existingCount > 0
+                          ? `Import ${newCount} New + Update ${existingCount} Existing`
+                          : newCount > 0
+                          ? `Import ${newCount} New Influencer${newCount !== 1 ? 's' : ''}`
+                          : existingCount > 0
+                          ? `Update ${existingCount} Existing Influencer${existingCount !== 1 ? 's' : ''}`
+                          : 'No Influencers to Import'}
                       </>
                     )}
                   </button>
