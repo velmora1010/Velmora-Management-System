@@ -13,7 +13,7 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
-import { parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
+import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 import toast from 'react-hot-toast';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 
@@ -171,12 +171,14 @@ export const syncInfluencerPostDate = async ({
   influencerId,
   campaignId,
   videoNumber,
-  newPostDate
+  newPostDate,
+  newDraftDate
 }: {
   influencerId: string | number;
   campaignId?: string;
   videoNumber: number;
   newPostDate: string;
+  newDraftDate?: string;
 }): Promise<{ success: boolean; error?: string }> => {
   const numericInfId = parseInt(String(influencerId), 10);
   if (isNaN(numericInfId)) {
@@ -197,13 +199,17 @@ export const syncInfluencerPostDate = async ({
     }
 
     if (existingRows && existingRows.length > 0) {
-      // Modify ONLY post_date on this specific row. Preserve draft_date, campaign_id, etc.
+      // Modify ONLY this specific video row
+      const updateData: any = {
+        post_date: newPostDate,
+        updated_at: new Date().toISOString()
+      };
+      if (newDraftDate) {
+        updateData.draft_date = newDraftDate;
+      }
       const { error: updatePdErr } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerPostDates)
-        .update({
-          post_date: newPostDate,
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', existingRows[0].id);
 
       if (updatePdErr) {
@@ -228,7 +234,8 @@ export const syncInfluencerPostDate = async ({
           influencer_id: numericInfId,
           campaign_id: campaignId || null,
           video_number: videoNumber,
-          post_date: newPostDate
+          post_date: newPostDate,
+          draft_date: newDraftDate || null
         }]);
 
       if (insertPdErr) {
@@ -272,11 +279,14 @@ export const syncInfluencerPostDate = async ({
       let pdItem = viewsJson.post_dates.find((p: any) => Number(p.video_number) === Number(videoNumber));
       if (pdItem) {
         pdItem.post_date = newPostDate;
-        // Do NOT touch pdItem.draft_date or other properties
+        if (newDraftDate) {
+          pdItem.draft_date = newDraftDate;
+        }
       } else {
         viewsJson.post_dates.push({
           video_number: videoNumber,
-          post_date: newPostDate
+          post_date: newPostDate,
+          draft_date: newDraftDate || null
         });
       }
 
@@ -295,6 +305,14 @@ export const syncInfluencerPostDate = async ({
       if (updateInfErr) {
         console.error('Error updating influencers_info_rows languages:', updateInfErr);
         return { success: false, error: updateInfErr.message || 'Failed to update influencer info' };
+      }
+    }
+
+    // 3. Notify any other active listeners
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('velmora:influencer-updated', { detail: { influencerId: numericInfId } }));
+      if (campaignId) {
+        window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId } }));
       }
     }
 
@@ -357,6 +375,13 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
         }
       } catch (e) {}
     }
+  }
+
+  // Load-time derivation if one date exists but the other is missing
+  if (!scheduledPostDate && scheduledDraftDate) {
+    scheduledPostDate = calculatePostDateFromDraft(scheduledDraftDate, 2026);
+  } else if (!scheduledDraftDate && scheduledPostDate) {
+    scheduledDraftDate = calculateDraftDate(scheduledPostDate, 2026);
   }
 
   // Initialize steps record
@@ -428,7 +453,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
         };
       } else if (cfg.id === 'post_date') {
         const postData = st.data || {};
-        const effPostDate = postData.scheduled_post_date || scheduledPostDate || '';
+        const timelineDate = storedVideo?.steps?.timeline?.data?.date;
+        const derivedFromTimeline = timelineDate ? calculatePostDateFromDraft(timelineDate, 2026) : '';
+        const effPostDate = postData.scheduled_post_date || scheduledPostDate || derivedFromTimeline || '';
         steps[cfg.id] = {
           ...st,
           data: {
@@ -1000,6 +1027,97 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         videoObj.steps.draft.data.latest_re_draft_submit_date = stepData.date;
         if (videoNumber === 1) {
           updates.re_draft_expected_date = stepData.date;
+        }
+      }
+    }
+
+    // =========================================================================
+    // AUTOMATIC DRAFT DATE -> POST DATE SYNC (+3 CALENDAR DAYS) & HISTORY
+    // Business Rule: For every video, Post Date = Draft Date + 3 Calendar Days
+    // =========================================================================
+    let targetDraftDate: string | null = null;
+    if (stepId === 'timeline' && cleanStepData?.date) {
+      targetDraftDate = parseToYMD(cleanStepData.date, 2026) || cleanStepData.date;
+    } else if (stepId === 'draft' && cleanStepData?.approval_status === 'Not Approved' && cleanStepData?.re_draft_submit_date) {
+      targetDraftDate = parseToYMD(cleanStepData.re_draft_submit_date, 2026) || cleanStepData.re_draft_submit_date;
+    }
+
+    if (targetDraftDate) {
+      const calculatedPostDate = calculatePostDateFromDraft(targetDraftDate, 2026);
+      if (calculatedPostDate) {
+        const postStep = videoObj.steps.post_date || { completed: false, data: {} };
+        const postStepData = postStep.data || {};
+
+        // Find previous post date strictly for this videoNumber
+        let prevPostDate = postStepData.scheduled_post_date || '';
+        if (!prevPostDate) {
+          const scheduleEntry = (record.postDates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
+          prevPostDate = scheduleEntry?.post_date || '';
+        }
+        if (!prevPostDate && Array.isArray((record.dispatch as any)?.languages)) {
+          const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+          if (matchViews) {
+            try {
+              const vJson = JSON.parse(matchViews.substring('views_data:'.length));
+              const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
+              if (found?.post_date) {
+                prevPostDate = parseToYMD(found.post_date, 2026) || found.post_date;
+              }
+            } catch (e) {}
+          }
+        }
+        const normalizedPrevPostDate = parseToYMD(prevPostDate, 2026) || prevPostDate;
+
+        // ONLY record history and update if Post Date actually changed
+        if (calculatedPostDate !== normalizedPrevPostDate) {
+          const currentUserName = await getCurrentUserName();
+          const prevDisplay = normalizedPrevPostDate ? formatDisplayDateLocal(normalizedPrevPostDate) : 'Not Scheduled';
+          const newDisplay = formatDisplayDateLocal(calculatedPostDate);
+          const postHistoryList: PostDateHistoryEntry[] = Array.isArray(postStepData.history) ? [...postStepData.history] : [];
+
+          const autoHistoryEntry: PostDateHistoryEntry = {
+            id: `pdh-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            old_date: prevDisplay,
+            new_date: newDisplay,
+            changed_by: currentUserName || 'Admin',
+            changed_at: new Date().toISOString(),
+            reason: 'Automatically updated from Draft Date (+3 days)'
+          };
+
+          videoObj.steps.post_date = {
+            ...postStep,
+            completed: postStep.completed || false,
+            data: {
+              ...postStepData,
+              scheduled_post_date: calculatedPostDate,
+              history: [autoHistoryEntry, ...postHistoryList],
+              is_modified: false // Auto-synced with Draft Date (+3 days)
+            },
+            updated_at: new Date().toISOString()
+          };
+
+          // Persist both post_date and draft_date to influencer_post_dates_rows & influencers_info_rows
+          await syncInfluencerPostDate({
+            influencerId: record.influencer_id,
+            campaignId: record.campaign_id,
+            videoNumber,
+            newPostDate: calculatedPostDate,
+            newDraftDate: targetDraftDate
+          });
+
+          // Log activity
+          logActivity({
+            department: 'Marketing',
+            action: 'Post Date Auto-Synced',
+            description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date auto-updated to ${newDisplay} from Draft Date ${formatDisplayDateLocal(targetDraftDate)} (+3 days)`,
+            metadata: { 
+              video_number: videoNumber, 
+              draft_date: targetDraftDate, 
+              post_date: calculatedPostDate, 
+              old_post_date: normalizedPrevPostDate,
+              reason: 'Automatically updated from Draft Date (+3 days)'
+            }
+          });
         }
       }
     }
@@ -2650,7 +2768,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
     });
 
-    toast.success(`Timeline date updated to ${newDateFormatted} and recorded in history.`);
+    toast.success(`Timeline date updated to ${newDateFormatted} and Post Date synced to ${formatDisplayDateLocal(calculatePostDateFromDraft(normalizedNew))} (+3 days).`);
   };
 
   const handleCancelEdit = () => {
@@ -2701,7 +2819,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
     });
 
-    toast.success(`Reset to scheduled draft date: ${newDateFormatted}`);
+    toast.success(`Reset to scheduled draft date: ${newDateFormatted} and Post Date synced to ${formatDisplayDateLocal(calculatePostDateFromDraft(normalizedScheduled))} (+3 days).`);
   };
 
   const handleSaveTimeline = async () => {
@@ -2750,7 +2868,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       expected_delivery_completed: !isReUploadTimeline
     });
 
-    toast.success(isReUploadTimeline ? 'Re-Upload Timeline details saved!' : 'Timeline details saved!');
+    toast.success(isReUploadTimeline ? 'Re-Upload Timeline details saved!' : `Timeline details saved! Post Date synced to ${formatDisplayDateLocal(calculatePostDateFromDraft(effectiveDate))} (+3 days).`);
   };
 
   return (
@@ -2781,6 +2899,15 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
               <span className={`text-base sm:text-lg font-bold font-mono tracking-wide ${effectiveDate ? 'text-white' : 'text-slate-500 italic'}`}>
                 {effectiveDate ? formatDisplayDateLocal(effectiveDate) : 'Not Assigned'}
               </span>
+
+              {effectiveDate && calculatePostDateFromDraft(effectiveDate) && (
+                <div className="flex items-center gap-1.5 text-xs text-slate-300 bg-[#070c18] px-2.5 py-1 rounded-lg border border-slate-800 shadow-sm">
+                  <span className="text-slate-500 font-medium">Post Date (+3d):</span>
+                  <span className="font-bold text-blue-400 font-mono">
+                    {formatDisplayDateLocal(calculatePostDateFromDraft(effectiveDate))}
+                  </span>
+                </div>
+              )}
 
               {isReUploadTimeline ? (
                 <>
@@ -2854,6 +2981,15 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
                 </button>
               </div>
             </div>
+            {tempEditDate && calculatePostDateFromDraft(tempEditDate) && (
+              <div className="text-xs text-slate-400 flex items-center gap-1.5 pt-1">
+                <span className="text-slate-500">Calculated Post Date:</span>
+                <strong className="text-blue-300 font-mono font-semibold">
+                  {formatDisplayDateLocal(calculatePostDateFromDraft(tempEditDate))}
+                </strong>
+                <span className="text-slate-500 text-[11px]">(+3 calendar days)</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -3795,7 +3931,11 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
     }
   }
 
-  const isDateModified = existingData.is_modified === true || (!!existingData.scheduled_post_date && existingData.scheduled_post_date !== scheduledPostDate);
+  if (!scheduledPostDate && scheduleEntry?.draft_date) {
+    scheduledPostDate = calculatePostDateFromDraft(scheduleEntry.draft_date, 2026);
+  }
+
+  const isDateModified = existingData.is_modified === true;
   const initialEffectivePostDate = existingData.scheduled_post_date || scheduledPostDate || '';
 
   const [effectivePostDate, setEffectivePostDate] = useState<string>(initialEffectivePostDate);
@@ -4090,6 +4230,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
                 <span className="text-[11px] font-bold text-amber-400 bg-amber-950/70 border border-amber-800/60 px-2.5 py-0.5 rounded-md">
                   Modified (Manual Edit)
                 </span>
+              ) : (historyList.length > 0 && historyList[0]?.reason?.includes('Draft')) ? (
+                <span className="text-[11px] font-bold text-blue-300 bg-blue-950/70 border border-blue-800/60 px-2.5 py-0.5 rounded-md">
+                  Auto-synced (+3 days from Draft Date)
+                </span>
               ) : scheduledPostDate ? (
                 <span className="text-[11px] font-bold text-blue-300 bg-blue-950/70 border border-blue-800/60 px-2.5 py-0.5 rounded-md">
                   Auto-filled from Post Date (Video {videoNumber})
@@ -4189,7 +4333,11 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
             historyList.map((entry, hIdx) => (
               <div key={entry.id || hIdx} className="p-3 rounded-xl bg-[#0b1329] border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`w-2 h-2 rounded-full ${entry.reason?.includes('Reset') ? 'bg-rose-400' : 'bg-amber-400'}`}></span>
+                  <span className={`w-2 h-2 rounded-full ${
+                    entry.reason?.includes('Reset') 
+                      ? 'bg-rose-400' 
+                      : (entry.reason?.includes('Draft') ? 'bg-blue-400' : 'bg-amber-400')
+                  }`}></span>
                   <span className="text-slate-400 font-medium">{entry.old_date}</span>
                   <span className="text-slate-500">→</span>
                   <span className="font-bold text-white">{entry.new_date}</span>
@@ -4201,7 +4349,9 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
                     entry.reason?.includes('Reset') 
                       ? 'bg-rose-950/60 text-rose-300 border-rose-800/50' 
-                      : 'bg-amber-950/60 text-amber-300 border-amber-800/50'
+                      : (entry.reason?.includes('Draft') 
+                          ? 'bg-blue-950/60 text-blue-300 border-blue-800/50' 
+                          : 'bg-amber-950/60 text-amber-300 border-amber-800/50')
                   }`}>
                     {entry.reason || 'Edited'}
                   </span>

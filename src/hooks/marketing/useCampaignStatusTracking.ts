@@ -5,9 +5,9 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
-import { parseToYMD, calculateDraftDate } from './useCampaignInfluencers';
+import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 
-export { naturalCompareCodes, parseToYMD, calculateDraftDate };
+export { naturalCompareCodes, parseToYMD, calculateDraftDate, calculatePostDateFromDraft };
 
 export interface StatusTrackingRecord {
   id: string;
@@ -204,7 +204,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                   const hasDraft = pd.draft_date && String(pd.draft_date).trim() !== '';
                   if (hasPost || hasDraft) {
                     const vNum = Number(pd.video_number) || (pIdx + 1);
-                    const postYmd = hasPost ? parseToYMD(pd.post_date, 2026) : null;
+                    const postYmd = hasPost 
+                      ? parseToYMD(pd.post_date, 2026) 
+                      : (hasDraft ? calculatePostDateFromDraft(pd.draft_date, 2026) : null);
                     const draftYmd = hasDraft
                       ? parseToYMD(pd.draft_date, 2026)
                       : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
@@ -225,7 +227,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 const hasDraft = pd.draft_date && String(pd.draft_date).trim() !== '';
                 if (hasPost || hasDraft) {
                   const vNum = Number(pd.video_number) || (pIdx + 1);
-                  const postYmd = hasPost ? parseToYMD(pd.post_date, 2026) : null;
+                  const postYmd = hasPost 
+                    ? parseToYMD(pd.post_date, 2026) 
+                    : (hasDraft ? calculatePostDateFromDraft(pd.draft_date, 2026) : null);
                   const draftYmd = hasDraft
                     ? parseToYMD(pd.draft_date, 2026)
                     : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
@@ -241,7 +245,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
               });
 
             const postDates = Array.from(postDatesMap.values()).map((pd: any) => {
-              const postYmd = pd.post_date ? parseToYMD(pd.post_date, 2026) : null;
+              const postYmd = pd.post_date 
+                ? parseToYMD(pd.post_date, 2026) 
+                : (pd.draft_date ? calculatePostDateFromDraft(pd.draft_date, 2026) : null);
               const draftYmd = pd.draft_date ? parseToYMD(pd.draft_date, 2026) : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
               return {
                 ...pd,
