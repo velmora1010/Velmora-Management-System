@@ -82,9 +82,17 @@ export interface StatusTrackingRecord {
     is_archived?: any;
     platforms?: string[];
     languages?: string[];
+    payment_method?: 'UPI' | 'ACCOUNT_DETAILS' | string | null;
+    upi_number?: string | null;
+    account_holder_name?: string | null;
+    account_number?: string | null;
+    ifsc_code?: string | null;
+    bank_name?: string | null;
   };
   pricing?: {
     final_price: number;
+    total_videos?: number;
+    product_pricing?: any;
   };
   postDates?: Array<{
     id?: any;
@@ -92,6 +100,7 @@ export interface StatusTrackingRecord {
     post_date?: string | null;
     draft_date?: string | null;
   }>;
+  influencer?: any;
 }
 
 export const useCampaignStatusTracking = (campaignId?: string) => {
@@ -128,11 +137,13 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           { data: dispatchData, error: dispatchError },
           { data: infoData, error: infoError },
           { data: pricingData, error: pricingError },
+          { data: productsData },
           { data: postDatesData }
         ] = await Promise.all([
           supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('id', dispatchIds),
-          supabase.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages').in('id', influencerIds),
-          supabase.from(SUPABASE_TABLES.influencerPricing).select('influencer_id, final_price, total_videos').in('influencer_id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name').in('id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerPricing).select('id, influencer_id, final_price, total_videos, product_pricing, video1_price, video2_price, video1_count, video2_count').in('influencer_id', influencerIds),
+          supabase.from(SUPABASE_TABLES.influencerProduct).select('id, influencer_id, product_name, name, video_number, qty, selected').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', influencerIds)
         ]);
 
@@ -168,6 +179,13 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           acc[p.influencer_id] = p;
           return acc;
         }, {});
+
+        const productsByInfluencer: Record<string, any[]> = {};
+        (productsData || []).forEach((p: any) => {
+          const infKey = String(p.influencer_id);
+          if (!productsByInfluencer[infKey]) productsByInfluencer[infKey] = [];
+          productsByInfluencer[infKey].push(p);
+        });
 
         // Combine and filter out archived
         const combined = records
@@ -256,8 +274,15 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
               };
             }).sort((a: any, b: any) => (a.video_number || 0) - (b.video_number || 0));
 
+            const fullInfluencer = {
+              ...info,
+              pricing: pricingMap[r.influencer_id] || {},
+              products: productsByInfluencer[String(r.influencer_id)] || []
+            };
+
             return {
               ...r,
+              influencer: fullInfluencer,
               postDates,
               dispatch: {
                 campaign_name: dispatch.campaign_name,
@@ -278,11 +303,18 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 influencer_avatar: info.profile_file_url,
                 is_archived: info.is_archived,
                 platforms: userPlatforms as string[],
-                languages: Array.from(new Set(cleanLangs)) as string[]
+                languages: Array.from(new Set(cleanLangs)) as string[],
+                payment_method: info.payment_method || (info.upi_number ? 'UPI' : (info.account_number ? 'ACCOUNT_DETAILS' : null)),
+                upi_number: info.upi_number || '',
+                account_holder_name: info.account_holder_name || '',
+                account_number: info.account_number || '',
+                ifsc_code: info.ifsc_code || '',
+                bank_name: info.bank_name || ''
               },
               pricing: {
                 final_price: pricing.final_price,
-                total_videos: pricing.total_videos !== undefined ? pricing.total_videos : 1
+                total_videos: pricing.total_videos !== undefined ? pricing.total_videos : 1,
+                product_pricing: pricing.product_pricing
               }
             };
           })
@@ -314,18 +346,23 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
   useEffect(() => {
     loadTrackingRecords();
 
-    const handleSync = () => {
-      loadTrackingRecords();
+    const handleSync = (e?: any) => {
+      const targetCampId = e?.detail?.campaignId;
+      if (!targetCampId || String(targetCampId) === String(campaignId)) {
+        loadTrackingRecords();
+      }
     };
 
     window.addEventListener('status_tracking_updated', handleSync);
     window.addEventListener('influencer_tracking_updated', handleSync);
+    window.addEventListener('velmora:influencer-updated', handleSync);
 
     return () => {
       window.removeEventListener('status_tracking_updated', handleSync);
       window.removeEventListener('influencer_tracking_updated', handleSync);
+      window.removeEventListener('velmora:influencer-updated', handleSync);
     };
-  }, [loadTrackingRecords]);
+  }, [campaignId, loadTrackingRecords]);
 
   // Save specific milestone data (PATCH only the provided fields)
   const saveMilestone = async (trackingId: string, updates: Partial<StatusTrackingRecord>) => {

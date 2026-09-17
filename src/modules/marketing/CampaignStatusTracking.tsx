@@ -16,6 +16,8 @@ import { naturalCompareCodes } from '../../services/influencerStatusHandoffServi
 import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 import toast from 'react-hot-toast';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import { getInfluencerResolvedVideoProducts, isVideoLabel } from './AddCampaignInfluencer';
+import { StatusTrackingPaymentCard, PaymentDetailsInfo } from './StatusTrackingPaymentCard';
 
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
@@ -95,6 +97,59 @@ export const formatDisplayDateLocal = (dateStr: string | null | undefined): stri
   const monthName = months[month - 1] || '';
   const dd = String(day).padStart(2, '0');
   return `${dd} ${monthName} ${year}`;
+};
+
+// =========================================================================
+// PRODUCT RESOLUTION HELPER (REUSING getInfluencerResolvedVideoProducts)
+// =========================================================================
+export interface ResolvedVideoProductInfo {
+  productName: string;
+  isAssigned: boolean;
+  amount: number;
+}
+
+export const getResolvedProductForVideo = (
+  influencer: any,
+  videoNumber: number
+): ResolvedVideoProductInfo => {
+  if (!influencer) {
+    return { productName: 'Product not assigned', isAssigned: false, amount: 0 };
+  }
+
+  try {
+    const resolvedVideos = getInfluencerResolvedVideoProducts(influencer);
+    const found = (resolvedVideos || []).find(v => Number(v.videoNumber) === Number(videoNumber));
+
+    if (!found) {
+      return { productName: 'Product not assigned', isAssigned: false, amount: 0 };
+    }
+
+    const amt = found.amount || 0;
+
+    // 1. Check found.combination (Canonical assigned combination from Pricing/Product)
+    const comb = (found.combination || '').trim();
+    if (comb && !isVideoLabel(comb) && comb.toLowerCase() !== '5-6 products') {
+      return { productName: comb, isAssigned: true, amount: amt };
+    }
+
+    // 2. Check structured products in found.products
+    if (Array.isArray(found.products) && found.products.length > 0) {
+      const validProds = found.products.filter((p: any) => p && !isVideoLabel(p.name || p.product_name));
+      if (validProds.length > 0) {
+        const names = validProds
+          .map((p: any) => (p.name || p.product_name || '').trim())
+          .filter((n: string) => n && !isVideoLabel(n));
+        if (names.length > 0) {
+          return { productName: names.join(' + '), isAssigned: true, amount: amt };
+        }
+      }
+    }
+
+    return { productName: 'Product not assigned', isAssigned: false, amount: amt };
+  } catch (e) {
+    console.error('Error in getResolvedProductForVideo:', e);
+    return { productName: 'Product not assigned', isAssigned: false, amount: 0 };
+  }
 };
 
 // =========================================================================
@@ -1865,6 +1920,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   const videoData = useMemo(() => getVideoWorkflow(record, videoNumber), [record, videoNumber]);
   const [activeStepId, setActiveStepId] = useState<string>(videoData.activeStepId);
 
+  // Derive resolved product for this specific video from Campaign Influencer data
+  const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
+
   // Sync active step when video changes
   useEffect(() => {
     setActiveStepId(videoData.activeStepId);
@@ -1968,8 +2026,16 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             })}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-bold text-white uppercase tracking-wider">VIDEO {videoNumber}</span>
+            <div className="flex items-center gap-1.5 bg-[#070c18] px-2.5 py-1 rounded-lg border border-slate-800" title={resolvedProductInfo.productName}>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Product:</span>
+              <span className={`text-xs font-bold truncate max-w-[170px] sm:max-w-[220px] ${
+                resolvedProductInfo.isAssigned ? 'text-purple-300' : 'text-slate-500 italic'
+              }`}>
+                {resolvedProductInfo.productName}
+              </span>
+            </div>
             {videoStatusBadge}
           </div>
         </div>
@@ -2126,6 +2192,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
           {activeStepId === 'share_script' && (
             <ShareScriptForm 
               record={record} 
+              videoNumber={videoNumber}
               existingData={activeStepState.data}
               onSave={(formData: any) => onSaveStep('share_script', formData, formData.reference_video_received)} 
             />
@@ -2372,8 +2439,16 @@ const CallExplainForm = ({ record, existingData = {}, onSave }: any) => {
 };
 
 // --- STEP: Share Script ---
-const ShareScriptForm = ({ record, existingData = {}, onSave }: any) => {
-  const [concept, setConcept] = useState(existingData.concept || record.ref_concept || '');
+const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }: any) => {
+  const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
+  const resolvedProductName = resolvedProductInfo.productName;
+
+  // Detect if concept is currently empty or contains legacy video label placeholder (e.g. "Video 1", "Video 2")
+  const rawConcept = existingData.concept || record.ref_concept || '';
+  const isLegacy = isVideoLabel(rawConcept);
+  const initialConcept = isLegacy ? '' : rawConcept;
+
+  const [concept, setConcept] = useState(initialConcept);
   const [script, setScript] = useState(existingData.script || record.ref_script || '');
   const [keypoints, setKeypoints] = useState(existingData.keypoints || record.ref_keypoints || '');
   const [offer, setOffer] = useState(existingData.offer || record.ref_offer || '');
@@ -2387,10 +2462,12 @@ const ShareScriptForm = ({ record, existingData = {}, onSave }: any) => {
 
   const handleSave = async () => {
     const validVids = vids.filter(Boolean);
+    const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
     await onSave({ 
       reference_video_received: scriptShared,
       script_shared: scriptShared,
-      concept: concept || '', 
+      concept: finalConcept, 
+      product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
       script: script || '', 
       keypoints: keypoints || '', 
       offer: offer || '', 
@@ -2415,16 +2492,24 @@ const ShareScriptForm = ({ record, existingData = {}, onSave }: any) => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Read-Only Product / Campaign Concept from Campaign Influencer */}
         <div>
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Campaign Concept</label>
-          <input 
-            type="text" 
-            value={concept} 
-            onChange={e => setConcept(e.target.value)} 
-            placeholder="e.g. Morning Glow Routine"
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-          />
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              Product / Campaign Concept
+            </label>
+            <span className="text-[10px] text-purple-400 font-medium flex items-center gap-1 bg-purple-950/50 px-2 py-0.5 rounded border border-purple-800/50">
+              <Lock size={10} /> Auto-filled from Campaign Influencer
+            </span>
+          </div>
+          <div className={`w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm font-semibold flex items-center gap-2 select-all ${
+            resolvedProductInfo.isAssigned ? 'text-purple-300' : 'text-slate-500 italic'
+          }`}>
+            <Package size={16} className={resolvedProductInfo.isAssigned ? 'text-purple-400 shrink-0' : 'text-slate-500 shrink-0'} />
+            <span className="truncate">{resolvedProductName}</span>
+          </div>
         </div>
+
         <div>
           <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Offer to Mention</label>
           <input 
@@ -2432,6 +2517,20 @@ const ShareScriptForm = ({ record, existingData = {}, onSave }: any) => {
             value={offer} 
             onChange={e => setOffer(e.target.value)} 
             placeholder="e.g. 15% OFF with code CREATOR15"
+            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+          />
+        </div>
+
+        {/* Custom Concept / Angle Notes (Preserved) */}
+        <div className="col-span-1 md:col-span-2">
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
+            Custom Concept / Angle Notes (Optional)
+          </label>
+          <input 
+            type="text" 
+            value={concept} 
+            onChange={e => setConcept(e.target.value)} 
+            placeholder="e.g. Morning Glow Routine, Unboxing & First Impressions..."
             className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
           />
         </div>
@@ -2499,7 +2598,21 @@ const ShareScriptForm = ({ record, existingData = {}, onSave }: any) => {
 
 // --- STEP: Pay Advance (Video 1 Only) ---
 const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
-  const [gpay, setGpay] = useState(existingData.gpay || record.advance_gpay_number || '');
+  const influencer = record.influencer || {};
+  const dispatch = record.dispatch || {};
+
+  const currentPaymentMethod = (influencer.payment_method || dispatch.payment_method || '').toUpperCase().trim();
+  const currentUpi = (influencer.upi_number || dispatch.upi_number || '').trim();
+  const currentAccountHolder = influencer.account_holder_name || dispatch.account_holder_name || '';
+  const currentAccountNumber = influencer.account_number || dispatch.account_number || '';
+  const currentIfsc = influencer.ifsc_code || dispatch.ifsc_code || '';
+  const currentBankName = influencer.bank_name || dispatch.bank_name || '';
+
+  const isAccount = currentPaymentMethod === 'ACCOUNT_DETAILS' || currentPaymentMethod.includes('ACCOUNT');
+  const isUPI = currentPaymentMethod === 'UPI' || (!currentPaymentMethod && Boolean(currentUpi));
+  const isHistorical = Boolean(existingData.pay_advance_completed || record.pay_advance_completed);
+
+  const [gpay, setGpay] = useState(existingData.gpay || record.advance_gpay_number || currentUpi || '');
   const [total, setTotal] = useState(existingData.total || record.advance_total_amount || record.pricing?.final_price || '');
   const [advance, setAdvance] = useState(existingData.advance || record.advance_paid_amount || '');
   
@@ -2507,6 +2620,17 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
+
+  const paymentInfoForCard: PaymentDetailsInfo = {
+    payment_method: isHistorical && existingData.payment_method 
+      ? existingData.payment_method 
+      : (isAccount ? 'ACCOUNT_DETAILS' : (isUPI ? 'UPI' : (currentPaymentMethod || null))),
+    upi_number: isHistorical && existingData.gpay ? existingData.gpay : (currentUpi || gpay),
+    account_holder_name: currentAccountHolder,
+    account_number: currentAccountNumber,
+    ifsc_code: currentIfsc,
+    bank_name: currentBankName
+  };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -2544,10 +2668,11 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
     }
 
     await onSave({ 
-      gpay, 
+      gpay: isUPI ? gpay : '', 
       total, 
       advance, 
       photo: finalUrl,
+      payment_method: isAccount ? 'ACCOUNT_DETAILS' : 'UPI',
       pay_advance_completed: true
     });
     setIsUploading(false);
@@ -2555,20 +2680,27 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave }: any) => {
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
+      {/* Compact Payment Details Card */}
+      <StatusTrackingPaymentCard paymentInfo={paymentInfoForCard} isHistorical={isHistorical} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         
         {/* Left: Inputs & Upload */}
         <div className="space-y-4">
-          <div>
-            <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">GPay / UPI Number</label>
-            <input 
-              type="text" 
-              value={gpay} 
-              onChange={e => setGpay(e.target.value)} 
-              placeholder="e.g. 9876543210@upi"
-              className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-            />
-          </div>
+          {isUPI && (
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">
+                GPay / UPI Number
+              </label>
+              <input 
+                type="text" 
+                value={gpay} 
+                onChange={e => setGpay(e.target.value)} 
+                placeholder="e.g. 9876543210@upi"
+                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono" 
+              />
+            </div>
+          )}
           <div>
             <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Total Agreed Amount (₹)</label>
             <input 
@@ -4446,7 +4578,38 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
 
 // --- STEP: Payment (Final step for Videos 2 to 6; NO Pay Advance) ---
 const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: any) => {
-  const [amount, setAmount] = useState(existingData.amount || '');
+  const influencer = record.influencer || {};
+  const dispatch = record.dispatch || {};
+
+  const currentPaymentMethod = (influencer.payment_method || dispatch.payment_method || '').toUpperCase().trim();
+  const currentUpi = (influencer.upi_number || dispatch.upi_number || '').trim();
+  const currentAccountHolder = influencer.account_holder_name || dispatch.account_holder_name || '';
+  const currentAccountNumber = influencer.account_number || dispatch.account_number || '';
+  const currentIfsc = influencer.ifsc_code || dispatch.ifsc_code || '';
+  const currentBankName = influencer.bank_name || dispatch.bank_name || '';
+
+  const isAccount = currentPaymentMethod === 'ACCOUNT_DETAILS' || currentPaymentMethod.includes('ACCOUNT');
+  const isUPI = currentPaymentMethod === 'UPI' || (!currentPaymentMethod && Boolean(currentUpi));
+  const isHistorical = Boolean(existingData.payment_completed);
+
+  const paymentInfoForCard: PaymentDetailsInfo = {
+    payment_method: isHistorical && existingData.payment_method 
+      ? existingData.payment_method 
+      : (isAccount ? 'ACCOUNT_DETAILS' : (isUPI ? 'UPI' : (currentPaymentMethod || null))),
+    upi_number: isHistorical && existingData.upi_number ? existingData.upi_number : currentUpi,
+    account_holder_name: currentAccountHolder,
+    account_number: currentAccountNumber,
+    ifsc_code: currentIfsc,
+    bank_name: currentBankName
+  };
+
+  // Resolve video product & expected payment amount
+  const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
+  const defaultExpectedAmount = (resolvedProductInfo.amount && resolvedProductInfo.amount > 0)
+    ? String(resolvedProductInfo.amount)
+    : (record.pricing?.[`video${videoNumber}_price`] || '');
+
+  const [amount, setAmount] = useState(existingData.amount || defaultExpectedAmount || '');
   const [paymentConfirmed, setPaymentConfirmed] = useState(existingData.payment_completed || false);
   const [photo, setPhoto] = useState(existingData.photo || '');
   const [file, setFile] = useState<File | null>(null);
@@ -4496,6 +4659,9 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
     await onSave({
       amount,
       photo: finalUrl,
+      payment_method: isHistorical && existingData.payment_method ? existingData.payment_method : (isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
+      upi_number: isUPI ? currentUpi : null,
+      account_number: isAccount ? currentAccountNumber : null,
       payment_completed: paymentConfirmed
     });
     setIsUploading(false);
@@ -4503,6 +4669,9 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
+      {/* Compact Payment Details Card from Campaign Influencer */}
+      <StatusTrackingPaymentCard paymentInfo={paymentInfoForCard} isHistorical={isHistorical} />
+
       <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
         <input 
           type="checkbox" 
