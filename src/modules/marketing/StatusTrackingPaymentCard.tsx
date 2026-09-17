@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Check, ShieldCheck, CreditCard, Smartphone } from 'lucide-react';
+import { Copy, Check, ShieldCheck, CreditCard, Smartphone, History } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export interface PaymentDetailsInfo {
@@ -18,6 +18,8 @@ export interface StatusTrackingPaymentCardProps {
   videoNumber?: number;
   perVideoAmount?: number | null;
   totalCampaignAmount?: number | null;
+  paymentStatus?: string | null;
+  transactions?: any[] | null;
 }
 
 export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps> = ({
@@ -26,7 +28,9 @@ export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps>
   isHistorical = false,
   videoNumber,
   perVideoAmount,
-  totalCampaignAmount
+  totalCampaignAmount,
+  paymentStatus,
+  transactions
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
@@ -57,9 +61,24 @@ export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps>
             Payment Details
           </span>
         </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800">
-          <ShieldCheck size={11} className={isHistorical ? "text-emerald-400" : "text-blue-400"} />
-          <span>{isHistorical ? 'Historical Record' : 'From Campaign Influencer'}</span>
+        <div className="flex items-center gap-2">
+          {paymentStatus && (
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+              paymentStatus.toLowerCase() === 'paid'
+                ? 'bg-emerald-950/80 text-emerald-400 border-emerald-700/60'
+                : paymentStatus.toLowerCase() === 'processing'
+                ? 'bg-blue-950/80 text-blue-400 border-blue-700/60'
+                : paymentStatus.toLowerCase() === 'failed'
+                ? 'bg-rose-950/80 text-rose-400 border-rose-700/60'
+                : 'bg-amber-950/80 text-amber-400 border-amber-700/60'
+            }`}>
+              {paymentStatus}
+            </span>
+          )}
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800">
+            <ShieldCheck size={11} className={isHistorical ? "text-emerald-400" : "text-blue-400"} />
+            <span>{isHistorical ? 'Historical Record' : 'From Campaign Influencer'}</span>
+          </div>
         </div>
       </div>
 
@@ -224,6 +243,46 @@ export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps>
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Payment History List (Append-only completed transactions) */}
+      {transactions && transactions.length > 0 && (
+        <div className="mt-3.5 pt-3 border-t border-slate-800/80">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+            <History size={13} className="text-slate-400" />
+            <span>Payment History ({transactions.length})</span>
+          </div>
+          <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+            {transactions.map((tx: any, idx: number) => {
+              const formattedDate = tx.payment_date 
+                ? new Date(tx.payment_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                : '—';
+              return (
+                <div key={tx.id || idx} className="bg-[#070c18] border border-slate-800/80 rounded-lg p-2 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-300 capitalize text-[11px]">
+                      {tx.payment_type || 'Payment'}
+                    </span>
+                    <span className="font-mono font-bold text-emerald-400 text-xs">
+                      ₹{Number(tx.amount || 0).toLocaleString('en-IN')}
+                    </span>
+                    {tx.payment_method && (
+                      <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded uppercase font-semibold">
+                        {tx.payment_method}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500">{formattedDate}</span>
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-full capitalize">
+                      {tx.payment_status || 'Paid'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import type { Campaign } from '../../types';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
@@ -18,6 +18,7 @@ import toast from 'react-hot-toast';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { getInfluencerResolvedVideoProducts, isVideoLabel } from './AddCampaignInfluencer';
 import { StatusTrackingPaymentCard, PaymentDetailsInfo } from './StatusTrackingPaymentCard';
+import { saveVideoPayment, fetchVideoPaymentTransactions, InfluencerVideoPayment, InfluencerVideoPaymentTransaction } from '../../services/influencerVideoPaymentService';
 
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
@@ -572,6 +573,42 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
             history: Array.isArray(postData.history) ? postData.history : []
           }
         };
+      } else if (cfg.id === 'pay_advance') {
+        const v1Price = getInfluencerVideoPrice(record.influencer, 1);
+        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'advance');
+        const isPaid = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : st.completed;
+        steps[cfg.id] = {
+          ...st,
+          completed: isPaid,
+          data: {
+            ...st.data,
+            gpay: videoPayment?.transaction_reference || st.data?.gpay || record.advance_gpay_number || '',
+            total: (videoPayment?.agreed_amount != null ? String(videoPayment.agreed_amount) : (st.data?.total || (v1Price !== null ? String(v1Price) : (record.advance_total_amount || '')))),
+            advance: (videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (st.data?.advance || record.advance_paid_amount || '')),
+            photo: videoPayment?.payment_proof_url || st.data?.photo || record.pay_advance_photo_url || '',
+            payment_status: videoPayment?.payment_status || (isPaid ? 'paid' : 'pending'),
+            payment_method: videoPayment?.payment_method || st.data?.payment_method || '',
+            payment_record: videoPayment
+          }
+        };
+      } else if (cfg.id === 'payment') {
+        const vPrice = getInfluencerVideoPrice(record.influencer, videoNum);
+        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === videoNum && vp.payment_type === 'final');
+        const isPaid = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : st.completed;
+        steps[cfg.id] = {
+          ...st,
+          completed: isPaid,
+          data: {
+            ...st.data,
+            amount: (videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (st.data?.amount || (vPrice !== null ? String(vPrice) : ''))),
+            gpay: videoPayment?.transaction_reference || st.data?.gpay || '',
+            photo: videoPayment?.payment_proof_url || st.data?.photo || '',
+            payment_status: videoPayment?.payment_status || (isPaid ? 'paid' : 'pending'),
+            payment_completed: isPaid,
+            payment_method: videoPayment?.payment_method || st.data?.payment_method || '',
+            payment_record: videoPayment
+          }
+        };
       } else {
         steps[cfg.id] = st;
       }
@@ -603,13 +640,19 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
           reference_videos_list: record.reference_videos_list || []
         };
       } else if (cfg.id === 'pay_advance') {
-        completed = !!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0);
         const v1Price = getInfluencerVideoPrice(record.influencer, 1);
+        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'advance');
+        completed = videoPayment 
+          ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0)
+          : (!!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0));
         data = {
-          gpay: record.advance_gpay_number || '',
-          total: record.advance_total_amount || (v1Price !== null ? String(v1Price) : ''),
-          advance: record.advance_paid_amount || '',
-          photo: record.pay_advance_photo_url || ''
+          gpay: videoPayment?.transaction_reference || record.advance_gpay_number || '',
+          total: videoPayment?.agreed_amount != null ? String(videoPayment.agreed_amount) : (record.advance_total_amount || (v1Price !== null ? String(v1Price) : '')),
+          advance: videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (record.advance_paid_amount || ''),
+          photo: videoPayment?.payment_proof_url || record.pay_advance_photo_url || '',
+          payment_status: videoPayment?.payment_status || (completed ? 'paid' : 'pending'),
+          payment_method: videoPayment?.payment_method || '',
+          payment_record: videoPayment
         };
       } else if (cfg.id === 'timeline') {
         completed = !!record.expected_delivery_completed || (!!record.draft_expected_date && !!record.draft_expected_time);
@@ -690,6 +733,19 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
           postedAt: (videoNum === 2 ? metadata.video2_posted_at : '') || '',
           platform: (videoNum === 2 ? metadata.video2_platform : 'Instagram') || 'Instagram',
           confirmed: completed
+        };
+      } else if (cfg.id === 'payment') {
+        const vPrice = getInfluencerVideoPrice(record.influencer, videoNum);
+        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === videoNum && vp.payment_type === 'final');
+        completed = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : false;
+        data = {
+          amount: videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (vPrice !== null ? String(vPrice) : ''),
+          gpay: videoPayment?.transaction_reference || '',
+          photo: videoPayment?.payment_proof_url || '',
+          payment_status: videoPayment?.payment_status || (completed ? 'paid' : 'pending'),
+          payment_completed: completed,
+          payment_method: videoPayment?.payment_method || '',
+          payment_record: videoPayment
         };
       }
     }
@@ -1254,6 +1310,26 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (stepData.total) updates.advance_total_amount = stepData.total;
         if (stepData.advance) updates.advance_paid_amount = stepData.advance;
         if (stepData.photo) updates.pay_advance_photo_url = stepData.photo;
+
+        try {
+          const v1Agreed = parseFloat(stepData.total) || getInfluencerVideoPrice(record.influencer, 1) || 0;
+          const v1Paid = parseFloat(stepData.advance) || 0;
+          await saveVideoPayment({
+            campaignId: record.campaign_id,
+            influencerId: record.influencer_id,
+            videoNumber: 1,
+            paymentType: 'advance',
+            agreedAmount: v1Agreed,
+            paidAmount: v1Paid,
+            paymentStatus: isStepCompleted || v1Paid > 0 ? 'paid' : 'pending',
+            paymentMethod: stepData.payment_method || (stepData.isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
+            transactionReference: stepData.gpay || stepData.upi_id || stepData.upi_number || null,
+            paymentProofUrl: stepData.photo || null,
+            notes: stepData.notes || (stepData.account_number ? `Account: ${stepData.account_number}` : null),
+          });
+        } catch (err) {
+          console.error('Failed to persist video 1 payment record:', err);
+        }
       } else if (stepId === 'timeline') {
         updates.expected_delivery_completed = isStepCompleted;
         if (stepData.date) updates.draft_expected_date = stepData.date;
@@ -1272,6 +1348,26 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (stepData.postedAt) updates.final_post_actual_datetime = stepData.postedAt;
       }
       updates.notes = JSON.stringify(metadata);
+    } else if (stepId === 'payment') {
+      try {
+        const vAgreed = getInfluencerVideoPrice(record.influencer, videoNumber) || parseFloat(stepData.amount) || 0;
+        const vPaid = parseFloat(stepData.amount) || 0;
+        await saveVideoPayment({
+          campaignId: record.campaign_id,
+          influencerId: record.influencer_id,
+          videoNumber: videoNumber,
+          paymentType: 'final',
+          agreedAmount: vAgreed,
+          paidAmount: vPaid,
+          paymentStatus: isStepCompleted || vPaid > 0 ? 'paid' : 'pending',
+          paymentMethod: stepData.payment_method || (stepData.isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
+          transactionReference: stepData.upi_number || stepData.gpay || null,
+          paymentProofUrl: stepData.photo || null,
+          notes: stepData.notes || (stepData.account_number ? `Account: ${stepData.account_number}` : null),
+        });
+      } catch (err) {
+        console.error(`Failed to persist video ${videoNumber} payment record:`, err);
+      }
     }
 
     const result = await saveMilestone(recordId, updates);
@@ -2705,6 +2801,19 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
 
+  const [transactions, setTransactions] = useState<InfluencerVideoPaymentTransaction[]>([]);
+
+  const loadTransactions = useCallback(async () => {
+    if (record?.campaign_id && record?.influencer_id) {
+      const txs = await fetchVideoPaymentTransactions(record.campaign_id, record.influencer_id, 1);
+      setTransactions(txs);
+    }
+  }, [record?.campaign_id, record?.influencer_id]);
+
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions]);
+
   const paymentInfoForCard: PaymentDetailsInfo = {
     payment_method: isHistorical && existingData.payment_method 
       ? existingData.payment_method 
@@ -2757,9 +2866,15 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
       advance, 
       photo: finalUrl,
       payment_method: isAccount ? 'ACCOUNT_DETAILS' : 'UPI',
+      upi_number: isUPI ? (gpay || currentUpi) : null,
+      account_holder_name: currentAccountHolder,
+      account_number: currentAccountNumber,
+      ifsc_code: currentIfsc,
+      bank_name: currentBankName,
       pay_advance_completed: true
     });
     setIsUploading(false);
+    await loadTransactions();
   };
 
   return (
@@ -2771,6 +2886,8 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
         videoNumber={1}
         perVideoAmount={v1Price}
         totalCampaignAmount={totalCampaignPrice}
+        paymentStatus={existingData.payment_status || (isHistorical ? 'paid' : 'pending')}
+        transactions={transactions}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -4734,6 +4851,19 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
 
+  const [transactions, setTransactions] = useState<InfluencerVideoPaymentTransaction[]>([]);
+
+  const loadTransactions = useCallback(async () => {
+    if (record?.campaign_id && record?.influencer_id) {
+      const txs = await fetchVideoPaymentTransactions(record.campaign_id, record.influencer_id, videoNumber);
+      setTransactions(txs);
+    }
+  }, [record?.campaign_id, record?.influencer_id, videoNumber]);
+
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions]);
+
   // Sync if not historical and perVideoPrice updates
   useEffect(() => {
     if (!isHistorical && perVideoPrice !== null) {
@@ -4787,9 +4917,13 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
       payment_method: isHistorical && existingData.payment_method ? existingData.payment_method : (isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
       upi_number: isUPI ? currentUpi : null,
       account_number: isAccount ? currentAccountNumber : null,
+      account_holder_name: currentAccountHolder,
+      ifsc_code: currentIfsc,
+      bank_name: currentBankName,
       payment_completed: paymentConfirmed
     });
     setIsUploading(false);
+    await loadTransactions();
   };
 
   return (
@@ -4801,6 +4935,8 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
         videoNumber={videoNumber}
         perVideoAmount={perVideoPrice}
         totalCampaignAmount={totalCampaignPrice}
+        paymentStatus={existingData.payment_status || (paymentConfirmed ? 'paid' : 'pending')}
+        transactions={transactions}
       />
 
       <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">

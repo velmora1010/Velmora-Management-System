@@ -6,6 +6,7 @@ import { logActivity } from '../../services/activityService';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
 import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
+import type { InfluencerVideoPayment } from '../../services/influencerVideoPaymentService';
 
 export { naturalCompareCodes, parseToYMD, calculateDraftDate, calculatePostDateFromDraft };
 
@@ -101,6 +102,7 @@ export interface StatusTrackingRecord {
     draft_date?: string | null;
   }>;
   influencer?: any;
+  videoPayments?: InfluencerVideoPayment[];
 }
 
 export const useCampaignStatusTracking = (campaignId?: string) => {
@@ -138,13 +140,15 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           { data: infoData, error: infoError },
           { data: pricingData, error: pricingError },
           { data: productsData },
-          { data: postDatesData }
+          { data: postDatesData },
+          { data: videoPaymentsData }
         ] = await Promise.all([
           supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('id', dispatchIds),
           supabase.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name').in('id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerPricing).select('id, influencer_id, final_price, total_videos, product_pricing, video1_price, video2_price, video1_count, video2_count').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerProduct).select('id, influencer_id, product_name, name, video_number, qty, selected').in('influencer_id', influencerIds),
-          supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', influencerIds)
+          supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', influencerIds),
+          supabaseAdmin.from(SUPABASE_TABLES.influencerVideoPayment).select('*').in('influencer_id', influencerIds)
         ]);
 
         let platformMap: Record<string, string> = {};
@@ -280,10 +284,15 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
               products: productsByInfluencer[String(r.influencer_id)] || []
             };
 
+            const vPayments = (videoPaymentsData || []).filter(
+              (vp: any) => String(vp.influencer_id) === String(r.influencer_id) && String(vp.campaign_id) === String(cleanCampaignId)
+            );
+
             return {
               ...r,
               influencer: fullInfluencer,
               postDates,
+              videoPayments: vPayments,
               dispatch: {
                 campaign_name: dispatch.campaign_name,
                 address: dispatch.address || info.complete_address || '',
@@ -356,11 +365,13 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
     window.addEventListener('status_tracking_updated', handleSync);
     window.addEventListener('influencer_tracking_updated', handleSync);
     window.addEventListener('velmora:influencer-updated', handleSync);
+    window.addEventListener('velmora:video-payment-updated', handleSync);
 
     return () => {
       window.removeEventListener('status_tracking_updated', handleSync);
       window.removeEventListener('influencer_tracking_updated', handleSync);
       window.removeEventListener('velmora:influencer-updated', handleSync);
+      window.removeEventListener('velmora:video-payment-updated', handleSync);
     };
   }, [campaignId, loadTrackingRecords]);
 
