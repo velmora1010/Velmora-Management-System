@@ -206,6 +206,11 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const [openBatchIds, setOpenBatchIds] = useState<string[]>([]);
   const [activeMenuBatchId, setActiveMenuBatchId] = useState<string | null>(null);
 
+  // Move Dispatched Batch Back to Active State & Confirmation Modal
+  const [batchToMoveToActive, setBatchToMoveToActive] = useState<any | null>(null);
+  const [influencerToMoveToActive, setInfluencerToMoveToActive] = useState<CampaignInfluencer | null>(null);
+  const [isProcessingMove, setIsProcessingMove] = useState(false);
+
   // Batch-level dispatch queue state
   const [batchDispatchContext, setBatchDispatchContext] = useState<{
     batch: DispatchBatch;
@@ -999,6 +1004,90 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     } catch (err) {
       console.error('Failed to return batch to logistics:', err);
       toast.error('Failed to return batch to logistics');
+    }
+  };
+
+  // Handler: Move an entire Dispatched Batch back to Active Logistics
+  const handleConfirmMoveBatchToActive = async (batchItem: typeof processedBatches[0]) => {
+    if (!batchItem?.batch?.id) return;
+    setIsProcessingMove(true);
+    try {
+      const res = await logisticsWorkflowService.returnDispatchedBatchToActive(
+        campaign.id,
+        batchItem.batch.id
+      );
+
+      if (res.success) {
+        toast.success(`Batch ${batchItem.batch.batch_name} moved back to Active successfully.`);
+        setBatchToMoveToActive(null);
+
+        // Optimistic local state update
+        setSavedBatches(prev => prev.filter(b => b.id !== batchItem.batch.id));
+
+        // Reconcile and reload
+        await Promise.all([
+          refreshDispatch(),
+          refreshInfluencers(),
+          loadSavedBatches()
+        ]);
+
+        // Broadcast cross-module synchronization events
+        window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
+        window.dispatchEvent(new CustomEvent('influencer_tracking_updated', {
+          detail: { campaignId: String(campaign.id) }
+        }));
+      } else {
+        toast.error(res.error || 'Unable to move the batch back to Active. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('Failed to move batch to active:', err);
+      toast.error('Unable to move the batch back to Active. Please try again.');
+    } finally {
+      setIsProcessingMove(false);
+    }
+  };
+
+  // Handler: Move a single Dispatched Influencer back to Active Logistics
+  const handleConfirmMoveInfluencerToActive = async (inf: CampaignInfluencer) => {
+    if (!inf?.id) return;
+    setIsProcessingMove(true);
+    try {
+      const res = await logisticsWorkflowService.returnDispatchedInfluencerToActive(
+        campaign.id,
+        inf.id
+      );
+
+      if (res.success) {
+        const username = getInfluencerUsername(inf);
+        toast.success(`Influencer ${username} moved back to Active successfully.`);
+        setInfluencerToMoveToActive(null);
+
+        // Optimistic local state update
+        setSavedBatches(prev => prev.map(b => ({
+          ...b,
+          members: b.members.filter(m => String(m.influencer_id) !== String(inf.id))
+        })).filter(b => b.members.length > 0));
+
+        // Reconcile and reload
+        await Promise.all([
+          refreshDispatch(),
+          refreshInfluencers(),
+          loadSavedBatches()
+        ]);
+
+        // Broadcast cross-module synchronization events
+        window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
+        window.dispatchEvent(new CustomEvent('influencer_tracking_updated', {
+          detail: { campaignId: String(campaign.id) }
+        }));
+      } else {
+        toast.error(res.error || 'Unable to move the influencer back to Active. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('Failed to move influencer to active:', err);
+      toast.error('Unable to move the influencer back to Active. Please try again.');
+    } finally {
+      setIsProcessingMove(false);
     }
   };
 
@@ -2142,6 +2231,180 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           onClose={() => setViewInfluencerTarget(null)}
         />
       )}
+
+      {/* Move Dispatched Batch Back to Active Confirmation Modal */}
+      {batchToMoveToActive && (
+        <div 
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => !isProcessingMove && setBatchToMoveToActive(null)}
+        >
+          <div 
+            className="bg-[#0f172a] border border-slate-700/90 rounded-2xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 animate-scale-up"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-sm">
+                  <RotateCcw size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white">
+                    Move Batch Back to Active?
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    {batchToMoveToActive.batch?.batch_name || 'Batch'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isProcessingMove}
+                onClick={() => setBatchToMoveToActive(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="space-y-3 text-xs sm:text-sm text-slate-300 leading-relaxed">
+              <p>
+                This will remove all <strong className="text-amber-300 font-bold">{batchToMoveToActive.dispatchedInBatch || batchToMoveToActive.totalMembers || (batchToMoveToActive.batch?.members?.length ?? 0)}</strong> influencer{(batchToMoveToActive.dispatchedInBatch || batchToMoveToActive.totalMembers || (batchToMoveToActive.batch?.members?.length ?? 0)) === 1 ? '' : 's'} from this dispatched batch and return them to <strong className="text-white font-semibold">Active Logistics</strong>.
+              </p>
+              <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl space-y-1.5 text-xs text-slate-400">
+                <div className="flex items-center gap-2 text-slate-300 font-medium">
+                  <Check size={14} className="text-emerald-400 shrink-0" />
+                  <span>Influencer master and profile records remain unchanged</span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-300 font-medium">
+                  <Check size={14} className="text-emerald-400 shrink-0" />
+                  <span>Influencers become immediately available in Active Logistics</span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-300 font-medium">
+                  <Check size={14} className="text-emerald-400 shrink-0" />
+                  <span>Eligible for Bulk Select & Prepare Dispatch again</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isProcessingMove}
+                onClick={() => setBatchToMoveToActive(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingMove}
+                onClick={() => handleConfirmMoveBatchToActive(batchToMoveToActive)}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all shadow-lg shadow-amber-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingMove ? (
+                  <>
+                    <RefreshCcw size={14} className="animate-spin" />
+                    <span>Moving to Active...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw size={14} />
+                    <span>Move to Active</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move Single Dispatched Influencer Back to Active Confirmation Modal */}
+      {influencerToMoveToActive && (
+        <div 
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => !isProcessingMove && setInfluencerToMoveToActive(null)}
+        >
+          <div 
+            className="bg-[#0f172a] border border-slate-700/90 rounded-2xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 animate-scale-up"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 shadow-sm">
+                  <RotateCcw size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white">
+                    Move Influencer Back to Active?
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    {getInfluencerUsername(influencerToMoveToActive)} {influencerToMoveToActive.code ? `(${influencerToMoveToActive.code})` : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isProcessingMove}
+                onClick={() => setInfluencerToMoveToActive(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="space-y-3 text-xs sm:text-sm text-slate-300 leading-relaxed">
+              <p>
+                This will remove <strong className="text-amber-300 font-bold">{getInfluencerUsername(influencerToMoveToActive)}</strong> from Dispatched Logistics and return them to <strong className="text-white font-semibold">Active Logistics</strong>.
+              </p>
+              <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl space-y-1.5 text-xs text-slate-400">
+                <div className="flex items-center gap-2 text-slate-300 font-medium">
+                  <Check size={14} className="text-emerald-400 shrink-0" />
+                  <span>Profile and campaign data remain unchanged</span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-300 font-medium">
+                  <Check size={14} className="text-emerald-400 shrink-0" />
+                  <span>Influencer becomes immediately available in Active Logistics</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isProcessingMove}
+                onClick={() => setInfluencerToMoveToActive(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingMove}
+                onClick={() => handleConfirmMoveInfluencerToActive(influencerToMoveToActive)}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-all shadow-lg shadow-amber-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingMove ? (
+                  <>
+                    <RefreshCcw size={14} className="animate-spin" />
+                    <span>Moving to Active...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw size={14} />
+                    <span>Move to Active</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -2273,6 +2536,20 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                   >
                     <Eye size={14} className="text-emerald-400" />
                     <span>View Dispatch</span>
+                  </button>
+                )}
+
+                {isDispatchedTab && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveMenuBatchId(null);
+                      setBatchToMoveToActive(batchItem);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-amber-950/40 text-amber-300 flex items-center gap-2.5 cursor-pointer border-t border-slate-700/60"
+                  >
+                    <RotateCcw size={14} className="text-amber-400" />
+                    <span>Move to Active</span>
                   </button>
                 )}
 
@@ -2475,19 +2752,30 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               </button>
 
               {isDispatchedTab ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const firstDispatched = allActiveMembersInBatch.find(inf => isInfluencerDispatched(inf, dispatchRecords));
-                    if (firstDispatched) {
-                      handleDispatchClick(firstDispatched);
-                    }
-                  }}
-                  className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
-                >
-                  <Eye size={14} />
-                  <span>View Dispatch</span>
-                </button>
+                <div className="flex-1 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const firstDispatched = allActiveMembersInBatch.find(inf => isInfluencerDispatched(inf, dispatchRecords));
+                      if (firstDispatched) {
+                        handleDispatchClick(firstDispatched);
+                      }
+                    }}
+                    className="flex-1 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
+                  >
+                    <Eye size={14} />
+                    <span>View Dispatch</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBatchToMoveToActive(batchItem)}
+                    className="px-3 py-2.5 bg-[#0e1d20] hover:bg-amber-950/40 text-amber-300 hover:text-amber-200 border border-emerald-900/60 hover:border-amber-700/60 text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Move all influencers in this batch back to Active Logistics"
+                  >
+                    <RotateCcw size={14} className="text-amber-400" />
+                    <span className="hidden sm:inline">Move to Active</span>
+                  </button>
+                </div>
               ) : (
                 <button
                   type="button"
@@ -2836,6 +3124,19 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           >
             <Package size={14} />
             <span>View Dispatch</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setInfluencerToMoveToActive(inf);
+            }}
+            className="p-1.5 hover:bg-amber-950/40 text-slate-400 hover:text-amber-300 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-amber-800/40"
+            title="Move Influencer back to Active"
+            aria-label="Move Influencer back to Active"
+          >
+            <RotateCcw size={14} />
           </button>
         </div>
       </div>

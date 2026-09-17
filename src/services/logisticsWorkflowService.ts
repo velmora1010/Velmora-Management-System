@@ -7,6 +7,7 @@ import {
   type DispatchBatch 
 } from './dispatchBatchService';
 import { getLocalDateKey } from '../utils/marketingUtils';
+import { logActivity } from './activityService';
 
 export const logisticsWorkflowService = {
   /**
@@ -245,6 +246,130 @@ export const logisticsWorkflowService = {
     } catch (err: any) {
       console.error('Error returning batch to logistics:', err);
       return { success: false, count: 0, error: err.message || 'Failed to return batch to logistics' };
+    }
+  },
+
+  /**
+   * Moves all influencers from a Dispatched Batch back to Active Logistics.
+   * 1. Resets their dispatch state to 'pending' in influencer_dispatch_details_rows.
+   * 2. Clears dispatch-specific fields (tracking_id, courier_partner, dispatch_date, expected_delivery_date, dispatch_photo_url).
+   * 3. Removes their membership from the batch in Supabase system_settings and localStorage.
+   * 4. Completely drops the batch if zero members remain.
+   * 5. Does NOT delete master influencer records (influencers_info_rows).
+   * 6. Does NOT touch campaign influencer profiles or status tracking records.
+   */
+  async returnDispatchedBatchToActive(
+    campaignId: string | number,
+    batchId: string
+  ): Promise<{ success: boolean; count: number; error?: string }> {
+    try {
+      const cId = String(campaignId);
+      const numericCampaignId = isNaN(Number(cId)) ? cId : Number(cId);
+
+      const batches = await dispatchBatchService.getBatches(campaignId, { skipReconcile: true });
+      const targetBatch = batches.find(b => b.id === batchId);
+      if (!targetBatch) {
+        return { success: true, count: 0 };
+      }
+
+      const memberIds = targetBatch.members
+        .map(m => m.influencer_id)
+        .filter(Boolean);
+
+      const numericMemberIds = memberIds.map(id => isNaN(Number(id)) ? id : Number(id));
+
+      if (numericMemberIds.length > 0) {
+        const { error } = await supabase
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .update({
+            dispatch_status: 'pending',
+            tracking_id: '',
+            courier_partner: '',
+            dispatch_date: null,
+            expected_delivery_date: null,
+            dispatch_photo_url: null,
+          })
+          .eq('campaign_id', numericCampaignId)
+          .in('influencer_id', numericMemberIds);
+
+        if (error) {
+          console.error('Error resetting dispatch status in influencer_dispatch_details_rows:', error);
+          throw error;
+        }
+      }
+
+      // Remove the batch and ensure none of these member IDs linger in any other batch
+      const memberIdSet = new Set(memberIds.map(id => String(id)));
+      const updatedBatches = batches
+        .filter(b => b.id !== batchId)
+        .map(b => ({
+          ...b,
+          members: (b.members || []).filter(m => !memberIdSet.has(String(m.influencer_id)))
+        }))
+        .filter(b => b.members.length > 0);
+
+      await dispatchBatchService.saveBatches(campaignId, updatedBatches);
+
+      // Activity logging
+      logActivity(
+        'Logistics',
+        'Batch Moved to Active',
+        `Batch "${targetBatch.batch_name}" with ${memberIds.length} influencers was removed from Dispatched and returned to Active Logistics.`
+      );
+
+      return { success: true, count: memberIds.length };
+    } catch (err: any) {
+      console.error('Error moving dispatched batch to active:', err);
+      return { 
+        success: false, 
+        count: 0, 
+        error: err.message || 'Unable to move the batch back to Active. Please try again.' 
+      };
+    }
+  },
+
+  /**
+   * Moves a single dispatched influencer back to Active Logistics.
+   */
+  async returnDispatchedInfluencerToActive(
+    campaignId: string | number,
+    influencerId: string | number,
+    batchId?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const cId = String(campaignId);
+      const numericCampaignId = isNaN(Number(cId)) ? cId : Number(cId);
+      const numericInfId = isNaN(Number(influencerId)) ? influencerId : Number(influencerId);
+
+      // 1. Reset dispatch status in influencer_dispatch_details_rows
+      const { error } = await supabase
+        .from(SUPABASE_TABLES.influencerDispatch)
+        .update({
+          dispatch_status: 'pending',
+          tracking_id: '',
+          courier_partner: '',
+          dispatch_date: null,
+          expected_delivery_date: null,
+          dispatch_photo_url: null,
+        })
+        .eq('campaign_id', numericCampaignId)
+        .eq('influencer_id', numericInfId);
+
+      if (error) {
+        console.error('Error resetting influencer dispatch status:', error);
+        throw error;
+      }
+
+      // 2. Remove influencer from batches and prune empty batches
+      await dispatchBatchService.removeInfluencerFromBatches(campaignId, influencerId);
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('Error moving dispatched influencer to active:', err);
+      return { 
+        success: false, 
+        error: err.message || 'Unable to move the influencer back to Active. Please try again.' 
+      };
     }
   }
 };
