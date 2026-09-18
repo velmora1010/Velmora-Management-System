@@ -5,17 +5,17 @@
 
 const MONTH_NAME_MAP: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
-  january: 1, february: 2, march: 3, april: 4, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12
+  january: 1, february: 2, march: 3, april: 4, june: 6, july: 7, august: 8, september: 9, sept: 9, october: 10, november: 11, december: 12
 };
 
 const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
- * Parses any incoming date representation (string, Date, ISO, DD-MMM-YYYY, etc.)
+ * Parses any incoming date representation (string, Date, ISO, Excel serial, DD-MMM-YYYY, MMM DD, etc.)
  * into a canonical YYYY-MM-DD string using calendar values (no UTC timezone shifts).
  */
 export const parseToYMD = (val: any, defaultYear = 2026): string => {
-  if (!val) return '';
+  if (val === undefined || val === null) return '';
   if (val instanceof Date) {
     if (isNaN(val.getTime())) return '';
     let y = val.getFullYear();
@@ -25,7 +25,20 @@ export const parseToYMD = (val: any, defaultYear = 2026): string => {
     return `${y}-${m}-${d}`;
   }
   const str = String(val).trim();
-  if (!str) return '';
+  if (!str || str === '—' || str === '-' || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'null') return '';
+
+  // Handle Excel serial date numbers (e.g. 46305 -> 2026-10-10)
+  const numVal = typeof val === 'number' ? val : (/^\d{5}$/.test(str) ? Number(str) : NaN);
+  if (!isNaN(numVal) && numVal >= 20000 && numVal <= 70000) {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const dateFromSerial = new Date(excelEpoch.getTime() + numVal * 86400 * 1000);
+    if (!isNaN(dateFromSerial.getTime())) {
+      const y = dateFromSerial.getUTCFullYear();
+      const m = String(dateFromSerial.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(dateFromSerial.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
 
   const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (isoMatch) {
@@ -38,7 +51,7 @@ export const parseToYMD = (val: any, defaultYear = 2026): string => {
   if (dmMatch) {
     const day = parseInt(dmMatch[1], 10);
     const mStr = dmMatch[2].toLowerCase();
-    const month = MONTH_NAME_MAP[mStr];
+    const month = MONTH_NAME_MAP[mStr] || MONTH_NAME_MAP[mStr.slice(0, 3)];
     let year = dmMatch[3] ? (dmMatch[3].length === 2 ? 2000 + parseInt(dmMatch[3], 10) : parseInt(dmMatch[3], 10)) : defaultYear;
     if (isNaN(year) || year <= 2010) year = defaultYear;
     if (month && day >= 1 && day <= 31) {
@@ -49,7 +62,7 @@ export const parseToYMD = (val: any, defaultYear = 2026): string => {
   const mdMatch = str.match(/^([a-zA-Z]+)[\s\-\/]+(\d{1,2})(?:[\s\-\/]+(\d{2,4}))?$/);
   if (mdMatch) {
     const mStr = mdMatch[1].toLowerCase();
-    const month = MONTH_NAME_MAP[mStr];
+    const month = MONTH_NAME_MAP[mStr] || MONTH_NAME_MAP[mStr.slice(0, 3)];
     const day = parseInt(mdMatch[2], 10);
     let year = mdMatch[3] ? (mdMatch[3].length === 2 ? 2000 + parseInt(mdMatch[3], 10) : parseInt(mdMatch[3], 10)) : defaultYear;
     if (isNaN(year) || year <= 2010) year = defaultYear;
