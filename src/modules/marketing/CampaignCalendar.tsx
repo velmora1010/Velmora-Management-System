@@ -46,12 +46,27 @@ interface CalendarEvent {
 }
 
 const createFallbackRecord = (inf: CampaignInfluencer, campaign: Campaign): StatusTrackingRecord => {
+  const pd1 = inf.postDates?.[0];
+  const postDate1 = pd1?.post_date ? parseDateOnly(pd1.post_date, 2026) : null;
+  const draftDate1 = pd1?.draft_date 
+    ? parseDateOnly(pd1.draft_date, 2026) 
+    : (postDate1 ? calculateDraftDate(postDate1, 2026) : null);
+
+  const pd2 = inf.postDates?.[1];
+  const postDate2 = pd2?.post_date ? parseDateOnly(pd2.post_date, 2026) : null;
+  const draftDate2 = pd2?.draft_date 
+    ? parseDateOnly(pd2.draft_date, 2026) 
+    : (postDate2 ? calculateDraftDate(postDate2, 2026) : null);
+
   return {
     id: `inf-${inf.id}`,
     campaign_id: campaign.id,
     influencer_id: inf.id as any,
     dispatch_id: `disp-${inf.id}`,
     delivered_confirmed: false,
+    draft_expected_date: draftDate1,
+    re_draft_expected_date: draftDate2,
+    final_post_expected_date: postDate1,
     draft_video_url: null,
     re_draft_video_url: null,
     final_post_completed: false,
@@ -693,55 +708,48 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         const pd = postDates[idx];
         const vNum = Number(pd.video_number) || (idx + 1);
 
-        // Resolve Timeline date strictly with priority: isReDraftTimeline / manualOverride -> canonical pd.draft_date
-        let effectiveTimelineDate = '';
-        let isReDraftTimeline = false;
-        let isDraftManualOverride = false;
+        // 1. Resolve canonical Draft & Post dates directly from Campaign Influencer Post Date data
+        const canonicalPostDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
+        const canonicalDraftDate = pd.draft_date 
+          ? parseDateOnly(pd.draft_date, 2026) 
+          : (canonicalPostDate ? calculateDraftDate(canonicalPostDate, 2026) : '');
+
+        const drDate = canonicalDraftDate;
+        const fpDate = canonicalPostDate;
+
+        // Check for legitimate Re-Draft timeline in matching status tracking record without overriding normal dates
+        let effectiveReDraftDate = '';
         if (matchingRecord) {
           try {
             const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
             const tlStep = vWorkflow.steps?.timeline;
-            const timelineDate = tlStep?.data?.date;
-            if (timelineDate) {
-              effectiveTimelineDate = parseDateOnly(timelineDate, 2026);
-            }
             if (tlStep?.data?.is_re_upload_timeline === true || !!tlStep?.data?.re_draft_submit_date || vWorkflow.isReDraftRequired) {
-              isReDraftTimeline = true;
-            }
-            if (tlStep?.data?.manualOverride === true) {
-              isDraftManualOverride = true;
-            }
-          } catch (e) {}
-        }
-
-        const originalDraftDate = pd.draft_date ? parseDateOnly(pd.draft_date, 2026) : (pd.post_date ? calculateDraftDate(pd.post_date, 2026) : '');
-        const drDate = isReDraftTimeline 
-          ? (effectiveTimelineDate || originalDraftDate) 
-          : (isDraftManualOverride && effectiveTimelineDate ? effectiveTimelineDate : (originalDraftDate || effectiveTimelineDate));
-
-        // 2. Final Post Event
-        // Canonical source: originalPostDate (pd.post_date). Old workflow values must NOT override it unless manualOverride is set.
-        let effectiveFinalPostDate = '';
-        let isPostManualOverride = false;
-        if (matchingRecord) {
-          try {
-            const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
-            const postDateStep = vWorkflow.steps?.post_date;
-            const postDateStepDate = postDateStep?.data?.scheduled_post_date;
-            if (postDateStepDate) {
-              effectiveFinalPostDate = parseDateOnly(postDateStepDate, 2026);
-            }
-            if (postDateStep?.data?.manualOverride === true) {
-              isPostManualOverride = true;
+              const rdDate = tlStep?.data?.date || tlStep?.data?.re_draft_submit_date;
+              if (rdDate) {
+                effectiveReDraftDate = parseDateOnly(rdDate, 2026);
+              }
             }
           } catch (e) {}
         }
 
-        const originalPostDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
-        const fpDate = isPostManualOverride && effectiveFinalPostDate 
-          ? effectiveFinalPostDate 
-          : (originalPostDate || effectiveFinalPostDate);
+        // Development logging for HIS1 (Requirement 23)
+        const codeUpper = String(inf.code || influencerUsername || '').toUpperCase();
+        if (codeUpper === 'HIS1' || codeUpper.includes('HIS1') || String(influencerName).toUpperCase().includes('KHANA_HI_KHANA')) {
+          console.log('[CalendarDateResolver]', {
+            campaignId: campaign.id,
+            influencerCode: inf.code || influencerUsername,
+            videoNumber: vNum,
+            canonicalDraftDate,
+            canonicalPostDate,
+            workflowDraftDate: effectiveReDraftDate || null,
+            workflowPostDate: null,
+            finalResolvedDraftDate: drDate,
+            finalResolvedPostDate: fpDate,
+            source: 'Campaign Influencer Basic Info / Post Date'
+          });
+        }
 
+        // Push NORMAL Draft milestone
         if (drDate) {
           const key = `${infId}_v${vNum}_Timeline`;
           if (!seenEventKeys.has(key)) {
@@ -750,11 +758,9 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               id: `inf-${inf.id}-v${vNum}-draft`,
               recordId: infId,
               type: 'Draft',
-              label: isReDraftTimeline ? `Video ${vNum} Re-Draft` : `Video ${vNum} Draft`,
-              icon: isReDraftTimeline ? '🔄' : '🎬',
-              colorClass: isReDraftTimeline 
-                ? 'bg-rose-500/10 border border-rose-500/30 text-rose-400' 
-                : 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
+              label: `Video ${vNum} Draft`,
+              icon: '🎬',
+              colorClass: 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
               dateStr: drDate,
               influencerName,
               influencerUsername,
@@ -762,12 +768,13 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               avatarUrl,
               record: matchingRecord,
               videoNumber: vNum,
-              postDateStr: fpDate || pd.post_date,
+              postDateStr: fpDate,
               draftDateStr: drDate
             });
           }
         }
 
+        // Push NORMAL Final Post milestone
         if (fpDate) {
           const key = `${infId}_v${vNum}_FinalPost`;
           if (!seenEventKeys.has(key)) {
@@ -788,6 +795,31 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               videoNumber: vNum,
               postDateStr: fpDate,
               draftDateStr: drDate
+            });
+          }
+        }
+
+        // Push legitimate Re-Draft milestone if present and different from normal draft
+        if (effectiveReDraftDate && effectiveReDraftDate !== drDate) {
+          const reDraftKey = `${infId}_v${vNum}_ReDraft`;
+          if (!seenEventKeys.has(reDraftKey)) {
+            seenEventKeys.add(reDraftKey);
+            list.push({
+              id: `inf-${inf.id}-v${vNum}-redraft`,
+              recordId: infId,
+              type: 'Draft',
+              label: `Video ${vNum} Re-Draft`,
+              icon: '🔄',
+              colorClass: 'bg-rose-500/10 border border-rose-500/30 text-rose-400',
+              dateStr: effectiveReDraftDate,
+              influencerName,
+              influencerUsername,
+              campaignName,
+              avatarUrl,
+              record: matchingRecord,
+              videoNumber: vNum,
+              postDateStr: fpDate,
+              draftDateStr: effectiveReDraftDate
             });
           }
         }
@@ -825,7 +857,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       for (const ev of todayEvents) {
         if (ev.type === 'Draft') {
           card1Val++;
-          const expected = ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date;
+          const expected = ev.draftDateStr || (ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date);
           if (expected && isDraftOnTime(expected, ev.dateStr)) card2Val++;
           if (expected && isDraftDelayed(expected, ev.dateStr, todayStr)) card3Val++;
         }
@@ -884,12 +916,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       if (filterType === 'Draft') return ev.type === 'Draft';
       if (filterType === 'Draft On Time') {
         if (ev.type !== 'Draft') return false;
-        const expected = ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date;
+        const expected = ev.draftDateStr || (ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date);
         return expected ? isDraftOnTime(expected, ev.dateStr) : false;
       }
       if (filterType === 'Draft Delayed') {
         if (ev.type !== 'Draft') return false;
-        const expected = ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date;
+        const expected = ev.draftDateStr || (ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date);
         return expected ? isDraftDelayed(expected, ev.dateStr, todayStr) : false;
       }
 
@@ -1289,8 +1321,24 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                   };
 
                   const renderDraftsSection = () => {
-                    const d1Status = getMilestoneStatus(r.draft_expected_date, draft1UploadedAt, isDraft1, todayStr);
-                    const d2Status = getMilestoneStatus(r.re_draft_expected_date, draft2UploadedAt, isDraft2, todayStr);
+                    const matchingInf = activeInfluencers.find(
+                      inf => String(inf.id) === String(r.influencer_id) || 
+                             (inf.name && influencerUsername && inf.name.toLowerCase() === influencerUsername.toLowerCase()) ||
+                             (inf.code && influencerUsername && inf.code.toLowerCase() === influencerUsername.toLowerCase())
+                    );
+                    const getCanonicalDraft = (vNum: number, fallback?: string | null) => {
+                      if (matchingInf?.postDates) {
+                        const pd = matchingInf.postDates.find(p => Number(p.video_number) === vNum) || matchingInf.postDates[vNum - 1];
+                        if (pd?.draft_date) return parseDateOnly(pd.draft_date, 2026);
+                        if (pd?.post_date) return calculateDraftDate(parseDateOnly(pd.post_date, 2026), 2026);
+                      }
+                      return fallback || '';
+                    };
+
+                    const d1Expected = getCanonicalDraft(1, r.draft_expected_date);
+                    const d2Expected = getCanonicalDraft(2, r.re_draft_expected_date);
+                    const d1Status = getMilestoneStatus(d1Expected, draft1UploadedAt, isDraft1, todayStr);
+                    const d2Status = getMilestoneStatus(d2Expected, draft2UploadedAt, isDraft2, todayStr);
 
                     const getStatusColor = (statusVal: 'Pending' | 'On Time' | 'Delayed') => {
                       if (statusVal === 'On Time') return 'text-green-400';

@@ -769,6 +769,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
         await loadInfluencers();
         notifyInfluencerChange(campaignId);
+        notifyPostDateChange(campaignId);
 
         // Non-blocking activity logging
         (async () => {
@@ -1126,6 +1127,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
       await loadInfluencers();
       notifyInfluencerChange(campaignId);
+      notifyPostDateChange(campaignId);
 
       // Non-blocking activity logging
       (async () => {
@@ -1251,6 +1253,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
       await loadInfluencers();
       notifyInfluencerChange(campaignId);
+      notifyPostDateChange(campaignId);
 
       // Non-blocking activity logging
       logActivity(

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, InfluencerPricing, InfluencerProduct, InfluencerBrandPerformance, InfluencerPostDate } from '../../types';
 import { Save, X, Plus, Upload, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
-import { useCampaignInfluencers, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
+import { useCampaignInfluencers, notifyInfluencerChange, notifyPostDateChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -1303,6 +1303,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         }
         toast.success(initialData?.id ? 'Influencer updated successfully!' : 'Influencer saved successfully!');
         notifyInfluencerChange(campaign.id);
+        notifyPostDateChange(campaign.id);
         await onBack();
       }
     } catch (err: any) {
