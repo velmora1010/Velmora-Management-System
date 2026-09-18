@@ -6,6 +6,7 @@ import {
   syncSingleShipment,
   syncAllShipments,
   normalizeTrackingStatus,
+  resolveDelhiveryCategory,
   getCourierTrackingUrl,
   getTrackingStatusBadgeStyle,
   getTrackingCache,
@@ -81,6 +82,9 @@ const STATUS_PILLS: TrackingStatusCategory[] = [
   'Expired'
 ];
 
+export const getShipmentCategory = (s: InfluencerDispatchedShipment): TrackingStatusCategory => {
+  return s.statusCategory || resolveDelhiveryCategory(s.status, s.rawStatus);
+};
 
 export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   campaign,
@@ -349,14 +353,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     let expired = 0;
 
     for (const s of allShipments) {
-      if (s.status === 'In Transit') inTransit++;
-      else if (s.status === 'Out for Delivery') outForDelivery++;
-      else if (s.status === 'Delivered') delivered++;
-      else if (s.status === 'Exception') exception++;
-      else if (s.status === 'Failed Attempt') failedAttempt++;
-      else if (s.status === 'Pending') pending++;
-      else if (s.status === 'Info Received') infoReceived++;
-      else if (s.status === 'Expired') expired++;
+      const cat = getShipmentCategory(s);
+      if (cat === 'In Transit') inTransit++;
+      else if (cat === 'Out for Delivery') outForDelivery++;
+      else if (cat === 'Delivered') delivered++;
+      else if (cat === 'Exception') exception++;
+      else if (cat === 'Failed Attempt') failedAttempt++;
+      else if (cat === 'Pending') pending++;
+      else if (cat === 'Info Received') infoReceived++;
+      else if (cat === 'Expired') expired++;
     }
 
     return {
@@ -414,13 +419,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       }
 
       // 3. Status Tab filter (pills)
-      if (selectedStatusTab !== 'All' && s.status !== selectedStatusTab) {
-        return false;
+      if (selectedStatusTab !== 'All') {
+        const cat = getShipmentCategory(s);
+        if (cat !== selectedStatusTab) {
+          return false;
+        }
       }
 
       // 4. Status Dropdown filter
-      if (selectedStatusDropdown !== 'All' && s.status !== selectedStatusDropdown) {
-        return false;
+      if (selectedStatusDropdown !== 'All') {
+        const cat = getShipmentCategory(s);
+        if (cat !== selectedStatusDropdown && s.status !== selectedStatusDropdown) {
+          return false;
+        }
       }
 
       // 5. Date Range filter (matches dispatchDate)
@@ -577,7 +588,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     let count = 0;
     const seen = new Set<string>();
     for (const s of allShipments) {
-      if (s.status === 'Delivered') {
+      if (getShipmentCategory(s) === 'Delivered') {
         const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
         if (matchedInfluencer) {
           const infId = String(matchedInfluencer.id);
@@ -593,8 +604,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Move single delivered shipment to Status Tracking
   const handleMoveToStatusTracking = async (shipment: InfluencerDispatchedShipment) => {
-    if (shipment.status !== 'Delivered') {
-      toast.error(`Shipment status is ${shipment.status}. Only Delivered shipments qualify for Status Tracking.`);
+    if (getShipmentCategory(shipment) !== 'Delivered') {
+      toast.error(`Shipment status is "${shipment.status}". Only Delivered shipments qualify for Status Tracking.`);
       return;
     }
 
@@ -640,7 +651,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Bulk move all eligible delivered shipments to Status Tracking
   const handleBulkMoveToStatusTracking = async () => {
-    const delivered = allShipments.filter(s => s.status === 'Delivered');
+    const delivered = allShipments.filter(s => getShipmentCategory(s) === 'Delivered');
     if (delivered.length === 0) {
       toast.error('No Delivered shipments found.');
       return;
@@ -1152,7 +1163,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                             </button>
 
                             {(() => {
-                              const isDelivered = s.status === 'Delivered';
+                              const isDelivered = getShipmentCategory(s) === 'Delivered';
                               const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
                               const isAlreadyAdded = matchedInfluencer && existingStatusInfluencerIds.has(String(matchedInfluencer.id));
                               const isMoving = movingShipmentId === s.id;
@@ -1412,11 +1423,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
                 <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4">
                   {(() => {
-                    const st = activeTrackingModalShipment.status;
-                    const isDelivered = st === 'Delivered';
-                    const isOut = isDelivered || st === 'Out for Delivery';
-                    const isTransit = isOut || st === 'In Transit';
-                    const isPicked = isTransit || st === 'Info Received';
+                    const cat = getShipmentCategory(activeTrackingModalShipment);
+                    const isDelivered = cat === 'Delivered';
+                    const isOut = isDelivered || cat === 'Out for Delivery';
+                    const isTransit = isOut || cat === 'In Transit';
+                    const isPicked = isTransit || cat === 'Info Received';
 
                     const steps = [
                       { label: 'Dispatch Created', done: true, current: !isPicked },

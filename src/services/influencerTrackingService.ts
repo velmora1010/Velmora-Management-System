@@ -34,8 +34,13 @@ export interface InfluencerDispatchedShipment {
   courier: string;
   dispatchDate: string;
   expectedDeliveryDate: string;
-  status: TrackingStatusCategory;
+  status: string;
+  statusCategory?: TrackingStatusCategory;
   rawStatus: string;
+  remarks?: string;
+  pendingRemarks?: string;
+  currentStatus?: string;
+  statusType?: string;
   statusSource?: 'Live ST Courier Tracking' | 'Uploaded Delhivery File' | string;
   sourceType?: 'LIVE_API' | 'UPLOADED_FILE';
   lastLocation?: string;
@@ -46,7 +51,8 @@ export interface InfluencerDispatchedShipment {
 }
 
 export interface TrackingCacheEntry {
-  status: TrackingStatusCategory;
+  status: string;
+  statusCategory?: TrackingStatusCategory;
   rawStatus: string;
   statusSource?: 'Live ST Courier Tracking' | 'Uploaded Delhivery File' | string;
   sourceType?: 'LIVE_API' | 'UPLOADED_FILE';
@@ -75,7 +81,7 @@ export function normalizeTrackingStatus(statusText?: string, error?: string): Tr
   if (s.includes('in transit') || s.includes('transit') || s.includes('forwarded') || s.includes('arrived')) {
     return 'In Transit';
   }
-  if (s.includes('delivered')) {
+  if (s.includes('delivered') && !s.includes('undelivered')) {
     return 'Delivered';
   }
   if (s.includes('failed')) {
@@ -102,92 +108,167 @@ export function normalizeTrackingStatus(statusText?: string, error?: string): Tr
   return 'Pending';
 }
 
+export interface DelhiveryStatusInput {
+  remarks?: string | null;
+  pendingRemarks?: string | null;
+  currentStatus?: string | null;
+  statusType?: string | null;
+  rawStatus?: string | null;
+  status?: string | null;
+}
+
 /**
- * Normalizes uploaded Delhivery status (Status Type and Current Status) into standard Tracking Status categories.
- * Note: Delhivery does not use external API/bot tracking; the uploaded file status is the source of truth.
+ * Resolves the display status for Delhivery shipments based on strict priority order:
+ * 1. Remarks (trimmed, non-empty)
+ * 2. Pending / Returned Remarks (when Remarks is empty)
+ * 3. Current Status (as fallback when no usable remark exists)
+ * 4. Status Type (as final fallback)
+ * 5. rawStatus / status (if already populated)
+ * 6. "Unknown" (if all are empty)
  */
-export function normalizeDelhiveryStatus(currentStatus?: string, statusType?: string): TrackingStatusCategory {
-  const cur = (currentStatus || '').toLowerCase().trim();
-  const type = (statusType || '').toLowerCase().trim();
-
-  // 1. Delivered
-  if (cur.includes('delivered') || type.includes('delivered')) {
-    return 'Delivered';
+export function resolveDelhiveryDisplayStatus(input?: DelhiveryStatusInput | string | null): string {
+  if (!input) return 'Unknown';
+  if (typeof input === 'string') {
+    const s = input.trim();
+    return s || 'Unknown';
   }
 
-  // 2. Out for delivery
-  if (cur.includes('out for delivery') || cur.includes('out_for_delivery') || type.includes('out for delivery')) {
-    return 'Out for Delivery';
+  // 1. Remarks (trimmed, non-empty)
+  const remarks = (input.remarks || '').trim();
+  if (remarks && remarks !== '-' && remarks.toLowerCase() !== 'null' && remarks.toLowerCase() !== 'undefined') {
+    return remarks;
   }
 
-  // 3. Failed Attempt
+  // 2. Pending / Returned Remarks (when Remarks is empty)
+  const pendingRemarks = (input.pendingRemarks || '').trim();
+  if (pendingRemarks && pendingRemarks !== '-' && pendingRemarks.toLowerCase() !== 'null' && pendingRemarks.toLowerCase() !== 'undefined') {
+    return pendingRemarks;
+  }
+
+  // 3. Current Status as fallback
+  const currentStatus = (input.currentStatus || '').trim();
+  if (currentStatus && currentStatus !== '-' && currentStatus.toLowerCase() !== 'null' && currentStatus.toLowerCase() !== 'undefined') {
+    return currentStatus;
+  }
+
+  // 4. Status Type as final fallback
+  const statusType = (input.statusType || '').trim();
+  if (statusType && statusType !== '-' && statusType.toLowerCase() !== 'null' && statusType.toLowerCase() !== 'undefined') {
+    return statusType;
+  }
+
+  // Fallback to existing rawStatus or status
+  const fallback = (input.rawStatus || input.status || '').trim();
+  if (fallback && fallback !== '-' && fallback.toLowerCase() !== 'null' && fallback.toLowerCase() !== 'undefined') {
+    return fallback;
+  }
+
+  return 'Unknown';
+}
+
+/**
+ * Normalizes any courier status or remark to one of the 8 canonical TrackingStatusCategory values:
+ * 'All' | 'Exception' | 'Failed Attempt' | 'Pending' | 'In Transit' | 'Delivered' | 'Out for Delivery' | 'Info Received' | 'Expired'
+ */
+export function resolveDelhiveryCategory(
+  displayStatus?: string | null,
+  currentStatus?: string | null,
+  statusType?: string | null
+): TrackingStatusCategory {
+  const combined = `${displayStatus || ''} ${currentStatus || ''} ${statusType || ''}`.toLowerCase().trim();
+  if (!combined) return 'Pending';
+
+  const isUndelivered = combined.includes('undelivered');
+
+  // 1. Exception / RTO / Returned / Cancelled / Lost / Damaged / Held / Rejected
   if (
-    cur.includes('attempt failed') || 
-    cur.includes('undelivered - attempt') || 
-    cur.includes('attempt') ||
-    cur.includes('customer not available') || 
-    cur.includes('failed attempt')
-  ) {
-    return 'Failed Attempt';
-  }
-
-  // 4. In Transit
-  if (
-    cur.includes('shipped') || 
-    cur.includes('in transit') || 
-    cur.includes('transit') || 
-    cur.includes('bagging') || 
-    cur.includes('reach') || 
-    cur.includes('forwarded') ||
-    cur.includes('hub') ||
-    cur.includes('center') ||
-    cur.includes('dispatched') ||
-    type.includes('transit') ||
-    type.includes('shipped')
-  ) {
-    return 'In Transit';
-  }
-
-  // 5. Exception / RTO / Returned / Cancelled / Lost / Damaged
-  if (
-    cur.includes('rto') || 
-    cur.includes('return to origin') ||
-    cur.includes('return') || 
-    cur.includes('cancelled') || 
-    cur.includes('canceled') || 
-    cur.includes('lost') || 
-    cur.includes('damaged') || 
-    cur.includes('exception') ||
-    type.includes('rto') ||
-    type.includes('return') ||
-    type.includes('cancelled') ||
-    type.includes('canceled')
+    combined.includes('rto') ||
+    combined.includes('return to origin') ||
+    combined.includes('return') ||
+    combined.includes('cancelled') ||
+    combined.includes('canceled') ||
+    combined.includes('lost') ||
+    combined.includes('damaged') ||
+    combined.includes('exception') ||
+    combined.includes('held') ||
+    combined.includes('rejected')
   ) {
     return 'Exception';
   }
 
-  // 6. Info Received / Manifest / Pickup pending
+  // 2. Failed Attempt
   if (
-    cur.includes('manifest') || 
-    cur.includes('pickup pending') || 
-    cur.includes('pickup scheduled') || 
-    cur.includes('info received') || 
-    cur.includes('booked')
+    combined.includes('attempt failed') ||
+    combined.includes('failed attempt') ||
+    combined.includes('customer not available') ||
+    combined.includes('door locked') ||
+    combined.includes('door closed') ||
+    combined.includes('attempted') ||
+    (isUndelivered && combined.includes('attempt'))
+  ) {
+    return 'Failed Attempt';
+  }
+
+  // 3. Delivered (CRITICAL: NEVER match if 'undelivered' is present!)
+  if (!isUndelivered && (combined.includes('delivered') || combined.includes('dlvd'))) {
+    return 'Delivered';
+  }
+
+  // 4. Out for Delivery
+  if (combined.includes('out for delivery') || combined.includes('out_for_delivery')) {
+    return 'Out for Delivery';
+  }
+
+  // 5. In Transit
+  if (
+    combined.includes('in transit') ||
+    combined.includes('transit') ||
+    combined.includes('shipped') ||
+    combined.includes('forwarded') ||
+    combined.includes('bagging') ||
+    combined.includes('reached') ||
+    combined.includes('hub') ||
+    combined.includes('center') ||
+    combined.includes('dispatched')
+  ) {
+    return 'In Transit';
+  }
+
+  // 6. Info Received / Manifest / Booked
+  if (
+    combined.includes('manifest') ||
+    combined.includes('info received') ||
+    combined.includes('booked') ||
+    combined.includes('shipment created')
   ) {
     return 'Info Received';
   }
 
   // 7. Expired
-  if (cur.includes('expired') || type.includes('expired')) {
+  if (combined.includes('expired')) {
     return 'Expired';
   }
 
-  // 8. Pending
-  if (cur.includes('pending') || type.includes('pending') || cur.includes('undelivered')) {
+  // 8. Pending (Pickup, Out for Pickup, Ready for Pickup, Undelivered, Pending, or any other non-delivered state)
+  if (
+    combined.includes('pickup') ||
+    combined.includes('pick up') ||
+    combined.includes('out for pickup') ||
+    combined.includes('ready_for_pickup') ||
+    combined.includes('pending') ||
+    isUndelivered
+  ) {
     return 'Pending';
   }
 
-  return normalizeTrackingStatus(currentStatus || statusType || 'Pending');
+  return 'Pending';
+}
+
+/**
+ * Normalizes uploaded Delhivery status into standard Tracking Status categories.
+ */
+export function normalizeDelhiveryStatus(currentStatus?: string, statusType?: string): TrackingStatusCategory {
+  return resolveDelhiveryCategory(undefined, currentStatus, statusType);
 }
 
 /**
@@ -224,15 +305,16 @@ export function getCourierTrackingUrl(courier: string, awb: string): string | nu
 }
 
 /**
- * Returns color classes for the status badge based on category.
+ * Returns color classes for the status badge based on courier status or category.
  */
-export function getTrackingStatusBadgeStyle(status: TrackingStatusCategory): {
+export function getTrackingStatusBadgeStyle(status?: TrackingStatusCategory | string): {
   bg: string;
   text: string;
   border: string;
   dot: string;
 } {
-  switch (status) {
+  const category = resolveDelhiveryCategory(status);
+  switch (category) {
     case 'Delivered':
       return {
         bg: 'bg-emerald-950/60',
@@ -394,15 +476,33 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
   const isDelhivery = (row.courier || '').toLowerCase().includes('delhivery');
   const isSTCourier = (row.courier || '').toLowerCase().includes('st courier');
 
-  let normalizedStatus: TrackingStatusCategory;
-  if (row.status && [
-    'In Transit', 'Out for Delivery', 'Delivered', 'Exception', 'Failed Attempt', 'Pending', 'Info Received', 'Expired'
-  ].includes(row.status)) {
-    normalizedStatus = row.status as TrackingStatusCategory;
-  } else if (isDelhivery) {
-    normalizedStatus = normalizeDelhiveryStatus(row.raw_status || row.status);
+  let displayStatus = (row.status || '').trim();
+  let statusCategory: TrackingStatusCategory;
+
+  if (isDelhivery) {
+    // If displayStatus was previously saved as 'Delivered' due to the old 'undelivered' bug,
+    // or if empty, resolve display status properly.
+    if (!displayStatus || (displayStatus.toLowerCase() === 'delivered' && (row.raw_status || '').toLowerCase().includes('undelivered'))) {
+      displayStatus = resolveDelhiveryDisplayStatus({
+        remarks: row.remarks,
+        pendingRemarks: row.pending_remarks,
+        currentStatus: row.current_status,
+        statusType: row.status_type || row.raw_status,
+        rawStatus: row.raw_status
+      });
+    }
+    statusCategory = resolveDelhiveryCategory(displayStatus, row.current_status, row.status_type || row.raw_status);
   } else {
-    normalizedStatus = normalizeTrackingStatus(row.raw_status || row.status);
+    if (displayStatus && [
+      'In Transit', 'Out for Delivery', 'Delivered', 'Exception', 'Failed Attempt', 'Pending', 'Info Received', 'Expired'
+    ].includes(displayStatus)) {
+      statusCategory = displayStatus as TrackingStatusCategory;
+    } else {
+      statusCategory = normalizeTrackingStatus(row.raw_status || displayStatus);
+    }
+    if (!displayStatus) {
+      displayStatus = statusCategory;
+    }
   }
 
   const statusSourceDisplay = isDelhivery
@@ -428,8 +528,13 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
     courier: row.courier || (isDelhivery ? 'Delhivery' : 'ST Courier'),
     dispatchDate: row.dispatch_date || '',
     expectedDeliveryDate: row.expected_delivery_date || '',
-    status: normalizedStatus,
+    status: displayStatus,
+    statusCategory: statusCategory,
     rawStatus: row.raw_status || row.status || 'In Transit',
+    remarks: row.remarks || undefined,
+    pendingRemarks: row.pending_remarks || undefined,
+    currentStatus: row.current_status || undefined,
+    statusType: row.status_type || undefined,
     statusSource: statusSourceDisplay,
     sourceType: row.source_type || (isDelhivery ? 'UPLOADED_FILE' : 'LIVE_API'),
     lastLocation: row.last_location || undefined,

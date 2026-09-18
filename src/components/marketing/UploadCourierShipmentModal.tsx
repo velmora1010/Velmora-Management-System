@@ -18,6 +18,8 @@ import {
   syncSingleShipment,
   normalizeDelhiveryStatus,
   normalizeTrackingStatus,
+  resolveDelhiveryDisplayStatus,
+  resolveDelhiveryCategory,
   upsertCampaignShipments,
   upsertCampaignShipmentsToDb,
   getCampaignShipments,
@@ -172,6 +174,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       let cityCol: string | null = null;
       let stateCol: string | null = null;
       let pinCol: string | null = null;
+      let remarksCol: string | null = null;
+      let pendingRemarksCol: string | null = null;
 
       if (courier === 'ST Courier') {
         awbCol = findColumnKey(headers, ['trackingnumber', 'trackingno', 'trackingid', 'tracking', 'awbnumber', 'awb']);
@@ -202,6 +206,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         consigneeNameCol = findColumnKey(headers, ['consigneename', 'creatorname', 'influencername', 'customername', 'name', 'recipient']);
         currentStatusCol = findColumnKey(headers, ['currentstatus', 'status', 'shipmentstatus']);
         statusTypeCol = findColumnKey(headers, ['statustype', 'type', 'shipmenttype']);
+        remarksCol = findColumnKey(headers, ['remarks', 'remark', 'delhiveryremarks', 'courierremarks']);
+        pendingRemarksCol = findColumnKey(headers, ['pendingreturnedremarks', 'pendingreturnedremark', 'pendingremarks', 'returnedremarks']);
         dateCol = findColumnKey(headers, ['pickupdate', 'dispatchdate', 'bookingdate', 'firstbaggingdate', 'date']);
         eddCol = findColumnKey(headers, ['delivereddate', 'deliverydate', 'estimateddeliverydate', 'promiseddeliverydate', 'edd']);
         cityCol = findColumnKey(headers, ['city', 'destinationcity']);
@@ -241,6 +247,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         consigneeName: string;
         currentStatus: string;
         statusType: string;
+        remarks: string;
+        pendingRemarks: string;
         weight: string;
         date: string;
         edd: string;
@@ -257,6 +265,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const rawConsigneeName = consigneeNameCol ? cleanStr(row[consigneeNameCol]) : '';
         const rawCurrentStatus = currentStatusCol ? cleanStr(row[currentStatusCol]) : '';
         const rawStatusType = statusTypeCol ? cleanStr(row[statusTypeCol]) : '';
+        const rawRemarks = remarksCol ? cleanStr(row[remarksCol]) : '';
+        const rawPendingRemarks = pendingRemarksCol ? cleanStr(row[pendingRemarksCol]) : '';
         const rawWeight = weightCol ? cleanStr(row[weightCol]) : '';
         const rawDate = dateCol ? cleanStr(row[dateCol]) : '';
         const rawEdd = eddCol ? cleanStr(row[eddCol]) : '';
@@ -314,6 +324,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           consigneeName: rawConsigneeName,
           currentStatus: rawCurrentStatus,
           statusType: rawStatusType,
+          remarks: rawRemarks,
+          pendingRemarks: rawPendingRemarks,
           weight: rawWeight,
           date: rawDate,
           edd: rawEdd,
@@ -504,8 +516,15 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           const awb = row.rawAwb.trim();
           const orderId = row.orderId || (inf ? inf.code : undefined) || '';
 
-          const normalized = normalizeDelhiveryStatus(row.currentStatus, row.statusType);
-          const rawStatus = row.currentStatus || row.statusType || 'DELIVERED';
+          const displayStatus = resolveDelhiveryDisplayStatus({
+            remarks: row.remarks,
+            pendingRemarks: row.pendingRemarks,
+            currentStatus: row.currentStatus,
+            statusType: row.statusType,
+            rawStatus: row.currentStatus || row.statusType
+          });
+          const statusCategory = resolveDelhiveryCategory(displayStatus, row.currentStatus, row.statusType);
+          const rawStatus = row.remarks || row.pendingRemarks || row.currentStatus || row.statusType || displayStatus;
 
           const shipmentObj: InfluencerDispatchedShipment = {
             id: inf ? (inf.dispatchDetails?.id || String(inf.id)) : `del-${awb}`,
@@ -525,8 +544,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             courier: 'Delhivery',
             dispatchDate: row.date || todayDate,
             expectedDeliveryDate: row.edd || '',
-            status: normalized,
+            status: displayStatus,
+            statusCategory,
             rawStatus,
+            remarks: row.remarks || undefined,
+            pendingRemarks: row.pendingRemarks || undefined,
+            currentStatus: row.currentStatus || undefined,
+            statusType: row.statusType || undefined,
             statusSource: 'Uploaded Delhivery File',
             sourceType: 'UPLOADED_FILE',
             lastSyncedAt: nowTimestamp,
@@ -540,7 +564,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             await db.shipments.put({
               awb,
               orderId: orderId || awb,
-              status: rawStatus,
+              status: displayStatus,
               state: row.state || 'Unknown',
               lastLocation: '-',
               trackingDateTime: '-',
