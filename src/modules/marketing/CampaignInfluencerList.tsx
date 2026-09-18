@@ -11,6 +11,7 @@ import { InfluencerActionMenu } from '../../components/marketing/InfluencerActio
 import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType, isInfluencerDispatched } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, calculateDraftDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination, isVideoLabel, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
+import { getCanonicalInfluencerPostDates } from '../../utils/influencerDateUtils';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
@@ -570,12 +571,9 @@ City: ${influencer.city}`;
           )}
 
           {activeTab === 'postdate' && (() => {
-            const dates = (influencer.postDates || [])
-              .filter(d => d && d.post_date && String(d.post_date).trim() !== '')
-              .slice()
-              .sort((a, b) => (a.video_number || 0) - (b.video_number || 0));
+            const canonicalDates = getCanonicalInfluencerPostDates(influencer, 2026);
 
-            if (dates.length === 0) {
+            if (canonicalDates.length === 0) {
               return (
                 <div className="text-slate-400 py-3 text-sm italic">
                   No post dates scheduled.
@@ -587,10 +585,9 @@ City: ${influencer.city}`;
               <div className="space-y-3">
                 <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">POST DATE SCHEDULE</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {dates.map((d, i) => {
-                    const draftVal = d.draft_date || calculateDraftDate(d.post_date);
+                  {canonicalDates.map((d) => {
                     return (
-                      <div key={d.id || d.video_number || i} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+                      <div key={d.video_number} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
                         <div className="flex items-center justify-between mb-2">
                           <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-[11px] font-bold rounded">
                             VIDEO {d.video_number}
@@ -599,11 +596,11 @@ City: ${influencer.city}`;
                         <div className="space-y-1.5 text-xs">
                           <div className="flex items-center justify-between">
                             <span className="text-slate-400">Post Date:</span>
-                            <span className="text-slate-200 font-medium font-mono">{formatDisplayDate(d.post_date)}</span>
+                            <span className="text-slate-200 font-medium font-mono">{d.formatted_post_date}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-slate-400">Draft Date:</span>
-                            <span className="text-purple-300 font-medium font-mono">{formatDisplayDate(draftVal)}</span>
+                            <span className="text-purple-300 font-medium font-mono">{d.formatted_draft_date}</span>
                           </div>
                         </div>
                       </div>

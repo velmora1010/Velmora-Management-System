@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
 import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
+import { getCanonicalInfluencerPostDates, formatDisplayDateLocal } from '../../utils/influencerDateUtils';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
 import { getVideoWorkflow } from './CampaignStatusTracking';
 import type { Campaign, CampaignInfluencer } from '../../types';
@@ -36,6 +37,7 @@ interface CalendarEvent {
   dateStr: string;
   influencerName: string;
   influencerUsername: string;
+  influencerCode: string;
   campaignName: string;
   avatarUrl: string;
   record: StatusTrackingRecord;
@@ -46,17 +48,9 @@ interface CalendarEvent {
 }
 
 const createFallbackRecord = (inf: CampaignInfluencer, campaign: Campaign): StatusTrackingRecord => {
-  const pd1 = inf.postDates?.[0];
-  const postDate1 = pd1?.post_date ? parseDateOnly(pd1.post_date, 2026) : null;
-  const draftDate1 = pd1?.draft_date 
-    ? parseDateOnly(pd1.draft_date, 2026) 
-    : (postDate1 ? calculateDraftDate(postDate1, 2026) : null);
-
-  const pd2 = inf.postDates?.[1];
-  const postDate2 = pd2?.post_date ? parseDateOnly(pd2.post_date, 2026) : null;
-  const draftDate2 = pd2?.draft_date 
-    ? parseDateOnly(pd2.draft_date, 2026) 
-    : (postDate2 ? calculateDraftDate(postDate2, 2026) : null);
+  const canonicalDates = getCanonicalInfluencerPostDates(inf, 2026);
+  const cd1 = canonicalDates[0];
+  const cd2 = canonicalDates[1];
 
   return {
     id: `inf-${inf.id}`,
@@ -64,9 +58,9 @@ const createFallbackRecord = (inf: CampaignInfluencer, campaign: Campaign): Stat
     influencer_id: inf.id as any,
     dispatch_id: `disp-${inf.id}`,
     delivered_confirmed: false,
-    draft_expected_date: draftDate1,
-    re_draft_expected_date: draftDate2,
-    final_post_expected_date: postDate1,
+    draft_expected_date: cd1?.draft_date || null,
+    re_draft_expected_date: cd2?.draft_date || null,
+    final_post_expected_date: cd1?.post_date || null,
     draft_video_url: null,
     re_draft_video_url: null,
     final_post_completed: false,
@@ -481,10 +475,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   const events = useMemo(() => {
     const list: CalendarEvent[] = [];
 
-    // 1. Process active status tracking milestones
+    // 1. Process active status tracking milestones (Delivered and Payment ONLY)
     for (const r of activeTrackingRecords) {
       const influencerName = r.dispatch?.influencer_name || 'Unknown';
       const influencerUsername = r.dispatch?.influencer_code || '';
+      const matchingInf = activeInfluencers.find(inf => String(inf.id) === String(r.influencer_id));
+      const influencerCode = matchingInf?.code || r.dispatch?.influencer_code || '';
       const campaignName = r.dispatch?.campaign_name || campaign.campaign_name;
       const avatarUrl = r.dispatch?.influencer_avatar || '';
 
@@ -503,6 +499,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             dateStr: dDate,
             influencerName,
             influencerUsername,
+            influencerCode,
             campaignName,
             avatarUrl,
             record: r
@@ -510,124 +507,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         }
       }
 
-      let metadata: any = {};
-      try {
-        metadata = JSON.parse(r.notes || '{}');
-      } catch (e) {
-        metadata = {};
-      }
-
-      // 2. Draft 1 milestone
-      const isDraft1Completed = !!r.draft_video_url;
-      const draft1UploadedAt = metadata.draft1_uploaded_at || metadata.draft_uploaded_at;
-      if (isDraft1Completed && draft1UploadedAt) {
-        const drDate = parseDateOnly(draft1UploadedAt);
-        if (drDate) {
-          const d1Status = getMilestoneStatus(r.draft_expected_date, draft1UploadedAt, isDraft1Completed, todayStr);
-          let d1Color = 'bg-purple-500/10 border border-purple-500/30 text-purple-400';
-          if (d1Status.status === 'On Time') d1Color = 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
-          else if (d1Status.status === 'Delayed') d1Color = 'bg-rose-500/10 border border-rose-500/30 text-rose-500';
-
-          list.push({
-            id: `${r.id}-draft1`,
-            recordId: r.id,
-            type: 'Draft',
-            label: 'Draft 1 Completed',
-            icon: '🎬',
-            colorClass: d1Color,
-            dateStr: drDate,
-            influencerName,
-            influencerUsername,
-            campaignName,
-            avatarUrl,
-            record: r,
-            videoNumber: 1
-          });
-        }
-      }
-
-      // 3. Draft 2 milestone
-      const isDraft2Completed = !!r.re_draft_video_url;
-      const draft2UploadedAt = metadata.draft2_uploaded_at;
-      if (isDraft2Completed && draft2UploadedAt) {
-        const dr2Date = parseDateOnly(draft2UploadedAt);
-        if (dr2Date) {
-          const d2Status = getMilestoneStatus(r.re_draft_expected_date, draft2UploadedAt, isDraft2Completed, todayStr);
-          let d2Color = 'bg-purple-500/10 border border-purple-500/30 text-purple-400';
-          if (d2Status.status === 'On Time') d2Color = 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
-          else if (d2Status.status === 'Delayed') d2Color = 'bg-rose-500/10 border border-rose-500/30 text-rose-500';
-
-          list.push({
-            id: `${r.id}-draft2`,
-            recordId: r.id,
-            type: 'Draft',
-            label: 'Draft 2 Completed',
-            icon: '🎬',
-            colorClass: d2Color,
-            dateStr: dr2Date,
-            influencerName,
-            influencerUsername,
-            campaignName,
-            avatarUrl,
-            record: r,
-            videoNumber: 2
-          });
-        }
-      }
-
-      // 4. Video 1 Final Post milestone
-      const totalVids = (r.pricing as any)?.total_videos || 1;
-      const rawV1Link = metadata.video1_final_post_link || r.final_post_link;
-      const isV1Completed = !!(metadata.video1_confirmed || r.final_post_completed) && 
-                            !isFakeUrl(rawV1Link) && 
-                            !!(metadata.video1_posted_at || r.final_post_actual_datetime);
-      if (isV1Completed && (metadata.video1_posted_at || r.final_post_actual_datetime)) {
-        const fpDate = parseDateOnly(metadata.video1_posted_at || r.final_post_actual_datetime);
-        if (fpDate) {
-          list.push({
-            id: `${r.id}-video1-finalpost`,
-            recordId: r.id,
-            type: 'Final Post',
-            label: totalVids === 2 ? 'Video 1 Final Post' : 'Final Post',
-            icon: '🚀',
-            colorClass: 'bg-blue-500/10 border border-blue-500/30 text-blue-400',
-            dateStr: fpDate,
-            influencerName,
-            influencerUsername,
-            campaignName,
-            avatarUrl,
-            record: r,
-            videoNumber: 1
-          });
-        }
-      }
-
-      // 5. Video 2 Final Post milestone
-      const isV2Completed = !!metadata.video2_confirmed && 
-                            !isFakeUrl(metadata.video2_final_post_link) && 
-                            !!metadata.video2_posted_at;
-      if (totalVids === 2 && isV2Completed && metadata.video2_posted_at) {
-        const fpDate = parseDateOnly(metadata.video2_posted_at);
-        if (fpDate) {
-          list.push({
-            id: `${r.id}-video2-finalpost`,
-            recordId: r.id,
-            type: 'Final Post',
-            label: 'Video 2 Final Post',
-            icon: '🚀',
-            colorClass: 'bg-blue-500/10 border border-blue-500/30 text-blue-400',
-            dateStr: fpDate,
-            influencerName,
-            influencerUsername,
-            campaignName,
-            avatarUrl,
-            record: r,
-            videoNumber: 2
-          });
-        }
-      }
-
-      // 6. Payment milestone (directly from the bills module)
+      // 2. Payment milestone (directly from the bills module)
       const matchingBill = campaignBills.find(b => {
         const note = b.notes?.toLowerCase() || '';
         const s3 = b.sub_category3?.toLowerCase() || '';
@@ -678,6 +558,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             dateStr: dueDate,
             influencerName,
             influencerUsername,
+            influencerCode,
             campaignName,
             avatarUrl,
             record: r,
@@ -693,10 +574,13 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     for (const inf of activeInfluencers) {
       const influencerName = inf.influencer_name || inf.name || 'Unknown';
       const influencerUsername = inf.name || inf.code || '';
+      const influencerCode = inf.code || '';
       const campaignName = campaign.campaign_name;
       const avatarUrl = inf.profile_file_url || '';
-      const postDates = inf.postDates || [];
       const infId = String(inf.id);
+
+      // Single source of truth: canonical dates resolved identically to the Post Date card
+      const canonicalDates = getCanonicalInfluencerPostDates(inf, 2026);
 
       // Find matching status tracking record if available
       const matchingRecord = activeTrackingRecords.find(r => 
@@ -704,18 +588,10 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         (r.dispatch?.influencer_code && r.dispatch.influencer_code.toLowerCase() === influencerUsername.toLowerCase())
       ) || createFallbackRecord(inf, campaign);
 
-      for (let idx = 0; idx < postDates.length; idx++) {
-        const pd = postDates[idx];
-        const vNum = Number(pd.video_number) || (idx + 1);
-
-        // 1. Resolve canonical Draft & Post dates directly from Campaign Influencer Post Date data
-        const canonicalPostDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
-        const canonicalDraftDate = pd.draft_date 
-          ? parseDateOnly(pd.draft_date, 2026) 
-          : (canonicalPostDate ? calculateDraftDate(canonicalPostDate, 2026) : '');
-
-        const drDate = canonicalDraftDate;
-        const fpDate = canonicalPostDate;
+      for (const cd of canonicalDates) {
+        const vNum = cd.video_number;
+        const drDate = cd.draft_date;
+        const fpDate = cd.post_date;
 
         // Check for legitimate Re-Draft timeline in matching status tracking record without overriding normal dates
         let effectiveReDraftDate = '';
@@ -732,15 +608,15 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
           } catch (e) {}
         }
 
-        // Development logging for HIS1 (Requirement 23)
+        // Development logging for HIS1 (Requirement 20 & 23)
         const codeUpper = String(inf.code || influencerUsername || '').toUpperCase();
         if (codeUpper === 'HIS1' || codeUpper.includes('HIS1') || String(influencerName).toUpperCase().includes('KHANA_HI_KHANA')) {
           console.log('[CalendarDateResolver]', {
             campaignId: campaign.id,
             influencerCode: inf.code || influencerUsername,
             videoNumber: vNum,
-            canonicalDraftDate,
-            canonicalPostDate,
+            canonicalDraftDate: drDate,
+            canonicalPostDate: fpDate,
             workflowDraftDate: effectiveReDraftDate || null,
             workflowPostDate: null,
             finalResolvedDraftDate: drDate,
@@ -764,6 +640,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               dateStr: drDate,
               influencerName,
               influencerUsername,
+              influencerCode,
               campaignName,
               avatarUrl,
               record: matchingRecord,
@@ -789,6 +666,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               dateStr: fpDate,
               influencerName,
               influencerUsername,
+              influencerCode,
               campaignName,
               avatarUrl,
               record: matchingRecord,
@@ -814,6 +692,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               dateStr: effectiveReDraftDate,
               influencerName,
               influencerUsername,
+              influencerCode,
               campaignName,
               avatarUrl,
               record: matchingRecord,
@@ -901,12 +780,13 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   // Filtered Events (Month View)
   const filteredEvents = useMemo(() => {
     return events.filter(ev => {
-      // Influencer search (name or username)
+      // Influencer search (name, username, or code)
       if (searchQuery) {
         const q = searchQuery.toLowerCase().trim();
         const matchesName = ev.influencerName.toLowerCase().includes(q);
         const matchesUser = ev.influencerUsername.toLowerCase().includes(q);
-        if (!matchesName && !matchesUser) return false;
+        const matchesCode = ev.influencerCode ? ev.influencerCode.toLowerCase().includes(q) : false;
+        if (!matchesName && !matchesUser && !matchesCode) return false;
       }
 
       // Filter Type logic
@@ -1236,14 +1116,22 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
               return uniqueEvents.map((ev) => {
                 const r = ev.record;
-                const influencerName = r.dispatch?.influencer_name || 'Unknown';
-                const influencerUsername = r.dispatch?.influencer_code || '';
-                const avatarUrl = r.dispatch?.influencer_avatar || '';
-                const phone = r.dispatch?.phone_number || '';
+                const matchingInf = activeInfluencers.find(
+                  inf => String(inf.id) === String(r.influencer_id) || 
+                         (ev.influencerCode && inf.code && inf.code.toLowerCase() === ev.influencerCode.toLowerCase()) ||
+                         (inf.name && r.dispatch?.influencer_code && inf.name.toLowerCase() === r.dispatch.influencer_code.toLowerCase()) ||
+                         (inf.code && r.dispatch?.influencer_code && inf.code.toLowerCase() === r.dispatch.influencer_code.toLowerCase())
+                );
+                const influencerName = matchingInf?.name || matchingInf?.influencer_name || r.dispatch?.influencer_name || ev.influencerName || 'Unknown';
+                const influencerCode = matchingInf?.code || ev.influencerCode || '';
+                const influencerUsername = (matchingInf as any)?.user_name || r.dispatch?.influencer_code || ev.influencerUsername || '';
+                const avatarUrl = matchingInf?.profile_file_url || r.dispatch?.influencer_avatar || ev.avatarUrl || '';
+                const phone = r.dispatch?.phone_number || matchingInf?.phone_number || '';
                 const courier = r.dispatch?.courier_partner || 'N/A';
                 const trackingId = r.dispatch?.tracking_id || 'N/A';
                 
                 const plats = influencerPlatforms[r.influencer_id] || [];
+                const canonicalList = matchingInf ? getCanonicalInfluencerPostDates(matchingInf, 2026) : [];
                 
                 // Milestone completion states
                 let metadata: any = {};
@@ -1256,7 +1144,10 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                   const draft1UploadedAt = metadata.draft1_uploaded_at || metadata.draft_uploaded_at;
                   const draft2UploadedAt = metadata.draft2_uploaded_at;
 
-                  const totalVideos = (r.pricing as any)?.total_videos || 1;
+                  const totalVideos = Math.max(
+                    (r.pricing as any)?.total_videos || 1,
+                    canonicalList.length
+                  );
                   const rawV1Link = metadata.video1_final_post_link || r.final_post_link;
                   const isVideo1FinalPostCompleted = !!(metadata.video1_confirmed || r.final_post_completed) && 
                                                      !isFakeUrl(rawV1Link) && 
@@ -1321,23 +1212,19 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                   };
 
                   const renderDraftsSection = () => {
-                    const matchingInf = activeInfluencers.find(
-                      inf => String(inf.id) === String(r.influencer_id) || 
-                             (inf.name && influencerUsername && inf.name.toLowerCase() === influencerUsername.toLowerCase()) ||
-                             (inf.code && influencerUsername && inf.code.toLowerCase() === influencerUsername.toLowerCase())
-                    );
-                    const getCanonicalDraft = (vNum: number, fallback?: string | null) => {
-                      if (matchingInf?.postDates) {
-                        const pd = matchingInf.postDates.find(p => Number(p.video_number) === vNum) || matchingInf.postDates[vNum - 1];
-                        if (pd?.draft_date) return parseDateOnly(pd.draft_date, 2026);
-                        if (pd?.post_date) return calculateDraftDate(parseDateOnly(pd.post_date, 2026), 2026);
-                      }
-                      return fallback || '';
-                    };
+                    const videoMatch = ev.label.match(/(?:Video|Draft)\s*(\d+)/i);
+                    const eventVidNum = ev.videoNumber || (videoMatch ? parseInt(videoMatch[1], 10) : 1);
+                    const isHigherVideo = eventVidNum > 2;
 
-                    const d1Expected = getCanonicalDraft(1, r.draft_expected_date);
-                    const d2Expected = getCanonicalDraft(2, r.re_draft_expected_date);
+                    const v1Num = isHigherVideo ? eventVidNum : 1;
+                    const v2Num = isHigherVideo ? null : 2;
+
+                    const d1Item = canonicalList.find(p => p.video_number === v1Num);
+                    const d1Expected = d1Item?.draft_date || (v1Num === 1 ? r.draft_expected_date : '') || '';
                     const d1Status = getMilestoneStatus(d1Expected, draft1UploadedAt, isDraft1, todayStr);
+
+                    const d2Item = v2Num ? canonicalList.find(p => p.video_number === v2Num) : null;
+                    const d2Expected = d2Item?.draft_date || r.re_draft_expected_date || '';
                     const d2Status = getMilestoneStatus(d2Expected, draft2UploadedAt, isDraft2, todayStr);
 
                     const getStatusColor = (statusVal: 'Pending' | 'On Time' | 'Delayed') => {
@@ -1353,17 +1240,23 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                         </div>
                         <div className="flex flex-col gap-1.5 mt-1">
                           <div className="flex items-center justify-between text-[10px] leading-none">
-                            <span className="text-slate-400 font-medium">Draft 1</span>
+                            <span className="text-slate-400 font-medium">Draft {v1Num}</span>
                             <span className={`font-black truncate max-w-[80px] ${getStatusColor(d1Status.status)}`} title={d1Status.badgeText}>
                               {d1Status.badgeText}
                             </span>
                           </div>
-                          <div className="flex items-center justify-between text-[10px] leading-none">
-                            <span className="text-slate-400 font-medium">Draft 2</span>
-                            <span className={`font-black truncate max-w-[80px] ${getStatusColor(d2Status.status)}`} title={d2Status.badgeText}>
-                              {d2Status.badgeText}
-                            </span>
-                          </div>
+                          {totalVideos >= 2 && !isHigherVideo ? (
+                            <div className="flex items-center justify-between text-[10px] leading-none">
+                              <span className="text-slate-400 font-medium">Draft 2</span>
+                              <span className={`font-black truncate max-w-[80px] ${getStatusColor(d2Status.status)}`} title={d2Status.badgeText}>
+                                {d2Status.badgeText}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="text-[9px] text-slate-500 italic leading-none truncate">
+                              {isHigherVideo ? `Draft ${v1Num} Milestone` : '1 Video Campaign'}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1429,8 +1322,25 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                   };
 
                   const renderFinalPostsSection = () => {
-                    const v1DateCompact = metadata.video1_posted_at ? formatCalendarUploadDateCompact(metadata.video1_posted_at) : '';
+                    const videoMatch = ev.label.match(/(?:Video|Draft)\s*(\d+)/i);
+                    const eventVidNum = ev.videoNumber || (videoMatch ? parseInt(videoMatch[1], 10) : 1);
+                    const isHigherVideo = eventVidNum > 2;
+
+                    const v1Num = isHigherVideo ? eventVidNum : 1;
+                    const v2Num = isHigherVideo ? null : 2;
+
+                    const v1Item = canonicalList.find(p => p.video_number === v1Num);
+                    const v1DateCompact = metadata[`video${v1Num}_posted_at`] 
+                      ? formatCalendarUploadDateCompact(metadata[`video${v1Num}_posted_at`]) 
+                      : (v1Num === 1 && metadata.video1_posted_at ? formatCalendarUploadDateCompact(metadata.video1_posted_at) : '');
+                    
+                    const isV1Done = v1Num === 1 
+                      ? isVideo1FinalPostCompleted 
+                      : !!(metadata[`video${v1Num}_confirmed`] && metadata[`video${v1Num}_posted_at`]);
+
+                    const v2Item = v2Num ? canonicalList.find(p => p.video_number === v2Num) : null;
                     const v2DateCompact = metadata.video2_posted_at ? formatCalendarUploadDateCompact(metadata.video2_posted_at) : '';
+
                     return (
                       <div className="bg-[#151923]/60 border border-slate-800/85 rounded-xl p-2.5 flex flex-col justify-between select-none shadow-sm h-[75px] min-w-0">
                         <div className="flex items-center gap-1 text-[9px] font-black text-slate-500 uppercase tracking-wider leading-none">
@@ -1438,20 +1348,22 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                         </div>
                         <div className="flex flex-col gap-1.5 mt-1">
                           <div className="flex items-center justify-between text-[10px] leading-none">
-                            <span className="text-slate-400 font-medium">Video 1</span>
-                            <span className={`font-black ${isVideo1FinalPostCompleted ? 'text-green-400' : 'text-slate-500'}`}>
-                              {isVideo1FinalPostCompleted ? `✓ ${v1DateCompact}` : 'Pending'}
+                            <span className="text-slate-400 font-medium">Video {v1Num}</span>
+                            <span className={`font-black ${isV1Done ? 'text-green-400' : 'text-slate-500'}`}>
+                              {isV1Done ? `✓ ${v1DateCompact}` : (v1Item?.post_date ? formatTimelineDate(v1Item.post_date) : 'Pending')}
                             </span>
                           </div>
-                          {totalVideos === 2 ? (
+                          {totalVideos >= 2 && !isHigherVideo ? (
                             <div className="flex items-center justify-between text-[10px] leading-none">
                               <span className="text-slate-400 font-medium">Video 2</span>
                               <span className={`font-black ${isVideo2FinalPostCompleted ? 'text-green-400' : 'text-slate-500'}`}>
-                                {isVideo2FinalPostCompleted ? `✓ ${v2DateCompact}` : 'Pending'}
+                                {isVideo2FinalPostCompleted ? `✓ ${v2DateCompact}` : (v2Item?.post_date ? formatTimelineDate(v2Item.post_date) : 'Pending')}
                               </span>
                             </div>
                           ) : (
-                            <div className="text-[9px] text-slate-500 italic leading-none truncate">1 Video Campaign</div>
+                            <div className="text-[9px] text-slate-500 italic leading-none truncate">
+                              {isHigherVideo ? `Video ${v1Num} Milestone` : '1 Video Campaign'}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1474,7 +1386,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                         )}
                       </div>
                       <div className="min-w-0 flex flex-col gap-0.5">
-                        <h4 className="font-extrabold text-slate-100 truncate text-sm leading-snug">{influencerName}</h4>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-extrabold text-slate-100 truncate text-sm leading-snug">{influencerName}</h4>
+                          {influencerCode && (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-600/70 text-[10px] font-black text-purple-300 font-mono shrink-0">
+                              {influencerCode}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2">
                           {influencerUsername && (
                             <p className="text-[10px] text-slate-400 font-mono truncate">@{influencerUsername}</p>
@@ -1698,7 +1617,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         </div>
 
         {/* Monthly Calendar View */}
-        <div className="flex-1 bg-slate-950/40 border border-slate-700 rounded-xl overflow-hidden flex flex-col">
+        <div className="flex-1 bg-slate-950/40 border border-slate-700 rounded-xl overflow-y-auto flex flex-col min-h-0">
           
           {/* Calendar month selector header */}
           <div className="flex justify-between items-center p-4 bg-slate-800/60 border-b border-slate-700 shrink-0">
@@ -1745,7 +1664,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
           </div>
 
           {/* Grid Layout (7 headers + month days) */}
-          <div className="flex-1 flex flex-col min-h-[500px]">
+          <div className="flex-1 flex flex-col min-h-[560px]">
             {/* Headers row */}
             <div className="grid grid-cols-7 border-b border-slate-800 bg-slate-800/30 shrink-0 select-none">
               {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(w => (
@@ -1758,7 +1677,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             {/* Days Grid Container */}
             <div 
               key={monthChangeTrigger}
-              className="flex-1 grid grid-cols-7 auto-rows-fr bg-slate-950/20 divide-x divide-y divide-slate-800/60 animate-fade-in"
+              className="flex-1 grid grid-cols-7 auto-rows-fr bg-slate-950/20 divide-x divide-y divide-slate-800/60 animate-fade-in min-h-[560px]"
             >
               {daysGrid.map((day, idx) => {
                 const dayEvents = day.isCurrentMonth ? (eventsByDate[day.dateStr] || []) : [];
@@ -1855,8 +1774,10 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                     {/* Events List inside Cell (No Inner Scrollbars) */}
                     <div className="flex-1 space-y-1.5 overflow-hidden">
                       {visibleEvents.map((ev) => {
+                        const codeBadge = ev.influencerCode ? `${ev.influencerCode}` : '';
                         const rawUsername = ev.influencerUsername || ev.influencerName || 'Inf';
                         const formattedUsername = rawUsername.startsWith('@') ? rawUsername : `@${rawUsername}`;
+                        const displayLabel = codeBadge ? `${codeBadge} ${formattedUsername}` : formattedUsername;
 
                         let badgeStyle = 'bg-[#3b154c]/70 text-purple-200 border-purple-500/30 hover:bg-[#3b154c]';
                         let dotStyle = 'bg-purple-400';
@@ -1875,10 +1796,10 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                           <div
                             key={ev.id}
                             className={`px-2.5 py-1 rounded-xl text-[11px] font-medium border truncate leading-tight select-none cursor-pointer transition-all flex items-center gap-1.5 shadow-sm ${badgeStyle}`}
-                            title={`${ev.influencerName} (@${ev.influencerUsername}): ${ev.label} (${ev.dateStr})`}
+                            title={`${ev.influencerCode ? `[${ev.influencerCode}] ` : ''}${ev.influencerName} (${formattedUsername}): ${ev.label} (${ev.dateStr})`}
                           >
                             <span className={`w-2 h-2 rounded-full shrink-0 ${dotStyle}`} />
-                            <span className="truncate">{formattedUsername}</span>
+                            <span className="truncate font-semibold">{displayLabel}</span>
                           </div>
                         );
                       })}

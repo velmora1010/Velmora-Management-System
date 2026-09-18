@@ -178,3 +178,44 @@ export const formatHistoryTimestamp = (isoStr?: string | null): string => {
     return isoStr;
   }
 };
+
+export interface CanonicalPostDateItem {
+  video_number: number;
+  post_date: string;            // YYYY-MM-DD
+  draft_date: string;           // YYYY-MM-DD
+  formatted_post_date: string;  // e.g. "10 Oct 2026"
+  formatted_draft_date: string; // e.g. "07 Oct 2026"
+}
+
+/**
+ * Single source of truth resolver for Campaign Influencer Post Date Schedule.
+ * Used identically by Campaign Influencer Post Date Card and Campaign Calendar.
+ */
+export const getCanonicalInfluencerPostDates = (
+  influencer?: { postDates?: Array<{ video_number?: number | string; post_date?: string | null; draft_date?: string | null }> | null } | null,
+  defaultYear = 2026
+): CanonicalPostDateItem[] => {
+  if (!influencer || !Array.isArray(influencer.postDates)) return [];
+
+  const dates = influencer.postDates
+    .filter(d => d && d.post_date && String(d.post_date).trim() !== '')
+    .slice()
+    .sort((a, b) => (Number(a.video_number) || 0) - (Number(b.video_number) || 0));
+
+  return dates.map((d, i) => {
+    const vNum = Number(d.video_number) || (i + 1);
+    const postDateYmd = parseToYMD(d.post_date, defaultYear);
+    const draftDateYmd = d.draft_date 
+      ? parseToYMD(d.draft_date, defaultYear) 
+      : (postDateYmd ? calculateDraftDate(postDateYmd, defaultYear) : '');
+
+    return {
+      video_number: vNum,
+      post_date: postDateYmd,
+      draft_date: draftDateYmd,
+      formatted_post_date: formatDisplayDateLocal(postDateYmd, defaultYear),
+      formatted_draft_date: formatDisplayDateLocal(draftDateYmd, defaultYear)
+    };
+  });
+};
+
