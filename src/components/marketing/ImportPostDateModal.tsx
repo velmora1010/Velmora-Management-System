@@ -523,9 +523,20 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
     }
   };
 
+  const renderPreviewDate = (dateVal?: string) => {
+    if (!dateVal || !String(dateVal).trim()) {
+      return <span className="text-slate-500 font-normal select-none">—</span>;
+    }
+    const formatted = formatDisplayDateLocal(dateVal);
+    if (!formatted || formatted === 'Not Assigned') {
+      return <span className="text-slate-500 font-normal select-none">—</span>;
+    }
+    return <span className="text-slate-200 font-mono font-medium whitespace-nowrap">{formatted}</span>;
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-4xl shadow-2xl overflow-hidden my-8">
+      <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-5xl shadow-2xl overflow-hidden my-8">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50">
           <div>
@@ -681,39 +692,75 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
               </div>
 
               {/* Table */}
-              <div className="border border-slate-800 rounded-lg overflow-x-auto max-h-64">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-800/80 text-slate-400 font-semibold sticky top-0">
+              <div className="border border-slate-700/80 rounded-xl overflow-x-auto overflow-y-auto max-h-[420px] bg-slate-950/60 shadow-inner custom-scrollbar relative">
+                <table className="w-full min-w-[1280px] border-separate border-spacing-0 text-left text-xs text-slate-300">
+                  <thead className="text-slate-400 font-bold text-[11px] uppercase tracking-wider">
                     <tr>
-                      <th className="p-2.5">Code</th>
-                      <th className="p-2.5">Username</th>
-                      <th className="p-2.5">Video 1 Date</th>
-                      <th className="p-2.5">Video 2 Date</th>
-                      <th className="p-2.5">Video 3 Date</th>
-                      <th className="p-2.5">Video 4 Date</th>
-                      <th className="p-2.5">Video 5 Date</th>
-                      <th className="p-2.5">Video 6 Date</th>
-                      <th className="p-2.5">Status</th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-left w-[110px] min-w-[110px] whitespace-nowrap shadow-sm">
+                        Code
+                      </th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-left w-[200px] min-w-[180px] max-w-[220px] whitespace-nowrap shadow-sm">
+                        Username
+                      </th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-left w-[140px] min-w-[140px] whitespace-nowrap shadow-sm">
+                        Video 1 Post Date
+                      </th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-left w-[140px] min-w-[140px] whitespace-nowrap shadow-sm">
+                        Video 2 Post Date
+                      </th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-left w-[140px] min-w-[140px] whitespace-nowrap shadow-sm">
+                        Video 3 Post Date
+                      </th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-left w-[140px] min-w-[140px] whitespace-nowrap shadow-sm">
+                        Video 4 Post Date
+                      </th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-left w-[140px] min-w-[140px] whitespace-nowrap shadow-sm">
+                        Video 5 Post Date
+                      </th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-left w-[140px] min-w-[140px] whitespace-nowrap shadow-sm">
+                        Video 6 Post Date
+                      </th>
+                      <th className="sticky top-0 z-20 bg-slate-900 border-b border-slate-700/80 px-3.5 py-3 text-center w-[130px] min-w-[130px] whitespace-nowrap shadow-sm">
+                        Status
+                      </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-slate-800/80 text-xs">
                     {parsedRecords.slice(0, 60).map((r, idx) => {
                       const isMatched = r.matchedInfluencerId !== undefined;
                       const hasDates = Object.keys(r.videoDates).length > 0;
                       return (
-                        <tr key={idx} className="hover:bg-slate-800/40">
-                          <td className="p-2.5 font-mono font-bold text-slate-200">{r.code || '—'}</td>
-                          <td className="p-2.5 text-slate-300 truncate max-w-[120px]">{r.username || '—'}</td>
-                          <td className="p-2.5 text-slate-300 font-mono">{formatDisplayDateLocal(r.videoDates[1])}</td>
-                          <td className="p-2.5 text-slate-300 font-mono">{formatDisplayDateLocal(r.videoDates[2])}</td>
-                          <td className="p-2.5 text-slate-300 font-mono">{formatDisplayDateLocal(r.videoDates[3])}</td>
-                          <td className="p-2.5 text-slate-300 font-mono">{formatDisplayDateLocal(r.videoDates[4])}</td>
-                          <td className="p-2.5 text-slate-300 font-mono">{formatDisplayDateLocal(r.videoDates[5])}</td>
-                          <td className="p-2.5 text-slate-300 font-mono">{formatDisplayDateLocal(r.videoDates[6])}</td>
-                          <td className="p-2.5">
+                        <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 font-mono font-bold text-slate-100 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded bg-purple-950/60 border border-purple-800/50 text-purple-300 font-mono text-[11px]">
+                              {r.code || '—'}
+                            </span>
+                          </td>
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 text-slate-300 font-mono truncate max-w-[200px]" title={r.username ? `@${r.username}` : ''}>
+                            {r.username ? `@${r.username}` : '—'}
+                          </td>
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 whitespace-nowrap font-mono">
+                            {renderPreviewDate(r.videoDates[1])}
+                          </td>
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 whitespace-nowrap font-mono">
+                            {renderPreviewDate(r.videoDates[2])}
+                          </td>
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 whitespace-nowrap font-mono">
+                            {renderPreviewDate(r.videoDates[3])}
+                          </td>
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 whitespace-nowrap font-mono">
+                            {renderPreviewDate(r.videoDates[4])}
+                          </td>
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 whitespace-nowrap font-mono">
+                            {renderPreviewDate(r.videoDates[5])}
+                          </td>
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 whitespace-nowrap font-mono">
+                            {renderPreviewDate(r.videoDates[6])}
+                          </td>
+                          <td className="px-3.5 py-2.5 border-b border-slate-800/70 text-center whitespace-nowrap">
                             {isMatched ? (
                               hasDates ? (
-                                <span className="text-[10px] bg-green-950/50 text-green-400 border border-green-800/30 px-2 py-0.5 rounded font-bold whitespace-nowrap">
+                                <span className="text-[10px] bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap inline-flex items-center gap-1">
                                   ✓ Matched
                                 </span>
                               ) : (
@@ -722,7 +769,7 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
                                 </span>
                               )
                             ) : (
-                              <span className="text-[10px] bg-amber-950/50 text-amber-400 border border-amber-800/30 px-2 py-0.5 rounded font-bold whitespace-nowrap">
+                              <span className="text-[10px] bg-amber-950/60 text-amber-400 border border-amber-800/40 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap inline-flex items-center gap-1">
                                 ⚠ Unmatched
                               </span>
                             )}
