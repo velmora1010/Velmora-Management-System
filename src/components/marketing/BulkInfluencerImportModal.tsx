@@ -38,6 +38,8 @@ interface ParsedRow {
   userId: string; // Username / User ID
   phone: string | null;
   altPhone: string | null;
+  email: string | null;
+  pincode: string | null;
   upi: string | null;
   city: string | null;
   state: string | null;
@@ -64,6 +66,8 @@ interface ColumnMapping {
   userIdCol: string;
   phoneCol: string;
   altPhoneCol: string;
+  emailCol: string;
+  pincodeCol: string;
   upiCol: string;
   paymentModeCol: string;
   paymentsCol: string;
@@ -97,6 +101,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     userIdCol: '',
     phoneCol: '',
     altPhoneCol: '',
+    emailCol: '',
+    pincodeCol: '',
     upiCol: '',
     paymentModeCol: '',
     paymentsCol: '',
@@ -168,6 +174,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     let userIdCol = '';
     let phoneCol = '';
     let altPhoneCol = '';
+    let emailCol = '';
+    let pincodeCol = '';
     let upiCol = '';
     let paymentModeCol = '';
     let paymentsCol = '';
@@ -222,6 +230,14 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       // 6. Alternative Number / Alt Phone
       else if (!altPhoneCol && (clean === 'alternativenumber' || clean === 'altnumber' || clean === 'alternatephone' || clean === 'altphone' || clean === 'alternatemobilenumber')) {
         altPhoneCol = h;
+      }
+      // 6a. Email Address / Email
+      else if (!emailCol && (clean === 'emailaddress' || clean === 'email' || clean === 'emailid' || clean === 'mail' || clean === 'mailid' || clean === 'electronicmail')) {
+        emailCol = h;
+      }
+      // 6b. Pincode / Pin Code / Postal Code / Zip
+      else if (!pincodeCol && (clean === 'pincode' || clean === 'pin' || clean === 'pincodenum' || clean === 'postalcode' || clean === 'zipcode' || clean === 'zip' || clean === 'postal')) {
+        pincodeCol = h;
       }
       // 7. Payment Mode (e.g. Payment Mode, Mode, Payment Method, Pay Mode, Payment Details)
       else if (!paymentModeCol && (clean === 'paymentmode' || clean === 'mode' || clean === 'paymentmethod' || clean === 'paymode' || clean === 'paymethod' || clean === 'paymentdetails')) {
@@ -282,7 +298,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     });
 
     // Secondary pass for ambiguous headers
-    if (!userIdCol || !nameCol) {
+    if (!userIdCol || !nameCol || !emailCol || !pincodeCol) {
       headers.forEach(h => {
         const clean = h.trim().toLowerCase();
         if (!userIdCol && (clean.includes('user') || clean.includes('username') || clean.includes('user id'))) {
@@ -290,6 +306,12 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         }
         if (!nameCol && (clean.includes('influencer name') || (clean.includes('name') && !clean.includes('user') && h !== accountHolderCol))) {
           nameCol = h;
+        }
+        if (!emailCol && (clean.includes('email') || clean.includes('e-mail'))) {
+          emailCol = h;
+        }
+        if (!pincodeCol && (clean.includes('pincode') || clean.includes('pin code') || clean.includes('postal code') || clean.includes('zip code'))) {
+          pincodeCol = h;
         }
       });
     }
@@ -305,6 +327,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       userIdCol, 
       phoneCol, 
       altPhoneCol, 
+      emailCol,
+      pincodeCol,
       upiCol, 
       paymentModeCol, 
       paymentsCol, 
@@ -370,6 +394,28 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       let profileImg: string | null = normalize(row[map.profileImgCol]);
       if (profileImg === '' || profileImg.toLowerCase() === 'null' || profileImg.toLowerCase() === 'undefined' || profileImg === '—') profileImg = null;
 
+      let email: string | null = null;
+      if (map.emailCol && row[map.emailCol] !== undefined && row[map.emailCol] !== null) {
+        const rawEmail = String(row[map.emailCol]).trim();
+        if (rawEmail !== '' && rawEmail.toLowerCase() !== 'null' && rawEmail.toLowerCase() !== 'undefined' && rawEmail !== '—') {
+          email = rawEmail;
+        }
+      }
+
+      let pincode: string | null = null;
+      if (map.pincodeCol && row[map.pincodeCol] !== undefined && row[map.pincodeCol] !== null) {
+        const rawPin = row[map.pincodeCol];
+        let pinStr = '';
+        if (typeof rawPin === 'number') {
+          pinStr = String(Math.floor(rawPin)).trim();
+        } else {
+          pinStr = String(rawPin).trim().replace(/\.0+$/, '');
+        }
+        if (pinStr !== '' && pinStr.toLowerCase() !== 'null' && pinStr.toLowerCase() !== 'undefined' && pinStr !== '—') {
+          pincode = pinStr;
+        }
+      }
+
       // Robust payment resolution using parseExcelPaymentDetails
       const rawPaymentMode = map.paymentModeCol ? row[map.paymentModeCol] : '';
       const rawPayments = (map.paymentsCol ? row[map.paymentsCol] : '') || (map.upiCol ? row[map.upiCol] : '');
@@ -416,6 +462,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           userId: userId || '—',
           phone,
           altPhone,
+          email: null,
+          pincode: null,
           upi,
           city,
           state,
@@ -443,6 +491,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           userId: userId || '—',
           phone,
           altPhone,
+          email,
+          pincode,
           upi,
           city,
           state,
@@ -471,6 +521,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           userId: userId || '—',
           phone,
           altPhone,
+          email,
+          pincode,
           upi,
           city,
           state,
@@ -530,6 +582,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           userId,
           phone: phone || (existingRecord.phone_number || null),
           altPhone: altPhone || (existingRecord.alternative_number || null),
+          email: email || (existingRecord.email || null),
+          pincode: pincode || (existingRecord.pincode || null),
           upi: resolvedUpi,
           city: city || (existingRecord.city || null),
           state: state || (existingRecord.state || null),
@@ -557,6 +611,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         userId,
         phone,
         altPhone,
+        email,
+        pincode,
         upi: parsedPayment.upi_number || upi,
         city,
         state,
@@ -804,6 +860,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
             city: row.city || null,
             state: normStateVal || null,
             complete_address: row.address || null,
+            email: row.email || null,
+            pincode: row.pincode || null,
             languages: langArray,
             auto_dm: row.autoDm ?? false,
             profile_file_url: row.profileImg || null,
@@ -833,6 +891,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           if (row.userId && row.userId.trim() !== '' && row.userId !== '—') updates.name = row.userId;
           if (row.phone && row.phone.trim() !== '' && row.phone !== '—') updates.phone_number = row.phone;
           if (row.altPhone && row.altPhone.trim() !== '' && row.altPhone !== '—') updates.alternative_number = row.altPhone;
+          if (row.email && row.email.trim() !== '' && row.email !== '—') updates.email = row.email.trim();
+          if (row.pincode && row.pincode.trim() !== '' && row.pincode !== '—') updates.pincode = row.pincode.trim();
           if (row.city && row.city.trim() !== '' && row.city !== '—') updates.city = row.city;
 
           const normStateVal = normalizeState(row.state);
@@ -1001,6 +1061,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                   <li><strong className="text-slate-300">State</strong> (e.g. TAMIL NADU, TELANGANA) — Optional</li>
                   <li><strong className="text-slate-300">Complete Address / Address</strong> — Optional</li>
                   <li><strong className="text-slate-300">City</strong> — Optional</li>
+                  <li><strong className="text-slate-300">Pincode</strong> (e.g. 641001, 208001) — Optional</li>
+                  <li><strong className="text-slate-300">Email Address</strong> (e.g. example@gmail.com) — Optional</li>
                   <li><strong className="text-slate-300">Alternative Number</strong> — Optional</li>
                 </ul>
               </div>
@@ -1253,6 +1315,34 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                     {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Email Address <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.emailCol}
+                    onChange={(e) => setMapping(m => ({ ...m, emailCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Pincode <span className="text-slate-500">(Optional)</span>
+                  </label>
+                  <select
+                    value={mapping.pincodeCol}
+                    onChange={(e) => setMapping(m => ({ ...m, pincodeCol: e.target.value }))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-purple-500"
+                  >
+                    <option value="">None / Skip</option>
+                    {rawHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
@@ -1332,6 +1422,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                         <th className="p-3">Code</th>
                         <th className="p-3">Influencer Name</th>
                         <th className="p-3">User ID</th>
+                        <th className="p-3">Email</th>
+                        <th className="p-3">Pincode</th>
                         <th className="p-3">Payment Info</th>
                         <th className="p-3">Phone</th>
                         <th className="p-3">Languages</th>
@@ -1346,6 +1438,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                           <td className="p-3 font-semibold text-purple-300">{row.code}</td>
                           <td className="p-3 text-white font-sans">{row.name || '—'}</td>
                           <td className="p-3 text-slate-300">{row.userId ? `@${row.userId}` : '—'}</td>
+                          <td className="p-3 text-slate-300 font-sans">{row.email || '—'}</td>
+                          <td className="p-3 text-slate-300 font-mono">{row.pincode || '—'}</td>
                           <td className="p-3 font-sans">
                             {row.paymentMethod === 'UPI' ? (
                               <div className="flex flex-col gap-0.5">

@@ -669,6 +669,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           bank_name: initialData.bank_name || '',
           pan_number: initialData.pan_number || '',
           city: initialData.city || '',
+          pincode: initialData.pincode || '',
           complete_address: initialData.complete_address || (initialData as any).address || '',
           state: (function(input?: string | null) {
             if (!input || !input.trim()) return '';
@@ -747,6 +748,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         bank_name: '',
         pan_number: '',
         city: '',
+        pincode: '',
         complete_address: '',
         state: '',
         languages: [],

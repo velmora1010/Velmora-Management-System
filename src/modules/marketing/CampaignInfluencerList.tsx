@@ -324,12 +324,19 @@ City: ${influencer.city}`;
                   <span className="text-slate-200 font-medium break-words">{influencer.state || '—'}</span>
                 </div>
                 <div>
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Pincode</span>
+                  <span className="text-slate-200 font-medium font-mono">{influencer.pincode && String(influencer.pincode).trim() ? String(influencer.pincode).trim() : '—'}</span>
+                </div>
+                <div>
                   <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Auto DM Tool</span>
                   <span className="text-slate-200 font-medium">{influencer.auto_dm ? 'Yes' : 'No'}</span>
                 </div>
-                <div></div>
 
-                <div className="col-span-1 sm:col-span-2 md:col-span-4">
+                <div className="col-span-1 sm:col-span-1 md:col-span-2">
+                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Email</span>
+                  <span className="text-slate-200 font-medium break-all">{influencer.email && influencer.email.trim() ? influencer.email.trim() : '—'}</span>
+                </div>
+                <div className="col-span-1 sm:col-span-1 md:col-span-2">
                   <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Languages</span>
                   <span className="text-slate-200 font-medium break-words">
                     {Array.isArray(influencer.languages) && influencer.languages.length > 0 
@@ -1144,6 +1151,8 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         (inf.influencer_name || '').toLowerCase().includes(term) ||
         (inf.code || '').toLowerCase().includes(term) ||
         (inf.phone_number || '').toLowerCase().includes(term) ||
+        (inf.email || '').toLowerCase().includes(term) ||
+        (inf.pincode || '').toLowerCase().includes(term) ||
         (inf.city || '').toLowerCase().includes(term) ||
         (inf.state || '').toLowerCase().includes(term)
       );
