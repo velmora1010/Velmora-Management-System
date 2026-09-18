@@ -237,18 +237,34 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
     try {
       setImportProgress({ stage: 'Fetching existing post dates & sequence...', percent: 20 });
 
-      // 1. Bulk fetch existing post dates and max ID in parallel
-      const [existingPostDatesRes, maxIdRes] = await Promise.all([
-        dbClient.from(SUPABASE_TABLES.influencerPostDates).select('*').eq('campaign_id', campaignIdStr),
+      // 1. Bulk fetch all existing post dates for this campaign (paginated) and max ID in parallel
+      const allExistingPostDates: any[] = [];
+      let fetchFrom = 0;
+      const PAGE_SIZE = 1000;
+
+      const [, maxIdRes] = await Promise.all([
+        (async () => {
+          while (true) {
+            const { data: pageData, error: pageErr } = await dbClient
+              .from(SUPABASE_TABLES.influencerPostDates)
+              .select('*')
+              .eq('campaign_id', campaignIdStr)
+              .range(fetchFrom, fetchFrom + PAGE_SIZE - 1);
+
+            if (pageErr) {
+              throw new Error(`Failed to fetch existing post dates: ${pageErr.message}`);
+            }
+            if (!pageData || pageData.length === 0) break;
+            allExistingPostDates.push(...pageData);
+            if (pageData.length < PAGE_SIZE) break;
+            fetchFrom += PAGE_SIZE;
+          }
+        })(),
         dbClient.from(SUPABASE_TABLES.influencerPostDates).select('id').order('id', { ascending: false }).limit(1)
       ]);
 
-      if (existingPostDatesRes.error) {
-        throw new Error(`Failed to fetch existing post dates: ${existingPostDatesRes.error.message}`);
-      }
-
       const existingMap = new Map<string, any>();
-      (existingPostDatesRes.data || []).forEach(ep => {
+      allExistingPostDates.forEach(ep => {
         existingMap.set(`${ep.influencer_id}_${ep.video_number}`, ep);
       });
 
@@ -412,6 +428,64 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
         }
       }
 
+      // 5b. Safe Status Tracking notes synchronization (if tracking records exist)
+      try {
+        const { data: trackingRows } = await dbClient
+          .from(SUPABASE_TABLES.influencerStatus)
+          .select('id, influencer_id, notes')
+          .eq('campaign_id', campaignIdStr);
+
+        if (trackingRows && trackingRows.length > 0) {
+          const trackingUpdates: { id: any; notes: string }[] = [];
+          trackingRows.forEach(tr => {
+            const infId = Number(tr.influencer_id);
+            const dateChanges = influencerDateChanges.get(infId);
+            if (!dateChanges || !tr.notes) return;
+
+            try {
+              const notesObj = JSON.parse(tr.notes);
+              let modified = false;
+
+              if (notesObj.videos && typeof notesObj.videos === 'object') {
+                dateChanges.forEach(dc => {
+                  const vKey = String(dc.video_number);
+                  const vObj = notesObj.videos[vKey];
+                  if (vObj?.steps) {
+                    if (vObj.steps.post_date?.data && !vObj.steps.post_date.data.manualOverride) {
+                      vObj.steps.post_date.data.scheduled_post_date = dc.post_date;
+                      modified = true;
+                    }
+                    if (vObj.steps.timeline?.data && !vObj.steps.timeline.data.manualOverride && !vObj.steps.timeline.data.is_re_upload_timeline) {
+                      vObj.steps.timeline.data.date = dc.draft_date;
+                      vObj.steps.timeline.data.scheduled_draft_date = dc.draft_date;
+                      modified = true;
+                    }
+                  }
+                });
+              }
+
+              if (modified) {
+                trackingUpdates.push({ id: tr.id, notes: JSON.stringify(notesObj) });
+              }
+            } catch (e) {}
+          });
+
+          for (let i = 0; i < trackingUpdates.length; i += 10) {
+            const chunk = trackingUpdates.slice(i, i + 10);
+            await Promise.all(
+              chunk.map(tu => 
+                dbClient
+                  .from(SUPABASE_TABLES.influencerStatus)
+                  .update({ notes: tu.notes })
+                  .eq('id', tu.id)
+              )
+            );
+          }
+        }
+      } catch (trackingSyncErr) {
+        console.warn('Status tracking safe sync skipped:', trackingSyncErr);
+      }
+
       setImportProgress({ stage: 'Finalizing...', percent: 100 });
 
       // 6. Log activity and broadcast updates
@@ -422,6 +496,14 @@ export const ImportPostDateModal: React.FC<ImportPostDateModalProps> = ({
       );
 
       notifyInfluencerChange(campaign.id);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('velmora:post-date-updated', {
+          detail: { campaignId: String(campaign.id) }
+        }));
+        window.dispatchEvent(new CustomEvent('status_tracking_updated', {
+          detail: { campaignId: String(campaign.id) }
+        }));
+      }
 
       setImportStats({
         totalRows: parsedRecords.length,

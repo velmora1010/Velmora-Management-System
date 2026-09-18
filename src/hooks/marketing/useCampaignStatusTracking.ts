@@ -7,6 +7,7 @@ import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
 import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 import type { InfluencerVideoPayment } from '../../services/influencerVideoPaymentService';
+import { fetchAllInChunks } from './useCampaignInfluencers';
 
 export { naturalCompareCodes, parseToYMD, calculateDraftDate, calculatePostDateFromDraft };
 
@@ -140,14 +141,18 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           { data: infoData, error: infoError },
           { data: pricingData, error: pricingError },
           { data: productsData },
-          { data: postDatesData },
+          postDatesData,
           { data: videoPaymentsData }
         ] = await Promise.all([
           supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('id', dispatchIds),
           supabase.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name').in('id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerPricing).select('id, influencer_id, final_price, total_videos, product_pricing, video1_price, video2_price, video1_count, video2_count').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerProduct).select('id, influencer_id, product_name, name, video_number, qty, selected').in('influencer_id', influencerIds),
-          supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', influencerIds),
+          fetchAllInChunks(
+            chunk => supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk),
+            influencerIds,
+            50
+          ),
           supabaseAdmin.from(SUPABASE_TABLES.influencerVideoPayment).select('*').in('influencer_id', influencerIds)
         ]);
 
@@ -366,12 +371,14 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
     window.addEventListener('influencer_tracking_updated', handleSync);
     window.addEventListener('velmora:influencer-updated', handleSync);
     window.addEventListener('velmora:video-payment-updated', handleSync);
+    window.addEventListener('velmora:post-date-updated', handleSync);
 
     return () => {
       window.removeEventListener('status_tracking_updated', handleSync);
       window.removeEventListener('influencer_tracking_updated', handleSync);
       window.removeEventListener('velmora:influencer-updated', handleSync);
       window.removeEventListener('velmora:video-payment-updated', handleSync);
+      window.removeEventListener('velmora:post-date-updated', handleSync);
     };
   }, [campaignId, loadTrackingRecords]);
 

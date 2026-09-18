@@ -111,6 +111,36 @@ export const notifyInfluencerChange = (campaignId?: string | number) => {
   }
 };
 
+export const notifyPostDateChange = (campaignId?: string | number) => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('velmora:post-date-updated', { 
+      detail: { campaignId: campaignId ? String(campaignId) : undefined } 
+    }));
+  }
+};
+
+export const fetchAllInChunks = async <T = any>(
+  queryFn: (chunk: (string | number)[]) => PromiseLike<{ data: T[] | null; error: any }>,
+  ids: (string | number)[],
+  chunkSize = 50
+): Promise<T[]> => {
+  if (!ids || ids.length === 0) return [];
+  const chunks: (string | number)[][] = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    chunks.push(ids.slice(i, i + chunkSize));
+  }
+  const chunkResults = await Promise.all(chunks.map(chunk => Promise.resolve(queryFn(chunk))));
+  const results: T[] = [];
+  for (const res of chunkResults) {
+    if (res.error) {
+      console.warn('Error fetching chunk:', res.error);
+    } else if (res.data) {
+      results.push(...res.data);
+    }
+  }
+  return results;
+};
+
 export const useCampaignInfluencers = (campaignId?: string) => {
   const [influencers, setInfluencers] = useState<CampaignInfluencer[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -152,14 +182,18 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           { data: productsData },
           { data: performanceData },
           { data: dispatchData },
-          { data: postDatesData }
+          postDatesData
         ] = await Promise.all([
           supabase.from(SUPABASE_TABLES.influencerPlatform).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerPricing).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerProduct).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerBrandPerformance).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('influencer_id', influencerIds).eq('campaign_id', campaignId),
-          supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', influencerIds)
+          fetchAllInChunks(
+            chunk => supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk),
+            influencerIds,
+            50
+          )
         ]);
 
         if (fetchIdRef.current !== currentFetchId) return;
@@ -393,8 +427,10 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       }
     };
     window.addEventListener('velmora:influencer-updated', handleGlobalUpdate);
+    window.addEventListener('velmora:post-date-updated', handleGlobalUpdate);
     return () => {
       window.removeEventListener('velmora:influencer-updated', handleGlobalUpdate);
+      window.removeEventListener('velmora:post-date-updated', handleGlobalUpdate);
     };
   }, [campaignId, loadInfluencers]);
 

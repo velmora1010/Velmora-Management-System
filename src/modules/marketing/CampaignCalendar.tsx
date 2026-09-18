@@ -296,6 +296,24 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   const refresh = async () => {
     await Promise.all([refreshTracking(), refreshInfluencers()]);
   };
+
+  // Reactively listen for post-date updates, influencer updates, and status tracking updates
+  useEffect(() => {
+    const handleCalendarSync = (e: any) => {
+      const targetCampId = e.detail?.campaignId;
+      if (!targetCampId || String(targetCampId) === String(campaign.id)) {
+        refresh();
+      }
+    };
+    window.addEventListener('velmora:post-date-updated', handleCalendarSync);
+    window.addEventListener('velmora:influencer-updated', handleCalendarSync);
+    window.addEventListener('status_tracking_updated', handleCalendarSync);
+    return () => {
+      window.removeEventListener('velmora:post-date-updated', handleCalendarSync);
+      window.removeEventListener('velmora:influencer-updated', handleCalendarSync);
+      window.removeEventListener('status_tracking_updated', handleCalendarSync);
+    };
+  }, [campaign.id, refreshTracking, refreshInfluencers]);
   
   // Date state for month selector
   const [currentDate, setCurrentDate] = useState(() => new Date());
@@ -675,9 +693,10 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         const pd = postDates[idx];
         const vNum = Number(pd.video_number) || (idx + 1);
 
-        // Resolve Timeline date strictly with priority: manualTimelineDate -> originalVideoDraftDate
+        // Resolve Timeline date strictly with priority: isReDraftTimeline / manualOverride -> canonical pd.draft_date
         let effectiveTimelineDate = '';
         let isReDraftTimeline = false;
+        let isDraftManualOverride = false;
         if (matchingRecord) {
           try {
             const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
@@ -689,11 +708,39 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             if (tlStep?.data?.is_re_upload_timeline === true || !!tlStep?.data?.re_draft_submit_date || vWorkflow.isReDraftRequired) {
               isReDraftTimeline = true;
             }
+            if (tlStep?.data?.manualOverride === true) {
+              isDraftManualOverride = true;
+            }
           } catch (e) {}
         }
 
         const originalDraftDate = pd.draft_date ? parseDateOnly(pd.draft_date, 2026) : (pd.post_date ? calculateDraftDate(pd.post_date, 2026) : '');
-        const drDate = effectiveTimelineDate || originalDraftDate;
+        const drDate = isReDraftTimeline 
+          ? (effectiveTimelineDate || originalDraftDate) 
+          : (isDraftManualOverride && effectiveTimelineDate ? effectiveTimelineDate : (originalDraftDate || effectiveTimelineDate));
+
+        // 2. Final Post Event
+        // Canonical source: originalPostDate (pd.post_date). Old workflow values must NOT override it unless manualOverride is set.
+        let effectiveFinalPostDate = '';
+        let isPostManualOverride = false;
+        if (matchingRecord) {
+          try {
+            const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
+            const postDateStep = vWorkflow.steps?.post_date;
+            const postDateStepDate = postDateStep?.data?.scheduled_post_date;
+            if (postDateStepDate) {
+              effectiveFinalPostDate = parseDateOnly(postDateStepDate, 2026);
+            }
+            if (postDateStep?.data?.manualOverride === true) {
+              isPostManualOverride = true;
+            }
+          } catch (e) {}
+        }
+
+        const originalPostDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
+        const fpDate = isPostManualOverride && effectiveFinalPostDate 
+          ? effectiveFinalPostDate 
+          : (originalPostDate || effectiveFinalPostDate);
 
         if (drDate) {
           const key = `${infId}_v${vNum}_Timeline`;
@@ -715,27 +762,11 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               avatarUrl,
               record: matchingRecord,
               videoNumber: vNum,
-              postDateStr: pd.post_date,
+              postDateStr: fpDate || pd.post_date,
               draftDateStr: drDate
             });
           }
         }
-
-        // 2. Final Post Event
-        // Resolve Final Post date strictly with priority: Status Tracking post_date -> originalVideoPostDate
-        let effectiveFinalPostDate = '';
-        if (matchingRecord) {
-          try {
-            const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
-            const postDateStepDate = vWorkflow.steps?.post_date?.data?.scheduled_post_date;
-            if (postDateStepDate) {
-              effectiveFinalPostDate = parseDateOnly(postDateStepDate, 2026);
-            }
-          } catch (e) {}
-        }
-
-        const originalPostDate = pd.post_date ? parseDateOnly(pd.post_date, 2026) : '';
-        const fpDate = effectiveFinalPostDate || originalPostDate;
 
         if (fpDate) {
           const key = `${infId}_v${vNum}_FinalPost`;

@@ -564,7 +564,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
         const postData = st.data || {};
         const timelineDate = storedVideo?.steps?.timeline?.data?.date;
         const derivedFromTimeline = timelineDate ? calculatePostDateFromDraft(timelineDate, 2026) : '';
-        const effPostDate = postData.scheduled_post_date || scheduledPostDate || derivedFromTimeline || '';
+        const isPostOver = postData.manualOverride === true;
+        const effPostDate = isPostOver 
+          ? (postData.scheduled_post_date || scheduledPostDate || '') 
+          : (scheduledPostDate || postData.scheduled_post_date || derivedFromTimeline || '');
         steps[cfg.id] = {
           ...st,
           data: {
