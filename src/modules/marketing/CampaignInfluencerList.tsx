@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus, FileText, Sparkles } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus, FileText, Sparkles, Send } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -22,6 +22,16 @@ import { generatePickListPDF } from '../../utils/generatePickListPDF';
 import { SingleInfluencerPickListModal } from '../../components/marketing/SingleInfluencerPickListModal';
 import { ImportMailAcceptanceModal } from '../../components/marketing/ImportMailAcceptanceModal';
 import { OfferAgreementSection, buildAgreementText, StoredAgreement } from './OfferAgreementSection';
+import { AfterDispatchSection } from './AfterDispatchSection';
+import { 
+  afterDispatchService, 
+  StoredAfterDispatchMessage, 
+  resolveDispatchedProducts, 
+  resolvePaymentDetails, 
+  resolveInfluencerShipment, 
+  buildAfterDispatchMessage 
+} from '../../services/afterDispatchService';
+import { fetchCampaignShipmentsFromDb } from '../../services/influencerTrackingService';
 
 const resolvePerformanceCode = (
   influencer: CampaignInfluencer,
@@ -765,7 +775,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     });
   };
 
-  const [mainViewMode, setMainViewMode] = useState<'list' | 'analytics' | 'offer_agreement'>('list');
+  const [mainViewMode, setMainViewMode] = useState<'list' | 'analytics' | 'offer_agreement' | 'after_dispatch'>('list');
   const [isSelectionModeActive, setIsSelectionModeActive] = useState(false);
   const [selectedPickListInfluencer, setSelectedPickListInfluencer] = useState<CampaignInfluencer | null>(null);
   const [analyticsFilterState, setAnalyticsFilterState] = useState<CampaignAnalyticsFilterState>(initialAnalyticsFilterState);
@@ -805,6 +815,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [isImportPostDateModalOpen, setIsImportPostDateModalOpen] = useState(false);
   const [isImportMailAcceptanceModalOpen, setIsImportMailAcceptanceModalOpen] = useState(false);
   const [offerAgreementRefreshTrigger, setOfferAgreementRefreshTrigger] = useState(0);
+  const [afterDispatchRefreshTrigger, setAfterDispatchRefreshTrigger] = useState(0);
   const [targetUploadCode, setTargetUploadCode] = useState<string | undefined>();
   const [activeEditInfluencer, setActiveEditInfluencer] = useState<CampaignInfluencer | null>(null);
   const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false);
@@ -1242,6 +1253,101 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     setMainViewMode('offer_agreement');
   };
 
+  const handleBulkGenerateAfterDispatch = async () => {
+    const selectedList = influencers.filter(inf => selectedIds.has(inf.id) && isActiveStatus(inf.is_archived));
+    if (selectedList.length === 0) {
+      toast.error('Please select at least one active influencer.');
+      return;
+    }
+
+    const toastId = toast.loading(`Generating After Dispatch messages for ${selectedList.length} influencer(s)...`);
+
+    try {
+      // 1. Fetch shipments for tracking resolution
+      const shipments = await fetchCampaignShipmentsFromDb(campaign.id);
+
+      // 2. Fetch dispatch records if any
+      let dispatchRecords: any[] = [];
+      try {
+        const { data } = await supabase
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .select('*')
+          .eq('campaign_id', campaign.id);
+        if (Array.isArray(data)) dispatchRecords = data;
+      } catch (e) {}
+
+      // 3. Existing messages map for preserving generated_at
+      const existingMessages = await afterDispatchService.getMessages(campaign.id);
+      const nowIso = new Date().toISOString();
+
+      const messagesToPersist: StoredAfterDispatchMessage[] = [];
+      let generatedCount = 0;
+      let missingTrackingCount = 0;
+
+      for (const inf of selectedList) {
+        const infId = String(inf.id);
+        const code = inf.code || (inf as any).influencer_code || '';
+        const user = inf.influencer_name || (inf as any).username || inf.name || '';
+        const creator = ((inf as any).creator_name || (inf as any).real_name || '').trim();
+
+        const dispatchedProds = resolveDispatchedProducts(inf, dispatchRecords);
+        const shipmentInfo = resolveInfluencerShipment(inf, shipments, dispatchRecords);
+        const paymentDetails = resolvePaymentDetails(inf, dispatchedProds);
+
+        if (!shipmentInfo.trackingId) {
+          missingTrackingCount++;
+        }
+
+        const msgText = buildAfterDispatchMessage(
+          inf,
+          dispatchedProds,
+          shipmentInfo,
+          paymentDetails
+        );
+
+        const record: StoredAfterDispatchMessage = {
+          campaign_id: String(campaign.id),
+          influencer_id: infId,
+          influencer_code: code,
+          username: user,
+          creator_name: creator,
+          dispatch_status: shipmentInfo.dispatchStatus,
+          courier: shipmentInfo.courier,
+          tracking_id: shipmentInfo.trackingId,
+          tracking_url: shipmentInfo.trackingUrl,
+          payment_amount: paymentDetails.amount,
+          payment_text: paymentDetails.paymentText,
+          dispatched_products: dispatchedProds,
+          message_text: msgText,
+          generated_at: existingMessages[infId]?.generated_at || nowIso,
+          updated_at: nowIso
+        };
+
+        messagesToPersist.push(record);
+        generatedCount++;
+      }
+
+      await afterDispatchService.batchPersistMessages(campaign.id, messagesToPersist);
+
+      toast.dismiss(toastId);
+      if (missingTrackingCount > 0) {
+        toast.success(
+          `Generated ${generatedCount} message(s)! (${missingTrackingCount} without tracking details)`,
+          { duration: 4000 }
+        );
+      } else {
+        toast.success(`Generated After Dispatch message for ${generatedCount} influencer(s)!`);
+      }
+
+      setAfterDispatchRefreshTrigger(prev => prev + 1);
+      setMainViewMode('after_dispatch');
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      console.error('Failed to generate After Dispatch messages:', err);
+      toast.error('Failed to generate After Dispatch messages: ' + (err?.message || 'Unknown error'));
+    }
+  };
+
   const handleBulkEliminate = async () => {
     const selectedList = influencers.filter(inf => selectedIds.has(inf.id) && isActiveStatus(inf.is_archived));
     if (selectedList.length === 0) return;
@@ -1338,6 +1444,19 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
             <span>Offer Agreement</span>
           </button>
 
+          <button 
+            onClick={() => setMainViewMode(prev => prev === 'after_dispatch' ? 'list' : 'after_dispatch')}
+            className={`px-3.5 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer shrink-0 border-0 ${
+              mainViewMode === 'after_dispatch'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50'
+                : 'bg-indigo-900/40 hover:bg-indigo-800/60 text-indigo-200 border border-indigo-700/50'
+            }`}
+            title="After Dispatch"
+          >
+            <Send size={15} className={mainViewMode === 'after_dispatch' ? 'text-white' : 'text-indigo-300'} />
+            <span>After Dispatch</span>
+          </button>
+
           <div className="relative shrink-0" ref={uploadDropdownRef}>
             <button 
               onClick={() => setIsUploadDropdownOpen(prev => !prev)}
@@ -1414,7 +1533,14 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         </div>
       </div>
 
-      {mainViewMode === 'offer_agreement' ? (
+      {mainViewMode === 'after_dispatch' ? (
+        <AfterDispatchSection
+          campaign={campaign}
+          influencers={influencers.filter(inf => isActiveStatus(inf.is_archived))}
+          onBackToList={() => setMainViewMode('list')}
+          refreshTrigger={afterDispatchRefreshTrigger}
+        />
+      ) : mainViewMode === 'offer_agreement' ? (
         <OfferAgreementSection
           campaign={campaign}
           influencers={influencers.filter(inf => isActiveStatus(inf.is_archived))}
@@ -1560,6 +1686,18 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               }`}
             >
               <Sparkles size={13} /> Generate Agreement
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkGenerateAfterDispatch}
+              disabled={selectedIds.size === 0}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                selectedIds.size > 0 
+                  ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-md' 
+                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+              }`}
+            >
+              <Send size={13} /> Generate After Dispatch
             </button>
             <button
               type="button"
