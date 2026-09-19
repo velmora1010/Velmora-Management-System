@@ -36,7 +36,15 @@ const mapToDb = (ticket: Partial<CustomerTicket>) => {
   if (ticket.platform !== undefined) {
     dbObj.platform = ticket.platform?.trim() || null;
   }
+  if (ticket.paymentProofUrl !== undefined) dbObj.payment_proof_url = ticket.paymentProofUrl || null;
+  if (ticket.paymentProofName !== undefined) dbObj.payment_proof_name = ticket.paymentProofName || null;
   return dbObj;
+};
+
+export const notifyTicketsChanged = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('customer_tickets_updated'));
+  }
 };
 
 const mapFromDb = (dbObj: any): CustomerTicket => {
@@ -63,7 +71,9 @@ const mapFromDb = (dbObj: any): CustomerTicket => {
     resolutionNotes: dbObj.resolution_notes,
     internalNotes: dbObj.internal_notes,
     qrImageUrl: dbObj.qr_image_url || null,
-    amount: dbObj.amount !== undefined && dbObj.amount !== null ? Number(dbObj.amount) : undefined
+    amount: dbObj.amount !== undefined && dbObj.amount !== null ? Number(dbObj.amount) : undefined,
+    paymentProofUrl: dbObj.payment_proof_url || null,
+    paymentProofName: dbObj.payment_proof_name || null
   };
 };
 
@@ -224,6 +234,7 @@ export const customerTicketsService = {
       `Ticket ${newTicketId} was created for customer "${ticket.customerName || 'Unknown'}" (Issue: ${ticket.issueType || 'N/A'}${ticket.subIssue ? ` - ${ticket.subIssue}` : ''}).`
     );
 
+    notifyTicketsChanged();
     return { id: data.id, ticketId: newTicketId };
   },
 
@@ -265,6 +276,8 @@ export const customerTicketsService = {
       action,
       `Ticket ID ${id} was ${updates.status === 'Resolved' ? 'resolved' : 'updated'}${updates.customerName ? ` for "${updates.customerName}"` : ''}.`
     );
+
+    notifyTicketsChanged();
   },
 
   async deleteTicket(id: number) {
@@ -273,6 +286,7 @@ export const customerTicketsService = {
       .delete()
       .eq('id', id);
     if (error) throw error;
+    notifyTicketsChanged();
   },
 
   async checkDuplicateTicket(orderId: string, awbNumber: string) {
@@ -586,6 +600,47 @@ export const customerTicketsService = {
     };
   },
 
+  async uploadTicketPaymentProof(file: File) {
+    if (!file) throw new Error('No file selected');
+
+    // 1. File Type Validation: Strictly PDF only
+    const isPdfMime = file.type === 'application/pdf';
+    const isPdfExt = file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdfMime && !isPdfExt) {
+      throw new Error('Invalid file format. Only PDF files (.pdf) are allowed as payment proof.');
+    }
+
+    // 2. File Size Validation (Max 15MB)
+    const MAX_SIZE = 15 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      throw new Error('File size exceeds 15MB limit. Please upload a smaller PDF file.');
+    }
+
+    // 3. Generate Safe Unique Filename
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}_${sanitizedName}`;
+
+    // 4. Upload to ticket-payment-proofs bucket
+    const bucketName = 'ticket-payment-proofs';
+    const { error: uploadErr } = await supabase.storage
+      .from(bucketName)
+      .upload(fileName, file, { cacheControl: '3600', upsert: false, contentType: 'application/pdf' });
+
+    if (uploadErr) {
+      throw new Error(`Payment proof upload failed: ${uploadErr.message}`);
+    }
+
+    const { data: publicData } = supabase.storage
+      .from(bucketName)
+      .getPublicUrl(fileName);
+
+    return {
+      publicUrl: publicData.publicUrl,
+      filePath: fileName,
+      fileName: file.name
+    };
+  },
+
   // ==========================================
   // CUSTOM COURIER PARTNER MANAGEMENT SERVICES
   // ==========================================
@@ -638,5 +693,30 @@ export const customerTicketsService = {
       active: data.active,
       created_at: data.created_at
     };
+  }
+};
+
+export const downloadFileBlob = async (url: string, defaultFilename: string) => {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = defaultFilename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.warn('Direct blob download failed, falling back to direct anchor:', err);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = defaultFilename;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 };
