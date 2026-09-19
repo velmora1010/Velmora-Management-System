@@ -219,3 +219,28 @@ export const getCanonicalInfluencerPostDates = (
   });
 };
 
+/**
+ * Returns today's local calendar date formatted as YYYY-MM-DD.
+ * Strictly avoids UTC conversion to prevent date drift.
+ */
+export const getTodayLocalYMD = (): string => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/**
+ * Formats a date value into "DD-MM-YYYY" (e.g. "23-09-2026").
+ * Clean calendar-safe representation without timezone shifts.
+ */
+export const formatDDMMYYYY = (val: any, defaultYear = 2026): string => {
+  if (!val) return '';
+  const ymd = parseToYMD(val, defaultYear);
+  if (!ymd) return String(val).trim();
+  const parts = ymd.split('-');
+  if (parts.length !== 3) return String(val).trim();
+  return `${parts[2]}-${parts[1]}-${parts[0]}`;
+};
+
