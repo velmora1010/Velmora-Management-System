@@ -15,8 +15,13 @@ import {
   fetchCampaignShipmentsFromDb,
   pruneUnmatchedCampaignTrackingShipments,
   TrackingStatusCategory,
-  InfluencerDispatchedShipment
+  InfluencerDispatchedShipment,
+  getTrackingDisplayStatus,
+  formatEstimatedDeliveryDate,
+  parseToYMD,
+  getTodayLocalYMD
 } from '../../services/influencerTrackingService';
+import { formatDDMMYYYY } from '../../utils/influencerDateUtils';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
@@ -69,10 +74,10 @@ interface CampaignTrackingSystemProps {
   campaign: Campaign;
   dispatchedInfluencers: CampaignInfluencer[];
   dispatchRecords: DispatchDetails[];
-  savedBatches: DispatchBatch[];
+  savedBatches?: DispatchBatch[];
   onBackToDispatched?: () => void;
-  onRefreshData?: () => Promise<void>;
   allActiveInfluencers?: CampaignInfluencer[];
+  onRefreshData?: () => void | Promise<void>;
 }
 
 const STATUS_PILLS: TrackingStatusCategory[] = [
@@ -88,18 +93,20 @@ const STATUS_PILLS: TrackingStatusCategory[] = [
 ];
 
 export const getShipmentCategory = (s: InfluencerDispatchedShipment): TrackingStatusCategory => {
-  return s.statusCategory || resolveDelhiveryCategory(s.status, s.rawStatus);
+  const displayStatus = getTrackingDisplayStatus(s);
+  return resolveDelhiveryCategory(displayStatus, s.rawStatus, s.currentStatus);
 };
 
 export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   campaign,
   dispatchedInfluencers,
   dispatchRecords,
-  savedBatches,
-  onBackToDispatched: _onBackToDispatched,
-  onRefreshData,
-  allActiveInfluencers
+  savedBatches = [],
+  onBackToDispatched,
+  allActiveInfluencers,
+  onRefreshData
 }) => {
+
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatusTab, setSelectedStatusTab] = useState<TrackingStatusCategory>('All');
@@ -107,6 +114,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [selectedStatusDropdown, setSelectedStatusDropdown] = useState('All');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  // Estimated Delivery Calendar & Filter State
+  const [isDeliveryCalendarOpen, setIsDeliveryCalendarOpen] = useState(false);
+  const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<string | null>(null); // YYYY-MM-DD
+  const [selectedDeliveryDateEnd, setSelectedDeliveryDateEnd] = useState<string | null>(null); // YYYY-MM-DD (for range)
+  const [calendarYear, setCalendarYear] = useState<number>(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState<number>(() => new Date().getMonth()); // 0-11
 
   // Upload Dropdown & Modal State
   const uploadDropdownRef = useRef<HTMLDivElement>(null);
@@ -304,7 +318,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       const infId = String(matchedInf.id);
       const dispatch = matchResult.matchedDispatch || matchedInf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === infId);
-      const batch = savedBatches.find(b => b.members && b.members.some(m => String(m.influencer_id) === infId));
+      const batch = (savedBatches || []).find(b => b.members && b.members.some(m => String(m.influencer_id) === infId));
       const batchCode = batch?.batch_name || '—';
       const batchId = batch?.id;
 
@@ -329,6 +343,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         : (isSTCourier ? 'Live ST Courier Tracking' : (cs.statusSource || 'Uploaded File'));
       const sourceType = isDelhivery ? 'UPLOADED_FILE' : (isSTCourier ? 'LIVE_API' : (cs.sourceType || 'UPLOADED_FILE'));
 
+      const rawStatus = cached?.rawStatus || cs.rawStatus || cs.status || '';
+      const displayStatus = getTrackingDisplayStatus({
+        ...cs,
+        rawStatus,
+        status: cached?.status || cs.status
+      });
+      const edd = cs.estimatedDeliveryDate || cs.expectedDeliveryDate || dispatch?.expected_delivery_date || '';
+
       shipmentMap.set(uniqueKey, {
         ...cs,
         influencerId: infId,
@@ -343,9 +365,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         batchId: cs.batchId || batchId,
         batchCode: cs.batchCode !== '—' ? cs.batchCode : batchCode,
         dispatchDate: cs.dispatchDate || dispatch?.dispatch_date || '',
-        expectedDeliveryDate: cs.expectedDeliveryDate || dispatch?.expected_delivery_date || '',
-        status: cached?.status || cs.status,
-        rawStatus: cached?.rawStatus || cs.rawStatus,
+        expectedDeliveryDate: edd,
+        estimatedDeliveryDate: edd,
+        status: displayStatus,
+        statusCategory: resolveDelhiveryCategory(displayStatus, rawStatus, cs.currentStatus),
+        rawStatus: rawStatus || 'In Transit',
         statusSource,
         sourceType,
         lastLocation: cached?.lastLocation || cs.lastLocation,
@@ -431,9 +455,217 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return counts;
   }, [allShipments, kpis]);
 
+  // Delivery Schedule grouping from allShipments
+  const deliverySchedule = useMemo(() => {
+    const map = new Map<string, { ymd: string; formattedDate: string; count: number; shipments: InfluencerDispatchedShipment[] }>();
+    const todayYmd = getTodayLocalYMD();
+    let totalWithDate = 0;
+    let todayCount = 0;
+
+    for (const s of allShipments) {
+      const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate;
+      if (!edd) continue;
+      const ymd = parseToYMD(edd);
+      if (!ymd) continue;
+
+      totalWithDate++;
+      if (ymd === todayYmd) {
+        todayCount++;
+      }
+
+      const existing = map.get(ymd);
+      if (existing) {
+        existing.count++;
+        existing.shipments.push(s);
+      } else {
+        map.set(ymd, {
+          ymd,
+          formattedDate: formatEstimatedDeliveryDate(ymd),
+          count: 1,
+          shipments: [s]
+        });
+      }
+    }
+
+    const sortedList = Array.from(map.values()).sort((a, b) => a.ymd.localeCompare(b.ymd));
+
+    return {
+      byDateMap: map,
+      sortedList,
+      totalWithDate,
+      todayCount,
+      todayYmd
+    };
+  }, [allShipments]);
+
+  // Auto-focus calendar view to selected date or scheduled deliveries when modal opens
+  useEffect(() => {
+    if (isDeliveryCalendarOpen) {
+      if (selectedDeliveryDate) {
+        const parts = selectedDeliveryDate.split('-');
+        if (parts.length === 3) {
+          const y = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10) - 1;
+          if (!isNaN(y) && !isNaN(m) && m >= 0 && m <= 11) {
+            setCalendarYear(y);
+            setCalendarMonth(m);
+            return;
+          }
+        }
+      }
+      if (deliverySchedule.sortedList.length > 0) {
+        const parts = deliverySchedule.sortedList[0].ymd.split('-');
+        if (parts.length === 3) {
+          const y = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10) - 1;
+          if (!isNaN(y) && !isNaN(m) && m >= 0 && m <= 11) {
+            setCalendarYear(y);
+            setCalendarMonth(m);
+            return;
+          }
+        }
+      }
+      const today = new Date();
+      setCalendarYear(today.getFullYear());
+      setCalendarMonth(today.getMonth());
+    }
+  }, [isDeliveryCalendarOpen]);
+
+  const handlePrevMonth = () => {
+    setCalendarMonth((prev) => {
+      if (prev === 0) {
+        setCalendarYear((y) => y - 1);
+        return 11;
+      }
+      return prev - 1;
+    });
+  };
+
+  const handleNextMonth = () => {
+    setCalendarMonth((prev) => {
+      if (prev === 11) {
+        setCalendarYear((y) => y + 1);
+        return 0;
+      }
+      return prev + 1;
+    });
+  };
+
+  const handleSelectCalendarDate = (ymd: string) => {
+    if (!selectedDeliveryDate) {
+      setSelectedDeliveryDate(ymd);
+      setSelectedDeliveryDateEnd(null);
+    } else if (!selectedDeliveryDateEnd) {
+      if (selectedDeliveryDate === ymd) {
+        setSelectedDeliveryDate(null);
+        setSelectedDeliveryDateEnd(null);
+      } else if (ymd < selectedDeliveryDate) {
+        setSelectedDeliveryDate(ymd);
+        setSelectedDeliveryDateEnd(null);
+      } else {
+        setSelectedDeliveryDateEnd(ymd);
+      }
+    } else {
+      if (selectedDeliveryDate === ymd || selectedDeliveryDateEnd === ymd) {
+        setSelectedDeliveryDate(null);
+        setSelectedDeliveryDateEnd(null);
+      } else {
+        setSelectedDeliveryDate(ymd);
+        setSelectedDeliveryDateEnd(null);
+      }
+    }
+  };
+
+  const MONTH_NAMES = useMemo(() => [
+    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+    'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
+  ], []);
+
+  const monthLabel = `${MONTH_NAMES[calendarMonth]} ${calendarYear}`;
+
+  const calendarCells = useMemo(() => {
+    const cells: {
+      ymd: string;
+      dayNum: number;
+      isCurrentMonth: boolean;
+      isToday: boolean;
+      count: number;
+    }[] = [];
+
+    const firstDayOfWeek = new Date(calendarYear, calendarMonth, 1).getDay();
+    const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+    const daysInPrevMonth = new Date(calendarYear, calendarMonth, 0).getDate();
+
+    // Previous month padding
+    const prevYear = calendarMonth === 0 ? calendarYear - 1 : calendarYear;
+    const prevMonth = calendarMonth === 0 ? 11 : calendarMonth - 1;
+    for (let i = 0; i < firstDayOfWeek; i++) {
+      const dayNum = daysInPrevMonth - firstDayOfWeek + 1 + i;
+      const ymd = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      const count = deliverySchedule.byDateMap.get(ymd)?.count || 0;
+      cells.push({
+        ymd,
+        dayNum,
+        isCurrentMonth: false,
+        isToday: ymd === deliverySchedule.todayYmd,
+        count
+      });
+    }
+
+    // Current month days
+    for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+      const ymd = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      const count = deliverySchedule.byDateMap.get(ymd)?.count || 0;
+      cells.push({
+        ymd,
+        dayNum,
+        isCurrentMonth: true,
+        isToday: ymd === deliverySchedule.todayYmd,
+        count
+      });
+    }
+
+    // Next month padding to fill out 7-column rows
+    const nextYear = calendarMonth === 11 ? calendarYear + 1 : calendarYear;
+    const nextMonth = calendarMonth === 11 ? 0 : calendarMonth + 1;
+    const remaining = (7 - (cells.length % 7)) % 7;
+    for (let i = 1; i <= remaining; i++) {
+      const ymd = `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+      const count = deliverySchedule.byDateMap.get(ymd)?.count || 0;
+      cells.push({
+        ymd,
+        dayNum: i,
+        isCurrentMonth: false,
+        isToday: ymd === deliverySchedule.todayYmd,
+        count
+      });
+    }
+
+    return cells;
+  }, [calendarYear, calendarMonth, deliverySchedule.byDateMap, deliverySchedule.todayYmd]);
+
   // Filtered Shipments
   const filteredShipments = useMemo(() => {
     const filtered = allShipments.filter(s => {
+      // 0. Estimated Delivery Date Filter (canonical estimated_delivery_date)
+      const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate;
+      const eddYmd = edd ? parseToYMD(edd) : '';
+
+      if (selectedDeliveryDate && selectedDeliveryDateEnd) {
+        if (!eddYmd) return false;
+        if (eddYmd < selectedDeliveryDate || eddYmd > selectedDeliveryDateEnd) {
+          return false;
+        }
+      } else if (selectedDeliveryDate) {
+        if (!eddYmd || eddYmd !== selectedDeliveryDate) {
+          return false;
+        }
+      } else if (selectedDeliveryDateEnd) {
+        if (!eddYmd || eddYmd > selectedDeliveryDateEnd) {
+          return false;
+        }
+      }
+
       // 1. Search filter
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase().trim();
@@ -468,25 +700,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       // 4. Status Dropdown filter
       if (selectedStatusDropdown !== 'All') {
         const cat = getShipmentCategory(s);
-        if (cat !== selectedStatusDropdown && s.status !== selectedStatusDropdown) {
+        const display = getTrackingDisplayStatus(s);
+        if (cat !== selectedStatusDropdown && display !== selectedStatusDropdown) {
           return false;
         }
       }
 
-      // 5. Date Range filter (matches dispatchDate)
+      // 5. Date Range filter (strictly on canonical Estimated Delivery Date, not dispatchDate/upload/order)
       if (startDate || endDate) {
-        if (!s.dispatchDate) return false;
-        const d = new Date(s.dispatchDate);
-        if (isNaN(d.getTime())) return true;
-        if (startDate) {
-          const start = new Date(startDate);
-          if (d < start) return false;
-        }
-        if (endDate) {
-          const end = new Date(endDate);
-          end.setHours(23, 59, 59, 999);
-          if (d > end) return false;
-        }
+        if (!eddYmd) return false;
+        if (startDate && eddYmd < startDate) return false;
+        if (endDate && eddYmd > endDate) return false;
       }
 
       return true;
@@ -494,12 +718,12 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
     // Natural ascending sort on the filtered influencer shipments BEFORE pagination
     return sortInfluencerShipmentsNaturally(filtered);
-  }, [allShipments, searchTerm, selectedCourier, selectedStatusTab, selectedStatusDropdown, startDate, endDate]);
+  }, [allShipments, selectedDeliveryDate, selectedDeliveryDateEnd, searchTerm, selectedCourier, selectedStatusTab, selectedStatusDropdown, startDate, endDate]);
 
   // Reset pagination whenever filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCourier, selectedStatusTab, selectedStatusDropdown, startDate, endDate]);
+  }, [searchTerm, selectedCourier, selectedStatusTab, selectedStatusDropdown, startDate, endDate, selectedDeliveryDate, selectedDeliveryDateEnd]);
 
   // Paginated Shipments
   const totalShipmentsCount = filteredShipments.length;
@@ -594,6 +818,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       setSelectedCourier('All');
       setSelectedStatusTab('All');
       setSelectedStatusDropdown('All');
+      setSelectedDeliveryDate(null);
       setStartDate('');
       setEndDate('');
       setCurrentPage(1);
@@ -1004,14 +1229,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               <option value="Expired">Expired</option>
             </select>
 
-            {/* 6. Date Range Inputs (From - To) */}
+            {/* 6. Date Range Inputs (From - To for Estimated Delivery Date) */}
             <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 h-10 shrink-0">
-              <Calendar size={13} className="text-slate-400 shrink-0" />
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                title="From date"
+                title="From Estimated Delivery Date"
                 className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
               />
               <span className="text-slate-500 text-xs">-</span>
@@ -1019,9 +1243,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                title="To date"
+                title="To Estimated Delivery Date"
                 className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
               />
+              {(startDate || endDate) && (
+                <button
+                  type="button"
+                  onClick={() => { setStartDate(''); setEndDate(''); }}
+                  className="p-1 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  title="Clear dates"
+                >
+                  <X size={12} />
+                </button>
+              )}
             </div>
 
             {/* 7. Clear All Button (Destructive: Permanently clears all tracking records for this campaign) */}
@@ -1071,9 +1305,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       ) : (
         <>
 
-      {/* 4. STATUS FILTER PILLS (Matching Screenshot order & color schemes) + BULK MOVE */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 overflow-x-auto pb-1 [scrollbar-width:none]">
-        <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none]">
+      {/* 4. STATUS FILTER PILLS + ESTIMATED DELIVERY DATE + BULK MOVE */}
+      <div className="flex items-center justify-between gap-3 w-full">
+        {/* Status Pills + Calendar Icon (Kept together on the same row) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap shrink-0 overflow-x-auto [scrollbar-width:none]">
           {STATUS_PILLS.map((pill) => {
             const count = statusTabCounts[pill] || 0;
             const isActive = selectedStatusTab === pill;
@@ -1114,7 +1349,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                 key={pill}
                 type="button"
                 onClick={() => setSelectedStatusTab(pill)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${badgeBorderClass}`}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${badgeBorderClass}`}
               >
                 <span>{pill}</span>
                 <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
@@ -1125,24 +1360,71 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               </button>
             );
           })}
+
+          {/* Calendar Icon Button: Positioned immediately after Expired on the SAME row */}
+          <button
+            type="button"
+            onClick={() => setIsDeliveryCalendarOpen(true)}
+            className={`h-8 w-8 rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0 flex-shrink-0 border ${
+              selectedDeliveryDate || isDeliveryCalendarOpen
+                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                : 'bg-[#0b1220] border-purple-800/50 text-purple-300 hover:border-purple-500 hover:text-white'
+            }`}
+            title={
+              selectedDeliveryDate
+                ? `Estimated Delivery Date: ${formatDDMMYYYY(selectedDeliveryDate)}`
+                : 'Estimated Delivery Date Calendar'
+            }
+            aria-label="Estimated Delivery Date Calendar"
+          >
+            <Calendar size={15} />
+          </button>
         </div>
 
-        {/* Bulk Move to Status Tracking (N) Button */}
-        <button
-          type="button"
-          onClick={handleBulkMoveToStatusTracking}
-          disabled={isMovingToStatus || eligibleForStatusTrackingCount === 0}
-          className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-            eligibleForStatusTrackingCount > 0
-              ? 'bg-purple-600 hover:bg-purple-500 text-white border-purple-500 shadow-sm shadow-purple-600/30'
-              : 'bg-slate-900/80 text-slate-500 border-slate-800 cursor-not-allowed'
-          }`}
-          title={eligibleForStatusTrackingCount > 0 ? `Move all ${eligibleForStatusTrackingCount} eligible delivered influencers to Status Tracking` : 'No delivered influencers waiting to be added'}
-        >
-          <RefreshCw size={13} className={isMovingToStatus ? 'animate-spin' : ''} />
-          <span>Move to Status Tracking ({eligibleForStatusTrackingCount})</span>
-        </button>
+        {/* Right Action Group: Move to Status Tracking aligned to FAR RIGHT */}
+        <div className="ml-auto shrink-0 flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleBulkMoveToStatusTracking}
+            disabled={isMovingToStatus || eligibleForStatusTrackingCount === 0}
+            className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer whitespace-nowrap shrink-0 flex-shrink-0 ${
+              eligibleForStatusTrackingCount > 0
+                ? 'bg-purple-600 hover:bg-purple-500 text-white border-purple-500 shadow-sm shadow-purple-600/30'
+                : 'bg-slate-900/80 text-slate-500 border-slate-800 cursor-not-allowed'
+            }`}
+            title={eligibleForStatusTrackingCount > 0 ? `Move all ${eligibleForStatusTrackingCount} eligible delivered influencers to Status Tracking` : 'No delivered influencers waiting to be added'}
+          >
+            <RefreshCw size={13} className={isMovingToStatus ? 'animate-spin' : ''} />
+            <span>Move to Status Tracking ({eligibleForStatusTrackingCount})</span>
+          </button>
+        </div>
       </div>
+
+      {/* Active Estimated Delivery Date Filter Banner */}
+      {(selectedDeliveryDate || selectedDeliveryDateEnd) && (
+        <div className="flex items-center justify-between px-4 py-2.5 bg-purple-950/40 border border-purple-800/60 rounded-xl text-xs text-purple-200 shadow-sm animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span>Filtering by Estimated Delivery Date:</span>
+            <span className="font-bold text-white px-2 py-0.5 rounded bg-purple-900/60 border border-purple-700/60 font-mono">
+              {selectedDeliveryDate && selectedDeliveryDateEnd
+                ? `[ ${formatDDMMYYYY(selectedDeliveryDate)} ] - [ ${formatDDMMYYYY(selectedDeliveryDateEnd)} ]`
+                : `[ ${formatDDMMYYYY(selectedDeliveryDate)} ]`}
+            </span>
+            <span className="text-purple-300">({filteredShipments.length} shipment{filteredShipments.length === 1 ? '' : 's'})</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedDeliveryDate(null);
+              setSelectedDeliveryDateEnd(null);
+            }}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-900/40 hover:bg-purple-800/60 text-purple-200 hover:text-white border border-purple-700/50 text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <X size={12} />
+            <span>Clear Filter</span>
+          </button>
+        </div>
+      )}
 
       {/* 5. SHIPMENT TABLE + PAGINATION (FULL WIDTH) */}
       <div className="flex flex-col bg-[#0b1220] border border-slate-800/90 rounded-2xl overflow-hidden shadow-xl w-full">
@@ -1155,13 +1437,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">AWB NUMBER</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">COURIER</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">STATUS</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">ESTIMATED DELIVERY DATE</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-right min-w-[240px]">ACTIONS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
                 {paginatedShipments.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-500 italic">
+                    <td colSpan={6} className="p-8 text-center text-slate-500 italic">
                       No shipments matching your filter criteria.
                     </td>
                   </tr>
@@ -1170,7 +1453,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                     const displayOrderId = s.orderId 
                       ? (s.orderId.startsWith('#') ? s.orderId : `#${s.orderId}`)
                       : (s.influencerCode || (s.id.length > 8 ? `#${s.id.slice(0, 8)}` : `#${s.id}`));
-                    const badgeStyle = getTrackingStatusBadgeStyle(s.status);
+                    const displayStatus = getTrackingDisplayStatus(s);
+                    const badgeStyle = getTrackingStatusBadgeStyle(displayStatus);
 
                     return (
                       <tr
@@ -1217,11 +1501,27 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         <td className="px-5 py-3.5">
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${badgeStyle.dot}`} />
-                            <span>{s.status}</span>
+                            <span>{displayStatus}</span>
                           </span>
                         </td>
 
-                        {/* 5. ACTIONS */}
+                        {/* 5. ESTIMATED DELIVERY DATE */}
+                        <td className="px-5 py-3.5 font-medium text-slate-200 whitespace-nowrap">
+                          {(() => {
+                            const dateVal = s.estimatedDeliveryDate || s.expectedDeliveryDate;
+                            const formatted = formatEstimatedDeliveryDate(dateVal);
+                            if (formatted === '—') {
+                              return <span className="text-slate-500 italic text-[11px]">—</span>;
+                            }
+                            return (
+                              <span className="text-slate-200 font-mono">
+                                {formatted}
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* 6. ACTIONS */}
                         <td className="px-5 py-3.5 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
                             <button
@@ -1453,10 +1753,12 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   <span className="text-slate-400">Dispatch Date:</span>
                   <span className="text-slate-200">{activeTrackingModalShipment.dispatchDate || '—'}</span>
                 </div>
-                {activeTrackingModalShipment.expectedDeliveryDate && (
+                {(activeTrackingModalShipment.estimatedDeliveryDate || activeTrackingModalShipment.expectedDeliveryDate) && (
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Expected Delivery:</span>
-                    <span className="text-slate-200">{activeTrackingModalShipment.expectedDeliveryDate}</span>
+                    <span className="text-slate-400">Estimated Delivery:</span>
+                    <span className="text-slate-200 font-semibold font-mono">
+                      {formatEstimatedDeliveryDate(activeTrackingModalShipment.estimatedDeliveryDate || activeTrackingModalShipment.expectedDeliveryDate)}
+                    </span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">
@@ -1481,12 +1783,33 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                     {activeTrackingModalShipment.lastSyncedAt || activeTrackingModalShipment.trackingDateTime || activeTrackingModalShipment.dispatchDate || '—'}
                   </span>
                 </div>
-                <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
-                  <span className="text-slate-400">Current Status:</span>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${getTrackingStatusBadgeStyle(activeTrackingModalShipment.status).bg} ${getTrackingStatusBadgeStyle(activeTrackingModalShipment.status).text} ${getTrackingStatusBadgeStyle(activeTrackingModalShipment.status).border}`}>
-                    {activeTrackingModalShipment.status}
-                  </span>
-                </div>
+                {(() => {
+                  const modalDisplayStatus = getTrackingDisplayStatus(activeTrackingModalShipment);
+                  const badgeStyle = getTrackingStatusBadgeStyle(modalDisplayStatus);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                        <span className="text-slate-400">Status:</span>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${badgeStyle.dot}`} />
+                          <span>{modalDisplayStatus}</span>
+                        </span>
+                      </div>
+                      {activeTrackingModalShipment.rawStatus && activeTrackingModalShipment.rawStatus !== modalDisplayStatus && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 text-[11px]">Raw Courier Status:</span>
+                          <span className="font-mono text-slate-400 text-[11px]">{activeTrackingModalShipment.rawStatus}</span>
+                        </div>
+                      )}
+                      {activeTrackingModalShipment.remarks && activeTrackingModalShipment.remarks !== modalDisplayStatus && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 text-[11px]">Source Remarks:</span>
+                          <span className="text-slate-400 text-[11px] max-w-[260px] truncate text-right">{activeTrackingModalShipment.remarks}</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Courier Tracking Timeline Visualizer */}
@@ -1666,6 +1989,269 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         }}
         onConfirm={handleDeleteSingleShipment}
       />
+
+      {/* 8. ESTIMATED DELIVERY DATE CENTERED MODAL */}
+      {isDeliveryCalendarOpen && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 animate-fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsDeliveryCalendarOpen(false);
+            }
+          }}
+        >
+          <div
+            className="bg-[#0e1626] border border-slate-700/80 rounded-2xl shadow-2xl w-full max-w-[580px] max-h-[92vh] flex flex-col overflow-hidden text-slate-200 animate-in fade-in zoom-in-95 duration-150 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 1. Modal Header (Fixed) */}
+            <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between bg-[#121c30] flex-shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-950/80 border border-purple-800/60 text-purple-400">
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Estimated Delivery Date</h3>
+                  <p className="text-[11px] text-slate-400">Filter shipments by estimated delivery schedule</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDeliveryCalendarOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700/80 flex items-center justify-center transition-colors cursor-pointer"
+                title="Close modal"
+                aria-label="Close modal"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Modal Body: Scrollable if necessary, but fits naturally */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-3.5 [scrollbar-width:thin]">
+              {/* 2. DATE FILTER CARD */}
+              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <span>Select Date or Range</span>
+                  {(selectedDeliveryDate || selectedDeliveryDateEnd) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDeliveryDate(null);
+                        setSelectedDeliveryDateEnd(null);
+                      }}
+                      className="text-purple-400 hover:text-purple-300 text-[11px] font-bold cursor-pointer transition-colors"
+                    >
+                      Clear Filter
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-medium block mb-1">Start Date</span>
+                    <input
+                      type="date"
+                      value={selectedDeliveryDate || ''}
+                      onChange={(e) => {
+                        const val = e.target.value || null;
+                        setSelectedDeliveryDate(val);
+                        if (val) {
+                          const [y, m] = val.split('-').map(Number);
+                          if (y && m) {
+                            setCalendarYear(y);
+                            setCalendarMonth(m - 1);
+                          }
+                        }
+                      }}
+                      title="Start Date"
+                      className="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:outline-none focus:border-purple-500 w-full cursor-pointer"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-medium block mb-1">End Date</span>
+                    <input
+                      type="date"
+                      value={selectedDeliveryDateEnd || ''}
+                      onChange={(e) => setSelectedDeliveryDateEnd(e.target.value || null)}
+                      title="End Date"
+                      className="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:outline-none focus:border-purple-500 w-full cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. DELIVERY SUMMARY CARDS */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="p-2.5 sm:p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Today's Estimated</span>
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className={`text-lg sm:text-xl font-black font-mono ${deliverySchedule.todayCount > 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                      {deliverySchedule.todayCount}
+                    </span>
+                    <span className="text-xs text-slate-400 font-medium">Deliveries</span>
+                    {deliverySchedule.todayCount > 0 && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-bold ml-auto">
+                        Due Today
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-2.5 sm:p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Total Scheduled</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-lg sm:text-xl font-black font-mono text-purple-300">
+                        {deliverySchedule.totalWithDate}
+                      </span>
+                      <span className="text-xs text-slate-400 font-medium">Shipments</span>
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-400">
+                      {deliverySchedule.sortedList.length} {deliverySchedule.sortedList.length === 1 ? 'Date' : 'Dates'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. MONTH CALENDAR VIEW (MAIN UI) */}
+              <div className="space-y-2">
+                {/* Month / Year Header with Navigation */}
+                <div className="flex items-center justify-between px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={handlePrevMonth}
+                    className="w-8 h-8 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 flex items-center justify-center transition-colors cursor-pointer"
+                    title="Previous Month"
+                    aria-label="Previous Month"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+
+                  <span className="text-xs sm:text-sm font-black tracking-wider uppercase text-white font-mono">
+                    {monthLabel}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={handleNextMonth}
+                    className="w-8 h-8 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 flex items-center justify-center transition-colors cursor-pointer"
+                    title="Next Month"
+                    aria-label="Next Month"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+
+                {/* Day of Week Headers */}
+                <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400 px-0.5">
+                  {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d) => (
+                    <div key={d} className="py-0.5">{d}</div>
+                  ))}
+                </div>
+
+                {/* Calendar Days Grid */}
+                <div className="grid grid-cols-7 gap-1 sm:gap-1.5 px-0.5">
+                  {calendarCells.map((cell) => {
+                    const isStart = selectedDeliveryDate === cell.ymd;
+                    const isEnd = selectedDeliveryDateEnd === cell.ymd;
+                    const isSelected = isStart || isEnd;
+                    const isInRange = Boolean(
+                      selectedDeliveryDate &&
+                      selectedDeliveryDateEnd &&
+                      cell.ymd > selectedDeliveryDate &&
+                      cell.ymd < selectedDeliveryDateEnd
+                    );
+
+                    return (
+                      <button
+                        key={cell.ymd}
+                        type="button"
+                        onClick={() => handleSelectCalendarDate(cell.ymd)}
+                        className={`min-h-[50px] sm:min-h-[54px] rounded-xl p-1 sm:p-1.5 flex flex-col items-center justify-between text-xs transition-all relative cursor-pointer border ${
+                          isSelected
+                            ? 'bg-purple-600 border-purple-400 text-white font-bold shadow-md shadow-purple-600/40 z-10'
+                            : isInRange
+                            ? 'bg-purple-900/40 border-purple-800/60 text-purple-100'
+                            : cell.count > 0
+                            ? 'bg-slate-900/90 border-purple-900/40 hover:border-purple-600 hover:bg-slate-800 text-slate-100'
+                            : cell.isCurrentMonth
+                            ? 'bg-slate-900/40 border-slate-800/60 hover:border-slate-700 hover:bg-slate-800/60 text-slate-300'
+                            : 'bg-transparent border-transparent text-slate-600 hover:text-slate-400 hover:bg-slate-900/30'
+                        } ${cell.isToday && !isSelected ? 'ring-1.5 ring-emerald-500/80' : ''}`}
+                        title={cell.count > 0 ? `${cell.ymd}: ${cell.count} estimated delivery(ies)` : cell.ymd}
+                      >
+                        {/* Top row: Day Number + Today micro-badge */}
+                        <div className="w-full flex items-center justify-between px-0.5 leading-none">
+                          <span className={`text-[11px] sm:text-xs font-bold ${
+                            isSelected
+                              ? 'text-white'
+                              : cell.isCurrentMonth
+                              ? 'text-slate-200'
+                              : 'text-slate-600'
+                          }`}>
+                            {cell.dayNum}
+                          </span>
+                          {cell.isToday && (
+                            <span className={`text-[8px] font-black uppercase px-1 py-0.2 rounded leading-none ${
+                              isSelected ? 'bg-white/20 text-white' : 'bg-emerald-950/90 text-emerald-300 border border-emerald-700/60'
+                            }`}>
+                              Today
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Bottom row: Delivery count badge (ONLY if cell.count > 0) */}
+                        <div className="w-full flex items-center justify-center min-h-[18px]">
+                          {cell.count > 0 && (
+                            <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-md leading-none shadow-sm ${
+                              isSelected
+                                ? 'bg-white/25 text-white border border-white/40'
+                                : isInRange
+                                ? 'bg-purple-800 text-purple-100 border border-purple-700'
+                                : 'bg-purple-950 border border-purple-700/70 text-purple-300'
+                            }`}>
+                              {cell.count}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* 5. Modal Footer (Fixed) */}
+            <div className="px-5 py-3 border-t border-slate-800 bg-[#121c30] flex items-center justify-between text-xs flex-shrink-0">
+              <span className="text-[11px] text-slate-400 truncate max-w-[280px]">
+                {selectedDeliveryDate
+                  ? `Filter: ${formatDDMMYYYY(selectedDeliveryDate)}${selectedDeliveryDateEnd ? ` to ${formatDDMMYYYY(selectedDeliveryDateEnd)}` : ''}`
+                  : 'Select a date or range to filter shipments'}
+              </span>
+              <div className="flex items-center gap-2">
+                {(selectedDeliveryDate || selectedDeliveryDateEnd) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDeliveryDate(null);
+                      setSelectedDeliveryDateEnd(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-purple-400 hover:text-purple-300 font-bold cursor-pointer text-xs transition-colors border border-slate-700/80"
+                  >
+                    Reset
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsDeliveryCalendarOpen(false)}
+                  className="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold cursor-pointer text-xs transition-colors shadow-sm"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

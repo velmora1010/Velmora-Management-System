@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { 
   FileSpreadsheet, 
   CheckCircle2, 
+  XCircle,
   AlertTriangle, 
   X, 
   Truck, 
@@ -19,6 +20,7 @@ import {
   normalizeDelhiveryStatus,
   normalizeTrackingStatus,
   resolveDelhiveryDisplayStatus,
+  getTrackingDisplayStatus,
   resolveDelhiveryCategory,
   upsertCampaignShipments,
   upsertCampaignShipmentsToDb,
@@ -26,8 +28,90 @@ import {
   InfluencerDispatchedShipment,
   getCourierTrackingUrl
 } from '../../services/influencerTrackingService';
+import { parseToYMD } from '../../utils/influencerDateUtils';
 import { normalizeInfluencerReference } from '../../services/influencerStatusHandoffService';
 import toast from 'react-hot-toast';
+
+export interface UploadResultStats {
+  title: string;
+  isSuccess: boolean;
+  acceptedCount: number;
+  ignoredCustomerCount: number;
+  unmatchedInvalidCount: number;
+  updatedExistingCount: number;
+  newShipmentsCount: number;
+  errorMessage?: string;
+}
+
+/**
+ * Displays a clean, uncompressed, dark navy result toast with separate metric rows.
+ * Prevents text collision/wrapping and clearly highlights success vs failure.
+ */
+export function showUploadResultToast(stats: UploadResultStats) {
+  toast.dismiss();
+
+  toast.custom(
+    (t) => (
+      <div
+        className={`relative z-[9999] bg-[#141a29] border ${
+          stats.isSuccess ? 'border-emerald-500/50 shadow-emerald-950/50' : 'border-rose-500/50 shadow-rose-950/50'
+        } p-4 rounded-xl shadow-2xl min-w-[340px] max-w-[420px] flex flex-col gap-3 pointer-events-auto transition-all duration-200 animate-in fade-in zoom-in-95`}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            {stats.isSuccess ? (
+              <div className="p-1.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shrink-0">
+                <CheckCircle2 size={18} />
+              </div>
+            ) : (
+              <div className="p-1.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/30 shrink-0">
+                <XCircle size={18} />
+              </div>
+            )}
+            <span className="font-bold text-sm text-slate-100">{stats.title}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => toast.dismiss(t.id)}
+            className="text-slate-400 hover:text-slate-200 p-1 rounded transition-colors cursor-pointer"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {stats.errorMessage && (
+          <div className="text-xs text-rose-300 font-medium bg-rose-950/40 p-2.5 rounded-lg border border-rose-800/50">
+            {stats.errorMessage}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-700/60 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-300 font-medium">Accepted Influencer Shipments:</span>
+            <span className="font-mono font-bold text-emerald-400">{stats.acceptedCount}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400">Ignored Customer Rows:</span>
+            <span className="font-mono font-bold text-slate-300">{stats.ignoredCustomerCount}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400">Unmatched / Invalid Rows:</span>
+            <span className="font-mono font-bold text-slate-400">{stats.unmatchedInvalidCount}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400">Updated Existing Shipments:</span>
+            <span className="font-mono font-bold text-blue-400">{stats.updatedExistingCount}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400">New Shipments:</span>
+            <span className="font-mono font-bold text-emerald-300">{stats.newShipmentsCount}</span>
+          </div>
+        </div>
+      </div>
+    ),
+    { duration: 7000 }
+  );
+}
 
 export interface UploadCourierShipmentModalProps {
   campaign: Campaign;
@@ -35,7 +119,7 @@ export interface UploadCourierShipmentModalProps {
   influencers: CampaignInfluencer[];
   initialFile?: File | null;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
 }
 
 export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProps> = ({
@@ -52,6 +136,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isExecutingRef = useRef(false);
+  const processedFileRef = useRef<File | null>(null);
 
   // Import Progress State
   const [importProgress, setImportProgress] = useState<{
@@ -97,13 +182,24 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
     return cleanStr(val).replace(/^#+/, '').trim().toLowerCase();
   };
 
-  // Find header index based on possible variations (ignoring punctuation & whitespace)
+  // Find header index based on possible variations (exact normalized match first, then substring)
   const findColumnKey = (rowKeys: string[], possibleNames: string[]): string | null => {
-    for (const key of rowKeys) {
-      const normKey = key.toString().toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-      for (const target of possibleNames) {
-        const normTarget = target.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-        if (normKey === normTarget || normKey.includes(normTarget)) {
+    // Pass 1: exact normalized match
+    for (const target of possibleNames) {
+      const normTarget = target.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      for (const key of rowKeys) {
+        const normKey = key.toString().toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+        if (normKey === normTarget) {
+          return key;
+        }
+      }
+    }
+    // Pass 2: substring match
+    for (const target of possibleNames) {
+      const normTarget = target.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      for (const key of rowKeys) {
+        const normKey = key.toString().toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+        if (normKey.includes(normTarget)) {
           return key;
         }
       }
@@ -216,7 +312,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         remarksCol = findColumnKey(headers, ['remarks', 'remark', 'delhiveryremarks', 'courierremarks']);
         pendingRemarksCol = findColumnKey(headers, ['pendingreturnedremarks', 'pendingreturnedremark', 'pendingremarks', 'returnedremarks']);
         dateCol = findColumnKey(headers, ['pickupdate', 'dispatchdate', 'bookingdate', 'firstbaggingdate', 'date']);
-        eddCol = findColumnKey(headers, ['delivereddate', 'deliverydate', 'estimateddeliverydate', 'promiseddeliverydate', 'edd']);
+        eddCol = findColumnKey(headers, ['estimateddeliverydate', 'estimateddelivery', 'estdeliverydate', 'edd', 'promiseddeliverydate', 'deliverydate', 'delivereddate']);
         cityCol = findColumnKey(headers, ['city', 'destinationcity']);
         stateCol = findColumnKey(headers, ['destinationstate', 'state']);
         pinCol = findColumnKey(headers, ['pin', 'pincode', 'postalcode', 'zip']);
@@ -331,7 +427,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
         // PRE-PERSISTENCE FILTER: Reject customer rows before they reach storage
         if (!matchedInf) {
-          ignoredCustomerRowsCount++;
+          if (rawOrderId) {
+            ignoredCustomerRowsCount++;
+          } else {
+            invalidRowsCount++;
+          }
           return;
         }
 
@@ -354,10 +454,19 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       });
 
       if (validRows.length === 0) {
-        const err = `No campaign influencer shipments found in this file (${ignoredCustomerRowsCount} customer / unmatched rows ignored).`;
+        const err = `No campaign influencer shipments found in this file (${ignoredCustomerRowsCount} customer rows ignored).`;
         setUploadError(err);
         setStep('error');
-        toast.error(err, { duration: 6000 });
+        showUploadResultToast({
+          title: `${courier} Upload - No Shipments Found`,
+          isSuccess: false,
+          acceptedCount: 0,
+          ignoredCustomerCount: ignoredCustomerRowsCount,
+          unmatchedInvalidCount: invalidRowsCount,
+          updatedExistingCount: 0,
+          newShipmentsCount: 0,
+          errorMessage: err
+        });
         isExecutingRef.current = false;
         return;
       }
@@ -397,24 +506,29 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               const awb = row.rawAwb.trim();
               const orderId = row.orderId || inf.code || '';
 
+              const existingShipment = existingMap.get(awb.toLowerCase()) || 
+                (inf.code ? Array.from(existingMap.values()).find(s => (s.influencerCode || '').toLowerCase() === inf.code?.toLowerCase()) : undefined);
+
               const baseShipment: InfluencerDispatchedShipment = {
-                id: inf.dispatchDetails?.id || String(inf.id),
+                id: existingShipment?.id || inf.dispatchDetails?.id || String(inf.id),
                 influencerId: String(inf.id),
-                creatorName: inf.influencer_name || inf.name || 'Influencer',
-                username: inf.platforms?.find(p => p.username)?.username || `@${inf.influencer_name}`,
-                influencerCode: inf.code || orderId || '',
-                orderId: orderId || undefined,
-                profilePhoto: inf.profile_file_url || '',
-                phoneNumber: inf.phone_number || '',
-                altPhoneNumber: inf.alternative_number || '',
-                state: inf.state || row.state || '',
-                city: row.city || undefined,
-                pincode: row.pin || undefined,
-                batchCode: '—',
+                creatorName: inf.influencer_name || inf.name || existingShipment?.creatorName || 'Influencer',
+                username: inf.platforms?.find(p => p.username)?.username || existingShipment?.username || `@${inf.influencer_name}`,
+                influencerCode: inf.code || orderId || existingShipment?.influencerCode || '',
+                orderId: orderId || existingShipment?.orderId || undefined,
+                profilePhoto: inf.profile_file_url || existingShipment?.profilePhoto || '',
+                phoneNumber: inf.phone_number || existingShipment?.phoneNumber || '',
+                altPhoneNumber: inf.alternative_number || existingShipment?.altPhoneNumber || '',
+                state: inf.state || row.state || existingShipment?.state || '',
+                city: row.city || existingShipment?.city || undefined,
+                pincode: row.pin || existingShipment?.pincode || undefined,
+                batchCode: existingShipment?.batchCode || '—',
+                batchId: existingShipment?.batchId,
                 awbNumber: awb,
                 courier: 'ST Courier',
-                dispatchDate: row.date || todayDate,
-                expectedDeliveryDate: row.edd || '',
+                dispatchDate: row.date || existingShipment?.dispatchDate || todayDate,
+                expectedDeliveryDate: row.edd || existingShipment?.expectedDeliveryDate || '',
+                estimatedDeliveryDate: row.edd || existingShipment?.estimatedDeliveryDate || '',
                 status: 'Pending',
                 rawStatus: row.currentStatus || 'Pending',
                 statusSource: 'Live ST Courier Tracking',
@@ -452,7 +566,6 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         // Save only validated campaign influencer shipments to campaign database & local storage
         const dbResult = await upsertCampaignShipmentsToDb(campaign.id, trackedShipments);
 
-        const totalReported = validRows.length + ignoredCustomerRowsCount + invalidRowsCount;
         const acceptedReported = validRows.length;
         const importedReported = dbResult.imported;
         const duplicatesReported = dbResult.duplicatesUpdated;
@@ -489,30 +602,39 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           await logActivity({
             department: 'Marketing',
             action: 'Upload ST Courier Shipments',
-            description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Accepted: ${acceptedReported}, Ignored customer/unmatched: ${ignoredCustomerRowsCount}, Duplicates updated: ${duplicatesReported}`,
+            description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Accepted: ${acceptedReported}, Ignored customer: ${ignoredCustomerRowsCount}, Invalid: ${invalidRowsCount}, Duplicates updated: ${duplicatesReported}`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'ST Courier', total: totalReported, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, liveSynced: liveApiSyncedCount, livePending: liveApiPendingCount }
+            metadata: { courier: 'ST Courier', total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, invalid: invalidRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, liveSynced: liveApiSyncedCount, livePending: liveApiPendingCount }
           });
         } catch (e) {}
 
         setImportProgress(prev => ({
           ...prev,
-          phase: 'Completed'
+          completed: prev.total,
+          phase: 'Completed',
+          duplicates: duplicatesReported,
+          imported: importedReported,
+          failed: failedReported
         }));
         setStep('completed');
 
-        const summaryText = `ST Courier Upload Complete\nAccepted Influencer Shipments: ${acceptedReported}\nIgnored Customer/Unmatched Rows: ${ignoredCustomerRowsCount}\nUpdated Existing Shipments: ${duplicatesReported}\nNew Shipments: ${importedReported}`;
-        if (failedReported > 0 && importedReported === 0 && duplicatesReported === 0) {
-          toast.error(summaryText, { duration: 6000 });
-        } else {
-          toast.success(summaryText, { duration: 6000 });
+        try {
+          await onSuccess();
+        } catch (refreshErr) {
+          console.warn('Error refreshing tracking data:', refreshErr);
         }
+        onClose();
 
-        setTimeout(() => {
-          onSuccess();
-          onClose();
-        }, 700);
+        showUploadResultToast({
+          title: 'ST Courier Upload Complete',
+          isSuccess: true,
+          acceptedCount: acceptedReported,
+          ignoredCustomerCount: ignoredCustomerRowsCount,
+          unmatchedInvalidCount: invalidRowsCount,
+          updatedExistingCount: duplicatesReported,
+          newShipmentsCount: importedReported
+        });
 
       // =======================================================================
       // WORKFLOW B: DELHIVERY (UPLOADED FILE STATUS AS SOURCE OF TRUTH - NO API)
@@ -540,7 +662,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           const awb = row.rawAwb.trim();
           const orderId = row.orderId || inf.code || '';
 
-          const displayStatus = resolveDelhiveryDisplayStatus({
+          const existingShipment = existingMap.get(awb.toLowerCase()) || 
+            (inf.code ? Array.from(existingMap.values()).find(s => (s.influencerCode || '').toLowerCase() === inf.code?.toLowerCase()) : undefined);
+
+          const displayStatus = getTrackingDisplayStatus({
             remarks: row.remarks,
             pendingRemarks: row.pendingRemarks,
             currentStatus: row.currentStatus,
@@ -549,32 +674,35 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           });
           const statusCategory = resolveDelhiveryCategory(displayStatus, row.currentStatus, row.statusType);
           const rawStatus = row.remarks || row.pendingRemarks || row.currentStatus || row.statusType || displayStatus;
+          const normalizedEdd = row.edd ? (parseToYMD(row.edd) || row.edd) : '';
 
           const shipmentObj: InfluencerDispatchedShipment = {
-            id: inf.dispatchDetails?.id || String(inf.id),
+            id: existingShipment?.id || inf.dispatchDetails?.id || String(inf.id),
             influencerId: String(inf.id),
-            creatorName: inf.influencer_name || inf.name || 'Influencer',
-            username: inf.platforms?.find(p => p.username)?.username || `@${inf.influencer_name}`,
-            influencerCode: inf.code || orderId || '',
-            orderId: orderId || undefined,
-            profilePhoto: inf.profile_file_url || '',
-            phoneNumber: inf.phone_number || '',
-            altPhoneNumber: inf.alternative_number || '',
-            state: inf.state || row.state || '',
-            city: row.city || undefined,
-            pincode: row.pin || undefined,
-            batchCode: '—',
+            creatorName: inf.influencer_name || inf.name || existingShipment?.creatorName || 'Influencer',
+            username: inf.platforms?.find(p => p.username)?.username || existingShipment?.username || `@${inf.influencer_name}`,
+            influencerCode: inf.code || orderId || existingShipment?.influencerCode || '',
+            orderId: orderId || existingShipment?.orderId || undefined,
+            profilePhoto: inf.profile_file_url || existingShipment?.profilePhoto || '',
+            phoneNumber: inf.phone_number || existingShipment?.phoneNumber || '',
+            altPhoneNumber: inf.alternative_number || existingShipment?.altPhoneNumber || '',
+            state: inf.state || row.state || existingShipment?.state || '',
+            city: row.city || existingShipment?.city || undefined,
+            pincode: row.pin || existingShipment?.pincode || undefined,
+            batchCode: existingShipment?.batchCode || '—',
+            batchId: existingShipment?.batchId,
             awbNumber: awb,
             courier: 'Delhivery',
-            dispatchDate: row.date || todayDate,
-            expectedDeliveryDate: row.edd || '',
+            dispatchDate: row.date || existingShipment?.dispatchDate || todayDate,
+            expectedDeliveryDate: normalizedEdd || existingShipment?.expectedDeliveryDate || '',
+            estimatedDeliveryDate: normalizedEdd || existingShipment?.estimatedDeliveryDate || '',
             status: displayStatus,
             statusCategory,
             rawStatus,
-            remarks: row.remarks || undefined,
-            pendingRemarks: row.pendingRemarks || undefined,
-            currentStatus: row.currentStatus || undefined,
-            statusType: row.statusType || undefined,
+            remarks: row.remarks || existingShipment?.remarks || undefined,
+            pendingRemarks: row.pendingRemarks || existingShipment?.pendingRemarks || undefined,
+            currentStatus: row.currentStatus || existingShipment?.currentStatus || undefined,
+            statusType: row.statusType || existingShipment?.statusType || undefined,
             statusSource: 'Uploaded Delhivery File',
             sourceType: 'UPLOADED_FILE',
             lastSyncedAt: nowTimestamp,
@@ -613,7 +741,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                   tracking_id: awb,
                   dispatch_status: 'Dispatched',
                   dispatch_date: row.date || todayDate,
-                  expected_delivery_date: row.edd || null
+                  expected_delivery_date: normalizedEdd || null
                 })
                 .eq('id', existingRecords[0].id);
             }
@@ -638,7 +766,6 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         // Save only validated campaign influencer shipments into isolated campaign database & local storage
         const dbResult = await upsertCampaignShipmentsToDb(campaign.id, delhiveryShipments);
 
-        const totalReported = validRows.length + ignoredCustomerRowsCount + invalidRowsCount;
         const acceptedReported = validRows.length;
         const importedReported = dbResult.imported;
         const duplicatesReported = dbResult.duplicatesUpdated;
@@ -649,37 +776,55 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           await logActivity({
             department: 'Marketing',
             action: 'Upload Delhivery Shipments',
-            description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File). Accepted: ${acceptedReported}, Ignored customer/unmatched: ${ignoredCustomerRowsCount}, Duplicates updated: ${duplicatesReported}`,
+            description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File). Accepted: ${acceptedReported}, Ignored customer: ${ignoredCustomerRowsCount}, Invalid: ${invalidRowsCount}, Duplicates updated: ${duplicatesReported}`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'Delhivery', total: totalReported, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, source: 'Uploaded File' }
+            metadata: { courier: 'Delhivery', total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, invalid: invalidRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, source: 'Uploaded File' }
           });
         } catch (e) {}
 
         setImportProgress(prev => ({
           ...prev,
-          phase: 'Completed'
+          completed: prev.total,
+          phase: 'Completed',
+          duplicates: duplicatesReported,
+          imported: importedReported,
+          failed: failedReported
         }));
         setStep('completed');
 
-        const summaryText = `Delhivery Upload Complete\nAccepted Influencer Shipments: ${acceptedReported}\nIgnored Customer/Unmatched Rows: ${ignoredCustomerRowsCount}\nUpdated Existing Shipments: ${duplicatesReported}\nNew Shipments: ${importedReported}`;
-        if (failedReported > 0 && importedReported === 0 && duplicatesReported === 0) {
-          toast.error(summaryText, { duration: 6000 });
-        } else {
-          toast.success(summaryText, { duration: 6000 });
+        try {
+          await onSuccess();
+        } catch (refreshErr) {
+          console.warn('Error refreshing tracking data:', refreshErr);
         }
+        onClose();
 
-        setTimeout(() => {
-          onSuccess();
-          onClose();
-        }, 700);
+        showUploadResultToast({
+          title: 'Delhivery Upload Complete',
+          isSuccess: true,
+          acceptedCount: acceptedReported,
+          ignoredCustomerCount: ignoredCustomerRowsCount,
+          unmatchedInvalidCount: invalidRowsCount,
+          updatedExistingCount: duplicatesReported,
+          newShipmentsCount: importedReported
+        });
       }
     } catch (err: any) {
       console.error('[Upload Pipeline Error]:', err);
       const msg = `Upload failed: ${err?.message || String(err)}`;
       setUploadError(msg);
       setStep('error');
-      toast.error(msg, { duration: 6000 });
+      showUploadResultToast({
+        title: `${courier} Upload Failed`,
+        isSuccess: false,
+        acceptedCount: 0,
+        ignoredCustomerCount: 0,
+        unmatchedInvalidCount: 0,
+        updatedExistingCount: 0,
+        newShipmentsCount: 0,
+        errorMessage: msg
+      });
     } finally {
       isExecutingRef.current = false;
     }
@@ -687,7 +832,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
   // Trigger automatically when initialFile is supplied
   useEffect(() => {
-    if (initialFile) {
+    if (initialFile && processedFileRef.current !== initialFile) {
+      processedFileRef.current = initialFile;
       executeUploadPipeline(initialFile);
     }
   }, [initialFile]);
@@ -695,6 +841,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   const handleManualFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0];
     if (selected) {
+      processedFileRef.current = selected;
       executeUploadPipeline(selected);
       e.target.value = '';
     }
@@ -703,7 +850,9 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      executeUploadPipeline(e.dataTransfer.files[0]);
+      const selected = e.dataTransfer.files[0];
+      processedFileRef.current = selected;
+      executeUploadPipeline(selected);
     }
   };
 

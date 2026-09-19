@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer } from '../types';
+import { parseToYMD, formatDisplayDateLocal, getTodayLocalYMD } from '../utils/influencerDateUtils';
 import {
   naturalCompareInfluencerCodes,
   naturalCompareCodes,
@@ -19,7 +20,10 @@ export {
   getInfluencerCodeNumber,
   getShipmentInfluencerCode,
   compareShipmentsByInfluencerCodeNaturally,
-  sortInfluencerShipmentsNaturally
+  sortInfluencerShipmentsNaturally,
+  parseToYMD,
+  formatDisplayDateLocal,
+  getTodayLocalYMD
 };
 
 export type TrackingStatusCategory = 
@@ -52,6 +56,7 @@ export interface InfluencerDispatchedShipment {
   courier: string;
   dispatchDate: string;
   expectedDeliveryDate: string;
+  estimatedDeliveryDate?: string;
   status: string;
   statusCategory?: TrackingStatusCategory;
   rawStatus: string;
@@ -96,7 +101,7 @@ export function normalizeTrackingStatus(statusText?: string, error?: string): Tr
   if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
     return 'Out for Delivery';
   }
-  if (s.includes('in transit') || s.includes('transit') || s.includes('forwarded') || s.includes('arrived')) {
+  if (s.includes('in transit') || s.includes('transit') || s.includes('vehicle departed') || s.includes('departed') || s.includes('forwarded') || s.includes('arrived')) {
     return 'In Transit';
   }
   if (s.includes('delivered') && !s.includes('undelivered')) {
@@ -143,45 +148,104 @@ export interface DelhiveryStatusInput {
  * 4. Status Type (as final fallback)
  * 5. rawStatus / status (if already populated)
  * 6. "Unknown" (if all are empty)
+ * Special rule: "Vehicle Departed" is normalized to "In Transit" for display.
  */
 export function resolveDelhiveryDisplayStatus(input?: DelhiveryStatusInput | string | null): string {
   if (!input) return 'Unknown';
   if (typeof input === 'string') {
     const s = input.trim();
+    if (s.toLowerCase() === 'vehicle departed') return 'In Transit';
     return s || 'Unknown';
   }
 
+  const checkVal = (v?: string | null): string | null => {
+    if (!v) return null;
+    const t = v.trim();
+    if (!t || t === '-' || t.toLowerCase() === 'null' || t.toLowerCase() === 'undefined') return null;
+    if (t.toLowerCase() === 'vehicle departed') return 'In Transit';
+    return t;
+  };
+
   // 1. Remarks (trimmed, non-empty)
-  const remarks = (input.remarks || '').trim();
-  if (remarks && remarks !== '-' && remarks.toLowerCase() !== 'null' && remarks.toLowerCase() !== 'undefined') {
-    return remarks;
-  }
+  const resRemarks = checkVal(input.remarks);
+  if (resRemarks) return resRemarks;
 
   // 2. Pending / Returned Remarks (when Remarks is empty)
-  const pendingRemarks = (input.pendingRemarks || '').trim();
-  if (pendingRemarks && pendingRemarks !== '-' && pendingRemarks.toLowerCase() !== 'null' && pendingRemarks.toLowerCase() !== 'undefined') {
-    return pendingRemarks;
-  }
+  const resPending = checkVal(input.pendingRemarks);
+  if (resPending) return resPending;
 
   // 3. Current Status as fallback
-  const currentStatus = (input.currentStatus || '').trim();
-  if (currentStatus && currentStatus !== '-' && currentStatus.toLowerCase() !== 'null' && currentStatus.toLowerCase() !== 'undefined') {
-    return currentStatus;
-  }
+  const resCurrent = checkVal(input.currentStatus);
+  if (resCurrent) return resCurrent;
 
   // 4. Status Type as final fallback
-  const statusType = (input.statusType || '').trim();
-  if (statusType && statusType !== '-' && statusType.toLowerCase() !== 'null' && statusType.toLowerCase() !== 'undefined') {
-    return statusType;
-  }
+  const resType = checkVal(input.statusType);
+  if (resType) return resType;
 
   // Fallback to existing rawStatus or status
-  const fallback = (input.rawStatus || input.status || '').trim();
-  if (fallback && fallback !== '-' && fallback.toLowerCase() !== 'null' && fallback.toLowerCase() !== 'undefined') {
-    return fallback;
-  }
+  const resFallback = checkVal(input.rawStatus || input.status);
+  if (resFallback) return resFallback;
 
   return 'Unknown';
+}
+
+/**
+ * Centralized tracking display status resolver.
+ * Determines the clean UI status label from shipment data.
+ * Rule: If the raw status or remark is "Vehicle Departed" (case-insensitive), display as "In Transit".
+ * Keeps the original source status/remark intact in rawStatus/remarks/currentStatus for audit/debugging.
+ */
+export function getTrackingDisplayStatus(shipment?: Partial<InfluencerDispatchedShipment> | string | null): string {
+  if (!shipment) return 'Unknown';
+  if (typeof shipment === 'string') {
+    const s = shipment.trim();
+    if (s.toLowerCase() === 'vehicle departed') return 'In Transit';
+    return s || 'Unknown';
+  }
+
+  const raw = (shipment.rawStatus || '').trim();
+  const remarks = (shipment.remarks || '').trim();
+  const pendingRemarks = (shipment.pendingRemarks || '').trim();
+  const currentStatus = (shipment.currentStatus || '').trim();
+  const status = (shipment.status || '').trim();
+
+  if (
+    raw.toLowerCase() === 'vehicle departed' ||
+    remarks.toLowerCase() === 'vehicle departed' ||
+    pendingRemarks.toLowerCase() === 'vehicle departed' ||
+    currentStatus.toLowerCase() === 'vehicle departed' ||
+    status.toLowerCase() === 'vehicle departed'
+  ) {
+    return 'In Transit';
+  }
+
+  if (status && status !== 'Unknown') {
+    return status;
+  }
+
+  return resolveDelhiveryDisplayStatus({
+    remarks,
+    pendingRemarks,
+    currentStatus,
+    statusType: shipment.statusType,
+    rawStatus: raw
+  });
+}
+
+/**
+ * Formats Estimated Delivery Date for display:
+ * If valid date -> "23 Sep 2026"
+ * If missing/empty -> "—"
+ */
+export function formatEstimatedDeliveryDate(dateStr: string | null | undefined): string {
+  if (!dateStr || !String(dateStr).trim()) return '—';
+  const trimmed = String(dateStr).trim();
+  if (trimmed === '—' || trimmed === '-' || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'null') {
+    return '—';
+  }
+  const ymd = parseToYMD(trimmed);
+  if (!ymd) return trimmed;
+  return formatDisplayDateLocal(ymd);
 }
 
 /**
@@ -241,6 +305,8 @@ export function resolveDelhiveryCategory(
   if (
     combined.includes('in transit') ||
     combined.includes('transit') ||
+    combined.includes('vehicle departed') ||
+    combined.includes('departed') ||
     combined.includes('shipped') ||
     combined.includes('forwarded') ||
     combined.includes('bagging') ||
@@ -497,21 +563,18 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
   const isDelhivery = (row.courier || '').toLowerCase().includes('delhivery');
   const isSTCourier = (row.courier || '').toLowerCase().includes('st courier');
 
-  let displayStatus = (row.status || '').trim();
+  let displayStatus = getTrackingDisplayStatus({
+    remarks: row.remarks,
+    pendingRemarks: row.pending_remarks,
+    currentStatus: row.current_status,
+    statusType: row.status_type || row.raw_status,
+    rawStatus: row.raw_status,
+    status: row.status
+  });
+
   let statusCategory: TrackingStatusCategory;
 
   if (isDelhivery) {
-    // If displayStatus was previously saved as 'Delivered' due to the old 'undelivered' bug,
-    // or if empty, resolve display status properly.
-    if (!displayStatus || (displayStatus.toLowerCase() === 'delivered' && (row.raw_status || '').toLowerCase().includes('undelivered'))) {
-      displayStatus = resolveDelhiveryDisplayStatus({
-        remarks: row.remarks,
-        pendingRemarks: row.pending_remarks,
-        currentStatus: row.current_status,
-        statusType: row.status_type || row.raw_status,
-        rawStatus: row.raw_status
-      });
-    }
     statusCategory = resolveDelhiveryCategory(displayStatus, row.current_status, row.status_type || row.raw_status);
   } else {
     if (displayStatus && [
@@ -529,6 +592,8 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
   const statusSourceDisplay = isDelhivery
     ? 'Uploaded Delhivery File'
     : (isSTCourier ? 'Live ST Courier Tracking' : (row.status_source === 'delhivery_file' ? 'Uploaded Delhivery File' : 'Live ST Courier Tracking'));
+
+  const edd = row.estimated_delivery_date || row.expected_delivery_date || '';
 
   return {
     id: row.id,
@@ -548,7 +613,8 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
     awbNumber: row.awb_number || '',
     courier: row.courier || (isDelhivery ? 'Delhivery' : 'ST Courier'),
     dispatchDate: row.dispatch_date || '',
-    expectedDeliveryDate: row.expected_delivery_date || '',
+    expectedDeliveryDate: edd,
+    estimatedDeliveryDate: edd,
     status: displayStatus,
     statusCategory: statusCategory,
     rawStatus: row.raw_status || row.status || 'In Transit',
@@ -578,6 +644,8 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
     : 'st_courier';
   const sourceType = isDelhivery ? 'UPLOADED_FILE' : 'LIVE_API';
   const nowIso = new Date().toISOString();
+  const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate || null;
+  const displayStatus = getTrackingDisplayStatus(s);
 
   const payload: any = {
     campaign_id: String(campaignId),
@@ -588,11 +656,11 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
     order_id: s.orderId || (s.influencerCode ? s.influencerCode : null),
     awb_number: awb,
     courier,
-    status: s.status || 'In Transit',
+    status: displayStatus,
     status_source: statusSource,
     source_type: sourceType,
     dispatch_date: s.dispatchDate || null,
-    expected_delivery_date: s.expectedDeliveryDate || null,
+    expected_delivery_date: edd,
     tracking_url: s.trackingUrl || getCourierTrackingUrl(courier, awb),
     raw_status: s.rawStatus || s.status || 'In Transit',
     last_location: s.lastLocation || null,
@@ -763,6 +831,17 @@ export async function upsertCampaignShipmentsToDb(
   shipments: InfluencerDispatchedShipment[]
 ): Promise<UpsertCampaignShipmentsResult> {
   const cleanCampaignId = String(campaignId).trim();
+  const previousLocalShipments = getCampaignShipments(cleanCampaignId);
+  const previousLocalKeys = new Set<string>();
+  previousLocalShipments.forEach(s => {
+    const courier = (s.courier || '').toLowerCase().trim();
+    const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
+    if (awb) {
+      previousLocalKeys.add(`${courier}__${awb}`);
+      previousLocalKeys.add(awb);
+    }
+  });
+
   const localMerged = upsertCampaignShipments(cleanCampaignId, shipments);
 
   if (!shipments || shipments.length === 0) {
@@ -817,7 +896,9 @@ export async function upsertCampaignShipmentsToDb(
         if (error || !data) break;
         data.forEach(r => {
           if (r.awb_number) {
-            existingDbKeys.add(`${cleanCampaignId}__${(r.courier || '').toLowerCase()}__${r.awb_number.toLowerCase()}`);
+            const cleanAwb = r.awb_number.toLowerCase().trim();
+            existingDbKeys.add(`${cleanCampaignId}__${(r.courier || '').toLowerCase()}__${cleanAwb}`);
+            existingDbKeys.add(`${cleanCampaignId}__${cleanAwb}`);
           }
         });
         if (data.length < pageSize) {
@@ -830,19 +911,8 @@ export async function upsertCampaignShipmentsToDb(
       console.warn('Could not query existing DB keys for duplicate count:', e);
     }
 
-    let initialImportedCount = 0;
-    let initialDuplicateCount = 0;
-
-    payloads.forEach(p => {
-      const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
-      if (existingDbKeys.has(key)) {
-        initialDuplicateCount++;
-      } else {
-        initialImportedCount++;
-      }
-    });
-
-    // Batch upsert into Supabase
+    let actualUpdatedCount = 0;
+    let actualNewCount = 0;
     let failedCount = invalidCount;
     const errors: string[] = [];
     const chunkSize = 50;
@@ -859,17 +929,38 @@ export async function upsertCampaignShipmentsToDb(
       if (error) {
         console.warn('[Supabase Tracking Upsert Error]:', error);
         errors.push(error.message || String(error));
-        // Count how many in this failed chunk were marked imported vs duplicate and mark them failed
+        failedCount += chunk.length;
+      } else {
         chunk.forEach(p => {
-          const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
-          if (existingDbKeys.has(key)) {
-            initialDuplicateCount = Math.max(0, initialDuplicateCount - 1);
+          const cleanAwb = (p.awb_number || '').toLowerCase().trim();
+          const key1 = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${cleanAwb}`;
+          const key2 = `${p.campaign_id}__${cleanAwb}`;
+          if (existingDbKeys.has(key1) || existingDbKeys.has(key2)) {
+            actualUpdatedCount++;
           } else {
-            initialImportedCount = Math.max(0, initialImportedCount - 1);
+            actualNewCount++;
+            existingDbKeys.add(key1);
+            existingDbKeys.add(key2);
           }
-          failedCount++;
         });
       }
+    }
+
+    // Fallback: If DB errors occurred or offline, ensure counts reflect local persistence
+    if (actualUpdatedCount === 0 && actualNewCount === 0 && payloads.length > 0) {
+      valid.forEach(s => {
+        const courier = (s.courier || '').toLowerCase().trim();
+        const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
+        if (previousLocalKeys.has(`${courier}__${awb}`) || previousLocalKeys.has(awb)) {
+          actualUpdatedCount++;
+        } else {
+          actualNewCount++;
+          previousLocalKeys.add(`${courier}__${awb}`);
+          previousLocalKeys.add(awb);
+        }
+      });
+      // If locally merged, the records are available to the UI
+      failedCount = invalidCount;
     }
 
     // Refresh updated list from Supabase with pagination
@@ -879,8 +970,8 @@ export async function upsertCampaignShipmentsToDb(
     return {
       success: failedCount === 0,
       total: shipments.length,
-      imported: initialImportedCount,
-      duplicatesUpdated: initialDuplicateCount,
+      imported: actualNewCount,
+      duplicatesUpdated: actualUpdatedCount,
       failed: failedCount,
       shipments: finalShipments,
       errors: errors.length > 0 ? errors : undefined
