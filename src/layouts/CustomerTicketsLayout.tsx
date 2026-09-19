@@ -33,6 +33,11 @@ export const CustomerTicketsLayout = () => {
   useEffect(() => {
     fetchCounts();
 
+    const handleTicketsUpdated = () => {
+      fetchCounts();
+    };
+    window.addEventListener('customer_tickets_updated', handleTicketsUpdated);
+
     // Subscribe to changes on customer_tickets table to update counts in real time
     const channelName = `customer-tickets-changes-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const channel = supabase
@@ -51,6 +56,7 @@ export const CustomerTicketsLayout = () => {
       .subscribe();
 
     return () => {
+      window.removeEventListener('customer_tickets_updated', handleTicketsUpdated);
       supabase.removeChannel(channel);
     };
   }, []);

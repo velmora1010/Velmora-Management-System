@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, AlertCircle, Clock, Eye, CheckCircle2, X, Edit, FileText, Calendar as CalendarIcon } from 'lucide-react';
+import { Search, AlertCircle, Clock, Eye, CheckCircle2, X, Edit, FileText, Calendar as CalendarIcon, Download, Upload, Trash2, RefreshCw, AlertTriangle, Check } from 'lucide-react';
 import { Card } from '../../components/ui/Card';
 import type { CustomerTicket, CustomIssueTypeRecord } from '../../types/customer-tickets';
-import { customerTicketsService } from '../../services/customerTicketsService';
+import { customerTicketsService, downloadFileBlob } from '../../services/customerTicketsService';
 import { DEFAULT_ISSUE_TYPES, getSubIssueLabel } from '../../config/ticketConfig';
 import { DateRangePickerModal, DateRange } from '../../components/ui/DateRangePickerModal';
 import toast from 'react-hot-toast';
@@ -38,8 +38,10 @@ export const TicketList: React.FC<TicketListProps> = ({
   const [resolvingTicket, setResolvingTicket] = useState<CustomerTicket | null>(null);
   const [enlargedImageUrl, setEnlargedImageUrl] = useState<string | null>(null);
   const [resolutionNotes, setResolutionNotes] = useState('');
+  const [paymentFile, setPaymentFile] = useState<File | null>(null);
   const [validationError, setValidationError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   useEffect(() => {
     loadCustomCategories();
@@ -50,22 +52,33 @@ export const TicketList: React.FC<TicketListProps> = ({
     setCustomIssueTypes(cTypes);
   };
 
-  // Combine Issue Types (Defaults + Custom, deduplicated case-insensitively)
+  // Combine Issue Types (Defaults + Custom, deduplicated case-insensitively and null-safe)
   const availableIssueTypes: string[] = [...DEFAULT_ISSUE_TYPES];
   customIssueTypes.forEach(c => {
-    if (!availableIssueTypes.some(d => d.toLowerCase() === c.name.toLowerCase())) {
+    if (c?.name && !availableIssueTypes.some(d => d && d.toLowerCase() === c.name.toLowerCase())) {
       availableIssueTypes.push(c.name);
     }
   });
 
+  // Centralized null-safe string normalizer for searching
+  const safeStr = (val: any): string => (val ?? '').toString().toLowerCase().trim();
+
   const filteredTickets = tickets.filter(ticket => {
-    const matchesSearch = 
-      ticket.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ticket.orderId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ticket.awbNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      ticket.phoneNumber.includes(searchTerm) ||
-      (ticket.platform && ticket.platform.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (ticket.subIssue && ticket.subIssue.toLowerCase().includes(searchTerm.toLowerCase()));
+    const q = searchTerm.toLowerCase().trim();
+    const matchesSearch = !q || (
+      safeStr(ticket.ticketId).includes(q) ||
+      safeStr(ticket.customerName).includes(q) ||
+      safeStr(ticket.orderId).includes(q) ||
+      safeStr(ticket.awbNumber).includes(q) ||
+      safeStr(ticket.phoneNumber).includes(q) ||
+      safeStr(ticket.courierPartner).includes(q) ||
+      safeStr(ticket.platform).includes(q) ||
+      safeStr(ticket.subIssue).includes(q) ||
+      safeStr(ticket.issueType).includes(q) ||
+      safeStr(ticket.issueDescription).includes(q) ||
+      safeStr(ticket.state).includes(q) ||
+      safeStr(ticket.city).includes(q)
+    );
       
     const matchesStatus = statusFilter ? ticket.status === statusFilter : true;
     const matchesIssue = issueFilter ? ticket.issueType === issueFilter : true;
@@ -127,38 +140,138 @@ export const TicketList: React.FC<TicketListProps> = ({
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
 
-  const handleConfirmResolve = async () => {
-    if (!resolvingTicket) return;
-    if (!resolutionNotes.trim()) {
-      setValidationError('Please enter resolution notes before resolving this ticket.');
+  const handleDownloadQr = async (ticket: CustomerTicket) => {
+    if (!ticket.qrImageUrl) {
+      toast.error('No QR image available for download.');
       return;
     }
-
     try {
-      setIsSubmitting(true);
-      await customerTicketsService.updateTicket(resolvingTicket.id!, {
-        status: 'Resolved',
-        resolutionNotes: resolutionNotes.trim(),
-        resolvedAt: new Date().toISOString()
-      });
-      toast.success(`Ticket ${resolvingTicket.ticketId} marked as Resolved`);
-      setResolvingTicket(null);
-      setResolutionNotes('');
-      setValidationError('');
-      if (onTicketUpdated) {
-        onTicketUpdated();
+      toast.loading('Downloading QR code...', { id: 'qr-download' });
+      let ext = 'png';
+      try {
+        const cleanUrl = ticket.qrImageUrl.split('?')[0];
+        const match = cleanUrl.match(/\.([a-zA-Z0-9]+)$/);
+        if (match && match[1]) {
+          ext = match[1].toLowerCase();
+        }
+      } catch (e) {
+        ext = 'png';
       }
+      const filename = `Ticket_${ticket.ticketId}_QR.${ext}`;
+      await downloadFileBlob(ticket.qrImageUrl, filename);
+      toast.success('QR Code downloaded', { id: 'qr-download' });
     } catch (err: any) {
-      toast.error('Failed to resolve ticket: ' + err.message);
-    } finally {
-      setIsSubmitting(false);
+      toast.error('Failed to download QR code: ' + (err.message || 'Error'), { id: 'qr-download' });
+    }
+  };
+
+  const handleDownloadPaymentProof = async (ticket: CustomerTicket) => {
+    if (!ticket.paymentProofUrl) {
+      toast.error('No payment proof available for download.');
+      return;
+    }
+    try {
+      toast.loading('Downloading payment proof...', { id: 'pdf-download' });
+      const filename = ticket.paymentProofName || `Ticket_${ticket.ticketId}_Payment_Proof.pdf`;
+      await downloadFileBlob(ticket.paymentProofUrl, filename);
+      toast.success('Payment proof downloaded', { id: 'pdf-download' });
+    } catch (err: any) {
+      toast.error('Failed to download payment proof: ' + (err.message || 'Error'), { id: 'pdf-download' });
     }
   };
 
   const openResolveModal = (ticket: CustomerTicket) => {
     setResolvingTicket(ticket);
     setResolutionNotes(ticket.resolutionNotes || '');
+    setPaymentFile(null);
     setValidationError('');
+    setShowConfirmDialog(false);
+  };
+
+  const handlePaymentFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isPdfMime = file.type === 'application/pdf';
+    const isPdfExt = file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdfMime && !isPdfExt) {
+      setValidationError('Invalid file format. Payment Proof must be a PDF file (.pdf).');
+      toast.error('Only PDF files are allowed for payment proof.');
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      setValidationError('File size exceeds 15MB limit. Please select a smaller PDF.');
+      toast.error('File size exceeds 15MB limit.');
+      return;
+    }
+
+    setPaymentFile(file);
+    setValidationError('');
+  };
+
+  const handleRemovePaymentFile = () => {
+    setPaymentFile(null);
+  };
+
+  const handleProceedToConfirm = () => {
+    if (!paymentFile) {
+      setValidationError('Payment Proof (PDF) is mandatory to resolve a ticket.');
+      toast.error('Payment Proof (PDF) is required.');
+      return;
+    }
+    if (!resolutionNotes.trim()) {
+      setValidationError('Short Description is mandatory to resolve a ticket.');
+      toast.error('Short Description is required.');
+      return;
+    }
+    setValidationError('');
+    setShowConfirmDialog(true);
+  };
+
+  const handleConfirmResolve = async () => {
+    if (!resolvingTicket) return;
+    if (!paymentFile) {
+      setValidationError('Payment Proof (PDF) is mandatory.');
+      setShowConfirmDialog(false);
+      return;
+    }
+    if (!resolutionNotes.trim()) {
+      setValidationError('Short Description is mandatory.');
+      setShowConfirmDialog(false);
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      toast.loading('Uploading payment proof...', { id: 'resolve-ticket-toast' });
+      
+      const uploadRes = await customerTicketsService.uploadTicketPaymentProof(paymentFile);
+      
+      toast.loading('Saving resolution...', { id: 'resolve-ticket-toast' });
+      await customerTicketsService.updateTicket(resolvingTicket.id!, {
+        status: 'Resolved',
+        paymentProofUrl: uploadRes.publicUrl,
+        paymentProofName: uploadRes.fileName,
+        resolutionNotes: resolutionNotes.trim(),
+        resolvedAt: new Date().toISOString()
+      });
+
+      toast.success(`Ticket ${resolvingTicket.ticketId} marked as Resolved!`, { id: 'resolve-ticket-toast' });
+      setResolvingTicket(null);
+      setPaymentFile(null);
+      setResolutionNotes('');
+      setValidationError('');
+      setShowConfirmDialog(false);
+      if (onTicketUpdated) {
+        onTicketUpdated();
+      }
+    } catch (err: any) {
+      toast.error('Failed to resolve ticket: ' + (err.message || 'Unknown error'), { id: 'resolve-ticket-toast' });
+      // Keep ticket open and modal open so user can fix and retry
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Helper for Date Filter Button Badge
@@ -472,7 +585,7 @@ export const TicketList: React.FC<TicketListProps> = ({
               <div className="space-y-3 pt-3 border-t border-border/50">
                 <h4 className="text-xs font-bold uppercase text-primary tracking-wider">Customer QR Image</h4>
                 {viewingTicket.qrImageUrl ? (
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 bg-background/40 p-3.5 rounded-xl border border-border/40">
                     <div 
                       className="w-24 h-24 rounded-xl overflow-hidden border border-border bg-black cursor-pointer group relative shadow-md hover:border-primary/60 transition-all shrink-0"
                       onClick={() => setEnlargedImageUrl(viewingTicket.qrImageUrl!)}
@@ -487,34 +600,78 @@ export const TicketList: React.FC<TicketListProps> = ({
                         Enlarge
                       </div>
                     </div>
-                    <p className="text-xs text-muted">Click thumbnail to view full size QR code</p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted">Click thumbnail to view full size QR code</p>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadQr(viewingTicket)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-semibold transition-colors cursor-pointer"
+                        title="Download Customer QR Code Image"
+                      >
+                        <Download size={14} />
+                        <span>Download QR</span>
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="bg-background/40 p-3 rounded-xl border border-border/40 text-muted text-xs italic">
-                    No QR image uploaded
+                  <div className="bg-background/40 px-3.5 py-2.5 rounded-xl border border-border/40 text-muted text-xs italic inline-flex items-center gap-2">
+                    QR not available
                   </div>
                 )}
               </div>
 
-              {(viewingTicket.internalNotes || viewingTicket.resolutionNotes) && (
+              {/* RESOLUTION DETAILS FOR RESOLVED TICKETS */}
+              {viewingTicket.status === 'Resolved' && (
                 <div className="space-y-3 pt-3 border-t border-border/50">
-                  <h4 className="text-xs font-bold uppercase text-primary tracking-wider">Notes History</h4>
-                  {viewingTicket.internalNotes && (
-                    <div>
-                      <p className="text-xs text-muted mb-1">Internal Notes</p>
-                      <div className="bg-background/80 p-3 rounded-xl border border-border text-slate-300">
-                        {viewingTicket.internalNotes}
+                  <div className="flex items-center gap-2 text-emerald-400">
+                    <CheckCircle2 size={18} />
+                    <h4 className="text-xs font-bold uppercase tracking-wider">Resolution Details</h4>
+                  </div>
+                  
+                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-xs text-muted mb-1">Resolved On</p>
+                        <p className="text-emerald-300 font-semibold text-sm">
+                          {viewingTicket.resolvedAt ? new Date(viewingTicket.resolvedAt).toLocaleString() : 'Recorded as Resolved'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted mb-1">Payment Proof</p>
+                        {viewingTicket.paymentProofUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadPaymentProof(viewingTicket)}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-colors cursor-pointer"
+                            title="Download Payment Proof PDF"
+                          >
+                            <FileText size={14} />
+                            <span>Download Payment PDF</span>
+                            <Download size={13} />
+                          </button>
+                        ) : (
+                          <p className="text-muted text-xs italic">No payment PDF attached</p>
+                        )}
                       </div>
                     </div>
-                  )}
-                  {viewingTicket.resolutionNotes && (
+
                     <div>
-                      <p className="text-xs text-emerald-400 mb-1 font-semibold">Resolution Notes</p>
-                      <div className="bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/30 text-emerald-200">
-                        {viewingTicket.resolutionNotes}
+                      <p className="text-xs text-muted mb-1">Short Description</p>
+                      <div className="bg-background/80 p-3 rounded-xl border border-emerald-500/20 text-slate-200 text-sm whitespace-pre-wrap leading-relaxed">
+                        {viewingTicket.resolutionNotes || 'No description provided'}
                       </div>
                     </div>
-                  )}
+                  </div>
+                </div>
+              )}
+
+              {/* Internal Notes */}
+              {viewingTicket.internalNotes && (
+                <div className="space-y-3 pt-3 border-t border-border/50">
+                  <h4 className="text-xs font-bold uppercase text-primary tracking-wider">Internal Notes</h4>
+                  <div className="bg-background/80 p-3 rounded-xl border border-border text-slate-300">
+                    {viewingTicket.internalNotes}
+                  </div>
                 </div>
               )}
             </div>
@@ -528,14 +685,14 @@ export const TicketList: React.FC<TicketListProps> = ({
                     setViewingTicket(null);
                     openResolveModal(ticketToResolve);
                   }}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm transition-colors flex items-center gap-2"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm transition-colors flex items-center gap-2 cursor-pointer"
                 >
                   <CheckCircle2 size={16} /> Resolved
                 </button>
               )}
               <button
                 onClick={() => setViewingTicket(null)}
-                className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors"
+                className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors cursor-pointer"
               >
                 OK
               </button>
@@ -544,65 +701,221 @@ export const TicketList: React.FC<TicketListProps> = ({
         </div>
       )}
 
-      {/* RESOLUTION NOTES INPUT MODAL */}
+      {/* RESOLUTION WORKFLOW MODAL (2-STEP: DETAILS FORM + CONFIRMATION) */}
       {resolvingTicket && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200 space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <div className="flex items-center gap-2 text-emerald-400">
-                <CheckCircle2 size={22} />
-                <h3 className="text-lg font-bold text-white">Resolve Ticket - {resolvingTicket.ticketId}</h3>
-              </div>
-              <button 
-                onClick={() => setResolvingTicket(null)}
-                className="p-1 rounded-lg text-muted hover:text-white"
-              >
-                <X size={18} />
-              </button>
-            </div>
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200 space-y-5">
+            {!showConfirmDialog ? (
+              // STEP 1: RESOLUTION DETAILS FORM
+              <>
+                <div className="flex items-center justify-between border-b border-border pb-3">
+                  <div className="flex items-center gap-2.5 text-emerald-400">
+                    <CheckCircle2 size={22} />
+                    <div>
+                      <h3 className="text-lg font-bold text-white">Resolve Ticket - {resolvingTicket.ticketId}</h3>
+                      <p className="text-xs text-muted">Customer: {resolvingTicket.customerName} (Order #{resolvingTicket.orderId})</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setResolvingTicket(null);
+                      setPaymentFile(null);
+                      setValidationError('');
+                    }}
+                    className="p-1.5 rounded-lg text-muted hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
 
-            <p className="text-sm text-muted">
-              Please provide resolution notes detailing how this issue was resolved before marking it as completed.
-            </p>
+                <div className="space-y-4 text-sm">
+                  {/* Payment Proof Field (PDF Only) */}
+                  <div>
+                    <label className="block text-sm font-semibold text-white mb-1.5 flex items-center justify-between">
+                      <span>Payment Proof (PDF) <span className="text-rose-400">*</span></span>
+                      <span className="text-[11px] text-muted font-normal">PDF only (Max 15MB)</span>
+                    </label>
 
-            <div>
-              <label className="block text-sm font-semibold text-white mb-1.5">
-                Resolution Notes <span className="text-rose-400">*</span>
-              </label>
-              <textarea
-                value={resolutionNotes}
-                onChange={(e) => {
-                  setResolutionNotes(e.target.value);
-                  if (e.target.value.trim()) setValidationError('');
-                }}
-                rows={4}
-                placeholder="Describe resolution (e.g., replacement item dispatched via AWB123, refund issued, transport delay settled with courier)..."
-                className="w-full bg-background border border-border rounded-xl p-3 text-white focus:border-emerald-500 outline-none transition-colors text-sm"
-              />
-              {validationError && (
-                <p className="text-rose-400 text-xs mt-1.5 font-medium flex items-center gap-1">
-                  <AlertCircle size={13} /> {validationError}
-                </p>
-              )}
-            </div>
+                    {!paymentFile ? (
+                      <div>
+                        <input
+                          type="file"
+                          id="ticket-resolve-pdf-file"
+                          accept="application/pdf,.pdf"
+                          onChange={handlePaymentFileSelect}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor="ticket-resolve-pdf-file"
+                          className="flex flex-col items-center justify-center gap-2 w-full border-2 border-dashed border-border hover:border-emerald-500/60 bg-background/60 hover:bg-emerald-500/5 rounded-xl py-5 px-4 text-center cursor-pointer transition-all group"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
+                            <Upload size={20} />
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-white">Upload Payment PDF</p>
+                            <p className="text-[11px] text-muted mt-0.5">Select official payment confirmation or receipt</p>
+                          </div>
+                        </label>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3 bg-background/80 p-3 rounded-xl border border-emerald-500/30">
+                        <div className="w-10 h-10 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                          <FileText size={20} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-white truncate" title={paymentFile.name}>
+                            {paymentFile.name}
+                          </p>
+                          <p className="text-[11px] text-muted">
+                            {(paymentFile.size / 1024).toFixed(1)} KB
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label
+                            htmlFor="ticket-resolve-pdf-file-change"
+                            className="text-xs font-semibold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                          >
+                            <RefreshCw size={12} /> Change
+                          </label>
+                          <input
+                            type="file"
+                            id="ticket-resolve-pdf-file-change"
+                            accept="application/pdf,.pdf"
+                            onChange={handlePaymentFileSelect}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleRemovePaymentFile}
+                            className="text-xs font-semibold text-rose-400 hover:underline flex items-center gap-1 ml-1 cursor-pointer"
+                          >
+                            <Trash2 size={12} /> Remove
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-            <div className="flex justify-end gap-3 pt-3 border-t border-border">
-              <button
-                type="button"
-                onClick={() => setResolvingTicket(null)}
-                className="px-4 py-2 rounded-xl border border-border text-white hover:bg-white/5 transition-colors text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isSubmitting}
-                onClick={handleConfirmResolve}
-                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm transition-colors flex items-center gap-2 disabled:opacity-50"
-              >
-                {isSubmitting ? 'Saving...' : 'Confirm Resolution'}
-              </button>
-            </div>
+                  {/* Short Description */}
+                  <div>
+                    <label className="block text-sm font-semibold text-white mb-1.5">
+                      Short Description <span className="text-rose-400">*</span>
+                    </label>
+                    <textarea
+                      value={resolutionNotes}
+                      onChange={(e) => {
+                        setResolutionNotes(e.target.value);
+                        if (e.target.value.trim()) setValidationError('');
+                      }}
+                      rows={3}
+                      placeholder="Concise resolution note (e.g., Replacement dispatched via Delhivery, Refund of ₹479 credited to customer UPI)..."
+                      className="w-full bg-background border border-border rounded-xl p-3 text-white focus:border-emerald-500 outline-none transition-colors text-sm"
+                    />
+                  </div>
+
+                  {validationError && (
+                    <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-medium flex items-center gap-1.5">
+                      <AlertCircle size={14} className="shrink-0" />
+                      <span>{validationError}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResolvingTicket(null);
+                      setPaymentFile(null);
+                      setValidationError('');
+                    }}
+                    className="px-4 py-2 rounded-xl border border-border text-muted hover:text-white hover:bg-white/5 transition-colors text-sm font-medium cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleProceedToConfirm}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/20"
+                  >
+                    Next: Confirm Resolution
+                  </button>
+                </div>
+              </>
+            ) : (
+              // STEP 2: CONFIRMATION DIALOG
+              <>
+                <div className="flex items-center gap-3 border-b border-border pb-3 text-amber-400">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                    <AlertTriangle size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Confirm Ticket Resolution</h3>
+                    <p className="text-xs text-muted">Please confirm marking this ticket as Resolved.</p>
+                  </div>
+                </div>
+
+                <div className="bg-background/80 p-4 rounded-xl border border-border/70 space-y-3 text-sm">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <p className="text-muted">Ticket ID</p>
+                      <p className="text-white font-semibold">{resolvingTicket.ticketId}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted">Customer</p>
+                      <p className="text-white font-semibold">{resolvingTicket.customerName}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted">Order ID</p>
+                      <p className="text-white font-semibold">{resolvingTicket.orderId}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted">Payment Proof</p>
+                      <p className="text-emerald-400 font-semibold truncate" title={paymentFile?.name}>
+                        {paymentFile?.name}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-border/50 pt-2 text-xs">
+                    <p className="text-muted mb-1">Resolution Summary</p>
+                    <p className="text-slate-200 italic bg-card/60 p-2.5 rounded-lg border border-border/40">
+                      "{resolutionNotes.trim()}"
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2 border-t border-border">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setShowConfirmDialog(false)}
+                    className="px-4 py-2 rounded-xl border border-border text-muted hover:text-white hover:bg-white/5 transition-colors text-sm font-medium cursor-pointer"
+                  >
+                    Back to Edit
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={handleConfirmResolve}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm transition-colors flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <RefreshCw size={15} className="animate-spin" />
+                        <span>Resolving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={16} />
+                        <span>Confirm Resolution</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

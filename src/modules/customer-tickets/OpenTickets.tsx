@@ -10,6 +10,11 @@ export const OpenTickets = () => {
 
   useEffect(() => {
     loadTickets();
+    const handleUpdate = () => {
+      loadTickets();
+    };
+    window.addEventListener('customer_tickets_updated', handleUpdate);
+    return () => window.removeEventListener('customer_tickets_updated', handleUpdate);
   }, []);
 
   const loadTickets = async () => {

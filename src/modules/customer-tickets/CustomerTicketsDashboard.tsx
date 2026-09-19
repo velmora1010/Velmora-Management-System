@@ -16,6 +16,11 @@ export const CustomerTicketsDashboard = () => {
 
   useEffect(() => {
     loadAnalytics();
+    const handleUpdate = () => {
+      loadAnalytics();
+    };
+    window.addEventListener('customer_tickets_updated', handleUpdate);
+    return () => window.removeEventListener('customer_tickets_updated', handleUpdate);
   }, []);
 
   const loadAnalytics = async () => {

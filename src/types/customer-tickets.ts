@@ -70,6 +70,8 @@ export interface CustomerTicket {
   internalNotes?: string;
   qrImageUrl?: string | null;
   amount?: number | null;
+  paymentProofUrl?: string | null;
+  paymentProofName?: string | null;
 }
 
 export interface CustomIssueTypeRecord {
