@@ -138,6 +138,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       setImportProgress({
         total: 0,
         completed: 0,
+        accepted: 0,
+        ignored: 0,
         successful: 0,
         failed: 0,
         duplicates: 0,

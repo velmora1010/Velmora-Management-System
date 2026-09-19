@@ -12,18 +12,130 @@ import {
 } from './influencerTrackingService';
 
 /**
- * Natural/code sorting for influencer codes (e.g. J2, J10, J61, J174, J203).
- * Preserves alphanumeric prefix and naturally sorts the numeric suffix.
+ * Centralized natural influencer code comparator.
+ * Dynamic and prefix-agnostic: handles codes like HIS1, HIS2, HIS9, HIS10, HIS45, HIS100, HIS190,
+ * as well as ABC1, GJS141, TNS45, etc.
+ * Strips leading '#' or whitespace without modifying original values.
+ * Numerically compares integer suffixes so HIS9 < HIS10.
  */
-export function naturalCompareCodes(a?: string | null, b?: string | null): number {
+export function naturalCompareInfluencerCodes(a?: string | null, b?: string | null): number {
   if (!a && !b) return 0;
   if (!a) return 1;
   if (!b) return -1;
 
-  const cleanA = String(a).replace(/^#+/, '').trim();
-  const cleanB = String(b).replace(/^#+/, '').trim();
+  const strA = String(a).trim();
+  const strB = String(b).trim();
 
+  const cleanA = strA.replace(/^#+/, '').trim();
+  const cleanB = strB.replace(/^#+/, '').trim();
+
+  // Extract prefix letters/symbols, numeric digits, and suffix
+  const regex = /^([A-Za-z\s_-]*?)(\d+)(.*)$/;
+  const matchA = cleanA.match(regex);
+  const matchB = cleanB.match(regex);
+
+  if (matchA && matchB) {
+    const prefixA = matchA[1].toUpperCase();
+    const prefixB = matchB[1].toUpperCase();
+    if (prefixA !== prefixB) {
+      return prefixA.localeCompare(prefixB);
+    }
+    const numA = parseInt(matchA[2], 10);
+    const numB = parseInt(matchB[2], 10);
+    if (numA !== numB) {
+      return numA - numB;
+    }
+    const suffixA = matchA[3].toUpperCase();
+    const suffixB = matchB[3].toUpperCase();
+    if (suffixA !== suffixB) {
+      return suffixA.localeCompare(suffixB, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    return 0;
+  }
+
+  // Fallback to standard natural comparison
   return cleanA.localeCompare(cleanB, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+/**
+ * Backwards-compatible alias for naturalCompareInfluencerCodes.
+ */
+export const naturalCompareCodes = naturalCompareInfluencerCodes;
+
+/**
+ * Resolves the primary influencer code for a shipment record safely.
+ * Checks influencerCode, orderId, or code fields.
+ */
+export function getShipmentInfluencerCode(s: any): string {
+  if (!s) return '';
+  if (s.influencerCode && String(s.influencerCode).trim()) {
+    return String(s.influencerCode).trim();
+  }
+  if (s.orderId && String(s.orderId).trim()) {
+    return String(s.orderId).trim();
+  }
+  if (s.code && String(s.code).trim()) {
+    return String(s.code).trim();
+  }
+  return '';
+}
+
+/**
+ * Stable comparator for shipment records ordered by natural influencer code ascending.
+ * Secondary order:
+ * 1. Influencer code natural sort
+ * 2. Video number if available
+ * 3. AWB number
+ * 4. dispatchDate or created_at
+ * 5. Record ID
+ */
+export function compareShipmentsByInfluencerCodeNaturally(
+  a: any,
+  b: any
+): number {
+  const codeA = getShipmentInfluencerCode(a);
+  const codeB = getShipmentInfluencerCode(b);
+
+  const codeComparison = naturalCompareInfluencerCodes(codeA, codeB);
+  if (codeComparison !== 0) {
+    return codeComparison;
+  }
+
+  // Stable secondary sorts:
+  // 1. Video number if available
+  const videoNumA = a?.videoNumber ?? a?.video_number ?? a?.videoNo ?? null;
+  const videoNumB = b?.videoNumber ?? b?.video_number ?? b?.videoNo ?? null;
+  if (videoNumA !== null && videoNumB !== null && videoNumA !== videoNumB) {
+    const vA = Number(videoNumA);
+    const vB = Number(videoNumB);
+    if (!isNaN(vA) && !isNaN(vB) && vA !== vB) {
+      return vA - vB;
+    }
+  }
+
+  // 2. AWB number
+  const awbA = String(a?.awbNumber || a?.awb_number || '').trim();
+  const awbB = String(b?.awbNumber || b?.awb_number || '').trim();
+  if (awbA !== awbB) {
+    return awbA.localeCompare(awbB, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  // 3. dispatchDate or created_at
+  const dateA = a?.dispatchDate || a?.created_at || '';
+  const dateB = b?.dispatchDate || b?.created_at || '';
+  if (dateA !== dateB) {
+    return String(dateA).localeCompare(String(dateB));
+  }
+
+  // 4. Record ID
+  return String(a?.id || '').localeCompare(String(b?.id || ''));
+}
+
+/**
+ * Sorts an array of shipment records naturally by influencer code ascending without mutating the original array.
+ */
+export function sortInfluencerShipmentsNaturally<T>(shipments: T[]): T[] {
+  return [...shipments].sort(compareShipmentsByInfluencerCodeNaturally);
 }
 
 /**

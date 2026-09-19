@@ -4,6 +4,21 @@ import { supabase } from '../lib/supabase';
 import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer } from '../types';
+import {
+  naturalCompareInfluencerCodes,
+  naturalCompareCodes,
+  getShipmentInfluencerCode,
+  compareShipmentsByInfluencerCodeNaturally,
+  sortInfluencerShipmentsNaturally
+} from './influencerStatusHandoffService';
+
+export {
+  naturalCompareInfluencerCodes,
+  naturalCompareCodes,
+  getShipmentInfluencerCode,
+  compareShipmentsByInfluencerCodeNaturally,
+  sortInfluencerShipmentsNaturally
+};
 
 export type TrackingStatusCategory = 
   | 'All'
@@ -417,7 +432,8 @@ export function getCampaignShipments(campaignId: string | number): InfluencerDis
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(`influencer_campaign_shipments_${campaignId}`);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return sortInfluencerShipmentsNaturally(parsed);
   } catch (e) {
     return [];
   }
@@ -426,7 +442,8 @@ export function getCampaignShipments(campaignId: string | number): InfluencerDis
 export function saveCampaignShipments(campaignId: string | number, shipments: InfluencerDispatchedShipment[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(`influencer_campaign_shipments_${campaignId}`, JSON.stringify(shipments));
+    const sorted = sortInfluencerShipmentsNaturally(shipments);
+    localStorage.setItem(`influencer_campaign_shipments_${campaignId}`, JSON.stringify(sorted));
   } catch (e) {
     console.warn('LocalStorage save error for campaign shipments:', e);
   }
@@ -466,8 +483,9 @@ export function upsertCampaignShipments(
   });
 
   const merged = Array.from(shipmentMap.values());
-  saveCampaignShipments(cleanCampaignId, merged);
-  return merged;
+  const sorted = sortInfluencerShipmentsNaturally(merged);
+  saveCampaignShipments(cleanCampaignId, sorted);
+  return sorted;
 }
 
 /**
@@ -655,8 +673,9 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
 
     if (allRows.length > 0) {
       const shipments = allRows.map(mapDbRowToShipment);
-      saveCampaignShipments(cleanCampaignId, shipments);
-      return shipments;
+      const sorted = sortInfluencerShipmentsNaturally(shipments);
+      saveCampaignShipments(cleanCampaignId, sorted);
+      return sorted;
     }
 
     // Database is the source of truth: 0 records found in Supabase.

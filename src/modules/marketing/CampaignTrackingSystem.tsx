@@ -60,7 +60,9 @@ import {
   fetchCampaignStatusTrackingInfluencerIds,
   matchShipmentToInfluencer,
   deleteShipmentWithStatusTrackingSync,
-  clearAllCampaignTrackingWithStatusSync
+  clearAllCampaignTrackingWithStatusSync,
+  sortInfluencerShipmentsNaturally,
+  naturalCompareInfluencerCodes
 } from '../../services/influencerStatusHandoffService';
 
 interface CampaignTrackingSystemProps {
@@ -354,7 +356,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       });
     }
 
-    return Array.from(shipmentMap.values());
+    const unsorted = Array.from(shipmentMap.values());
+    return sortInfluencerShipmentsNaturally(unsorted);
   }, [candidateInfluencers, dispatchRecords, savedBatches, campaignShipments, trackingCache]);
 
   // True if valid campaign tracking shipments exist in the database
@@ -430,18 +433,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Filtered Shipments
   const filteredShipments = useMemo(() => {
-    return allShipments.filter(s => {
+    const filtered = allShipments.filter(s => {
       // 1. Search filter
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase().trim();
+        const cleanQuery = query.replace(/^#+/, '');
         const matchesName = s.creatorName.toLowerCase().includes(query);
         const matchesUser = s.username.toLowerCase().includes(query);
         const matchesPhone = s.phoneNumber.toLowerCase().includes(query) || s.altPhoneNumber.toLowerCase().includes(query);
         const matchesAwb = s.awbNumber.toLowerCase().includes(query);
         const matchesBatch = s.batchCode.toLowerCase().includes(query);
         const matchesCourier = s.courier.toLowerCase().includes(query);
-        const matchesCode = s.influencerCode.toLowerCase().includes(query);
-        const matchesOrderId = (s.id || '').toLowerCase().includes(query);
+        const matchesCode = s.influencerCode.toLowerCase().includes(query) || s.influencerCode.toLowerCase().includes(cleanQuery);
+        const matchesOrderId = (s.orderId || '').toLowerCase().includes(query) || (s.orderId || '').toLowerCase().includes(cleanQuery) || (s.id || '').toLowerCase().includes(query);
 
         if (!matchesName && !matchesUser && !matchesPhone && !matchesAwb && !matchesBatch && !matchesCourier && !matchesCode && !matchesOrderId) {
           return false;
@@ -487,6 +491,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       return true;
     });
+
+    // Natural ascending sort on the filtered influencer shipments BEFORE pagination
+    return sortInfluencerShipmentsNaturally(filtered);
   }, [allShipments, searchTerm, selectedCourier, selectedStatusTab, selectedStatusDropdown, startDate, endDate]);
 
   // Reset pagination whenever filters change
@@ -503,6 +510,46 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     const startIdx = (safeCurrentPage - 1) * pageSize;
     return filteredShipments.slice(startIdx, startIdx + pageSize);
   }, [filteredShipments, safeCurrentPage, pageSize]);
+
+  // Generate clean, strictly non-colliding pagination items
+  const paginationItems = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => ({
+        type: 'page' as const,
+        page: i + 1,
+        key: `page-${i + 1}`
+      }));
+    }
+
+    const items: Array<{ type: 'page' | 'ellipsis'; page?: number; key: string }> = [];
+    items.push({ type: 'page', page: 1, key: 'page-1' });
+
+    let start = Math.max(2, safeCurrentPage - 1);
+    let end = Math.min(totalPages - 1, safeCurrentPage + 1);
+
+    if (safeCurrentPage <= 3) {
+      start = 2;
+      end = 4;
+    } else if (safeCurrentPage >= totalPages - 2) {
+      start = totalPages - 3;
+      end = totalPages - 1;
+    }
+
+    if (start > 2) {
+      items.push({ type: 'ellipsis', key: 'ellipsis-start' });
+    }
+
+    for (let p = start; p <= end; p++) {
+      items.push({ type: 'page', page: p, key: `page-${p}` });
+    }
+
+    if (end < totalPages - 1) {
+      items.push({ type: 'ellipsis', key: 'ellipsis-end' });
+    }
+
+    items.push({ type: 'page', page: totalPages, key: `page-${totalPages}` });
+    return items;
+  }, [totalPages, safeCurrentPage]);
 
   // Delete All Tracking Records Confirmation Modal State
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -1271,19 +1318,25 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               </button>
 
               {/* Page Number Pills */}
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                let pageNum = i + 1;
-                if (totalPages > 5 && safeCurrentPage > 3) {
-                  pageNum = safeCurrentPage - 2 + i;
-                  if (pageNum > totalPages) pageNum = totalPages - (4 - i);
+              {paginationItems.map((item) => {
+                if (item.type === 'ellipsis') {
+                  return (
+                    <span key={item.key} className="text-slate-600 px-1 select-none">
+                      ...
+                    </span>
+                  );
                 }
+
+                const pageNum = item.page!;
+                const isActive = safeCurrentPage === pageNum;
+
                 return (
                   <button
-                    key={pageNum}
+                    key={item.key}
                     type="button"
                     onClick={() => setCurrentPage(pageNum)}
                     className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                      safeCurrentPage === pageNum
+                      isActive
                         ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/40'
                         : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
                     }`}
@@ -1292,19 +1345,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   </button>
                 );
               })}
-
-              {totalPages > 5 && safeCurrentPage < totalPages - 2 && (
-                <>
-                  <span className="text-slate-600 px-0.5">...</span>
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(totalPages)}
-                    className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    {totalPages}
-                  </button>
-                </>
-              )}
 
               <button
                 type="button"

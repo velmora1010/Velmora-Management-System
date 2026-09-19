@@ -755,7 +755,9 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         addressCol: 'Complete Address',
         languagesCol: 'Languages',
         autoDmCol: '',
-        profileImgCol: ''
+        profileImgCol: '',
+        emailCol: '',
+        pincodeCol: ''
       };
       setMapping(map);
       processRowsWithMapping(extractedRows, map);
