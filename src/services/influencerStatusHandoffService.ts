@@ -12,49 +12,45 @@ import {
 } from './influencerTrackingService';
 
 /**
- * Centralized natural influencer code comparator.
- * Dynamic and prefix-agnostic: handles codes like HIS1, HIS2, HIS9, HIS10, HIS45, HIS100, HIS190,
- * as well as ABC1, GJS141, TNS45, etc.
- * Strips leading '#' or whitespace without modifying original values.
- * Numerically compares integer suffixes so HIS9 < HIS10.
+ * Extracts the numeric integer value from an influencer code.
+ * E.g. "HIS1" -> 1, "#HIS1" -> 1, "GJS140" -> 140, "#BHS214" -> 214.
+ * Returns Infinity if no numeric digits are found so non-numeric codes sort to the end.
+ */
+export function getInfluencerCodeNumber(code?: string | null): number {
+  if (!code) return Infinity;
+  const clean = String(code).replace(/^#+/, '').trim();
+  const match = clean.match(/\d+/);
+  if (match) {
+    const n = parseInt(match[0], 10);
+    return isNaN(n) ? Infinity : n;
+  }
+  return Infinity;
+}
+
+/**
+ * Centralized strict numeric influencer code comparator.
+ * PRIMARY: Numeric value strictly ascending (e.g. 1 < 2 < 3 < 10 < 140 < 214).
+ * The alphabetic prefix is completely ignored for the primary ordering.
+ * SECONDARY (tie-breaker only when numeric values are identical):
+ * Code / prefix alphabetically (e.g. BHS12 < GJS12 < HIS12).
  */
 export function naturalCompareInfluencerCodes(a?: string | null, b?: string | null): number {
   if (!a && !b) return 0;
   if (!a) return 1;
   if (!b) return -1;
 
-  const strA = String(a).trim();
-  const strB = String(b).trim();
+  const numA = getInfluencerCodeNumber(a);
+  const numB = getInfluencerCodeNumber(b);
 
-  const cleanA = strA.replace(/^#+/, '').trim();
-  const cleanB = strB.replace(/^#+/, '').trim();
-
-  // Extract prefix letters/symbols, numeric digits, and suffix
-  const regex = /^([A-Za-z\s_-]*?)(\d+)(.*)$/;
-  const matchA = cleanA.match(regex);
-  const matchB = cleanB.match(regex);
-
-  if (matchA && matchB) {
-    const prefixA = matchA[1].toUpperCase();
-    const prefixB = matchB[1].toUpperCase();
-    if (prefixA !== prefixB) {
-      return prefixA.localeCompare(prefixB);
-    }
-    const numA = parseInt(matchA[2], 10);
-    const numB = parseInt(matchB[2], 10);
-    if (numA !== numB) {
-      return numA - numB;
-    }
-    const suffixA = matchA[3].toUpperCase();
-    const suffixB = matchB[3].toUpperCase();
-    if (suffixA !== suffixB) {
-      return suffixA.localeCompare(suffixB, undefined, { numeric: true, sensitivity: 'base' });
-    }
-    return 0;
+  // PRIMARY: Numeric value strictly ascending
+  if (numA !== numB) {
+    return numA - numB;
   }
 
-  // Fallback to standard natural comparison
-  return cleanA.localeCompare(cleanB, undefined, { numeric: true, sensitivity: 'base' });
+  // SECONDARY: When numbers are equal (e.g. BHS12 vs GJS12 vs HIS12)
+  const cleanA = String(a).replace(/^#+/, '').trim().toUpperCase();
+  const cleanB = String(b).replace(/^#+/, '').trim().toUpperCase();
+  return cleanA.localeCompare(cleanB);
 }
 
 /**
@@ -69,15 +65,18 @@ export const naturalCompareCodes = naturalCompareInfluencerCodes;
 export function getShipmentInfluencerCode(s: any): string {
   if (!s) return '';
   if (s.influencerCode && String(s.influencerCode).trim()) {
-    return String(s.influencerCode).trim();
+    const code = String(s.influencerCode).trim();
+    if (/\d+/.test(code)) return code;
   }
   if (s.orderId && String(s.orderId).trim()) {
-    return String(s.orderId).trim();
+    const ord = String(s.orderId).trim();
+    if (/\d+/.test(ord)) return ord;
   }
   if (s.code && String(s.code).trim()) {
-    return String(s.code).trim();
+    const c = String(s.code).trim();
+    if (/\d+/.test(c)) return c;
   }
-  return '';
+  return s.influencerCode || s.orderId || s.code || '';
 }
 
 /**

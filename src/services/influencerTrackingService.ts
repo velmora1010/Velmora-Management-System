@@ -7,6 +7,7 @@ import type { CampaignInfluencer } from '../types';
 import {
   naturalCompareInfluencerCodes,
   naturalCompareCodes,
+  getInfluencerCodeNumber,
   getShipmentInfluencerCode,
   compareShipmentsByInfluencerCodeNaturally,
   sortInfluencerShipmentsNaturally
@@ -15,6 +16,7 @@ import {
 export {
   naturalCompareInfluencerCodes,
   naturalCompareCodes,
+  getInfluencerCodeNumber,
   getShipmentInfluencerCode,
   compareShipmentsByInfluencerCodeNaturally,
   sortInfluencerShipmentsNaturally
