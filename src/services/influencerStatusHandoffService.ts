@@ -26,6 +26,25 @@ export function naturalCompareCodes(a?: string | null, b?: string | null): numbe
   return cleanA.localeCompare(cleanB, undefined, { numeric: true, sensitivity: 'base' });
 }
 
+/**
+ * Normalizes an influencer code or shipment order reference for canonical comparison.
+ * - converts to string
+ * - trims whitespace
+ * - removes leading "#"
+ * - converts to lowercase
+ * Example: "#HIS1", "HIS1", " his1 ", "#his1" all resolve to "his1"
+ * But "#4536" resolves to "4536", which will only match if an actual campaign influencer has code "4536".
+ */
+export function normalizeInfluencerReference(value: any): string {
+  if (value === undefined || value === null) return '';
+  return String(value)
+    .replace(/[\t\r\n]/g, ' ')
+    .trim()
+    .replace(/^#+/, '')
+    .trim()
+    .toLowerCase();
+}
+
 export interface InfluencerMatchResult {
   matchedInfluencer?: CampaignInfluencer;
   matchedDispatch?: DispatchDetails;
@@ -34,22 +53,23 @@ export interface InfluencerMatchResult {
 }
 
 /**
- * Matches a shipment to an influencer using the 5 priority rules:
+ * Matches a shipment to an influencer using strict priority rules:
  * 1. Influencer Code
- * 2. Influencer ID / internal ID
- * 3. Order ID / shipment relationship
- * 4. AWB mapping
- * 5. Existing dispatch relationship
+ * 2. Explicit Influencer ID (only if already set on shipment)
+ * 3. Order ID matching canonical Influencer Code
+ * 4. AWB mapping to existing dispatch tracking ID
+ * 5. Existing dispatch record relationship
  * 
- * Never matches solely by generic display name.
+ * Never converts arbitrary customer numeric IDs into influencer IDs.
+ * Never matches solely by generic display name or phone.
  */
 export function matchShipmentToInfluencer(
   shipment: InfluencerDispatchedShipment,
   campaignInfluencers: CampaignInfluencer[],
   dispatchRecords: DispatchDetails[]
 ): InfluencerMatchResult {
-  const cleanShipCode = (shipment.influencerCode || '').replace(/^#+/, '').trim().toLowerCase();
-  const cleanOrderId = (shipment.orderId || '').replace(/^#+/, '').trim().toLowerCase();
+  const cleanShipCode = normalizeInfluencerReference(shipment.influencerCode);
+  const cleanOrderId = normalizeInfluencerReference(shipment.orderId);
   const cleanShipInfId = shipment.influencerId ? String(shipment.influencerId).trim() : '';
   const cleanAwb = (shipment.awbNumber || '').trim().toLowerCase();
 
@@ -58,7 +78,7 @@ export function matchShipmentToInfluencer(
   // -------------------------------------------------------------
   if (cleanShipCode) {
     const infByCode = campaignInfluencers.find(inf => {
-      const code = (inf.code || '').replace(/^#+/, '').trim().toLowerCase();
+      const code = normalizeInfluencerReference(inf.code);
       return code && code === cleanShipCode;
     });
     if (infByCode) {
@@ -72,7 +92,7 @@ export function matchShipmentToInfluencer(
     }
 
     const dispByCode = dispatchRecords.find(d => {
-      const code = ((d as any).influencer_code || '').replace(/^#+/, '').trim().toLowerCase();
+      const code = normalizeInfluencerReference((d as any).influencer_code);
       return code && code === cleanShipCode;
     });
     if (dispByCode) {
@@ -89,7 +109,7 @@ export function matchShipmentToInfluencer(
   }
 
   // -------------------------------------------------------------
-  // Priority 2: Influencer ID / internal ID
+  // Priority 2: Influencer ID / internal ID (Only if explicitly assigned on shipment)
   // -------------------------------------------------------------
   if (cleanShipInfId) {
     const infById = campaignInfluencers.find(inf => String(inf.id) === cleanShipInfId);
@@ -104,26 +124,12 @@ export function matchShipmentToInfluencer(
     }
   }
 
-  // Check if orderId is a direct numeric influencer ID
-  if (cleanOrderId && /^\d+$/.test(cleanOrderId)) {
-    const infByNumOrder = campaignInfluencers.find(inf => String(inf.id) === cleanOrderId);
-    if (infByNumOrder) {
-      const dispatch = dispatchRecords.find(d => String(d.influencer_id) === String(infByNumOrder.id));
-      return {
-        matchedInfluencer: infByNumOrder,
-        matchedDispatch: dispatch,
-        matchPriority: 2,
-        matchReason: `Matched Order ID as Influencer ID: ${cleanOrderId}`
-      };
-    }
-  }
-
   // -------------------------------------------------------------
-  // Priority 3: Order ID / shipment relationship
+  // Priority 3: Order ID / shipment relationship matching canonical Influencer Code
   // -------------------------------------------------------------
   if (cleanOrderId) {
     const infByOrderAsCode = campaignInfluencers.find(inf => {
-      const code = (inf.code || '').replace(/^#+/, '').trim().toLowerCase();
+      const code = normalizeInfluencerReference(inf.code);
       return code && code === cleanOrderId;
     });
     if (infByOrderAsCode) {

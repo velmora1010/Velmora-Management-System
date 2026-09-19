@@ -26,6 +26,7 @@ import {
   InfluencerDispatchedShipment,
   getCourierTrackingUrl
 } from '../../services/influencerTrackingService';
+import { normalizeInfluencerReference } from '../../services/influencerStatusHandoffService';
 import toast from 'react-hot-toast';
 
 export interface UploadCourierShipmentModalProps {
@@ -56,6 +57,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   const [importProgress, setImportProgress] = useState<{
     total: number;
     completed: number;
+    accepted: number;
+    ignored: number;
     successful: number;
     failed: number;
     duplicates: number;
@@ -65,6 +68,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   }>({
     total: 0,
     completed: 0,
+    accepted: 0,
+    ignored: 0,
     successful: 0,
     failed: 0,
     duplicates: 0,
@@ -216,19 +221,33 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         weightCol = findColumnKey(headers, ['weight', 'amount', 'mpsamount']);
       }
 
-      // 2. Build influencer lookup maps for current campaign
-      const codeMap = new Map<string, CampaignInfluencer>();
-      const phoneMap = new Map<string, CampaignInfluencer>();
-      const nameMap = new Map<string, CampaignInfluencer>();
-      const idMap = new Map<string, CampaignInfluencer>();
+      // 2. Load and build canonical influencer lookup map strictly for the current campaign
+      let activeCampaignInfluencers = (influencers || []).filter(inf => 
+        String(inf.is_archived).toLowerCase() !== 'true' &&
+        (inf.campaign_id === undefined || String(inf.campaign_id) === String(campaign.id))
+      );
 
-      influencers.forEach(inf => {
-        idMap.set(String(inf.id), inf);
-        if (inf.code) codeMap.set(normalizeCode(inf.code), inf);
-        if (inf.phone_number) phoneMap.set(normalizePhone(inf.phone_number), inf);
-        if (inf.alternative_number) phoneMap.set(normalizePhone(inf.alternative_number), inf);
-        if (inf.influencer_name) nameMap.set(cleanStr(inf.influencer_name).toLowerCase(), inf);
-        if (inf.name) nameMap.set(cleanStr(inf.name).toLowerCase(), inf);
+      if (activeCampaignInfluencers.length === 0) {
+        try {
+          const { data: dbInfs } = await supabase
+            .from(SUPABASE_TABLES.influencersInfo)
+            .select('*')
+            .eq('campaign_id', String(campaign.id));
+          if (dbInfs && dbInfs.length > 0) {
+            activeCampaignInfluencers = dbInfs.filter(i => String(i.is_archived).toLowerCase() !== 'true') as any[];
+          }
+        } catch (e) {
+          console.warn('Fallback loading active influencers for upload failed:', e);
+        }
+      }
+
+      // Build canonical influencer code lookup map for the current campaign
+      const codeMap = new Map<string, CampaignInfluencer>();
+      activeCampaignInfluencers.forEach(inf => {
+        if (inf.code) {
+          const norm = normalizeInfluencerReference(inf.code);
+          if (norm) codeMap.set(norm, inf);
+        }
       });
 
       // 3. Existing shipments in current campaign (for duplicate & reconciliation tracking)
@@ -239,7 +258,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         if (k) existingMap.set(k, s);
       });
 
-      // 4. Parse rows into shipment records
+      // 4. Parse rows into shipment records with PRE-PERSISTENCE customer filtering
       const todayDate = new Date().toISOString().split('T')[0];
       const validRows: {
         rawAwb: string;
@@ -255,9 +274,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         city: string;
         state: string;
         pin: string;
-        matchedInf?: CampaignInfluencer;
+        matchedInf: CampaignInfluencer;
       }[] = [];
       let invalidRowsCount = 0;
+      let ignoredCustomerRowsCount = 0;
 
       rawData.forEach((row) => {
         const rawAwb = awbCol ? cleanStr(row[awbCol]) : '';
@@ -284,43 +304,38 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           return;
         }
 
+        // Match reference against current campaign influencers
         let matchedInf: CampaignInfluencer | undefined;
 
         if (rawOrderId) {
-          const normCode = normalizeCode(rawOrderId);
+          const normCode = normalizeInfluencerReference(rawOrderId);
           if (codeMap.has(normCode)) {
             matchedInf = codeMap.get(normCode);
-          } else if (idMap.has(rawOrderId)) {
-            matchedInf = idMap.get(rawOrderId);
           }
         }
 
-        if (!matchedInf && rawConsigneeName) {
-          const normName = cleanStr(rawConsigneeName).toLowerCase();
-          if (nameMap.has(normName)) {
-            matchedInf = nameMap.get(normName);
-          }
-        }
-
+        // If not matched by orderCol, check if any column contains a valid canonical campaign influencer code
         if (!matchedInf) {
           for (const key of headers) {
             const val = cleanStr(row[key]);
             if (!val) continue;
-            const normC = normalizeCode(val);
-            const normP = normalizePhone(val);
+            const normC = normalizeInfluencerReference(val);
             if (codeMap.has(normC)) {
               matchedInf = codeMap.get(normC);
-              break;
-            } else if (normP && phoneMap.has(normP)) {
-              matchedInf = phoneMap.get(normP);
               break;
             }
           }
         }
 
+        // PRE-PERSISTENCE FILTER: Reject customer rows before they reach storage
+        if (!matchedInf) {
+          ignoredCustomerRowsCount++;
+          return;
+        }
+
         validRows.push({
           rawAwb,
-          orderId: rawOrderId,
+          orderId: matchedInf.code || rawOrderId,
           consigneeName: rawConsigneeName,
           currentStatus: rawCurrentStatus,
           statusType: rawStatusType,
@@ -337,23 +352,25 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       });
 
       if (validRows.length === 0) {
-        const err = `No valid shipments found with a valid ${courier === 'ST Courier' ? 'Tracking number' : 'Waybill'}.`;
+        const err = `No campaign influencer shipments found in this file (${ignoredCustomerRowsCount} customer / unmatched rows ignored).`;
         setUploadError(err);
         setStep('error');
-        toast.error(err);
+        toast.error(err, { duration: 6000 });
         isExecutingRef.current = false;
         return;
       }
 
-      console.log(`[Upload Pipeline] Valid rows: ${validRows.length}, Invalid rows: ${invalidRowsCount}`);
+      console.log(`[Upload Pipeline] Accepted Influencers: ${validRows.length}, Ignored Customers: ${ignoredCustomerRowsCount}, Invalid: ${invalidRowsCount}`);
 
       // =======================================================================
       // WORKFLOW A: ST COURIER (LIVE API SYNC ONE BY ONE)
       // =======================================================================
       if (courier === 'ST Courier') {
         setImportProgress({
-          total: validRows.length + invalidRowsCount,
+          total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount,
           completed: 0,
+          accepted: validRows.length,
+          ignored: ignoredCustomerRowsCount,
           successful: 0,
           failed: invalidRowsCount,
           duplicates: 0,
@@ -376,19 +393,19 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             chunk.map(async (row) => {
               const inf = row.matchedInf;
               const awb = row.rawAwb.trim();
-              const orderId = row.orderId || (inf ? inf.code : undefined) || '';
+              const orderId = row.orderId || inf.code || '';
 
               const baseShipment: InfluencerDispatchedShipment = {
-                id: inf ? (inf.dispatchDetails?.id || String(inf.id)) : `st-${awb}`,
-                influencerId: inf ? String(inf.id) : undefined,
-                creatorName: inf ? (inf.influencer_name || inf.name || 'Influencer') : (row.consigneeName || 'Influencer Not Matched'),
-                username: inf?.platforms?.find(p => p.username)?.username || (inf ? `@${inf.influencer_name}` : '—'),
-                influencerCode: inf?.code || orderId || '',
+                id: inf.dispatchDetails?.id || String(inf.id),
+                influencerId: String(inf.id),
+                creatorName: inf.influencer_name || inf.name || 'Influencer',
+                username: inf.platforms?.find(p => p.username)?.username || `@${inf.influencer_name}`,
+                influencerCode: inf.code || orderId || '',
                 orderId: orderId || undefined,
-                profilePhoto: inf?.profile_file_url || '',
-                phoneNumber: inf?.phone_number || '',
-                altPhoneNumber: inf?.alternative_number || '',
-                state: inf?.state || row.state || '',
+                profilePhoto: inf.profile_file_url || '',
+                phoneNumber: inf.phone_number || '',
+                altPhoneNumber: inf.alternative_number || '',
+                state: inf.state || row.state || '',
                 city: row.city || undefined,
                 pincode: row.pin || undefined,
                 batchCode: '—',
@@ -415,8 +432,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               completedCount++;
 
               setImportProgress({
-                total: validRows.length + invalidRowsCount,
+                total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount,
                 completed: completedCount,
+                accepted: validRows.length,
+                ignored: ignoredCustomerRowsCount,
                 successful: liveApiSyncedCount,
                 failed: invalidRowsCount,
                 duplicates: 0,
@@ -428,10 +447,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           );
         }
 
-        // Save all tracked shipments to campaign database & local storage
+        // Save only validated campaign influencer shipments to campaign database & local storage
         const dbResult = await upsertCampaignShipmentsToDb(campaign.id, trackedShipments);
 
-        const totalReported = validRows.length + invalidRowsCount;
+        const totalReported = validRows.length + ignoredCustomerRowsCount + invalidRowsCount;
+        const acceptedReported = validRows.length;
         const importedReported = dbResult.imported;
         const duplicatesReported = dbResult.duplicatesUpdated;
         const failedReported = dbResult.failed + invalidRowsCount;
@@ -467,10 +487,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           await logActivity({
             department: 'Marketing',
             action: 'Upload ST Courier Shipments',
-            description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Imported: ${importedReported}, Duplicates updated: ${duplicatesReported}, Failed: ${failedReported}`,
+            description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Accepted: ${acceptedReported}, Ignored customer/unmatched: ${ignoredCustomerRowsCount}, Duplicates updated: ${duplicatesReported}`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'ST Courier', total: totalReported, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, liveSynced: liveApiSyncedCount, livePending: liveApiPendingCount }
+            metadata: { courier: 'ST Courier', total: totalReported, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, liveSynced: liveApiSyncedCount, livePending: liveApiPendingCount }
           });
         } catch (e) {}
 
@@ -480,7 +500,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }));
         setStep('completed');
 
-        const summaryText = `ST Courier Upload Complete\nTotal rows: ${totalReported}\nImported: ${importedReported}\nDuplicates updated: ${duplicatesReported}\nFailed: ${failedReported}`;
+        const summaryText = `ST Courier Upload Complete\nAccepted Influencer Shipments: ${acceptedReported}\nIgnored Customer/Unmatched Rows: ${ignoredCustomerRowsCount}\nUpdated Existing Shipments: ${duplicatesReported}\nNew Shipments: ${importedReported}`;
         if (failedReported > 0 && importedReported === 0 && duplicatesReported === 0) {
           toast.error(summaryText, { duration: 6000 });
         } else {
@@ -497,8 +517,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       // =======================================================================
       } else {
         setImportProgress({
-          total: validRows.length + invalidRowsCount,
+          total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount,
           completed: 0,
+          accepted: validRows.length,
+          ignored: ignoredCustomerRowsCount,
           successful: 0,
           failed: invalidRowsCount,
           duplicates: 0,
@@ -514,7 +536,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           const row = validRows[i];
           const inf = row.matchedInf;
           const awb = row.rawAwb.trim();
-          const orderId = row.orderId || (inf ? inf.code : undefined) || '';
+          const orderId = row.orderId || inf.code || '';
 
           const displayStatus = resolveDelhiveryDisplayStatus({
             remarks: row.remarks,
@@ -527,16 +549,16 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           const rawStatus = row.remarks || row.pendingRemarks || row.currentStatus || row.statusType || displayStatus;
 
           const shipmentObj: InfluencerDispatchedShipment = {
-            id: inf ? (inf.dispatchDetails?.id || String(inf.id)) : `del-${awb}`,
-            influencerId: inf ? String(inf.id) : undefined,
-            creatorName: inf ? (inf.influencer_name || inf.name || 'Influencer') : (row.consigneeName || 'Influencer Not Matched'),
-            username: inf?.platforms?.find(p => p.username)?.username || (inf ? `@${inf.influencer_name}` : '—'),
-            influencerCode: inf?.code || orderId || '',
+            id: inf.dispatchDetails?.id || String(inf.id),
+            influencerId: String(inf.id),
+            creatorName: inf.influencer_name || inf.name || 'Influencer',
+            username: inf.platforms?.find(p => p.username)?.username || `@${inf.influencer_name}`,
+            influencerCode: inf.code || orderId || '',
             orderId: orderId || undefined,
-            profilePhoto: inf?.profile_file_url || '',
-            phoneNumber: inf?.phone_number || '',
-            altPhoneNumber: inf?.alternative_number || '',
-            state: inf?.state || row.state || '',
+            profilePhoto: inf.profile_file_url || '',
+            phoneNumber: inf.phone_number || '',
+            altPhoneNumber: inf.alternative_number || '',
+            state: inf.state || row.state || '',
             city: row.city || undefined,
             pincode: row.pin || undefined,
             batchCode: '—',
@@ -559,7 +581,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
           delhiveryShipments.push(shipmentObj);
 
-          // Save to Dexie
+          // Save to Dexie (only for validated campaign influencers)
           try {
             await db.shipments.put({
               awb,
@@ -573,34 +595,34 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             });
           } catch (dbErr) {}
 
-          // If matched to influencer, persist to Supabase
-          if (inf) {
-            try {
-              const { data: existingRecords } = await supabase
-                .from(SUPABASE_TABLES.influencerDispatch)
-                .select('id')
-                .eq('influencer_id', String(inf.id))
-                .eq('campaign_id', String(campaign.id));
+          // Persist to Supabase influencerDispatch
+          try {
+            const { data: existingRecords } = await supabase
+              .from(SUPABASE_TABLES.influencerDispatch)
+              .select('id')
+              .eq('influencer_id', String(inf.id))
+              .eq('campaign_id', String(campaign.id));
 
-              if (existingRecords && existingRecords.length > 0) {
-                await supabase
-                  .from(SUPABASE_TABLES.influencerDispatch)
-                  .update({
-                    courier_partner: 'Delhivery',
-                    tracking_id: awb,
-                    dispatch_status: 'Dispatched',
-                    dispatch_date: row.date || todayDate,
-                    expected_delivery_date: row.edd || null
-                  })
-                  .eq('id', existingRecords[0].id);
-              }
-            } catch (e) {}
-          }
+            if (existingRecords && existingRecords.length > 0) {
+              await supabase
+                .from(SUPABASE_TABLES.influencerDispatch)
+                .update({
+                  courier_partner: 'Delhivery',
+                  tracking_id: awb,
+                  dispatch_status: 'Dispatched',
+                  dispatch_date: row.date || todayDate,
+                  expected_delivery_date: row.edd || null
+                })
+                .eq('id', existingRecords[0].id);
+            }
+          } catch (e) {}
 
           if (i % 25 === 0 || i === validRows.length - 1) {
             setImportProgress({
-              total: validRows.length + invalidRowsCount,
+              total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount,
               completed: i + 1,
+              accepted: validRows.length,
+              ignored: ignoredCustomerRowsCount,
               successful: i + 1,
               failed: invalidRowsCount,
               duplicates: 0,
@@ -611,10 +633,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           }
         }
 
-        // Save all Delhivery shipments into isolated campaign database & local storage
+        // Save only validated campaign influencer shipments into isolated campaign database & local storage
         const dbResult = await upsertCampaignShipmentsToDb(campaign.id, delhiveryShipments);
 
-        const totalReported = validRows.length + invalidRowsCount;
+        const totalReported = validRows.length + ignoredCustomerRowsCount + invalidRowsCount;
+        const acceptedReported = validRows.length;
         const importedReported = dbResult.imported;
         const duplicatesReported = dbResult.duplicatesUpdated;
         const failedReported = dbResult.failed + invalidRowsCount;
@@ -624,10 +647,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           await logActivity({
             department: 'Marketing',
             action: 'Upload Delhivery Shipments',
-            description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File)`,
+            description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File). Accepted: ${acceptedReported}, Ignored customer/unmatched: ${ignoredCustomerRowsCount}, Duplicates updated: ${duplicatesReported}`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'Delhivery', total: totalReported, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, source: 'Uploaded File' }
+            metadata: { courier: 'Delhivery', total: totalReported, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, source: 'Uploaded File' }
           });
         } catch (e) {}
 
@@ -637,7 +660,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }));
         setStep('completed');
 
-        const summaryText = `Delhivery Upload Complete\nTotal rows: ${totalReported}\nImported: ${importedReported}\nDuplicates updated: ${duplicatesReported}\nFailed: ${failedReported}`;
+        const summaryText = `Delhivery Upload Complete\nAccepted Influencer Shipments: ${acceptedReported}\nIgnored Customer/Unmatched Rows: ${ignoredCustomerRowsCount}\nUpdated Existing Shipments: ${duplicatesReported}\nNew Shipments: ${importedReported}`;
         if (failedReported > 0 && importedReported === 0 && duplicatesReported === 0) {
           toast.error(summaryText, { duration: 6000 });
         } else {
@@ -770,13 +793,18 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               {/* Live Count Badges */}
               <div className="flex items-center gap-2.5 flex-wrap justify-center">
                 <span className="px-3 py-1 rounded-xl bg-purple-950/60 border border-purple-800/60 text-purple-300 text-xs font-semibold">
-                  New: {importProgress.imported}
+                  Accepted: {importProgress.accepted}
                 </span>
+                {importProgress.ignored > 0 && (
+                  <span className="px-3 py-1 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-300 text-xs font-semibold" title="Ignored — Not a campaign influencer">
+                    Ignored Customers: {importProgress.ignored}
+                  </span>
+                )}
                 <span className="px-3 py-1 rounded-xl bg-blue-950/60 border border-blue-800/60 text-blue-300 text-xs font-semibold">
                   Updated: {importProgress.duplicates}
                 </span>
                 <span className="px-3 py-1 rounded-xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 text-xs font-semibold">
-                  Ready: {importProgress.successful}
+                  New: {importProgress.imported}
                 </span>
                 {importProgress.failed > 0 && (
                   <span className="px-3 py-1 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs font-semibold">

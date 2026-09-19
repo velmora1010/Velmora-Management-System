@@ -13,9 +13,12 @@ import {
   getLastCampaignSyncTime,
   getCampaignShipments,
   fetchCampaignShipmentsFromDb,
+  pruneUnmatchedCampaignTrackingShipments,
   TrackingStatusCategory,
   InfluencerDispatchedShipment
 } from '../../services/influencerTrackingService';
+import { supabase } from '../../lib/supabase';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import {
   Truck,
@@ -182,6 +185,43 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
   }, [campaign?.id]);
 
+  // Campaign active influencers from DB (fallback if parent did not supply allActiveInfluencers)
+  const [dbActiveInfluencers, setDbActiveInfluencers] = useState<CampaignInfluencer[]>([]);
+
+  useEffect(() => {
+    const fetchActive = async () => {
+      if (!campaign?.id) return;
+      try {
+        const { data } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('*')
+          .eq('campaign_id', String(campaign.id));
+        if (data && data.length > 0) {
+          const active = data.filter((i: any) => String(i.is_archived).toLowerCase() !== 'true');
+          setDbActiveInfluencers(active as any[]);
+        }
+      } catch (e) {
+        console.warn('Failed loading campaign active influencers:', e);
+      }
+    };
+    fetchActive();
+  }, [campaign?.id]);
+
+  // Candidate influencers: pool all active influencers and dispatched influencers for the campaign
+  const candidateInfluencers = useMemo(() => {
+    const map = new Map<string, CampaignInfluencer>();
+    (allActiveInfluencers || []).forEach(inf => {
+      if (inf?.id) map.set(String(inf.id), inf);
+    });
+    (dbActiveInfluencers || []).forEach(inf => {
+      if (inf?.id && !map.has(String(inf.id))) map.set(String(inf.id), inf);
+    });
+    (dispatchedInfluencers || []).forEach(inf => {
+      if (inf?.id && !map.has(String(inf.id))) map.set(String(inf.id), inf);
+    });
+    return Array.from(map.values());
+  }, [allActiveInfluencers, dbActiveInfluencers, dispatchedInfluencers]);
+
   // Campaign imported shipments (ST Courier + Delhivery) - loads from DB with local storage cache fallback
   const [campaignShipments, setCampaignShipments] = useState<InfluencerDispatchedShipment[]>(() => getCampaignShipments(campaign.id));
   const [isLoadingDb, setIsLoadingDb] = useState(false);
@@ -193,6 +233,25 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const loadShipments = useCallback(async () => {
     setIsLoadingDb(true);
     try {
+      // 1. Ensure we have candidate influencers to validate against
+      let activeInfs = candidateInfluencers;
+      if (activeInfs.length === 0) {
+        const { data } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('*')
+          .eq('campaign_id', String(campaign.id));
+        if (data && data.length > 0) {
+          activeInfs = data.filter((i: any) => String(i.is_archived).toLowerCase() !== 'true') as any[];
+          setDbActiveInfluencers(activeInfs);
+        }
+      }
+
+      // 2. Prune any orphaned customer records from Supabase for this campaign
+      if (activeInfs.length > 0) {
+        await pruneUnmatchedCampaignTrackingShipments(campaign.id, activeInfs);
+      }
+
+      // 3. Fetch clean shipments from DB
       const dbShipments = await fetchCampaignShipmentsFromDb(campaign.id);
       setCampaignShipments(dbShipments);
       setTrackingCache(getTrackingCache(campaign.id));
@@ -203,7 +262,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     } finally {
       setIsLoadingDb(false);
     }
-  }, [campaign.id, loadStatusTrackingInfluencerIds]);
+  }, [campaign.id, candidateInfluencers, loadStatusTrackingInfluencerIds]);
 
   // Reload cache and shipments when campaign changes
   useEffect(() => {
@@ -225,25 +284,35 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     };
   }, [campaign.id, loadShipments]);
 
-  // Candidate influencers: pool all active influencers and dispatched influencers for the campaign
-  const candidateInfluencers = useMemo(() => {
-    const map = new Map<string, CampaignInfluencer>();
-    (allActiveInfluencers || []).forEach(inf => {
-      if (inf?.id) map.set(String(inf.id), inf);
-    });
-    (dispatchedInfluencers || []).forEach(inf => {
-      if (inf?.id && !map.has(String(inf.id))) map.set(String(inf.id), inf);
-    });
-    return Array.from(map.values());
-  }, [allActiveInfluencers, dispatchedInfluencers]);
-
   // Build unified dispatched shipments strictly for the current campaign
   // Combines uploaded campaign shipments (ST Courier & Delhivery) and matched campaign influencers
+  // Excludes any customer shipments that do not belong to an active campaign influencer
   const allShipments: InfluencerDispatchedShipment[] = useMemo(() => {
     const shipmentMap = new Map<string, InfluencerDispatchedShipment>();
 
-    // 1. First index uploaded campaign shipments (ST Courier & Delhivery)
+    // 1. First index uploaded campaign shipments that strictly resolve to an active campaign influencer
     for (const cs of campaignShipments) {
+      const matchResult = matchShipmentToInfluencer(cs, candidateInfluencers, dispatchRecords);
+      const matchedInf = matchResult.matchedInfluencer;
+
+      // REJECT/EXCLUDE: If shipment does not match any active campaign influencer, exclude it!
+      if (!matchedInf) {
+        continue;
+      }
+
+      const infId = String(matchedInf.id);
+      const dispatch = matchResult.matchedDispatch || matchedInf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === infId);
+      const batch = savedBatches.find(b => b.members && b.members.some(m => String(m.influencer_id) === infId));
+      const batchCode = batch?.batch_name || '—';
+      const batchId = batch?.id;
+
+      const username = matchedInf.platforms?.find(p => p.username && p.username.trim())?.username?.trim()
+        || matchedInf.influencer_name?.trim()
+        || (matchedInf as any).username?.trim()
+        || matchedInf.name?.trim()
+        || '—';
+      const cleanUsername = username.startsWith('@') ? username : `@${username}`;
+
       const awbKey = (cs.awbNumber || '').toLowerCase().trim();
       const courierLower = (cs.courier || '').toLowerCase().trim();
       const uniqueKey = `${courierLower}__${awbKey || (cs.id ? cs.id.toLowerCase().trim() : '')}`;
@@ -260,6 +329,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       shipmentMap.set(uniqueKey, {
         ...cs,
+        influencerId: infId,
+        creatorName: matchedInf.influencer_name || matchedInf.name || cs.creatorName,
+        username: cleanUsername,
+        influencerCode: matchedInf.code || cs.influencerCode || '',
+        orderId: cs.orderId || matchedInf.code || '',
+        profilePhoto: cs.profilePhoto || matchedInf.profile_file_url || '',
+        phoneNumber: cs.phoneNumber || matchedInf.phone_number || dispatch?.phone_number || '',
+        altPhoneNumber: cs.altPhoneNumber || matchedInf.alternative_number || dispatch?.alternative_phone_number || '',
+        state: cs.state || matchedInf.state || dispatch?.state || '',
+        batchId: cs.batchId || batchId,
+        batchCode: cs.batchCode !== '—' ? cs.batchCode : batchCode,
+        dispatchDate: cs.dispatchDate || dispatch?.dispatch_date || '',
+        expectedDeliveryDate: cs.expectedDeliveryDate || dispatch?.expected_delivery_date || '',
         status: cached?.status || cs.status,
         rawStatus: cached?.rawStatus || cs.rawStatus,
         statusSource,
@@ -269,53 +351,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         lastSyncedAt: cached?.lastSyncedAt || cs.lastSyncedAt,
         syncError: cached?.syncError || cs.syncError,
         trackingUrl: cs.trackingUrl || getCourierTrackingUrl(cs.courier, cs.awbNumber)
-      });
-    }
-
-    // 2. Enrich uploaded campaign tracking shipments with matched influencer details
-    for (const inf of candidateInfluencers) {
-      const infId = String(inf.id);
-      const dispatch = inf.dispatchDetails || dispatchRecords.find(d => String(d.influencer_id) === infId);
-      const batch = savedBatches.find(b => b.members && b.members.some(m => String(m.influencer_id) === infId));
-      const batchCode = batch?.batch_name || '—';
-      const batchId = batch?.id;
-
-      const rawAwb = (dispatch?.tracking_id || '').trim();
-      const rawCode = (inf.code || '').trim().toLowerCase();
-      const dispatchDate = dispatch?.dispatch_date || (batch as any)?.dispatched_date || dispatch?.created_at || '';
-      const expectedDeliveryDate = dispatch?.expected_delivery_date || '';
-
-      const username = inf.platforms?.find(p => p.username && p.username.trim())?.username?.trim()
-        || inf.influencer_name?.trim()
-        || (inf as any).username?.trim()
-        || inf.name?.trim()
-        || '—';
-      const cleanUsername = username.startsWith('@') ? username : `@${username}`;
-
-      const awbKey = rawAwb ? rawAwb.toLowerCase().trim() : '';
-
-      shipmentMap.forEach((existing, key) => {
-        const matchesAwb = awbKey && (existing.awbNumber || '').toLowerCase().trim() === awbKey;
-        const matchesId = existing.influencerId && String(existing.influencerId) === infId;
-        const matchesCode = rawCode && (existing.influencerCode || existing.orderId || '').toLowerCase().trim() === rawCode;
-
-        if (matchesAwb || matchesId || matchesCode) {
-          shipmentMap.set(key, {
-            ...existing,
-            influencerId: infId,
-            creatorName: existing.creatorName === 'Influencer Not Matched' ? (inf.influencer_name || inf.name || 'Influencer') : existing.creatorName,
-            username: existing.username === '—' ? cleanUsername : existing.username,
-            influencerCode: existing.influencerCode || inf.code || '',
-            profilePhoto: existing.profilePhoto || inf.profile_file_url || '',
-            phoneNumber: existing.phoneNumber || inf.phone_number || dispatch?.phone_number || '',
-            altPhoneNumber: existing.altPhoneNumber || dispatch?.alternative_phone_number || '',
-            state: existing.state || inf.state || dispatch?.state || '',
-            batchId: existing.batchId || batchId,
-            batchCode: existing.batchCode !== '—' ? existing.batchCode : batchCode,
-            dispatchDate: existing.dispatchDate || dispatchDate,
-            expectedDeliveryDate: existing.expectedDeliveryDate || expectedDeliveryDate
-          });
-        }
       });
     }
 

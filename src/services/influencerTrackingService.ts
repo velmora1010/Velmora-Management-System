@@ -3,6 +3,7 @@ import { trackingService } from './trackingService';
 import { supabase } from '../lib/supabase';
 import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
+import type { CampaignInfluencer } from '../types';
 
 export type TrackingStatusCategory = 
   | 'All'
@@ -666,6 +667,68 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
     console.error('fetchCampaignShipmentsFromDb exception:', err);
     return getCampaignShipments(cleanCampaignId);
   }
+}
+
+/**
+ * Prunes customer / unmatched tracking shipments from Supabase for a specific campaign.
+ * Scoped strictly to `influencer_tracking_shipments` where `campaign_id` matches.
+ * Deletes any records that do not match an active campaign influencer.
+ */
+export async function pruneUnmatchedCampaignTrackingShipments(
+  campaignId: string | number,
+  activeInfluencers: CampaignInfluencer[]
+): Promise<number> {
+  const cleanCampaignId = String(campaignId).trim();
+  if (!cleanCampaignId || !activeInfluencers || activeInfluencers.length === 0) return 0;
+
+  try {
+    const validCodes = new Set<string>();
+    const validIds = new Set<string>();
+    activeInfluencers.forEach(inf => {
+      if (inf.id) validIds.add(String(inf.id));
+      if (inf.code) {
+        const norm = String(inf.code).replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toLowerCase();
+        if (norm) validCodes.add(norm);
+      }
+    });
+
+    const { data: dbShipments, error } = await supabaseAdmin
+      .from(SUPABASE_TABLES.influencerTrackingShipments)
+      .select('id, awb_number, influencer_code, order_id, influencer_id')
+      .eq('campaign_id', cleanCampaignId);
+
+    if (error || !dbShipments || dbShipments.length === 0) return 0;
+
+    const idsToDelete: string[] = [];
+    dbShipments.forEach(s => {
+      const code1 = String(s.influencer_code || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toLowerCase();
+      const code2 = String(s.order_id || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toLowerCase();
+      const infId = s.influencer_id ? String(s.influencer_id) : '';
+
+      const isMatch = (code1 && validCodes.has(code1)) ||
+                      (code2 && validCodes.has(code2)) ||
+                      (infId && validIds.has(infId));
+
+      if (!isMatch) {
+        idsToDelete.push(s.id);
+      }
+    });
+
+    if (idsToDelete.length > 0) {
+      console.log(`[Tracking Cleanup] Pruning ${idsToDelete.length} customer/unmatched shipments for campaign ${cleanCampaignId}`);
+      for (let i = 0; i < idsToDelete.length; i += 100) {
+        const chunk = idsToDelete.slice(i, i + 100);
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerTrackingShipments)
+          .delete()
+          .in('id', chunk);
+      }
+      return idsToDelete.length;
+    }
+  } catch (err) {
+    console.warn('Error pruning unmatched campaign tracking shipments:', err);
+  }
+  return 0;
 }
 
 /**
