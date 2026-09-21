@@ -18,8 +18,11 @@ import {
   InfluencerDispatchedShipment,
   getTrackingDisplayStatus,
   formatEstimatedDeliveryDate,
+  formatDispatchedDate,
+  formatDeliveredDate,
   parseToYMD,
-  getTodayLocalYMD
+  getTodayLocalYMD,
+  isShipmentDelivered
 } from '../../services/influencerTrackingService';
 import { formatDDMMYYYY } from '../../utils/influencerDateUtils';
 import { supabase } from '../../lib/supabase';
@@ -286,7 +289,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     setCurrentPage(1);
   }, [loadShipments]);
 
-  // Listen to external tracking updates across tabs or modules
+  // Listen to external tracking and status updates across tabs or modules
   useEffect(() => {
     const handleTrackingUpdated = (e: any) => {
       const updatedCampaignId = e?.detail?.campaignId;
@@ -294,11 +297,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         loadShipments();
       }
     };
+    const handleStatusUpdated = (e: any) => {
+      const updatedCampaignId = e?.detail?.campaignId;
+      if (!updatedCampaignId || String(updatedCampaignId) === String(campaign.id)) {
+        loadStatusTrackingInfluencerIds();
+      }
+    };
     window.addEventListener('influencer_tracking_updated', handleTrackingUpdated);
+    window.addEventListener('status_tracking_updated', handleStatusUpdated);
     return () => {
       window.removeEventListener('influencer_tracking_updated', handleTrackingUpdated);
+      window.removeEventListener('status_tracking_updated', handleStatusUpdated);
     };
-  }, [campaign.id, loadShipments]);
+  }, [campaign.id, loadShipments, loadStatusTrackingInfluencerIds]);
 
   // Build unified dispatched shipments strictly for the current campaign
   // Combines uploaded campaign shipments (ST Courier & Delhivery) and matched campaign influencers
@@ -351,6 +362,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       });
       const edd = cs.estimatedDeliveryDate || cs.expectedDeliveryDate || dispatch?.expected_delivery_date || '';
 
+      let resolvedRemarks = (cs.remarks && cs.remarks.trim()) ? cs.remarks.trim() : undefined;
+      let resolvedDeliveredDate = cs.deliveredDate || (cs as any).delivered_date || undefined;
+      const rawSyncError = cs.syncError || cached?.syncError;
+      if ((!resolvedRemarks || !resolvedDeliveredDate) && rawSyncError && typeof rawSyncError === 'string' && rawSyncError.startsWith('{')) {
+        try {
+          const meta = JSON.parse(rawSyncError);
+          if (!resolvedRemarks && meta.remarks) resolvedRemarks = String(meta.remarks).trim();
+          if (!resolvedDeliveredDate && meta.delivered_date) resolvedDeliveredDate = String(meta.delivered_date).trim();
+        } catch (e) {}
+      }
+
       shipmentMap.set(uniqueKey, {
         ...cs,
         influencerId: infId,
@@ -367,6 +389,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         dispatchDate: cs.dispatchDate || dispatch?.dispatch_date || '',
         expectedDeliveryDate: edd,
         estimatedDeliveryDate: edd,
+        deliveredDate: resolvedDeliveredDate,
+        remarks: resolvedRemarks,
         status: displayStatus,
         statusCategory: resolveDelhiveryCategory(displayStatus, rawStatus, cs.currentStatus),
         rawStatus: rawStatus || 'In Transit',
@@ -895,7 +919,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     let count = 0;
     const seen = new Set<string>();
     for (const s of allShipments) {
-      if (getShipmentCategory(s) === 'Delivered') {
+      if (isShipmentDelivered(s)) {
         const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
         if (matchedInfluencer) {
           const infId = String(matchedInfluencer.id);
@@ -911,7 +935,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Move single delivered shipment to Status Tracking
   const handleMoveToStatusTracking = async (shipment: InfluencerDispatchedShipment) => {
-    if (getShipmentCategory(shipment) !== 'Delivered') {
+    if (!isShipmentDelivered(shipment)) {
       toast.error(`Shipment status is "${shipment.status}". Only Delivered shipments qualify for Status Tracking.`);
       return;
     }
@@ -946,6 +970,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       await loadStatusTrackingInfluencerIds();
 
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+        window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+      }
+
       if (onRefreshData) {
         await onRefreshData();
       }
@@ -958,7 +987,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Bulk move all eligible delivered shipments to Status Tracking
   const handleBulkMoveToStatusTracking = async () => {
-    const delivered = allShipments.filter(s => getShipmentCategory(s) === 'Delivered');
+    const delivered = allShipments.filter(s => isShipmentDelivered(s));
     if (delivered.length === 0) {
       toast.error('No Delivered shipments found.');
       return;
@@ -976,6 +1005,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       );
 
       await loadStatusTrackingInfluencerIds();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+        window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+      }
 
       if (summary.addedCount > 0) {
         toast.success(`Added ${summary.addedCount} influencer(s) to Status Tracking (${summary.alreadyPresentCount} already present).`, { id: toastId, duration: 5000 });
@@ -1023,7 +1057,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       }
 
       // Automatic handoff if shipment became Delivered
-      if (updated.status === 'Delivered') {
+      if (isShipmentDelivered(updated)) {
         const handoffRes = await handoffDeliveredShipmentToStatusTracking(
           campaign.id,
           updated,
@@ -1051,7 +1085,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     const stEligible = allShipments.filter(s => 
       (s.courier || '').toLowerCase().includes('st courier') && 
       s.awbNumber && 
-      s.status !== 'Delivered'
+      !isShipmentDelivered(s)
     );
 
     const delhiveryCount = allShipments.filter(s => 
@@ -1080,7 +1114,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       // Automatic handoff for all delivered shipments
       const refreshedShipments = await fetchCampaignShipmentsFromDb(campaign.id);
-      const deliveredAfterSync = refreshedShipments.filter(s => s.status === 'Delivered');
+      const deliveredAfterSync = refreshedShipments.filter(s => isShipmentDelivered(s));
       if (deliveredAfterSync.length > 0) {
         const handoffSummary = await bulkHandoffDeliveredShipments(
           campaign.id,
@@ -1437,14 +1471,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">AWB NUMBER</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">COURIER</th>
                   <th className="px-5 py-3.5 bg-[#0e1626] text-left">STATUS</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">ESTIMATED DELIVERY DATE</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-right min-w-[240px]">ACTIONS</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">REMARKS</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left whitespace-nowrap">DISPATCHED DATE</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left whitespace-nowrap">ESTIMATED DELIVERY DATE</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-left whitespace-nowrap">DELIVERED DATE</th>
+                  <th className="px-5 py-3.5 bg-[#0e1626] text-right min-w-[120px]">ACTIONS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
                 {paginatedShipments.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-500 italic">
+                    <td colSpan={9} className="p-8 text-center text-slate-500 italic">
                       No shipments matching your filter criteria.
                     </td>
                   </tr>
@@ -1505,7 +1542,37 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           </span>
                         </td>
 
-                        {/* 5. ESTIMATED DELIVERY DATE */}
+                        {/* 5. REMARKS */}
+                        <td className="px-5 py-3.5 text-slate-300">
+                          {s.remarks && s.remarks.trim() ? (
+                            <span 
+                              className="block max-w-[150px] truncate text-slate-300 font-medium cursor-help hover:text-white transition-colors" 
+                              title={s.remarks.trim()}
+                            >
+                              {s.remarks.trim()}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 italic text-[11px]">—</span>
+                          )}
+                        </td>
+
+                        {/* 6. DISPATCHED DATE */}
+                        <td className="px-5 py-3.5 font-medium text-slate-200 whitespace-nowrap">
+                          {(() => {
+                            const dateVal = s.dispatchedDate || s.dispatchDate;
+                            const formatted = formatDispatchedDate(dateVal);
+                            if (formatted === '—') {
+                              return <span className="text-slate-500 italic text-[11px]">—</span>;
+                            }
+                            return (
+                              <span className="text-slate-200 font-mono">
+                                {formatted}
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* 6. ESTIMATED DELIVERY DATE */}
                         <td className="px-5 py-3.5 font-medium text-slate-200 whitespace-nowrap">
                           {(() => {
                             const dateVal = s.estimatedDeliveryDate || s.expectedDeliveryDate;
@@ -1521,31 +1588,46 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           })()}
                         </td>
 
-                        {/* 6. ACTIONS */}
+                        {/* 7. DELIVERED DATE */}
+                        <td className="px-5 py-3.5 font-medium text-slate-200 whitespace-nowrap">
+                          {(() => {
+                            const formatted = formatDeliveredDate(s.deliveredDate);
+                            if (formatted === '—') {
+                              return <span className="text-slate-500 italic text-[11px]">—</span>;
+                            }
+                            return (
+                              <span className="text-slate-200 font-mono">
+                                {formatted}
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* 8. ACTIONS */}
                         <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() => setActiveTrackingModalShipment(s)}
-                              className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                              className="w-7 h-7 rounded-lg bg-slate-900 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
                               title="View Shipment Details"
                               aria-label="View Shipment Details"
                             >
-                              <Eye size={15} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
+                              <Eye size={13} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
                             </button>
 
                             <button
                               type="button"
                               onClick={() => setShipmentToDelete(s)}
-                              className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 border border-slate-700/80 hover:border-rose-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                              className="w-7 h-7 rounded-lg bg-slate-900 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 border border-slate-700/80 hover:border-rose-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
                               title="Delete Shipment"
                               aria-label="Delete Shipment"
                             >
-                              <Trash2 size={14} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-rose-400" />
+                              <Trash2 size={13} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-rose-400" />
                             </button>
 
                             {(() => {
-                              const isDelivered = getShipmentCategory(s) === 'Delivered';
+                              const isDelivered = isShipmentDelivered(s);
                               const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
                               const isAlreadyAdded = matchedInfluencer && existingStatusInfluencerIds.has(String(matchedInfluencer.id));
                               const isMoving = movingShipmentId === s.id;
@@ -1553,13 +1635,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                               if (isDelivered) {
                                 if (isAlreadyAdded) {
                                   return (
-                                    <div
-                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-950/60 border border-emerald-700/60 text-emerald-300 whitespace-nowrap shadow-sm"
-                                      title={`Added to Status Tracking (${matchedInfluencer?.code || matchedInfluencer?.influencer_name})`}
+                                    <button
+                                      type="button"
+                                      disabled
+                                      className="w-7 h-7 rounded-lg bg-emerald-950/60 border border-emerald-700/60 text-emerald-400 transition-all flex items-center justify-center cursor-default shadow-sm shrink-0"
+                                      title={`Already added to Status Tracking (${matchedInfluencer?.code || matchedInfluencer?.influencer_name || ''})`}
+                                      aria-label="Already added to Status Tracking"
                                     >
                                       <Check size={13} className="text-emerald-400" />
-                                      <span>Added to Status Tracking</span>
-                                    </div>
+                                    </button>
                                   );
                                 }
 
@@ -1568,11 +1652,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                                     type="button"
                                     onClick={() => handleMoveToStatusTracking(s)}
                                     disabled={isMoving || isMovingToStatus}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white shadow-sm hover:shadow-purple-600/30 transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+                                    className="w-7 h-7 rounded-lg bg-purple-600 hover:bg-purple-500 text-white shadow-sm hover:shadow-purple-600/30 transition-all flex items-center justify-center cursor-pointer group shrink-0 disabled:opacity-50"
                                     title={matchedInfluencer ? `Move ${matchedInfluencer.code || matchedInfluencer.influencer_name} to Status Tracking` : 'Move to Status Tracking'}
+                                    aria-label="Move to Status Tracking"
                                   >
-                                    <span>{isMoving ? 'Moving...' : 'Move to Status Tracking'}</span>
-                                    <ArrowRight size={13} />
+                                    {isMoving ? (
+                                      <RefreshCw size={13} className="animate-spin text-white" />
+                                    ) : (
+                                      <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform text-white" />
+                                    )}
                                   </button>
                                 );
                               }
@@ -1581,11 +1669,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                                 <button
                                   type="button"
                                   disabled
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/60 text-slate-600 border border-slate-800/80 cursor-not-allowed whitespace-nowrap"
+                                  className="w-7 h-7 rounded-lg bg-slate-900/60 text-slate-600 border border-slate-800/80 transition-all flex items-center justify-center cursor-not-allowed shadow-sm shrink-0"
                                   title="Only Delivered shipments qualify for Status Tracking"
+                                  aria-label="Move to Status Tracking (Disabled - Only Delivered shipments qualify)"
                                 >
-                                  <span>Move to Status Tracking</span>
-                                  <ArrowRight size={13} className="opacity-40" />
+                                  <ArrowRight size={13} className="opacity-30" />
                                 </button>
                               );
                             })()}
@@ -1762,6 +1850,12 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   </div>
                 )}
                 <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Delivered Date:</span>
+                  <span className="text-emerald-400 font-semibold font-mono">
+                    {formatDeliveredDate(activeTrackingModalShipment.deliveredDate)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
                   <span className="text-slate-400">Status Source:</span>
                   {activeTrackingModalShipment.courier.toLowerCase().includes('delhivery') ? (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-cyan-950/70 border border-cyan-800/60 text-cyan-300">
@@ -1801,10 +1895,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           <span className="font-mono text-slate-400 text-[11px]">{activeTrackingModalShipment.rawStatus}</span>
                         </div>
                       )}
-                      {activeTrackingModalShipment.remarks && activeTrackingModalShipment.remarks !== modalDisplayStatus && (
+                      {activeTrackingModalShipment.remarks && (
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-500 text-[11px]">Source Remarks:</span>
-                          <span className="text-slate-400 text-[11px] max-w-[260px] truncate text-right">{activeTrackingModalShipment.remarks}</span>
+                          <span className="text-slate-500 text-[11px]">Remarks:</span>
+                          <span className="text-slate-300 text-[11px] max-w-[260px] truncate text-right font-medium" title={activeTrackingModalShipment.remarks}>{activeTrackingModalShipment.remarks}</span>
                         </div>
                       )}
                     </>

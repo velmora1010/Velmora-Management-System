@@ -6,6 +6,7 @@ import type { CampaignInfluencer } from '../types';
 import type { DispatchDetails } from '../hooks/marketing/useCampaignDispatch';
 import {
   type InfluencerDispatchedShipment,
+  isShipmentDelivered,
   deleteCampaignShipmentsFromDb,
   deleteSingleCampaignShipmentFromDb,
   fetchCampaignShipmentsFromDb
@@ -504,7 +505,7 @@ export async function handoffDeliveredShipmentToStatusTracking(
     return { success: false, alreadyExisted: false, error: 'Campaign ID is required.' };
   }
 
-  if (shipment.status !== 'Delivered') {
+  if (!isShipmentDelivered(shipment)) {
     return {
       success: false,
       alreadyExisted: false,
@@ -552,6 +553,9 @@ export async function handoffDeliveredShipmentToStatusTracking(
     if (existing && existing.length > 0) {
       // Idempotent: preserve all existing progress!
       const existingRow = existing[0];
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+      }
       return {
         success: true,
         alreadyExisted: true,
@@ -573,6 +577,16 @@ export async function handoffDeliveredShipmentToStatusTracking(
 
       if (existingDispatches && existingDispatches.length > 0) {
         dispatchId = existingDispatches[0].id;
+        await supabase
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .update({
+            dispatch_status: 'Tracking',
+            tracking_id: shipment.awbNumber || undefined,
+            courier_partner: shipment.courier || undefined,
+            dispatch_date: shipment.dispatchedDate || shipment.dispatchDate || undefined,
+            expected_delivery_date: shipment.estimatedDeliveryDate || shipment.expectedDeliveryDate || undefined
+          })
+          .eq('id', dispatchId);
       } else {
         // Create dispatch record so logistics state aligns
         const { data: maxDispData } = await supabase
@@ -598,6 +612,8 @@ export async function handoffDeliveredShipmentToStatusTracking(
             courier_partner: shipment.courier || '',
             tracking_id: shipment.awbNumber || '',
             dispatch_status: 'Tracking',
+            dispatch_date: shipment.dispatchedDate || shipment.dispatchDate || null,
+            expected_delivery_date: shipment.estimatedDeliveryDate || shipment.expectedDeliveryDate || null,
             created_at: new Date().toISOString()
           }])
           .select('id');
@@ -612,7 +628,13 @@ export async function handoffDeliveredShipmentToStatusTracking(
       // Update existing dispatch status to Tracking
       await supabase
         .from(SUPABASE_TABLES.influencerDispatch)
-        .update({ dispatch_status: 'Tracking', tracking_id: shipment.awbNumber || undefined })
+        .update({
+          dispatch_status: 'Tracking',
+          tracking_id: shipment.awbNumber || undefined,
+          courier_partner: shipment.courier || undefined,
+          dispatch_date: shipment.dispatchedDate || shipment.dispatchDate || undefined,
+          expected_delivery_date: shipment.estimatedDeliveryDate || shipment.expectedDeliveryDate || undefined
+        })
         .eq('id', dispatchId);
     }
 
@@ -632,22 +654,31 @@ export async function handoffDeliveredShipmentToStatusTracking(
     const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
     const nextId = isNaN(maxId) ? 1 : maxId + 1;
 
-    // 4. Insert new Status Tracking row
+    // 4. Insert new Status Tracking row (Step 1 Delivery is confirmed)
     const nowIso = new Date().toISOString();
+    const deliveredDateVal = shipment.deliveredDate || nowIso.split('T')[0];
+    const initialNotes = JSON.stringify({
+      delivered_date: deliveredDateVal,
+      handoff_source: 'Tracking',
+      source_courier: shipment.courier,
+      source_awb: shipment.awbNumber
+    });
+
     const trackingPayload: any = {
       id: nextId,
       campaign_id: isNaN(Number(cleanCampaignId)) ? cleanCampaignId : Number(cleanCampaignId),
       influencer_id: isNaN(Number(cleanInfId)) ? cleanInfId : Number(cleanInfId),
       dispatch_id: dispatchId ? (isNaN(Number(dispatchId)) ? dispatchId : Number(dispatchId)) : null,
-      current_step: 0,
-      delivered_confirmed: false,
+      current_step: 1,
+      delivered_confirmed: true,
       pay_advance_completed: false,
       reference_video_received: false,
       expected_delivery_completed: false,
       draft_received: false,
       payment_remaining_completed: false,
       final_post_completed: false,
-      status: 'Not Started',
+      notes: initialNotes,
+      status: 'Active',
       created_at: nowIso,
       updated_at: nowIso
     };
@@ -659,6 +690,12 @@ export async function handoffDeliveredShipmentToStatusTracking(
     if (insertError) {
       console.error('Error inserting status tracking record:', insertError);
       return { success: false, alreadyExisted: false, error: insertError.message };
+    }
+
+    // 5. Dispatch sync events to refresh UI immediately
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+      window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
     }
 
     return {
@@ -704,7 +741,7 @@ export async function bulkHandoffDeliveredShipments(
   dispatchRecords?: DispatchDetails[]
 ): Promise<BulkHandoffSummary> {
   const cleanCampaignId = String(campaignId).trim();
-  const delivered = shipments.filter(s => s.status === 'Delivered');
+  const delivered = shipments.filter(s => isShipmentDelivered(s));
   const existingSet = await fetchCampaignStatusTrackingInfluencerIds(cleanCampaignId);
 
   const summary: BulkHandoffSummary = {
@@ -805,6 +842,11 @@ export async function bulkHandoffDeliveredShipments(
         error: res.error
       });
     }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+    window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
   }
 
   return summary;

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import db from '../../lib/db';
 import { logActivity } from '../../services/activityService';
@@ -21,6 +22,7 @@ import {
   normalizeTrackingStatus,
   resolveDelhiveryDisplayStatus,
   getTrackingDisplayStatus,
+  formatStatusLabel,
   resolveDelhiveryCategory,
   upsertCampaignShipments,
   upsertCampaignShipmentsToDb,
@@ -40,6 +42,7 @@ export interface UploadResultStats {
   unmatchedInvalidCount: number;
   updatedExistingCount: number;
   newShipmentsCount: number;
+  rowsWithRemarksCount?: number;
   errorMessage?: string;
 }
 
@@ -90,6 +93,12 @@ export function showUploadResultToast(stats: UploadResultStats) {
             <span className="text-slate-300 font-medium">Accepted Influencer Shipments:</span>
             <span className="font-mono font-bold text-emerald-400">{stats.acceptedCount}</span>
           </div>
+          {stats.rowsWithRemarksCount !== undefined && (
+            <div className="flex items-center justify-between">
+              <span className="text-slate-300 font-medium">Rows with Remarks:</span>
+              <span className="font-mono font-bold text-purple-300">{stats.rowsWithRemarksCount}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-slate-400">Ignored Customer Rows:</span>
             <span className="font-mono font-bold text-slate-300">{stats.ignoredCustomerCount}</span>
@@ -274,6 +283,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       let weightCol: string | null = null;
       let dateCol: string | null = null;
       let eddCol: string | null = null;
+      let deliveredDateCol: string | null = null;
       let cityCol: string | null = null;
       let stateCol: string | null = null;
       let pinCol: string | null = null;
@@ -292,7 +302,9 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
         orderCol = findColumnKey(headers, ['order', 'orderno', 'orderid', 'ordernumber', 'influencercode', 'code']);
         currentStatusCol = findColumnKey(headers, ['status', 'shipmentstatus', 'substatus', 'currentstatus']);
+        remarksCol = findColumnKey(headers, ['remarks', 'remark', 'courierremarks', 'statusremarks', 'trackingremarks']);
         dateCol = findColumnKey(headers, ['orderdate', 'dispatchdate', 'bookingdate', 'date', 'pickupdate']);
+        deliveredDateCol = findColumnKey(headers, ['delivereddate', 'delivered_date', 'deliverydate', 'delivery_date', 'actualdeliverydate', 'actual_delivery_date']);
         weightCol = findColumnKey(headers, ['weight', 'totalweight', 'chargedweight']);
       } else {
         // Delhivery
@@ -309,10 +321,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         consigneeNameCol = findColumnKey(headers, ['consigneename', 'creatorname', 'influencername', 'customername', 'name', 'recipient']);
         currentStatusCol = findColumnKey(headers, ['currentstatus', 'status', 'shipmentstatus']);
         statusTypeCol = findColumnKey(headers, ['statustype', 'type', 'shipmenttype']);
-        remarksCol = findColumnKey(headers, ['remarks', 'remark', 'delhiveryremarks', 'courierremarks']);
+        remarksCol = findColumnKey(headers, ['remarks', 'remark', 'delhiveryremarks', 'courierremarks', 'statusremarks', 'trackingremarks', 'deliveryremarks', 'lastremarks', 'activityremarks', 'latestremarks', 'comment', 'comments', 'notes', 'reason', 'statusreason']);
         pendingRemarksCol = findColumnKey(headers, ['pendingreturnedremarks', 'pendingreturnedremark', 'pendingremarks', 'returnedremarks']);
-        dateCol = findColumnKey(headers, ['pickupdate', 'dispatchdate', 'bookingdate', 'firstbaggingdate', 'date']);
-        eddCol = findColumnKey(headers, ['estimateddeliverydate', 'estimateddelivery', 'estdeliverydate', 'edd', 'promiseddeliverydate', 'deliverydate', 'delivereddate']);
+        dateCol = findColumnKey(headers, ['pickupdate', 'pickup_date', 'dispatchdate', 'dispatch_date', 'bookingdate']);
+        eddCol = findColumnKey(headers, ['estimateddeliverydate', 'estimateddelivery', 'estdeliverydate', 'edd']);
+        deliveredDateCol = findColumnKey(headers, ['delivereddate', 'delivered_date', 'deliverydate', 'delivery_date', 'actualdeliverydate', 'actual_delivery_date', 'delivered_on', 'deliveredon']);
         cityCol = findColumnKey(headers, ['city', 'destinationcity']);
         stateCol = findColumnKey(headers, ['destinationstate', 'state']);
         pinCol = findColumnKey(headers, ['pin', 'pincode', 'postalcode', 'zip']);
@@ -369,6 +382,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         weight: string;
         date: string;
         edd: string;
+        deliveredDate: string;
         city: string;
         state: string;
         pin: string;
@@ -388,6 +402,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const rawWeight = weightCol ? cleanStr(row[weightCol]) : '';
         const rawDate = dateCol ? cleanStr(row[dateCol]) : '';
         const rawEdd = eddCol ? cleanStr(row[eddCol]) : '';
+        const rawDeliveredDate = deliveredDateCol ? cleanStr(row[deliveredDateCol]) : '';
         const rawCity = cityCol ? cleanStr(row[cityCol]) : '';
         const rawState = stateCol ? cleanStr(row[stateCol]) : '';
         const rawPin = pinCol ? cleanStr(row[pinCol]) : '';
@@ -446,6 +461,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           weight: rawWeight,
           date: rawDate,
           edd: rawEdd,
+          deliveredDate: rawDeliveredDate,
           city: rawCity,
           state: rawState,
           pin: rawPin,
@@ -526,9 +542,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                 batchId: existingShipment?.batchId,
                 awbNumber: awb,
                 courier: 'ST Courier',
-                dispatchDate: row.date || existingShipment?.dispatchDate || todayDate,
-                expectedDeliveryDate: row.edd || existingShipment?.expectedDeliveryDate || '',
-                estimatedDeliveryDate: row.edd || existingShipment?.estimatedDeliveryDate || '',
+                dispatchDate: row.date ? (parseToYMD(row.date) || row.date) : (existingShipment?.dispatchDate || existingShipment?.dispatchedDate || ''),
+                dispatchedDate: row.date ? (parseToYMD(row.date) || row.date) : (existingShipment?.dispatchDate || existingShipment?.dispatchedDate || ''),
+                expectedDeliveryDate: row.edd ? (parseToYMD(row.edd) || row.edd) : (existingShipment?.expectedDeliveryDate || ''),
+                estimatedDeliveryDate: row.edd ? (parseToYMD(row.edd) || row.edd) : (existingShipment?.estimatedDeliveryDate || ''),
+                deliveredDate: row.deliveredDate ? (parseToYMD(row.deliveredDate) || row.deliveredDate) : (existingShipment?.deliveredDate || undefined),
                 status: 'Pending',
                 rawStatus: row.currentStatus || 'Pending',
                 statusSource: 'Live ST Courier Tracking',
@@ -588,7 +606,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                     courier_partner: 'ST Courier',
                     tracking_id: s.awbNumber,
                     dispatch_status: 'Dispatched',
-                    dispatch_date: s.dispatchDate || todayDate,
+                    dispatch_date: s.dispatchDate || null,
                     expected_delivery_date: s.expectedDeliveryDate || null
                   })
                   .eq('id', existingRecords[0].id);
@@ -624,6 +642,9 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         } catch (refreshErr) {
           console.warn('Error refreshing tracking data:', refreshErr);
         }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+        }
         onClose();
 
         showUploadResultToast({
@@ -653,28 +674,50 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           phase: `Importing ${validRows.length} Delhivery shipments from file...`
         });
 
+        // Pre-fetch existing campaign dispatches in one query
+        const existingDispatchesMap = new Map<string, string>();
+        try {
+          const { data: dispatches } = await supabaseAdmin
+            .from(SUPABASE_TABLES.influencerDispatch)
+            .select('id, influencer_id')
+            .eq('campaign_id', String(campaign.id));
+          if (dispatches) {
+            dispatches.forEach((d: any) => {
+              if (d.influencer_id) existingDispatchesMap.set(String(d.influencer_id), d.id);
+            });
+          }
+        } catch (e) {}
+
         const nowTimestamp = new Date().toLocaleString();
         const delhiveryShipments: InfluencerDispatchedShipment[] = [];
+        const dispatchUpdates: { id: string; courier_partner: string; tracking_id: string; dispatch_status: string; dispatch_date: string | null; expected_delivery_date: string | null; }[] = [];
+        let rowsWithRemarksCount = 0;
 
         for (let i = 0; i < validRows.length; i++) {
           const row = validRows[i];
           const inf = row.matchedInf;
-          const awb = row.rawAwb.trim();
+          const awb = String(row.rawAwb || '').trim();
           const orderId = row.orderId || inf.code || '';
+
+          const incomingRemarks = (row.remarks && row.remarks.trim()) ? row.remarks.trim() : '';
+          if (incomingRemarks) {
+            rowsWithRemarksCount++;
+          }
 
           const existingShipment = existingMap.get(awb.toLowerCase()) || 
             (inf.code ? Array.from(existingMap.values()).find(s => (s.influencerCode || '').toLowerCase() === inf.code?.toLowerCase()) : undefined);
 
-          const displayStatus = getTrackingDisplayStatus({
-            remarks: row.remarks,
-            pendingRemarks: row.pendingRemarks,
-            currentStatus: row.currentStatus,
-            statusType: row.statusType,
-            rawStatus: row.currentStatus || row.statusType
-          });
+          const finalRemarks = incomingRemarks || existingShipment?.remarks || undefined;
+          const incomingDeliveredDate = (row.deliveredDate && row.deliveredDate.trim()) ? row.deliveredDate.trim() : '';
+          const finalDeliveredDate = (incomingDeliveredDate ? (parseToYMD(incomingDeliveredDate) || incomingDeliveredDate) : '') || existingShipment?.deliveredDate || undefined;
+
+          const displayStatus = row.currentStatus
+            ? formatStatusLabel(row.currentStatus)
+            : (row.statusType ? formatStatusLabel(row.statusType) : (row.remarks || 'Pending'));
           const statusCategory = resolveDelhiveryCategory(displayStatus, row.currentStatus, row.statusType);
-          const rawStatus = row.remarks || row.pendingRemarks || row.currentStatus || row.statusType || displayStatus;
-          const normalizedEdd = row.edd ? (parseToYMD(row.edd) || row.edd) : '';
+          const rawStatus = row.currentStatus || row.statusType || displayStatus;
+          const normalizedDate = row.date ? (parseToYMD(row.date) || row.date) : (existingShipment?.dispatchDate || existingShipment?.dispatchedDate || '');
+          const normalizedEdd = row.edd ? (parseToYMD(row.edd) || row.edd) : (existingShipment?.estimatedDeliveryDate || '');
 
           const shipmentObj: InfluencerDispatchedShipment = {
             id: existingShipment?.id || inf.dispatchDetails?.id || String(inf.id),
@@ -693,14 +736,16 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             batchId: existingShipment?.batchId,
             awbNumber: awb,
             courier: 'Delhivery',
-            dispatchDate: row.date || existingShipment?.dispatchDate || todayDate,
-            expectedDeliveryDate: normalizedEdd || existingShipment?.expectedDeliveryDate || '',
-            estimatedDeliveryDate: normalizedEdd || existingShipment?.estimatedDeliveryDate || '',
+            dispatchDate: normalizedDate,
+            dispatchedDate: normalizedDate,
+            expectedDeliveryDate: normalizedEdd,
+            estimatedDeliveryDate: normalizedEdd,
+            deliveredDate: finalDeliveredDate,
             status: displayStatus,
             statusCategory,
             rawStatus,
-            remarks: row.remarks || existingShipment?.remarks || undefined,
-            pendingRemarks: row.pendingRemarks || existingShipment?.pendingRemarks || undefined,
+            remarks: finalRemarks,
+            pendingRemarks: (row.pendingRemarks && row.pendingRemarks.trim()) ? row.pendingRemarks.trim() : (existingShipment?.pendingRemarks || undefined),
             currentStatus: row.currentStatus || existingShipment?.currentStatus || undefined,
             statusType: row.statusType || existingShipment?.statusType || undefined,
             statusSource: 'Uploaded Delhivery File',
@@ -725,27 +770,18 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             });
           } catch (dbErr) {}
 
-          // Persist to Supabase influencerDispatch
-          try {
-            const { data: existingRecords } = await supabase
-              .from(SUPABASE_TABLES.influencerDispatch)
-              .select('id')
-              .eq('influencer_id', String(inf.id))
-              .eq('campaign_id', String(campaign.id));
-
-            if (existingRecords && existingRecords.length > 0) {
-              await supabase
-                .from(SUPABASE_TABLES.influencerDispatch)
-                .update({
-                  courier_partner: 'Delhivery',
-                  tracking_id: awb,
-                  dispatch_status: 'Dispatched',
-                  dispatch_date: row.date || todayDate,
-                  expected_delivery_date: normalizedEdd || null
-                })
-                .eq('id', existingRecords[0].id);
-            }
-          } catch (e) {}
+          // Queue influencerDispatch update
+          const dispatchId = existingDispatchesMap.get(String(inf.id));
+          if (dispatchId) {
+            dispatchUpdates.push({
+              id: dispatchId,
+              courier_partner: 'Delhivery',
+              tracking_id: awb,
+              dispatch_status: 'Dispatched',
+              dispatch_date: normalizedDate || null,
+              expected_delivery_date: normalizedEdd || null
+            });
+          }
 
           if (i % 25 === 0 || i === validRows.length - 1) {
             setImportProgress({
@@ -763,6 +799,26 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           }
         }
 
+        // Batch update influencerDispatch records
+        if (dispatchUpdates.length > 0) {
+          try {
+            await Promise.all(dispatchUpdates.map(u =>
+              supabaseAdmin
+                .from(SUPABASE_TABLES.influencerDispatch)
+                .update({
+                  courier_partner: u.courier_partner,
+                  tracking_id: u.tracking_id,
+                  dispatch_status: u.dispatch_status,
+                  dispatch_date: u.dispatch_date,
+                  expected_delivery_date: u.expected_delivery_date
+                })
+                .eq('id', u.id)
+            ));
+          } catch (dispErr) {
+            console.warn('Batch updating influencerDispatch failed:', dispErr);
+          }
+        }
+
         // Save only validated campaign influencer shipments into isolated campaign database & local storage
         const dbResult = await upsertCampaignShipmentsToDb(campaign.id, delhiveryShipments);
 
@@ -771,15 +827,25 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const duplicatesReported = dbResult.duplicatesUpdated;
         const failedReported = dbResult.failed + invalidRowsCount;
 
+        console.log(`[Delhivery Upload Complete]
+- Total rows read: ${rawData.length}
+- Valid influencer rows matched: ${validRows.length}
+- Rows with non-empty Remarks: ${rowsWithRemarksCount}
+- Rows with empty Remarks: ${validRows.length - rowsWithRemarksCount}
+- Ignored customer rows: ${ignoredCustomerRowsCount}
+- Invalid/Unmatched rows: ${invalidRowsCount}
+- Updated existing shipments: ${duplicatesReported}
+- New shipments created: ${importedReported}`);
+
         // Log activity
         try {
           await logActivity({
             department: 'Marketing',
             action: 'Upload Delhivery Shipments',
-            description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File). Accepted: ${acceptedReported}, Ignored customer: ${ignoredCustomerRowsCount}, Invalid: ${invalidRowsCount}, Duplicates updated: ${duplicatesReported}`,
+            description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File). Accepted: ${acceptedReported}, Ignored customer: ${ignoredCustomerRowsCount}, Invalid: ${invalidRowsCount}, Duplicates updated: ${duplicatesReported}, With Remarks: ${rowsWithRemarksCount}`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'Delhivery', total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, invalid: invalidRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, source: 'Uploaded File' }
+            metadata: { courier: 'Delhivery', total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, invalid: invalidRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, rowsWithRemarks: rowsWithRemarksCount, source: 'Uploaded File' }
           });
         } catch (e) {}
 
@@ -798,6 +864,9 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         } catch (refreshErr) {
           console.warn('Error refreshing tracking data:', refreshErr);
         }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+        }
         onClose();
 
         showUploadResultToast({
@@ -807,7 +876,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           ignoredCustomerCount: ignoredCustomerRowsCount,
           unmatchedInvalidCount: invalidRowsCount,
           updatedExistingCount: duplicatesReported,
-          newShipmentsCount: importedReported
+          newShipmentsCount: importedReported,
+          rowsWithRemarksCount: rowsWithRemarksCount
         });
       }
     } catch (err: any) {

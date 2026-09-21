@@ -55,8 +55,10 @@ export interface InfluencerDispatchedShipment {
   awbNumber: string;
   courier: string;
   dispatchDate: string;
+  dispatchedDate?: string;
   expectedDeliveryDate: string;
   estimatedDeliveryDate?: string;
+  deliveredDate?: string;
   status: string;
   statusCategory?: TrackingStatusCategory;
   rawStatus: string;
@@ -141,13 +143,41 @@ export interface DelhiveryStatusInput {
 }
 
 /**
- * Resolves the display status for Delhivery shipments based on strict priority order:
- * 1. Remarks (trimmed, non-empty)
- * 2. Pending / Returned Remarks (when Remarks is empty)
- * 3. Current Status (as fallback when no usable remark exists)
- * 4. Status Type (as final fallback)
- * 5. rawStatus / status (if already populated)
- * 6. "Unknown" (if all are empty)
+ * Formats courier status codes (like READY_FOR_PICKUP, IN_TRANSIT) into clean human-readable labels.
+ */
+export function formatStatusLabel(str?: string | null): string {
+  if (!str) return 'Pending';
+  const trimmed = str.trim();
+  if (!trimmed || trimmed === '-' || trimmed.toLowerCase() === 'null' || trimmed.toLowerCase() === 'undefined') {
+    return 'Pending';
+  }
+  const upper = trimmed.toUpperCase();
+  if (upper === 'READY_FOR_PICKUP') return 'Ready For Pickup';
+  if (upper === 'IN_TRANSIT') return 'In Transit';
+  if (upper === 'OUT_FOR_DELIVERY') return 'Out for Delivery';
+  if (upper === 'OUT_FOR_PICKUP') return 'Out for Pickup';
+  if (upper === 'PICKED_UP') return 'Picked Up';
+  if (upper === 'VEHICLE DEPARTED') return 'In Transit';
+  if (upper === 'DELIVERED') return 'Delivered';
+  if (upper === 'UNDELIVERED') return 'Undelivered';
+
+  // If all uppercase with underscores, convert to Title Case words
+  if (/^[A-Z0-9_]+$/.test(trimmed) && trimmed.includes('_')) {
+    return trimmed
+      .split('_')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+  }
+  return trimmed;
+}
+
+/**
+ * Resolves the display status for Delhivery shipments:
+ * 1. Current Status (maps directly to status, formatted cleanly e.g. READY_FOR_PICKUP -> Ready For Pickup)
+ * 2. Status Type (as secondary courier status)
+ * 3. rawStatus / status (if already populated)
+ * 4. Pending / Returned Remarks (fallback)
+ * 5. Remarks (last fallback if no explicit status is present)
  * Special rule: "Vehicle Departed" is normalized to "In Transit" for display.
  */
 export function resolveDelhiveryDisplayStatus(input?: DelhiveryStatusInput | string | null): string {
@@ -155,7 +185,7 @@ export function resolveDelhiveryDisplayStatus(input?: DelhiveryStatusInput | str
   if (typeof input === 'string') {
     const s = input.trim();
     if (s.toLowerCase() === 'vehicle departed') return 'In Transit';
-    return s || 'Unknown';
+    return formatStatusLabel(s) || 'Unknown';
   }
 
   const checkVal = (v?: string | null): string | null => {
@@ -166,27 +196,27 @@ export function resolveDelhiveryDisplayStatus(input?: DelhiveryStatusInput | str
     return t;
   };
 
-  // 1. Remarks (trimmed, non-empty)
-  const resRemarks = checkVal(input.remarks);
-  if (resRemarks) return resRemarks;
+  // 1. Current Status (maps directly to status)
+  const resCurrent = checkVal(input.currentStatus);
+  if (resCurrent) return formatStatusLabel(resCurrent);
 
-  // 2. Pending / Returned Remarks (when Remarks is empty)
+  // 2. Status Type
+  const resType = checkVal(input.statusType);
+  if (resType) return formatStatusLabel(resType);
+
+  // 3. rawStatus or status
+  const resFallback = checkVal(input.rawStatus || input.status);
+  if (resFallback) return formatStatusLabel(resFallback);
+
+  // 4. Pending / Returned Remarks fallback
   const resPending = checkVal(input.pendingRemarks);
   if (resPending) return resPending;
 
-  // 3. Current Status as fallback
-  const resCurrent = checkVal(input.currentStatus);
-  if (resCurrent) return resCurrent;
+  // 5. Remarks as last fallback if no status given
+  const resRemarks = checkVal(input.remarks);
+  if (resRemarks) return resRemarks;
 
-  // 4. Status Type as final fallback
-  const resType = checkVal(input.statusType);
-  if (resType) return resType;
-
-  // Fallback to existing rawStatus or status
-  const resFallback = checkVal(input.rawStatus || input.status);
-  if (resFallback) return resFallback;
-
-  return 'Unknown';
+  return 'Pending';
 }
 
 /**
@@ -200,7 +230,7 @@ export function getTrackingDisplayStatus(shipment?: Partial<InfluencerDispatched
   if (typeof shipment === 'string') {
     const s = shipment.trim();
     if (s.toLowerCase() === 'vehicle departed') return 'In Transit';
-    return s || 'Unknown';
+    return formatStatusLabel(s) || 'Unknown';
   }
 
   const raw = (shipment.rawStatus || '').trim();
@@ -219,8 +249,12 @@ export function getTrackingDisplayStatus(shipment?: Partial<InfluencerDispatched
     return 'In Transit';
   }
 
+  if (currentStatus) {
+    return formatStatusLabel(currentStatus);
+  }
+
   if (status && status !== 'Unknown') {
-    return status;
+    return formatStatusLabel(status);
   }
 
   return resolveDelhiveryDisplayStatus({
@@ -245,6 +279,38 @@ export function formatEstimatedDeliveryDate(dateStr: string | null | undefined):
   }
   const ymd = parseToYMD(trimmed);
   if (!ymd) return trimmed;
+  return formatDisplayDateLocal(ymd);
+}
+
+/**
+ * Formats Dispatched Date (Pick Up Date) for display:
+ * If valid date -> "17 Sep 2026"
+ * If missing/empty/invalid -> "—"
+ */
+export function formatDispatchedDate(dateStr: string | null | undefined): string {
+  if (!dateStr || !String(dateStr).trim()) return '—';
+  const trimmed = String(dateStr).trim();
+  if (trimmed === '—' || trimmed === '-' || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'null') {
+    return '—';
+  }
+  const ymd = parseToYMD(trimmed);
+  if (!ymd) return '—';
+  return formatDisplayDateLocal(ymd);
+}
+
+/**
+ * Formats Delivered Date for display:
+ * If valid date -> "22 Sep 2026"
+ * If missing/empty/invalid -> "—"
+ */
+export function formatDeliveredDate(dateStr: string | null | undefined): string {
+  if (!dateStr || !String(dateStr).trim()) return '—';
+  const trimmed = String(dateStr).trim();
+  if (trimmed === '—' || trimmed === '-' || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'null') {
+    return '—';
+  }
+  const ymd = parseToYMD(trimmed);
+  if (!ymd) return '—';
   return formatDisplayDateLocal(ymd);
 }
 
@@ -353,6 +419,47 @@ export function resolveDelhiveryCategory(
  */
 export function normalizeDelhiveryStatus(currentStatus?: string, statusType?: string): TrackingStatusCategory {
   return resolveDelhiveryCategory(undefined, currentStatus, statusType);
+}
+
+/**
+ * Normalizes any shipment or status into standard Tracking Status categories.
+ */
+export function normalizeShipmentCategory(
+  shipmentOrStatus?: Partial<InfluencerDispatchedShipment> | string | null,
+  rawStatus?: string | null,
+  currentStatus?: string | null
+): TrackingStatusCategory {
+  if (!shipmentOrStatus) return 'Pending';
+  if (typeof shipmentOrStatus === 'string') {
+    return resolveDelhiveryCategory(shipmentOrStatus, rawStatus, currentStatus);
+  }
+  const s = shipmentOrStatus;
+  const displayStatus = getTrackingDisplayStatus(s);
+  return resolveDelhiveryCategory(
+    displayStatus || s.status,
+    s.rawStatus || s.remarks || rawStatus,
+    s.currentStatus || s.statusType || currentStatus
+  );
+}
+
+/**
+ * Convenience helper to get the canonical status category for a shipment.
+ */
+export function getShipmentCategory(s: InfluencerDispatchedShipment): TrackingStatusCategory {
+  return normalizeShipmentCategory(s);
+}
+
+/**
+ * Checks whether a shipment or status string is classified as Delivered.
+ * Safely resolves any courier delivered-status variants (e.g. "Delivered",
+ * "Delivered to consignee - Code Verified delivery", "Delivered to Consignee", etc.)
+ * Returns false for non-delivered states (Pending, In Transit, Exception, Failed Attempt, etc.)
+ */
+export function isShipmentDelivered(
+  shipmentOrStatus?: Partial<InfluencerDispatchedShipment> | string | null
+): boolean {
+  if (!shipmentOrStatus) return false;
+  return normalizeShipmentCategory(shipmentOrStatus) === 'Delivered';
 }
 
 /**
@@ -529,7 +636,10 @@ export function upsertCampaignShipments(
     const courier = (s.courier || '').toLowerCase().trim();
     const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
     const key = `${courier}__${awb}`;
-    if (awb) shipmentMap.set(key, s);
+    if (awb) {
+      shipmentMap.set(key, s);
+      shipmentMap.set(awb, s);
+    }
   });
 
   newShipments.forEach(s => {
@@ -537,20 +647,55 @@ export function upsertCampaignShipments(
     const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
     const key = `${courier}__${awb}`;
     if (awb) {
-      const prev = shipmentMap.get(key);
-      shipmentMap.set(key, {
+      const prev = shipmentMap.get(key) || shipmentMap.get(awb);
+      const incomingRemarks = (s.remarks && s.remarks.trim()) ? s.remarks.trim() : '';
+      const finalRemarks = incomingRemarks || prev?.remarks || undefined;
+
+      const incomingDeliveredDate = (s.deliveredDate && s.deliveredDate.trim()) ? s.deliveredDate.trim() : '';
+      const finalDeliveredDate = incomingDeliveredDate || prev?.deliveredDate || undefined;
+
+      const updated: InfluencerDispatchedShipment = {
         ...(prev || {}),
         ...s,
+        id: prev?.id || s.id,
         creatorName: s.creatorName !== 'Influencer Not Matched' ? s.creatorName : (prev?.creatorName || s.creatorName),
         username: s.username !== '—' ? s.username : (prev?.username || s.username),
         influencerId: s.influencerId || prev?.influencerId,
         profilePhoto: s.profilePhoto || prev?.profilePhoto || '',
-        phoneNumber: s.phoneNumber || prev?.phoneNumber || ''
-      });
+        phoneNumber: s.phoneNumber || prev?.phoneNumber || '',
+        altPhoneNumber: s.altPhoneNumber || prev?.altPhoneNumber || '',
+        state: s.state || prev?.state || '',
+        city: s.city || prev?.city,
+        pincode: s.pincode || prev?.pincode,
+        batchCode: (s.batchCode && s.batchCode !== '—') ? s.batchCode : (prev?.batchCode || '—'),
+        batchId: s.batchId || prev?.batchId,
+        dispatchDate: s.dispatchDate || prev?.dispatchDate || '',
+        dispatchedDate: s.dispatchedDate || s.dispatchDate || prev?.dispatchedDate || prev?.dispatchDate || '',
+        expectedDeliveryDate: s.expectedDeliveryDate || prev?.expectedDeliveryDate || '',
+        estimatedDeliveryDate: s.estimatedDeliveryDate || s.expectedDeliveryDate || prev?.estimatedDeliveryDate || prev?.expectedDeliveryDate || '',
+        deliveredDate: finalDeliveredDate,
+        remarks: finalRemarks,
+        pendingRemarks: s.pendingRemarks || prev?.pendingRemarks || undefined,
+        currentStatus: s.currentStatus || prev?.currentStatus || undefined,
+        statusType: s.statusType || prev?.statusType || undefined,
+        status: s.status || prev?.status || 'Pending',
+        statusCategory: s.statusCategory || prev?.statusCategory,
+        rawStatus: s.rawStatus || prev?.rawStatus || ''
+      };
+      shipmentMap.set(key, updated);
+      shipmentMap.set(awb, updated);
     }
   });
 
-  const merged = Array.from(shipmentMap.values());
+  const uniqueMap = new Map<string, InfluencerDispatchedShipment>();
+  shipmentMap.forEach(s => {
+    const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
+    if (awb && !uniqueMap.has(awb)) {
+      uniqueMap.set(awb, s);
+    }
+  });
+
+  const merged = Array.from(uniqueMap.values());
   const sorted = sortInfluencerShipmentsNaturally(merged);
   saveCampaignShipments(cleanCampaignId, sorted);
   return sorted;
@@ -595,6 +740,18 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
 
   const edd = row.estimated_delivery_date || row.expected_delivery_date || '';
 
+  let resolvedRemarks = row.remarks || undefined;
+  let resolvedDeliveredDate = row.delivered_date || row.deliveredDate || undefined;
+
+  // If Supabase schema lacks dedicated remarks/delivered_date columns, decode from sync_error JSON
+  if (row.sync_error && typeof row.sync_error === 'string' && row.sync_error.startsWith('{')) {
+    try {
+      const meta = JSON.parse(row.sync_error);
+      if (!resolvedRemarks && meta.remarks) resolvedRemarks = meta.remarks;
+      if (!resolvedDeliveredDate && meta.delivered_date) resolvedDeliveredDate = meta.delivered_date;
+    } catch (e) {}
+  }
+
   return {
     id: row.id,
     influencerId: row.influencer_id || undefined,
@@ -613,12 +770,14 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
     awbNumber: row.awb_number || '',
     courier: row.courier || (isDelhivery ? 'Delhivery' : 'ST Courier'),
     dispatchDate: row.dispatch_date || '',
+    dispatchedDate: row.dispatch_date || '',
     expectedDeliveryDate: edd,
     estimatedDeliveryDate: edd,
+    deliveredDate: resolvedDeliveredDate,
     status: displayStatus,
     statusCategory: statusCategory,
     rawStatus: row.raw_status || row.status || 'In Transit',
-    remarks: row.remarks || undefined,
+    remarks: resolvedRemarks,
     pendingRemarks: row.pending_remarks || undefined,
     currentStatus: row.current_status || undefined,
     statusType: row.status_type || undefined,
@@ -647,6 +806,19 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
   const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate || null;
   const displayStatus = getTrackingDisplayStatus(s);
 
+  // Safely encode metadata into sync_error so remarks and delivered_date are persisted directly into Supabase
+  let syncErrorPayload = s.syncError || null;
+  const remarksClean = (s.remarks && s.remarks.trim()) ? s.remarks.trim() : null;
+  const deliveredDateClean = (s.deliveredDate && s.deliveredDate.trim()) ? s.deliveredDate.trim() : null;
+  if (remarksClean || deliveredDateClean) {
+    try {
+      syncErrorPayload = JSON.stringify({
+        remarks: remarksClean,
+        delivered_date: deliveredDateClean
+      });
+    } catch (e) {}
+  }
+
   const payload: any = {
     campaign_id: String(campaignId),
     influencer_id: s.influencerId || null,
@@ -659,7 +831,7 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
     status: displayStatus,
     status_source: statusSource,
     source_type: sourceType,
-    dispatch_date: s.dispatchDate || null,
+    dispatch_date: s.dispatchedDate || s.dispatchDate || null,
     expected_delivery_date: edd,
     tracking_url: s.trackingUrl || getCourierTrackingUrl(courier, awb),
     raw_status: s.rawStatus || s.status || 'In Transit',
@@ -673,7 +845,7 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
     pincode: s.pincode || null,
     batch_id: s.batchId || null,
     batch_code: s.batchCode || null,
-    sync_error: s.syncError || null,
+    sync_error: syncErrorPayload,
     updated_at: nowIso,
   };
 
@@ -742,7 +914,36 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
     }
 
     if (allRows.length > 0) {
-      const shipments = allRows.map(mapDbRowToShipment);
+      const localCached = getCampaignShipments(cleanCampaignId);
+      const localMap = new Map<string, InfluencerDispatchedShipment>();
+      localCached.forEach(s => {
+        const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
+        if (awb) localMap.set(awb, s);
+      });
+
+      const shipments = allRows.map(row => {
+        const mapped = mapDbRowToShipment(row);
+        const awb = (mapped.awbNumber || mapped.id || '').toLowerCase().trim();
+        const local = localMap.get(awb);
+        if (local) {
+          if (!mapped.deliveredDate && local.deliveredDate) {
+            mapped.deliveredDate = local.deliveredDate;
+          }
+          if (!mapped.remarks && local.remarks) {
+            mapped.remarks = local.remarks;
+          }
+          if (!mapped.dispatchedDate && (local.dispatchedDate || local.dispatchDate)) {
+            mapped.dispatchedDate = local.dispatchedDate || local.dispatchDate;
+            mapped.dispatchDate = mapped.dispatchedDate;
+          }
+          if (!mapped.estimatedDeliveryDate && (local.estimatedDeliveryDate || local.expectedDeliveryDate)) {
+            mapped.estimatedDeliveryDate = local.estimatedDeliveryDate || local.expectedDeliveryDate;
+            mapped.expectedDeliveryDate = mapped.estimatedDeliveryDate;
+          }
+        }
+        return mapped;
+      });
+
       const sorted = sortInfluencerShipmentsNaturally(shipments);
       saveCampaignShipments(cleanCampaignId, sorted);
       return sorted;
@@ -887,7 +1088,7 @@ export async function upsertCampaignShipmentsToDb(
       let from = 0;
       let hasMore = true;
       while (hasMore) {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
           .from(SUPABASE_TABLES.influencerTrackingShipments)
           .select('awb_number, courier')
           .eq('campaign_id', cleanCampaignId)
@@ -919,12 +1120,24 @@ export async function upsertCampaignShipmentsToDb(
 
     for (let i = 0; i < payloads.length; i += chunkSize) {
       const chunk = payloads.slice(i, i + chunkSize);
-      const { error } = await supabase
+      let { error } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerTrackingShipments)
         .upsert(chunk, {
           onConflict: 'campaign_id,courier,awb_number',
           ignoreDuplicates: false
         });
+
+      if (error && (error.code === '42703' || String(error.message || '').includes('delivered_date') || String(error.message || '').includes('remarks')) && chunk.some(p => 'delivered_date' in p || 'remarks' in p)) {
+        // Fallback: table doesn't have delivered_date or remarks column yet, strip them and retry
+        const sanitizedChunk = chunk.map(({ delivered_date, remarks, ...rest }: any) => rest);
+        const retryResult = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerTrackingShipments)
+          .upsert(sanitizedChunk, {
+            onConflict: 'campaign_id,courier,awb_number',
+            ignoreDuplicates: false
+          });
+        error = retryResult.error;
+      }
 
       if (error) {
         console.warn('[Supabase Tracking Upsert Error]:', error);

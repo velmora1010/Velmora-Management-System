@@ -1693,11 +1693,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     <div className="flex-1 px-2 py-1 max-w-3xl mx-auto w-full">
                       <div className="flex items-center justify-between w-full">
                         
-                        {/* 1. DELIVERY CONFIRMATION STAGE */}
+                        {/* 1. STEP 1: DELIVERY CONFIRMATION STAGE */}
                         <div 
                           className="flex flex-col items-center cursor-pointer group relative select-none"
                           onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
-                          title={isDelivered ? 'Delivery Confirmed (Click to view/edit)' : 'Delivery Confirmation: Not Started (Click to confirm)'}
+                          title={isDelivered ? 'STEP 1: Delivery Confirmed (Click to view/edit)' : 'STEP 1: Delivery Confirmation: Not Started (Click to confirm)'}
                         >
                           <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${
                             isDelivered 
@@ -1707,14 +1707,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             {isDelivered ? (
                               <Check size={18} strokeWidth={3} className="text-white" />
                             ) : (
-                              <Package size={17} className="text-slate-400 group-hover:text-slate-200" />
+                              <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">1</span>
                             )}
                           </div>
-                          <span className={`text-[10px] sm:text-[11px] text-center w-20 sm:w-24 leading-tight mt-1.5 transition-colors ${
-                            isDelivered ? 'text-emerald-400 font-bold' : 'text-slate-400'
-                          }`}>
-                            Delivery
-                          </span>
+                          <div className="flex flex-col items-center mt-1.5">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                              STEP 1
+                            </span>
+                            <span className={`text-[10px] sm:text-[11px] text-center w-20 sm:w-24 leading-tight transition-colors ${
+                              isDelivered ? 'text-emerald-400 font-bold' : 'text-slate-400'
+                            }`}>
+                              Delivery
+                            </span>
+                          </div>
                         </div>
 
                         {/* Connecting Line from Delivery to Video 1 */}
@@ -1724,9 +1729,10 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           }`} />
                         </div>
 
-                        {/* 2 to 7: VIDEOS 1 THROUGH 6 */}
+                        {/* 2 to 7: VIDEOS 1 THROUGH 6 (STEP 2 TO STEP 7) */}
                         {videoWorkflows.map((vw, idx) => {
                           const vNum = vw.videoNumber;
+                          const stepNumber = vNum + 1; // Video 1 is STEP 2, Video 2 is STEP 3, ..., Video 6 is STEP 7
                           const isVCompleted = vw.status === 'COMPLETED';
                           const isVInProgress = vw.status === 'IN_PROGRESS';
                           const isReDraftReq = vw.isReDraftRequired;
@@ -1754,13 +1760,13 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 className="flex flex-col items-center cursor-pointer group relative select-none"
                                 onClick={() => {
                                   if (!isDelivered) {
-                                    toast.error('Please complete Delivery Confirmation first.');
+                                    toast.error('Please complete Step 1: Delivery Confirmation first.');
                                     setActiveModal({ recordId: record.id, stageId: 'delivered' });
                                     return;
                                   }
                                   setSelectedVideo({ recordId: record.id, videoNumber: vNum });
                                 }}
-                                title={`Click to manage Video ${vNum} (${vw.completedCount} of ${vw.totalSteps} completed)`}
+                                title={`STEP ${stepNumber}: Video ${vNum} (${vw.completedCount} of ${vw.totalSteps} completed)`}
                               >
                                 <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
                                   {isVCompleted ? (
@@ -1770,11 +1776,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                   ) : isVInProgress ? (
                                     <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
                                   ) : (
-                                    <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">{vNum}</span>
+                                    <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">{stepNumber}</span>
                                   )}
                                 </div>
-                                <div className="flex flex-col items-center">
-                                  <span className={`text-[10px] sm:text-[11px] text-center w-16 sm:w-20 leading-tight mt-1.5 transition-colors ${labelStyle}`}>
+                                <div className="flex flex-col items-center mt-1.5">
+                                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                                    STEP {stepNumber}
+                                  </span>
+                                  <span className={`text-[10px] sm:text-[11px] text-center w-16 sm:w-20 leading-tight transition-colors ${labelStyle}`}>
                                     Video {vNum}
                                   </span>
                                   {isReDraftReq && (
@@ -1895,7 +1904,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     <Package size={18} />
                   </div>
                   <div>
-                    <h5 className="text-base sm:text-lg font-bold text-white leading-none">Delivery Confirmation</h5>
+                    <h5 className="text-base sm:text-lg font-bold text-white leading-none">Step 1: Delivery Confirmation</h5>
                     <p className="text-[11px] text-slate-400 mt-1">
                       {targetRecord.dispatch?.influencer_name} ({targetRecord.dispatch?.influencer_code || targetRecord.influencer_id})
                     </p>
@@ -2181,7 +2190,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-white uppercase tracking-wider">VIDEO {videoNumber}</span>
+            <span className="text-xs font-bold text-white uppercase tracking-wider">STEP {videoNumber + 1}: VIDEO {videoNumber}</span>
             <div className="flex items-center gap-1.5 bg-[#070c18] px-2.5 py-1 rounded-lg border border-slate-800" title={resolvedProductInfo.productName}>
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Product:</span>
               <span className={`text-xs font-bold truncate max-w-[170px] sm:max-w-[220px] ${
@@ -2211,7 +2220,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-5 shrink-0 shadow-md">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-black text-white uppercase tracking-wider">VIDEO {videoNumber} WORKFLOW</span>
+            <span className="text-xs font-black text-white uppercase tracking-wider">STEP {videoNumber + 1}: VIDEO {videoNumber} WORKFLOW</span>
             <span className="text-xs text-slate-400">
               ({videoNumber === 1 ? '6 Steps: with Advance Payment' : '6 Steps: with Final Payment'})
             </span>
