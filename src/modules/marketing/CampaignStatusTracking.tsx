@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { Campaign } from '../../types';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
@@ -6,7 +6,8 @@ import {
   Clock, Package, Phone, FileText, Video, Check, 
   XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
-  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2
+  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2,
+  Mic, Volume2, ExternalLink
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -19,6 +20,7 @@ import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { getInfluencerResolvedVideoProducts, isVideoLabel } from './AddCampaignInfluencer';
 import { StatusTrackingPaymentCard, PaymentDetailsInfo } from './StatusTrackingPaymentCard';
 import { saveVideoPayment, fetchVideoPaymentTransactions, InfluencerVideoPayment, InfluencerVideoPaymentTransaction } from '../../services/influencerVideoPaymentService';
+import { upsertCampaignVideoScript, type CampaignVideoScriptRecord } from '../../services/campaignVideoScriptService';
 
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
@@ -497,6 +499,79 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
   const steps: Record<string, { completed: boolean; data: any; updated_at?: string }> = {};
 
   configs.forEach(cfg => {
+    // Dedicated Step 2: Share Script Resolution (Priority: 1. campaign_video_scripts, 2. notes JSON, 3. legacy columns)
+    if (cfg.id === 'share_script') {
+      const videoScript = (record.videoScripts || []).find((vs: any) => Number(vs.video_number) === Number(videoNum));
+      const st = storedVideo?.steps?.['share_script'];
+
+      let isScriptCompleted = false;
+      let scriptData: any = {};
+
+      if (videoScript) {
+        // Priority 1: campaign_video_scripts relational record
+        isScriptCompleted = Boolean(videoScript.script_shared_approved);
+        scriptData = {
+          concept: videoScript.custom_concept || '',
+          hooks: videoScript.hooks || '',
+          script: videoScript.proposed_script || '',
+          voice_record: videoScript.voice_record_url ? {
+            url: videoScript.voice_record_url,
+            file_name: videoScript.voice_record_file_name || 'voice_recording',
+            file_size_formatted: videoScript.voice_record_file_size || '',
+            storage_path: videoScript.voice_record_storage_path || ''
+          } : null,
+          script_shared: isScriptCompleted,
+          keypoints: st?.data?.keypoints || (videoNum === 1 ? (record.ref_keypoints || metadata.keypoints || '') : ''),
+          link: st?.data?.link || (videoNum === 1 ? (record.ref_link || metadata.link || '') : ''),
+          reference_videos_list: st?.data?.reference_videos_list || (videoNum === 1 ? (record.reference_videos_list || []) : [])
+        };
+      } else if (st) {
+        // Priority 2: existing notes JSON data
+        isScriptCompleted = Boolean(st.completed);
+        scriptData = {
+          concept: st.data?.concept || '',
+          hooks: st.data?.hooks || '',
+          script: st.data?.script || '',
+          voice_record: st.data?.voice_record || null,
+          script_shared: isScriptCompleted,
+          keypoints: st.data?.keypoints || '',
+          link: st.data?.link || '',
+          reference_videos_list: st.data?.reference_videos_list || []
+        };
+      } else if (videoNum === 1) {
+        // Priority 3: legacy ref_concept / ref_script fields
+        isScriptCompleted = Boolean(metadata.script_shared || record.reference_video_received || record.ref_script || ((record.current_step || 0) >= 3));
+        scriptData = {
+          concept: record.ref_concept || metadata.concept || '',
+          hooks: metadata.videos?.[1]?.steps?.share_script?.data?.hooks || metadata.hooks || '',
+          script: record.ref_script || metadata.script || '',
+          voice_record: metadata.videos?.[1]?.steps?.share_script?.data?.voice_record || metadata.voice_record || null,
+          script_shared: isScriptCompleted,
+          keypoints: record.ref_keypoints || metadata.keypoints || '',
+          link: record.ref_link || metadata.link || '',
+          reference_videos_list: record.reference_videos_list || []
+        };
+      } else {
+        isScriptCompleted = false;
+        scriptData = {
+          concept: '',
+          hooks: '',
+          script: '',
+          voice_record: null,
+          script_shared: false,
+          keypoints: '',
+          link: '',
+          reference_videos_list: []
+        };
+      }
+
+      steps[cfg.id] = {
+        completed: isScriptCompleted,
+        data: scriptData
+      };
+      return;
+    }
+
     // If structured in metadata.videos, use that
     if (storedVideo?.steps?.[cfg.id]) {
       const st = storedVideo.steps[cfg.id];
@@ -636,9 +711,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
         data = {
           script_shared: completed,
           concept: record.ref_concept || metadata.concept || '',
+          hooks: metadata.videos?.[1]?.steps?.share_script?.data?.hooks || metadata.hooks || '',
           script: record.ref_script || metadata.script || '',
+          voice_record: metadata.videos?.[1]?.steps?.share_script?.data?.voice_record || metadata.voice_record || null,
           keypoints: record.ref_keypoints || metadata.keypoints || '',
-          offer: record.ref_offer || metadata.offer || '',
           link: record.ref_link || metadata.link || '',
           reference_videos_list: record.reference_videos_list || []
         };
@@ -1299,6 +1375,27 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     metadata.last_updated = new Date().toISOString();
     updates.notes = JSON.stringify(metadata);
 
+    // Handle dedicated Step 2: Share Script relational persistence
+    if (stepId === 'share_script') {
+      try {
+        await upsertCampaignVideoScript({
+          campaign_id: String(record.campaign_id),
+          influencer_id: Number(record.influencer_id),
+          video_number: Number(videoNumber),
+          custom_concept: stepData.concept || null,
+          hooks: stepData.hooks || null,
+          proposed_script: stepData.script || null,
+          voice_record_url: stepData.voice_record?.url || null,
+          voice_record_file_name: stepData.voice_record?.file_name || null,
+          voice_record_file_size: stepData.voice_record?.file_size_formatted || null,
+          voice_record_storage_path: stepData.voice_record?.storage_path || null,
+          script_shared_approved: isStepCompleted
+        });
+      } catch (err) {
+        console.error(`Failed to persist video ${videoNumber} script record:`, err);
+      }
+    }
+
     // For Video 1, mirror corresponding legacy columns to maintain backward compatibility
     if (videoNumber === 1) {
       if (stepId === 'call_explain') {
@@ -1306,6 +1403,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         metadata.call_explained = isStepCompleted;
       } else if (stepId === 'share_script') {
         updates.reference_video_received = isStepCompleted;
+        if (stepData.concept) updates.ref_concept = stepData.concept;
+        if (stepData.script) updates.ref_script = stepData.script;
         metadata.script_shared = isStepCompleted;
       } else if (stepId === 'pay_advance') {
         updates.pay_advance_completed = isStepCompleted;
@@ -1377,6 +1476,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     if (result.success) {
       if (!stepData?.suppressDefaultToast) {
         toast.success(`Video ${videoNumber} step updated successfully!`);
+      }
+      if (stepId === 'share_script' && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('velmora:campaign-video-script-updated', {
+          detail: {
+            campaignId: record.campaign_id,
+            influencerId: record.influencer_id,
+            videoNumber
+          }
+        }));
       }
       await refresh();
       return { success: true };
@@ -2366,6 +2474,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
           {activeStepId === 'share_script' && (
             <ShareScriptForm 
+              key={`v-${videoNumber}-share-script-${record.id}`}
               record={record} 
               videoNumber={videoNumber}
               existingData={activeStepState.data}
@@ -2617,157 +2726,497 @@ const CallExplainForm = ({ record, existingData = {}, onSave }: any) => {
 };
 
 // --- STEP: Share Script ---
+interface VoiceRecordData {
+  file_name: string;
+  file_size?: number;
+  file_size_formatted?: string;
+  storage_path?: string;
+  url: string;
+  uploaded_at?: string;
+}
+
+const formatAudioFileSize = (bytes?: number): string => {
+  if (!bytes || isNaN(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const normalizeVoiceRecord = (raw: any): VoiceRecordData | null => {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    return {
+      file_name: trimmed.split('/').pop() || 'voice-record.audio',
+      url: trimmed
+    };
+  }
+  if (typeof raw === 'object' && raw.url) {
+    return {
+      file_name: raw.file_name || raw.fileName || raw.url.split('/').pop() || 'voice-record.audio',
+      file_size: raw.file_size || raw.fileSize,
+      file_size_formatted: raw.file_size_formatted || (raw.file_size ? formatAudioFileSize(raw.file_size) : ''),
+      storage_path: raw.storage_path || raw.storagePath || '',
+      url: raw.url,
+      uploaded_at: raw.uploaded_at || raw.uploadedAt
+    };
+  }
+  return null;
+};
+
 const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }: any) => {
   const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
   const resolvedProductName = resolvedProductInfo.productName;
 
   // Detect if concept is currently empty or contains legacy video label placeholder (e.g. "Video 1", "Video 2")
-  const rawConcept = existingData.concept || record.ref_concept || '';
+  const rawConcept = existingData.concept || (videoNumber === 1 ? record.ref_concept : '') || '';
   const isLegacy = isVideoLabel(rawConcept);
   const initialConcept = isLegacy ? '' : rawConcept;
 
   const [concept, setConcept] = useState(initialConcept);
-  const [script, setScript] = useState(existingData.script || record.ref_script || '');
-  const [keypoints, setKeypoints] = useState(existingData.keypoints || record.ref_keypoints || '');
-  const [offer, setOffer] = useState(existingData.offer || record.ref_offer || '');
-  const [link, setLink] = useState(existingData.link || record.ref_link || '');
-  const [vids, setVids] = useState<string[]>(
-    existingData.reference_videos_list?.length ? existingData.reference_videos_list : (record.reference_videos_list?.length ? record.reference_videos_list : [''])
-  );
+  const [hooks, setHooks] = useState(existingData.hooks || (videoNumber === 1 ? (record.ref_hooks || '') : '') || '');
+  const [script, setScript] = useState(existingData.script || (videoNumber === 1 ? (record.ref_script || '') : '') || '');
+  const [voiceRecord, setVoiceRecord] = useState<VoiceRecordData | null>(normalizeVoiceRecord(existingData.voice_record));
+  const [isUploadingVoice, setIsUploadingVoice] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [scriptShared, setScriptShared] = useState(
-    existingData.script_shared !== undefined ? existingData.script_shared : (!!record.reference_video_received || !!record.ref_script)
+    existingData.script_shared !== undefined 
+      ? existingData.script_shared 
+      : (videoNumber === 1 ? (!!record.reference_video_received || !!record.ref_script) : false)
   );
 
+  const handleAudioFileSelect = async (file: File) => {
+    if (!file) return;
+
+    // Validate audio extension / type
+    const validExts = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'webm'];
+    const fileExt = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!validExts.includes(fileExt) && !file.type.startsWith('audio/')) {
+      toast.error(`Please select a valid audio file (${validExts.join(', ').toUpperCase()})`);
+      return;
+    }
+
+    // Size limit 50MB
+    if (file.size > 50 * 1024 * 1024) {
+      toast.error('Audio file size must be less than 50MB');
+      return;
+    }
+
+    setIsUploadingVoice(true);
+    const toastId = toast.loading(`Uploading voice record: ${file.name}...`);
+
+    try {
+      const campId = record.campaign_id || 'general';
+      const infId = record.influencer_id || 'inf';
+      const uniqueKey = Math.random().toString(36).substring(2, 9);
+      const filePath = `voice_records/camp_${campId}_inf_${infId}_v${videoNumber}_${Date.now()}_${uniqueKey}.${fileExt}`;
+
+      const { error: uploadErr } = await supabaseAdmin.storage
+        .from('influencer-profiles')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicData } = supabaseAdmin.storage
+        .from('influencer-profiles')
+        .getPublicUrl(filePath);
+
+      const finalUrl = publicData.publicUrl;
+
+      const newVoiceRecord: VoiceRecordData = {
+        file_name: file.name,
+        file_size: file.size,
+        file_size_formatted: formatAudioFileSize(file.size),
+        storage_path: filePath,
+        url: finalUrl,
+        uploaded_at: new Date().toISOString()
+      };
+
+      setVoiceRecord(newVoiceRecord);
+
+      // Clean up previous storage file if replacing
+      if (voiceRecord?.storage_path && voiceRecord.storage_path !== filePath) {
+        supabaseAdmin.storage
+          .from('influencer-profiles')
+          .remove([voiceRecord.storage_path])
+          .catch(e => console.warn('Previous voice record delete error:', e));
+      }
+
+      // Persist immediately so audio isn't lost on refresh or navigation
+      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
+      await onSave({
+        reference_video_received: scriptShared,
+        script_shared: scriptShared,
+        concept: finalConcept,
+        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
+        hooks: hooks || '',
+        script: script || '',
+        voice_record: newVoiceRecord,
+        keypoints: existingData.keypoints || '',
+        link: existingData.link || '',
+        reference_videos_list: existingData.reference_videos_list || []
+      });
+
+      toast.success('Voice recording uploaded and saved successfully!', { id: toastId });
+    } catch (err: any) {
+      console.error('Error uploading voice record:', err);
+      toast.error('Failed to upload voice record: ' + (err?.message || err), { id: toastId });
+    } finally {
+      setIsUploadingVoice(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleRemoveVoiceRecord = async () => {
+    if (!voiceRecord) return;
+    const oldPath = voiceRecord.storage_path;
+    setVoiceRecord(null);
+
+    if (oldPath) {
+      supabaseAdmin.storage
+        .from('influencer-profiles')
+        .remove([oldPath])
+        .catch(e => console.warn('Could not remove file from storage:', e));
+    }
+
+    try {
+      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
+      await onSave({
+        reference_video_received: scriptShared,
+        script_shared: scriptShared,
+        concept: finalConcept,
+        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
+        hooks: hooks || '',
+        script: script || '',
+        voice_record: null,
+        keypoints: existingData.keypoints || '',
+        link: existingData.link || '',
+        reference_videos_list: existingData.reference_videos_list || []
+      });
+      toast.success('Voice recording removed');
+    } catch (err: any) {
+      console.error('Error removing voice record:', err);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleAudioFileSelect(e.dataTransfer.files[0]);
+    }
+  };
+
   const handleSave = async () => {
-    const validVids = vids.filter(Boolean);
-    const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
-    await onSave({ 
-      reference_video_received: scriptShared,
-      script_shared: scriptShared,
-      concept: finalConcept, 
-      product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
-      script: script || '', 
-      keypoints: keypoints || '', 
-      offer: offer || '', 
-      link: link || '', 
-      reference_videos_list: validVids
-    });
+    setIsSaving(true);
+    try {
+      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
+      await onSave({ 
+        reference_video_received: scriptShared,
+        script_shared: scriptShared,
+        concept: finalConcept, 
+        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
+        hooks: hooks || '',
+        script: script || '', 
+        voice_record: voiceRecord || null,
+        keypoints: existingData.keypoints || '', 
+        link: existingData.link || '', 
+        reference_videos_list: existingData.reference_videos_list || []
+      });
+      toast.success('Script details saved successfully');
+    } catch (err: any) {
+      console.error('Error saving script details:', err);
+      toast.error('Failed to save script details: ' + (err?.message || err));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
-    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-5">
-      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-5 animate-fade-in">
+      {/* 1. Checkbox: Script & Reference Materials Shared */}
+      <div className="flex items-center gap-3 bg-[#0b1329] p-3.5 sm:p-4 rounded-xl border border-slate-800/90">
         <input 
           type="checkbox" 
           id="script-shared-checkbox"
           checked={scriptShared}
           onChange={(e) => setScriptShared(e.target.checked)}
-          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
+          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
         />
-        <label htmlFor="script-shared-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer">
+        <label htmlFor="script-shared-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer select-none">
           Script & reference materials shared and approved with the creator.
         </label>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Read-Only Product / Campaign Concept from Campaign Influencer */}
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Product / Campaign Concept
-            </label>
-            <span className="text-[10px] text-purple-400 font-medium flex items-center gap-1 bg-purple-950/50 px-2 py-0.5 rounded border border-purple-800/50">
-              <Lock size={10} /> Auto-filled from Campaign Influencer
+      {/* 2-Column Responsive Form Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 sm:gap-x-6 gap-y-6 sm:gap-y-7">
+        {/* ROW 1 - COL 1: Product / Campaign Concept */}
+        <div className="space-y-1.5 flex flex-col justify-start">
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+            PRODUCT / CAMPAIGN CONCEPT
+          </label>
+          <div className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 flex items-center justify-between gap-3 h-[88px] sm:h-[92px]">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-purple-950/60 border border-purple-800/40 flex items-center justify-center text-purple-400 shrink-0">
+                <Package size={20} className={resolvedProductInfo.isAssigned ? 'text-purple-400' : 'text-slate-500'} />
+              </div>
+              <div className="min-w-0">
+                <span className={`text-sm sm:text-base font-bold truncate block ${
+                  resolvedProductInfo.isAssigned ? 'text-white' : 'text-slate-500 italic'
+                }`}>
+                  {resolvedProductName}
+                </span>
+                <span className="text-[11px] text-slate-400 block mt-0.5">
+                  Assigned Campaign Product
+                </span>
+              </div>
+            </div>
+            <span className="text-[11px] text-purple-300 font-medium flex items-center gap-1.5 bg-purple-950/70 px-3 py-1.5 rounded-lg border border-purple-800/50 shrink-0 select-none shadow-sm">
+              <Lock size={12} /> Auto-filled from Campaign Influencer
             </span>
           </div>
-          <div className={`w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm font-semibold flex items-center gap-2 select-all ${
-            resolvedProductInfo.isAssigned ? 'text-purple-300' : 'text-slate-500 italic'
-          }`}>
-            <Package size={16} className={resolvedProductInfo.isAssigned ? 'text-purple-400 shrink-0' : 'text-slate-500 shrink-0'} />
-            <span className="truncate">{resolvedProductName}</span>
+        </div>
+
+        {/* ROW 1 - COL 2: Upload Voice Record */}
+        <div className="space-y-1.5 flex flex-col justify-start">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              UPLOAD VOICE RECORD
+            </label>
+            <span className="text-xs text-slate-500 font-medium">Optional</span>
+          </div>
+
+          {!voiceRecord ? (
+            /* Dropzone / Upload Area */
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border border-dashed rounded-xl px-4 py-3 h-[88px] sm:h-[92px] transition-all cursor-pointer flex items-center justify-between gap-3 select-none ${
+                isDragOver 
+                  ? 'border-purple-500 bg-purple-950/30 ring-2 ring-purple-500/20' 
+                  : 'border-purple-800/60 bg-[#0b1329]/80 hover:border-purple-600 hover:bg-[#0b1329]'
+              }`}
+            >
+              <input 
+                ref={fileInputRef}
+                type="file" 
+                accept=".mp3,.wav,.m4a,.aac,.ogg,.webm,audio/*"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleAudioFileSelect(e.target.files[0]);
+                  }
+                }}
+                className="hidden" 
+              />
+
+              {isUploadingVoice ? (
+                <div className="flex items-center justify-center gap-3 w-full py-2">
+                  <Loader2 size={24} className="text-purple-400 animate-spin shrink-0" />
+                  <div className="text-left">
+                    <span className="text-xs font-bold text-purple-300 block">Uploading voice recording...</span>
+                    <span className="text-[11px] text-slate-500 block">Please wait a moment</span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-purple-950/80 border border-purple-800/60 flex items-center justify-center text-purple-400 shrink-0 shadow-inner">
+                      <UploadCloud size={20} />
+                    </div>
+                    <div className="truncate min-w-0 text-left">
+                      <p className="text-xs sm:text-sm font-bold text-white truncate">
+                        Upload Voice Recording
+                      </p>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        Drag & drop or click to upload
+                      </p>
+                      <p className="text-[10px] text-slate-500 font-mono truncate">
+                        MP3, WAV, M4A, AAC, OGG, WEBM (Max 50MB)
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-600/30 flex items-center gap-1.5 shrink-0 pointer-events-none"
+                  >
+                    <UploadCloud size={13} />
+                    <span>Choose File</span>
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+            /* Uploaded Audio File Card with Audio Player */
+            <div className="bg-[#0b1329] border border-purple-900/50 rounded-xl px-4 py-2.5 h-[88px] sm:h-[92px] flex flex-col justify-between gap-1.5 shadow-sm">
+              {/* Top row: Audio Info + Actions */}
+              <div className="flex items-center justify-between gap-2 min-w-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-purple-950/80 border border-purple-800/70 flex items-center justify-center text-purple-400 shrink-0">
+                    <Volume2 size={14} />
+                  </div>
+                  <div className="truncate min-w-0">
+                    <p className="text-xs font-bold text-white truncate" title={voiceRecord.file_name}>
+                      {voiceRecord.file_name}
+                    </p>
+                    <p className="text-[10px] text-purple-300 font-mono">
+                      {voiceRecord.file_size_formatted || ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <a 
+                    href={voiceRecord.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700/80 shrink-0" 
+                    title="Open Audio in New Tab"
+                  >
+                    <ExternalLink size={12} />
+                  </a>
+                  <label className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-semibold cursor-pointer transition-colors border border-slate-700/80 flex items-center gap-1 shrink-0">
+                    <UploadCloud size={10} />
+                    <span>Replace</span>
+                    <input 
+                      type="file" 
+                      accept=".mp3,.wav,.m4a,.aac,.ogg,.webm,audio/*" 
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleAudioFileSelect(e.target.files[0]);
+                        }
+                      }} 
+                      className="hidden" 
+                    />
+                  </label>
+                  <button 
+                    type="button" 
+                    onClick={handleRemoveVoiceRecord} 
+                    className="px-2 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 text-[10px] font-semibold transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                    title="Remove voice recording"
+                  >
+                    <Trash2 size={10} />
+                    <span>Remove</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Bottom row: Compact Audio Player */}
+              <div className="w-full flex items-center">
+                <audio 
+                  controls 
+                  src={voiceRecord.url} 
+                  className="h-6 w-full rounded accent-purple-500" 
+                  preload="metadata" 
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ROW 2 - COL 1: Custom Concept / Angle Notes */}
+        <div className="space-y-1.5 flex flex-col justify-start">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              CUSTOM CONCEPT / ANGLE NOTES
+            </label>
+            <span className="text-xs text-slate-500 font-medium">Optional</span>
+          </div>
+          <div className="relative">
+            <textarea 
+              rows={5}
+              value={concept} 
+              onChange={e => setConcept(e.target.value)} 
+              placeholder="e.g. Morning Glow Routine, Unboxing & First Impressions..."
+              className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 pb-7 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none h-[135px] sm:h-[140px]" 
+            />
+            <span className="absolute bottom-2.5 right-3 text-[10px] text-slate-500 font-mono select-none">
+              {concept.length}/1000
+            </span>
           </div>
         </div>
 
-        <div>
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Offer to Mention</label>
-          <input 
-            type="text" 
-            value={offer} 
-            onChange={e => setOffer(e.target.value)} 
-            placeholder="e.g. 15% OFF with code CREATOR15"
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-          />
+        {/* ROW 2 - COL 2: Hooks */}
+        <div className="space-y-1.5 flex flex-col justify-start">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              HOOKS
+            </label>
+            <span className="text-xs text-slate-500 font-medium">Optional</span>
+          </div>
+          <div className="relative">
+            <textarea 
+              rows={5}
+              value={hooks} 
+              onChange={e => setHooks(e.target.value)} 
+              placeholder="Enter the video hook, opening line, attention-grabber..."
+              className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 pb-7 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none h-[135px] sm:h-[140px]" 
+            />
+            <span className="absolute bottom-2.5 right-3 text-[10px] text-slate-500 font-mono select-none">
+              {hooks.length}/1000
+            </span>
+          </div>
         </div>
 
-        {/* Custom Concept / Angle Notes (Preserved) */}
-        <div className="col-span-1 md:col-span-2">
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
-            Custom Concept / Angle Notes (Optional)
+        {/* ROW 3: Proposed Script (Full Width across both columns) */}
+        <div className="space-y-1.5 col-span-1 md:col-span-2">
+          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+            PROPOSED SCRIPT
           </label>
-          <input 
-            type="text" 
-            value={concept} 
-            onChange={e => setConcept(e.target.value)} 
-            placeholder="e.g. Morning Glow Routine, Unboxing & First Impressions..."
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-          />
+          <div className="relative">
+            <textarea 
+              rows={6}
+              value={script} 
+              onChange={e => setScript(e.target.value)} 
+              placeholder="Enter the proposed video talking points, hook, body, and call-to-action..."
+              className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 pb-7 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none min-h-[160px] sm:min-h-[170px]" 
+            />
+            <span className="absolute bottom-2.5 right-3 text-[10px] text-slate-500 font-mono select-none">
+              {script.length}/2000
+            </span>
+          </div>
         </div>
-        <div className="col-span-1 md:col-span-2">
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Proposed Script</label>
-          <textarea 
-            value={script} 
-            onChange={e => setScript(e.target.value)} 
-            placeholder="Enter the proposed video talking points, hook, body, and call-to-action..."
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 h-24" 
-          />
-        </div>
-        <div className="col-span-1 md:col-span-2">
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Key Points to Cover</label>
-          <textarea 
-            value={keypoints} 
-            onChange={e => setKeypoints(e.target.value)} 
-            placeholder="Key product USPs, ingredients, or brand highlights to emphasize..."
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 h-20" 
-          />
-        </div>
-        <div className="col-span-1 md:col-span-2">
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Creator Product Link</label>
-          <input 
-            type="text" 
-            value={link} 
-            onChange={e => setLink(e.target.value)} 
-            placeholder="https://..."
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-          />
-        </div>
-      </div>
-      
-      <div className="border-t border-slate-800 pt-4">
-        <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Reference Video Links</label>
-        {vids.map((v, i) => (
-          <input 
-            key={i} 
-            type="text" 
-            value={v} 
-            onChange={e => { const nv = [...vids]; nv[i] = e.target.value; setVids(nv); }} 
-            className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white mb-2 focus:outline-none focus:border-blue-500" 
-            placeholder="Paste reference video URL..." 
-          />
-        ))}
-        <button 
-          onClick={() => setVids([...vids, ''])} 
-          className="text-emerald-400 text-xs font-bold hover:underline"
-        >
-          + Add More Video Links
-        </button>
       </div>
 
-      <div className="flex justify-end pt-2 border-t border-slate-800">
+      {/* Save Action Button */}
+      <div className="flex justify-end pt-3 border-t border-slate-800/90">
         <button 
+          type="button"
           onClick={handleSave} 
-          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+          disabled={isSaving || isUploadingVoice}
+          className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-purple-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
         >
-          Save Script Details
+          {isSaving ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>Saving...</span>
+            </>
+          ) : (
+            <span>Save Script Details</span>
+          )}
         </button>
       </div>
     </div>

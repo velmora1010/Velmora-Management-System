@@ -151,15 +151,18 @@ export function formatStatusLabel(str?: string | null): string {
   if (!trimmed || trimmed === '-' || trimmed.toLowerCase() === 'null' || trimmed.toLowerCase() === 'undefined') {
     return 'Pending';
   }
-  const upper = trimmed.toUpperCase();
-  if (upper === 'READY_FOR_PICKUP') return 'Ready For Pickup';
-  if (upper === 'IN_TRANSIT') return 'In Transit';
+  const upper = trimmed.toUpperCase().replace(/\s+/g, '_');
+  if (upper === 'READY_FOR_PICKUP') return 'Ready for Pickup';
+  if (upper === 'IN_TRANSIT' || upper === 'TRANSIT') return 'In Transit';
   if (upper === 'OUT_FOR_DELIVERY') return 'Out for Delivery';
   if (upper === 'OUT_FOR_PICKUP') return 'Out for Pickup';
   if (upper === 'PICKED_UP') return 'Picked Up';
-  if (upper === 'VEHICLE DEPARTED') return 'In Transit';
+  if (upper === 'VEHICLE_DEPARTED') return 'In Transit';
   if (upper === 'DELIVERED') return 'Delivered';
   if (upper === 'UNDELIVERED') return 'Undelivered';
+  if (upper === 'SHIPPED') return 'In Transit';
+  if (upper === 'PENDING') return 'Pending';
+  if (upper.includes('DELIVERED_TO_CONSIGNEE') || upper.startsWith('DELIVERED')) return 'Delivered';
 
   // If all uppercase with underscores, convert to Title Case words
   if (/^[A-Z0-9_]+$/.test(trimmed) && trimmed.includes('_')) {
@@ -173,18 +176,16 @@ export function formatStatusLabel(str?: string | null): string {
 
 /**
  * Resolves the display status for Delhivery shipments:
- * 1. Current Status (maps directly to status, formatted cleanly e.g. READY_FOR_PICKUP -> Ready For Pickup)
+ * 1. Current Status (maps directly to status, formatted cleanly e.g. READY_FOR_PICKUP -> Ready for Pickup)
  * 2. Status Type (as secondary courier status)
  * 3. rawStatus / status (if already populated)
- * 4. Pending / Returned Remarks (fallback)
- * 5. Remarks (last fallback if no explicit status is present)
- * Special rule: "Vehicle Departed" is normalized to "In Transit" for display.
+ * Remarks are strictly separate and are NEVER used to determine status.
  */
 export function resolveDelhiveryDisplayStatus(input?: DelhiveryStatusInput | string | null): string {
   if (!input) return 'Unknown';
   if (typeof input === 'string') {
     const s = input.trim();
-    if (s.toLowerCase() === 'vehicle departed') return 'In Transit';
+    if (s.toLowerCase() === 'vehicle departed' || s.toUpperCase() === 'SHIPPED') return 'In Transit';
     return formatStatusLabel(s) || 'Unknown';
   }
 
@@ -192,7 +193,7 @@ export function resolveDelhiveryDisplayStatus(input?: DelhiveryStatusInput | str
     if (!v) return null;
     const t = v.trim();
     if (!t || t === '-' || t.toLowerCase() === 'null' || t.toLowerCase() === 'undefined') return null;
-    if (t.toLowerCase() === 'vehicle departed') return 'In Transit';
+    if (t.toLowerCase() === 'vehicle departed' || t.toUpperCase() === 'SHIPPED') return 'In Transit';
     return t;
   };
 
@@ -208,43 +209,34 @@ export function resolveDelhiveryDisplayStatus(input?: DelhiveryStatusInput | str
   const resFallback = checkVal(input.rawStatus || input.status);
   if (resFallback) return formatStatusLabel(resFallback);
 
-  // 4. Pending / Returned Remarks fallback
-  const resPending = checkVal(input.pendingRemarks);
-  if (resPending) return resPending;
-
-  // 5. Remarks as last fallback if no status given
-  const resRemarks = checkVal(input.remarks);
-  if (resRemarks) return resRemarks;
-
   return 'Pending';
 }
 
 /**
  * Centralized tracking display status resolver.
  * Determines the clean UI status label from shipment data.
- * Rule: If the raw status or remark is "Vehicle Departed" (case-insensitive), display as "In Transit".
- * Keeps the original source status/remark intact in rawStatus/remarks/currentStatus for audit/debugging.
+ * Status is strictly derived from currentStatus, status, rawStatus, or statusType.
+ * Remarks are NEVER used to determine or override status.
  */
 export function getTrackingDisplayStatus(shipment?: Partial<InfluencerDispatchedShipment> | string | null): string {
   if (!shipment) return 'Unknown';
   if (typeof shipment === 'string') {
     const s = shipment.trim();
-    if (s.toLowerCase() === 'vehicle departed') return 'In Transit';
+    if (s.toLowerCase() === 'vehicle departed' || s.toUpperCase() === 'SHIPPED') return 'In Transit';
     return formatStatusLabel(s) || 'Unknown';
   }
 
   const raw = (shipment.rawStatus || '').trim();
-  const remarks = (shipment.remarks || '').trim();
-  const pendingRemarks = (shipment.pendingRemarks || '').trim();
   const currentStatus = (shipment.currentStatus || '').trim();
   const status = (shipment.status || '').trim();
 
   if (
     raw.toLowerCase() === 'vehicle departed' ||
-    remarks.toLowerCase() === 'vehicle departed' ||
-    pendingRemarks.toLowerCase() === 'vehicle departed' ||
+    raw.toUpperCase() === 'SHIPPED' ||
     currentStatus.toLowerCase() === 'vehicle departed' ||
-    status.toLowerCase() === 'vehicle departed'
+    currentStatus.toUpperCase() === 'SHIPPED' ||
+    status.toLowerCase() === 'vehicle departed' ||
+    status.toUpperCase() === 'SHIPPED'
   ) {
     return 'In Transit';
   }
@@ -258,11 +250,10 @@ export function getTrackingDisplayStatus(shipment?: Partial<InfluencerDispatched
   }
 
   return resolveDelhiveryDisplayStatus({
-    remarks,
-    pendingRemarks,
     currentStatus,
     statusType: shipment.statusType,
-    rawStatus: raw
+    rawStatus: raw,
+    status
   });
 }
 
@@ -437,7 +428,7 @@ export function normalizeShipmentCategory(
   const displayStatus = getTrackingDisplayStatus(s);
   return resolveDelhiveryCategory(
     displayStatus || s.status,
-    s.rawStatus || s.remarks || rawStatus,
+    s.rawStatus || rawStatus,
     s.currentStatus || s.statusType || currentStatus
   );
 }
@@ -580,6 +571,13 @@ export function saveTrackingCache(campaignId: string | number, cache: Record<str
   } catch (e) {
     // Ignore storage quota errors
   }
+}
+
+export function clearTrackingCache(campaignId: string | number) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(`influencer_tracking_cache_${campaignId}`);
+  } catch (e) {}
 }
 
 export function getLastCampaignSyncTime(campaignId: string | number): string | null {
@@ -845,6 +843,8 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
     pincode: s.pincode || null,
     batch_id: s.batchId || null,
     batch_code: s.batchCode || null,
+    remarks: remarksClean,
+    delivered_date: deliveredDateClean,
     sync_error: syncErrorPayload,
     updated_at: nowIso,
   };
@@ -928,9 +928,6 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
         if (local) {
           if (!mapped.deliveredDate && local.deliveredDate) {
             mapped.deliveredDate = local.deliveredDate;
-          }
-          if (!mapped.remarks && local.remarks) {
-            mapped.remarks = local.remarks;
           }
           if (!mapped.dispatchedDate && (local.dispatchedDate || local.dispatchDate)) {
             mapped.dispatchedDate = local.dispatchedDate || local.dispatchDate;

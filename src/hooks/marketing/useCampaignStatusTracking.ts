@@ -7,6 +7,7 @@ import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
 import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 import type { InfluencerVideoPayment } from '../../services/influencerVideoPaymentService';
+import { fetchCampaignVideoScripts, type CampaignVideoScriptRecord } from '../../services/campaignVideoScriptService';
 import { fetchAllInChunks } from './useCampaignInfluencers';
 
 export { naturalCompareCodes, parseToYMD, calculateDraftDate, calculatePostDateFromDraft };
@@ -104,6 +105,7 @@ export interface StatusTrackingRecord {
   }>;
   influencer?: any;
   videoPayments?: InfluencerVideoPayment[];
+  videoScripts?: CampaignVideoScriptRecord[];
 }
 
 export const useCampaignStatusTracking = (campaignId?: string) => {
@@ -142,7 +144,8 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           { data: pricingData, error: pricingError },
           { data: productsData },
           postDatesData,
-          { data: videoPaymentsData }
+          { data: videoPaymentsData },
+          videoScriptsData
         ] = await Promise.all([
           supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('id', dispatchIds),
           supabase.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name').in('id', influencerIds),
@@ -153,7 +156,8 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
             influencerIds,
             50
           ),
-          supabaseAdmin.from(SUPABASE_TABLES.influencerVideoPayment).select('*').in('influencer_id', influencerIds)
+          supabaseAdmin.from(SUPABASE_TABLES.influencerVideoPayment).select('*').in('influencer_id', influencerIds),
+          fetchCampaignVideoScripts(cleanCampaignId, influencerIds)
         ]);
 
         let platformMap: Record<string, string> = {};
@@ -194,6 +198,13 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           const infKey = String(p.influencer_id);
           if (!productsByInfluencer[infKey]) productsByInfluencer[infKey] = [];
           productsByInfluencer[infKey].push(p);
+        });
+
+        const videoScriptsByInfluencer: Record<string, CampaignVideoScriptRecord[]> = {};
+        (videoScriptsData || []).forEach(vs => {
+          const infKey = String(vs.influencer_id);
+          if (!videoScriptsByInfluencer[infKey]) videoScriptsByInfluencer[infKey] = [];
+          videoScriptsByInfluencer[infKey].push(vs);
         });
 
         // Combine and filter out archived
@@ -329,7 +340,8 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 final_price: pricing.final_price,
                 total_videos: pricing.total_videos !== undefined ? pricing.total_videos : 1,
                 product_pricing: pricing.product_pricing
-              }
+              },
+              videoScripts: videoScriptsByInfluencer[String(r.influencer_id)] || []
             };
           })
           .filter(r => {
@@ -372,6 +384,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
     window.addEventListener('velmora:influencer-updated', handleSync);
     window.addEventListener('velmora:video-payment-updated', handleSync);
     window.addEventListener('velmora:post-date-updated', handleSync);
+    window.addEventListener('velmora:campaign-video-script-updated', handleSync);
 
     return () => {
       window.removeEventListener('status_tracking_updated', handleSync);
@@ -379,6 +392,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
       window.removeEventListener('velmora:influencer-updated', handleSync);
       window.removeEventListener('velmora:video-payment-updated', handleSync);
       window.removeEventListener('velmora:post-date-updated', handleSync);
+      window.removeEventListener('velmora:campaign-video-script-updated', handleSync);
     };
   }, [campaignId, loadTrackingRecords]);
 

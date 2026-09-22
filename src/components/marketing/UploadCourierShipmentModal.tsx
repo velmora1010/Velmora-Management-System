@@ -27,6 +27,8 @@ import {
   upsertCampaignShipments,
   upsertCampaignShipmentsToDb,
   getCampaignShipments,
+  fetchCampaignShipmentsFromDb,
+  clearTrackingCache,
   InfluencerDispatchedShipment,
   getCourierTrackingUrl
 } from '../../services/influencerTrackingService';
@@ -203,9 +205,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
       }
     }
-    // Pass 2: substring match
+    // Pass 2: substring match (only for targets with length >= 4 to avoid false positive substring matches)
     for (const target of possibleNames) {
       const normTarget = target.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      if (normTarget.length < 4) continue;
       for (const key of rowKeys) {
         const normKey = key.toString().toLowerCase().trim().replace(/[^a-z0-9]/g, '');
         if (normKey.includes(normTarget)) {
@@ -362,10 +365,15 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       });
 
       // 3. Existing shipments in current campaign (for duplicate & reconciliation tracking)
-      const existingCampaignShipments = getCampaignShipments(campaign.id);
+      let existingCampaignShipments: InfluencerDispatchedShipment[] = [];
+      try {
+        existingCampaignShipments = await fetchCampaignShipmentsFromDb(campaign.id);
+      } catch (e) {
+        existingCampaignShipments = getCampaignShipments(campaign.id);
+      }
       const existingMap = new Map<string, InfluencerDispatchedShipment>();
       existingCampaignShipments.forEach(s => {
-        const k = (s.awbNumber || s.id).toLowerCase().trim();
+        const k = (s.awbNumber || s.id || '').toLowerCase().trim();
         if (k) existingMap.set(k, s);
       });
 
@@ -417,17 +425,40 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           return;
         }
 
-        // Match reference against current campaign influencers
+        // Match reference against current campaign influencers or existing shipments
         let matchedInf: CampaignInfluencer | undefined;
 
-        if (rawOrderId) {
+        // 1. Check if AWB matches an existing campaign shipment
+        const existingShipment = rawAwb ? existingMap.get(rawAwb.toLowerCase()) : undefined;
+        if (existingShipment) {
+          matchedInf = activeCampaignInfluencers.find(i => 
+            (existingShipment.influencerId && String(i.id) === String(existingShipment.influencerId)) ||
+            (i.code && normalizeInfluencerReference(i.code) === normalizeInfluencerReference(existingShipment.influencerCode))
+          );
+          if (!matchedInf) {
+            matchedInf = {
+              id: existingShipment.influencerId ? Number(existingShipment.influencerId) || existingShipment.influencerId : existingShipment.id,
+              campaign_id: campaign.id,
+              name: existingShipment.creatorName,
+              influencer_name: existingShipment.creatorName,
+              code: existingShipment.influencerCode || rawOrderId,
+              phone_number: existingShipment.phoneNumber,
+              alternative_number: existingShipment.altPhoneNumber,
+              state: existingShipment.state,
+              profile_file_url: existingShipment.profilePhoto
+            } as any;
+          }
+        }
+
+        // 2. Match by Order ID / Reference No
+        if (!matchedInf && rawOrderId) {
           const normCode = normalizeInfluencerReference(rawOrderId);
           if (codeMap.has(normCode)) {
             matchedInf = codeMap.get(normCode);
           }
         }
 
-        // If not matched by orderCol, check if any column contains a valid canonical campaign influencer code
+        // 3. If not matched by orderCol, check if any column contains a valid canonical campaign influencer code
         if (!matchedInf) {
           for (const key of headers) {
             const val = cleanStr(row[key]);
@@ -713,11 +744,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
           const displayStatus = row.currentStatus
             ? formatStatusLabel(row.currentStatus)
-            : (row.statusType ? formatStatusLabel(row.statusType) : (row.remarks || 'Pending'));
+            : (row.statusType ? formatStatusLabel(row.statusType) : (existingShipment?.status || 'Pending'));
           const statusCategory = resolveDelhiveryCategory(displayStatus, row.currentStatus, row.statusType);
           const rawStatus = row.currentStatus || row.statusType || displayStatus;
           const normalizedDate = row.date ? (parseToYMD(row.date) || row.date) : (existingShipment?.dispatchDate || existingShipment?.dispatchedDate || '');
-          const normalizedEdd = row.edd ? (parseToYMD(row.edd) || row.edd) : (existingShipment?.estimatedDeliveryDate || '');
+          const normalizedEdd = row.edd ? (parseToYMD(row.edd) || row.edd) : (existingShipment?.estimatedDeliveryDate || existingShipment?.expectedDeliveryDate || '');
 
           const shipmentObj: InfluencerDispatchedShipment = {
             id: existingShipment?.id || inf.dispatchDetails?.id || String(inf.id),
@@ -859,6 +890,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }));
         setStep('completed');
 
+        clearTrackingCache(campaign.id);
         try {
           await onSuccess();
         } catch (refreshErr) {

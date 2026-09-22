@@ -354,17 +354,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         : (isSTCourier ? 'Live ST Courier Tracking' : (cs.statusSource || 'Uploaded File'));
       const sourceType = isDelhivery ? 'UPLOADED_FILE' : (isSTCourier ? 'LIVE_API' : (cs.sourceType || 'UPLOADED_FILE'));
 
-      const rawStatus = cached?.rawStatus || cs.rawStatus || cs.status || '';
+      const rawStatus = (isDelhivery ? (cs.rawStatus || cs.status) : (cached?.rawStatus || cs.rawStatus || cs.status)) || '';
       const displayStatus = getTrackingDisplayStatus({
         ...cs,
         rawStatus,
-        status: cached?.status || cs.status
+        status: isDelhivery ? (cs.status || rawStatus) : (cached?.status || cs.status)
       });
       const edd = cs.estimatedDeliveryDate || cs.expectedDeliveryDate || dispatch?.expected_delivery_date || '';
 
       let resolvedRemarks = (cs.remarks && cs.remarks.trim()) ? cs.remarks.trim() : undefined;
       let resolvedDeliveredDate = cs.deliveredDate || (cs as any).delivered_date || undefined;
-      const rawSyncError = cs.syncError || cached?.syncError;
+      const rawSyncError = isDelhivery ? cs.syncError : (cs.syncError || cached?.syncError);
       if ((!resolvedRemarks || !resolvedDeliveredDate) && rawSyncError && typeof rawSyncError === 'string' && rawSyncError.startsWith('{')) {
         try {
           const meta = JSON.parse(rawSyncError);
@@ -387,6 +387,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         batchId: cs.batchId || batchId,
         batchCode: cs.batchCode !== '—' ? cs.batchCode : batchCode,
         dispatchDate: cs.dispatchDate || dispatch?.dispatch_date || '',
+        dispatchedDate: cs.dispatchedDate || cs.dispatchDate || dispatch?.dispatch_date || '',
         expectedDeliveryDate: edd,
         estimatedDeliveryDate: edd,
         deliveredDate: resolvedDeliveredDate,
@@ -396,10 +397,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         rawStatus: rawStatus || 'In Transit',
         statusSource,
         sourceType,
-        lastLocation: cached?.lastLocation || cs.lastLocation,
-        trackingDateTime: cached?.trackingDateTime || cs.trackingDateTime,
-        lastSyncedAt: cached?.lastSyncedAt || cs.lastSyncedAt,
-        syncError: cached?.syncError || cs.syncError,
+        lastLocation: isDelhivery ? cs.lastLocation : (cached?.lastLocation || cs.lastLocation),
+        trackingDateTime: isDelhivery ? cs.trackingDateTime : (cached?.trackingDateTime || cs.trackingDateTime),
+        lastSyncedAt: isDelhivery ? cs.lastSyncedAt : (cached?.lastSyncedAt || cs.lastSyncedAt),
+        syncError: isDelhivery ? cs.syncError : (cached?.syncError || cs.syncError),
         trackingUrl: cs.trackingUrl || getCourierTrackingUrl(cs.courier, cs.awbNumber)
       });
     }
@@ -479,45 +480,88 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return counts;
   }, [allShipments, kpis]);
 
-  // Delivery Schedule grouping from allShipments
+  // Delivery & Delivered Schedule grouping from allShipments
   const deliverySchedule = useMemo(() => {
-    const map = new Map<string, { ymd: string; formattedDate: string; count: number; shipments: InfluencerDispatchedShipment[] }>();
+    const byDateMap = new Map<string, {
+      ymd: string;
+      formattedDate: string;
+      estimatedCount: number;
+      deliveredCount: number;
+      estimatedShipments: InfluencerDispatchedShipment[];
+      deliveredShipments: InfluencerDispatchedShipment[];
+    }>();
+
     const todayYmd = getTodayLocalYMD();
-    let totalWithDate = 0;
-    let todayCount = 0;
+    let totalEstimatedWithDate = 0;
+    let totalDeliveredWithDate = 0;
+    let todayEstimatedCount = 0;
+    let todayDeliveredCount = 0;
 
-    for (const s of allShipments) {
-      const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate;
-      if (!edd) continue;
-      const ymd = parseToYMD(edd);
-      if (!ymd) continue;
-
-      totalWithDate++;
-      if (ymd === todayYmd) {
-        todayCount++;
-      }
-
-      const existing = map.get(ymd);
-      if (existing) {
-        existing.count++;
-        existing.shipments.push(s);
-      } else {
-        map.set(ymd, {
+    const getOrCreate = (ymd: string) => {
+      let existing = byDateMap.get(ymd);
+      if (!existing) {
+        existing = {
           ymd,
           formattedDate: formatEstimatedDeliveryDate(ymd),
-          count: 1,
-          shipments: [s]
-        });
+          estimatedCount: 0,
+          deliveredCount: 0,
+          estimatedShipments: [],
+          deliveredShipments: []
+        };
+        byDateMap.set(ymd, existing);
+      }
+      return existing;
+    };
+
+    const estimatedDatesSet = new Set<string>();
+    const deliveredDatesSet = new Set<string>();
+
+    for (const s of allShipments) {
+      // 1. Estimated Delivery Date
+      const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate;
+      if (edd) {
+        const eddYmd = parseToYMD(edd);
+        if (eddYmd) {
+          totalEstimatedWithDate++;
+          estimatedDatesSet.add(eddYmd);
+          if (eddYmd === todayYmd) {
+            todayEstimatedCount++;
+          }
+          const entry = getOrCreate(eddYmd);
+          entry.estimatedCount++;
+          entry.estimatedShipments.push(s);
+        }
+      }
+
+      // 2. Delivered Date (strictly from deliveredDate)
+      const del = s.deliveredDate || (s as any).delivered_date;
+      if (del) {
+        const delYmd = parseToYMD(del);
+        if (delYmd) {
+          totalDeliveredWithDate++;
+          deliveredDatesSet.add(delYmd);
+          if (delYmd === todayYmd) {
+            todayDeliveredCount++;
+          }
+          const entry = getOrCreate(delYmd);
+          entry.deliveredCount++;
+          entry.deliveredShipments.push(s);
+        }
       }
     }
 
-    const sortedList = Array.from(map.values()).sort((a, b) => a.ymd.localeCompare(b.ymd));
+    const allDatesList = Array.from(byDateMap.values()).sort((a, b) => a.ymd.localeCompare(b.ymd));
 
     return {
-      byDateMap: map,
-      sortedList,
-      totalWithDate,
-      todayCount,
+      byDateMap,
+      allDatesList,
+      sortedList: allDatesList,
+      totalEstimatedWithDate,
+      totalDeliveredWithDate,
+      todayEstimatedCount,
+      todayDeliveredCount,
+      estimatedDatesCount: estimatedDatesSet.size,
+      deliveredDatesCount: deliveredDatesSet.size,
       todayYmd
     };
   }, [allShipments]);
@@ -537,8 +581,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           }
         }
       }
-      if (deliverySchedule.sortedList.length > 0) {
-        const parts = deliverySchedule.sortedList[0].ymd.split('-');
+      if (deliverySchedule.allDatesList.length > 0) {
+        const parts = deliverySchedule.allDatesList[0].ymd.split('-');
         if (parts.length === 3) {
           const y = parseInt(parts[0], 10);
           const m = parseInt(parts[1], 10) - 1;
@@ -613,40 +657,42 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       dayNum: number;
       isCurrentMonth: boolean;
       isToday: boolean;
-      count: number;
+      estimatedCount: number;
+      deliveredCount: number;
+      hasAnyCount: boolean;
     }[] = [];
 
     const firstDayOfWeek = new Date(calendarYear, calendarMonth, 1).getDay();
     const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
     const daysInPrevMonth = new Date(calendarYear, calendarMonth, 0).getDate();
 
+    const makeCell = (y: number, m: number, d: number, isCurrentMonth: boolean) => {
+      const ymd = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const entry = deliverySchedule.byDateMap.get(ymd);
+      const estimatedCount = entry?.estimatedCount || 0;
+      const deliveredCount = entry?.deliveredCount || 0;
+      return {
+        ymd,
+        dayNum: d,
+        isCurrentMonth,
+        isToday: ymd === deliverySchedule.todayYmd,
+        estimatedCount,
+        deliveredCount,
+        hasAnyCount: estimatedCount > 0 || deliveredCount > 0
+      };
+    };
+
     // Previous month padding
     const prevYear = calendarMonth === 0 ? calendarYear - 1 : calendarYear;
     const prevMonth = calendarMonth === 0 ? 11 : calendarMonth - 1;
     for (let i = 0; i < firstDayOfWeek; i++) {
       const dayNum = daysInPrevMonth - firstDayOfWeek + 1 + i;
-      const ymd = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-      const count = deliverySchedule.byDateMap.get(ymd)?.count || 0;
-      cells.push({
-        ymd,
-        dayNum,
-        isCurrentMonth: false,
-        isToday: ymd === deliverySchedule.todayYmd,
-        count
-      });
+      cells.push(makeCell(prevYear, prevMonth, dayNum, false));
     }
 
     // Current month days
     for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
-      const ymd = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-      const count = deliverySchedule.byDateMap.get(ymd)?.count || 0;
-      cells.push({
-        ymd,
-        dayNum,
-        isCurrentMonth: true,
-        isToday: ymd === deliverySchedule.todayYmd,
-        count
-      });
+      cells.push(makeCell(calendarYear, calendarMonth, dayNum, true));
     }
 
     // Next month padding to fill out 7-column rows
@@ -654,15 +700,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     const nextMonth = calendarMonth === 11 ? 0 : calendarMonth + 1;
     const remaining = (7 - (cells.length % 7)) % 7;
     for (let i = 1; i <= remaining; i++) {
-      const ymd = `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-      const count = deliverySchedule.byDateMap.get(ymd)?.count || 0;
-      cells.push({
-        ymd,
-        dayNum: i,
-        isCurrentMonth: false,
-        isToday: ymd === deliverySchedule.todayYmd,
-        count
-      });
+      cells.push(makeCell(nextYear, nextMonth, i, false));
     }
 
     return cells;
@@ -671,21 +709,28 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   // Filtered Shipments
   const filteredShipments = useMemo(() => {
     const filtered = allShipments.filter(s => {
-      // 0. Estimated Delivery Date Filter (canonical estimated_delivery_date)
+      // 0. Delivery & Delivered Date Filter (canonical estimated_delivery_date and delivered_date)
       const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate;
       const eddYmd = edd ? parseToYMD(edd) : '';
+      const del = s.deliveredDate || (s as any).delivered_date;
+      const delYmd = del ? parseToYMD(del) : '';
 
       if (selectedDeliveryDate && selectedDeliveryDateEnd) {
-        if (!eddYmd) return false;
-        if (eddYmd < selectedDeliveryDate || eddYmd > selectedDeliveryDateEnd) {
+        const matchesEdd = Boolean(eddYmd && eddYmd >= selectedDeliveryDate && eddYmd <= selectedDeliveryDateEnd);
+        const matchesDel = Boolean(delYmd && delYmd >= selectedDeliveryDate && delYmd <= selectedDeliveryDateEnd);
+        if (!matchesEdd && !matchesDel) {
           return false;
         }
       } else if (selectedDeliveryDate) {
-        if (!eddYmd || eddYmd !== selectedDeliveryDate) {
+        const matchesEdd = Boolean(eddYmd && eddYmd === selectedDeliveryDate);
+        const matchesDel = Boolean(delYmd && delYmd === selectedDeliveryDate);
+        if (!matchesEdd && !matchesDel) {
           return false;
         }
       } else if (selectedDeliveryDateEnd) {
-        if (!eddYmd || eddYmd > selectedDeliveryDateEnd) {
+        const matchesEdd = Boolean(eddYmd && eddYmd <= selectedDeliveryDateEnd);
+        const matchesDel = Boolean(delYmd && delYmd <= selectedDeliveryDateEnd);
+        if (!matchesEdd && !matchesDel) {
           return false;
         }
       }
@@ -1292,15 +1337,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               )}
             </div>
 
-            {/* 7. Clear All Button (Destructive: Permanently clears all tracking records for this campaign) */}
+            {/* 7. Clear All Button (UI-only, permanently disabled as requested) */}
             <button
               type="button"
-              onClick={() => setIsDeleteModalOpen(true)}
-              disabled={isDeleting || allShipments.length === 0}
-              className="h-10 px-3.5 bg-slate-900 hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 text-xs font-semibold rounded-xl border border-slate-700/80 hover:border-rose-700/60 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Delete all tracking shipment records for this campaign"
+              disabled
+              aria-disabled="true"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              className="h-10 px-3.5 bg-slate-900 text-slate-400 text-xs font-semibold rounded-xl border border-slate-700/80 flex items-center gap-1.5 shrink-0 opacity-40 cursor-not-allowed select-none"
+              title="Clear All is disabled"
             >
-              <Trash2 size={13} className="text-rose-400" />
+              <Trash2 size={13} className="text-rose-400/60" />
               <span>Clear All</span>
             </button>
 
@@ -1839,7 +1888,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Dispatch Date:</span>
-                  <span className="text-slate-200">{activeTrackingModalShipment.dispatchDate || '—'}</span>
+                  <span className="text-slate-200 font-semibold font-mono">{formatDispatchedDate(activeTrackingModalShipment.dispatchedDate || activeTrackingModalShipment.dispatchDate)}</span>
                 </div>
                 {(activeTrackingModalShipment.estimatedDeliveryDate || activeTrackingModalShipment.expectedDeliveryDate) && (
                   <div className="flex items-center justify-between">
@@ -2105,8 +2154,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   <Calendar size={18} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Estimated Delivery Date</h3>
-                  <p className="text-[11px] text-slate-400">Filter shipments by estimated delivery schedule</p>
+                  <h3 className="text-sm font-bold text-white">Estimated Delivery & Delivered Calendar</h3>
+                  <p className="text-[11px] text-slate-400">Filter shipments by estimated delivery schedule and delivered dates</p>
                 </div>
               </div>
               <button
@@ -2174,35 +2223,50 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               </div>
 
               {/* 3. DELIVERY SUMMARY CARDS */}
-              <div className="grid grid-cols-2 gap-2.5">
-                <div className="p-2.5 sm:p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Today's Estimated</span>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className={`text-lg sm:text-xl font-black font-mono ${deliverySchedule.todayCount > 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
-                      {deliverySchedule.todayCount}
+              <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
+                <div className="p-2 sm:p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-slate-400 truncate">Today's Estimated</span>
+                  <div className="flex items-baseline gap-1.5 mt-1">
+                    <span className={`text-base sm:text-lg font-black font-mono ${deliverySchedule.todayEstimatedCount > 0 ? 'text-purple-400' : 'text-slate-200'}`}>
+                      {deliverySchedule.todayEstimatedCount}
                     </span>
-                    <span className="text-xs text-slate-400 font-medium">Deliveries</span>
-                    {deliverySchedule.todayCount > 0 && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-bold ml-auto">
-                        Due Today
-                      </span>
-                    )}
+                    <span className="text-[11px] text-slate-400 font-medium">Deliveries</span>
                   </div>
+                  {deliverySchedule.todayEstimatedCount > 0 && (
+                    <span className="text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-700/60 text-purple-300 font-bold self-start mt-1">
+                      Due Today
+                    </span>
+                  )}
                 </div>
 
-                <div className="p-2.5 sm:p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Total Scheduled</span>
-                  <div className="flex items-baseline justify-between mt-1">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-lg sm:text-xl font-black font-mono text-purple-300">
-                        {deliverySchedule.totalWithDate}
-                      </span>
-                      <span className="text-xs text-slate-400 font-medium">Shipments</span>
-                    </div>
-                    <span className="text-[11px] font-semibold text-slate-400">
-                      {deliverySchedule.sortedList.length} {deliverySchedule.sortedList.length === 1 ? 'Date' : 'Dates'}
+                <div className="p-2 sm:p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-slate-400 truncate">Today's Delivered</span>
+                  <div className="flex items-baseline gap-1.5 mt-1">
+                    <span className={`text-base sm:text-lg font-black font-mono ${deliverySchedule.todayDeliveredCount > 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                      {deliverySchedule.todayDeliveredCount}
                     </span>
+                    <span className="text-[11px] text-slate-400 font-medium">Delivered</span>
                   </div>
+                  {deliverySchedule.todayDeliveredCount > 0 && (
+                    <span className="text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-bold self-start mt-1">
+                      Delivered Today
+                    </span>
+                  )}
+                </div>
+
+                <div className="p-2 sm:p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                  <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider text-slate-400 truncate">Total Scheduled</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-base sm:text-lg font-black font-mono text-purple-300">
+                        {deliverySchedule.totalEstimatedWithDate}
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-medium">Shipments</span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-semibold text-slate-400 mt-1">
+                    {deliverySchedule.estimatedDatesCount} {deliverySchedule.estimatedDatesCount === 1 ? 'Date' : 'Dates'}
+                  </span>
                 </div>
               </div>
 
@@ -2235,6 +2299,18 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   </button>
                 </div>
 
+                {/* Color Legend */}
+                <div className="flex items-center justify-center gap-5 text-[11px] font-medium text-slate-400 py-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shadow-sm shadow-purple-500/50" />
+                    <span className="text-slate-300 font-semibold">Estimated Delivery</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" />
+                    <span className="text-slate-300 font-semibold">Delivered</span>
+                  </div>
+                </div>
+
                 {/* Day of Week Headers */}
                 <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-[10px] font-bold uppercase tracking-wider text-slate-400 px-0.5">
                   {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d) => (
@@ -2260,18 +2336,18 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         key={cell.ymd}
                         type="button"
                         onClick={() => handleSelectCalendarDate(cell.ymd)}
-                        className={`min-h-[50px] sm:min-h-[54px] rounded-xl p-1 sm:p-1.5 flex flex-col items-center justify-between text-xs transition-all relative cursor-pointer border ${
+                        className={`min-h-[56px] sm:min-h-[62px] rounded-xl p-1 sm:p-1.5 flex flex-col items-center justify-between text-xs transition-all relative cursor-pointer border ${
                           isSelected
                             ? 'bg-purple-600 border-purple-400 text-white font-bold shadow-md shadow-purple-600/40 z-10'
                             : isInRange
                             ? 'bg-purple-900/40 border-purple-800/60 text-purple-100'
-                            : cell.count > 0
-                            ? 'bg-slate-900/90 border-purple-900/40 hover:border-purple-600 hover:bg-slate-800 text-slate-100'
+                            : cell.hasAnyCount
+                            ? 'bg-slate-900/90 border-slate-700/80 hover:border-purple-600 hover:bg-slate-800 text-slate-100'
                             : cell.isCurrentMonth
                             ? 'bg-slate-900/40 border-slate-800/60 hover:border-slate-700 hover:bg-slate-800/60 text-slate-300'
                             : 'bg-transparent border-transparent text-slate-600 hover:text-slate-400 hover:bg-slate-900/30'
                         } ${cell.isToday && !isSelected ? 'ring-1.5 ring-emerald-500/80' : ''}`}
-                        title={cell.count > 0 ? `${cell.ymd}: ${cell.count} estimated delivery(ies)` : cell.ymd}
+                        title={`${cell.ymd}${cell.estimatedCount > 0 ? ` • ${cell.estimatedCount} estimated delivery(ies)` : ''}${cell.deliveredCount > 0 ? ` • ${cell.deliveredCount} delivered shipment(s)` : ''}`}
                       >
                         {/* Top row: Day Number + Today micro-badge */}
                         <div className="w-full flex items-center justify-between px-0.5 leading-none">
@@ -2293,17 +2369,37 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           )}
                         </div>
 
-                        {/* Bottom row: Delivery count badge (ONLY if cell.count > 0) */}
-                        <div className="w-full flex items-center justify-center min-h-[18px]">
-                          {cell.count > 0 && (
-                            <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-md leading-none shadow-sm ${
-                              isSelected
-                                ? 'bg-white/25 text-white border border-white/40'
-                                : isInRange
-                                ? 'bg-purple-800 text-purple-100 border border-purple-700'
-                                : 'bg-purple-950 border border-purple-700/70 text-purple-300'
-                            }`}>
-                              {cell.count}
+                        {/* Bottom area: Delivery count badges (show ONLY if count > 0) */}
+                        <div className="w-full flex flex-col items-center justify-center gap-0.5 min-h-[18px]">
+                          {cell.estimatedCount > 0 && (
+                            <span
+                              className={`text-[9px] sm:text-[10px] font-mono font-black px-1.5 py-0.5 rounded-md leading-none shadow-sm flex items-center justify-center gap-1 ${
+                                isSelected
+                                  ? 'bg-purple-950/80 text-purple-200 border border-purple-300/50'
+                                  : isInRange
+                                  ? 'bg-purple-800 text-purple-100 border border-purple-700'
+                                  : 'bg-purple-950 border border-purple-700/70 text-purple-300'
+                              }`}
+                              title={`${cell.estimatedCount} estimated delivery(ies)`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                              <span>{cell.estimatedCount}</span>
+                            </span>
+                          )}
+
+                          {cell.deliveredCount > 0 && (
+                            <span
+                              className={`text-[9px] sm:text-[10px] font-mono font-black px-1.5 py-0.5 rounded-md leading-none shadow-sm flex items-center justify-center gap-1 ${
+                                isSelected
+                                  ? 'bg-emerald-950/90 text-emerald-200 border border-emerald-400/60'
+                                  : isInRange
+                                  ? 'bg-emerald-900/90 text-emerald-100 border border-emerald-700'
+                                  : 'bg-emerald-950 border border-emerald-700/70 text-emerald-300'
+                              }`}
+                              title={`${cell.deliveredCount} delivered shipment(s)`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                              <span>{cell.deliveredCount}</span>
                             </span>
                           )}
                         </div>
