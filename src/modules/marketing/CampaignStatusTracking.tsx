@@ -44,20 +44,20 @@ export interface VideoStepConfig {
   icon: any;
 }
 
-// Video 1 Steps: Call & Explain -> Share Script -> Pay Advance -> Time Line -> Draft -> Post Date
+// Video 1 Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date
 export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
-  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
+  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
   { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: IndianRupee },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
 ];
 
-// Videos 2 through 6 Steps: Call & Explain -> Share Script -> Time Line -> Draft -> Post Date -> Payment
+// Videos 2 through N Steps: Share Script -> Call & Explain -> Time Line -> Draft -> Post Date -> Payment
 export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
-  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
+  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
