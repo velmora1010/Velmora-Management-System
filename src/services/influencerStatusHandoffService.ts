@@ -488,11 +488,50 @@ export interface HandoffResult {
 }
 
 /**
+ * Determines whether Step 1: Delivery Confirmation is genuinely completed in the Status Tracking workflow.
+ * Requires:
+ * 1. delivered_confirmed === true
+ * AND
+ * 2. delivery_photo_url is present (uploaded proof image) OR legacy record has already progressed to later steps.
+ */
+export function isDeliveryStepCompleted(record: any): boolean {
+  if (!record) return false;
+
+  // If explicitly not confirmed, definitely not completed
+  if (!record.delivered_confirmed) return false;
+
+  // Genuine completion requires delivery proof photo
+  if (record.delivery_photo_url && typeof record.delivery_photo_url === 'string' && record.delivery_photo_url.trim() !== '') {
+    return true;
+  }
+
+  // Check notes for metadata delivery_photo_url
+  try {
+    const meta = typeof record.notes === 'string' ? JSON.parse(record.notes) : record.notes;
+    if (meta?.delivery_photo_url && typeof meta.delivery_photo_url === 'string' && meta.delivery_photo_url.trim() !== '') {
+      return true;
+    }
+  } catch (e) {}
+
+  // Preserve legacy records from older campaigns that had already progressed to later workflow steps
+  if (
+    Number(record.current_step) >= 2 ||
+    record.draft_received ||
+    record.pay_advance_completed ||
+    record.final_post_completed
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Idempotently moves a single delivered shipment to Status Tracking.
  * - Only 'Delivered' shipments are eligible.
  * - If the influencer already has a Status Tracking record for this campaign,
  *   it preserves all existing progress and returns alreadyExisted = true.
- * - If not present, inserts a new record with current_step: 0, delivered_confirmed: true, status: 'Active'.
+ * - If not present, inserts a new record with current_step: 0, delivered_confirmed: false, status: 'Not Started'.
  */
 export async function handoffDeliveredShipmentToStatusTracking(
   campaignId: string | number,
@@ -669,8 +708,9 @@ export async function handoffDeliveredShipmentToStatusTracking(
       campaign_id: isNaN(Number(cleanCampaignId)) ? cleanCampaignId : Number(cleanCampaignId),
       influencer_id: isNaN(Number(cleanInfId)) ? cleanInfId : Number(cleanInfId),
       dispatch_id: dispatchId ? (isNaN(Number(dispatchId)) ? dispatchId : Number(dispatchId)) : null,
-      current_step: 1,
-      delivered_confirmed: true,
+      current_step: 0,
+      delivered_confirmed: false,
+      delivery_photo_url: null,
       pay_advance_completed: false,
       reference_video_received: false,
       expected_delivery_completed: false,
@@ -678,7 +718,7 @@ export async function handoffDeliveredShipmentToStatusTracking(
       payment_remaining_completed: false,
       final_post_completed: false,
       notes: initialNotes,
-      status: 'Active',
+      status: 'Not Started',
       created_at: nowIso,
       updated_at: nowIso
     };

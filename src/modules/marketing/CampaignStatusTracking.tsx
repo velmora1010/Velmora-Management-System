@@ -13,7 +13,7 @@ import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { isActiveStatus } from '../../utils/marketingUtils';
-import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
+import { naturalCompareCodes, isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
 import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 import toast from 'react-hot-toast';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
@@ -947,7 +947,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }
 
     // Not Started: if delivery is not confirmed yet
-    if (!record.delivered_confirmed) {
+    if (!isDeliveryStepCompleted(record)) {
       return {
         key: 'NOT_STARTED',
         label: 'Not Started',
@@ -1151,6 +1151,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     const record = activeTrackingRecords.find(r => r.id === recordId) || trackingRecords.find(r => r.id === recordId);
     if (!record) return;
 
+    if (!data.delivered_confirmed || !data.delivery_photo_url || !String(data.delivery_photo_url).trim()) {
+      toast.error('Please confirm delivery and upload the delivery proof photo before completing Step 1.');
+      return;
+    }
+
     let metadata: any = {};
     try {
       metadata = JSON.parse(record.notes || '{}');
@@ -1159,12 +1164,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }
 
     metadata.last_updated = new Date().toISOString();
-    metadata.delivered_confirmed = data.delivered_confirmed;
+    metadata.delivered_confirmed = true;
+    metadata.delivery_photo_url = data.delivery_photo_url;
 
     const updates: Partial<StatusTrackingRecord> = {
-      delivered_confirmed: data.delivered_confirmed,
-      delivery_photo_url: data.delivery_photo_url || null,
-      current_step: data.delivered_confirmed ? Math.max(record.current_step || 0, 1) : 0,
+      delivered_confirmed: true,
+      delivery_photo_url: data.delivery_photo_url,
+      current_step: Math.max(record.current_step || 0, 1),
+      status: 'Active',
       notes: JSON.stringify(metadata)
     };
 
@@ -1757,7 +1764,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 const influencerName = dispatch.influencer_name || 'Unknown Influencer';
                 const username = dispatch.username || '—';
 
-                const isDelivered = !!record.delivered_confirmed;
+                const isDelivered = isDeliveryStepCompleted(record);
                 const overallStatus = getOverallStatus(record);
                 const isMenuOpen = openMenuId === record.id;
 
@@ -2544,8 +2551,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
 // --- STEP: Delivery Confirmation ---
 const DeliveredForm = ({ record, onSave }: any) => {
+  const isInitiallyCompleted = isDeliveryStepCompleted(record);
   const [photo, setPhoto] = useState(record.delivery_photo_url || '');
-  const [confirmed, setConfirmed] = useState(record.delivered_confirmed || false);
+  const [confirmed, setConfirmed] = useState(isInitiallyCompleted);
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
@@ -2559,10 +2567,11 @@ const DeliveredForm = ({ record, onSave }: any) => {
   };
 
   const handleSave = async () => {
-    if (!confirmed) {
-      toast.error('Please confirm package delivery first.');
+    if (!confirmed || (!file && (!photo || !photo.trim()))) {
+      toast.error('Please confirm delivery and upload the delivery proof photo before completing Step 1.');
       return;
     }
+
     setIsUploading(true);
     let finalUrl = photo;
 
@@ -2580,14 +2589,21 @@ const DeliveredForm = ({ record, onSave }: any) => {
         setPhoto(finalUrl);
       } catch (err) {
         console.error('Error uploading photo:', err);
+        toast.error('Failed to upload delivery proof photo. Please try again.');
         setIsUploading(false);
         return;
       }
     }
 
+    if (!finalUrl || !finalUrl.trim()) {
+      toast.error('Please confirm delivery and upload the delivery proof photo before completing Step 1.');
+      setIsUploading(false);
+      return;
+    }
+
     await onSave({ 
       delivery_photo_url: finalUrl, 
-      delivered_confirmed: confirmed
+      delivered_confirmed: true
     });
     setIsUploading(false);
   };

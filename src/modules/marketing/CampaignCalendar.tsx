@@ -4,6 +4,7 @@ import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../ho
 import { getCanonicalInfluencerPostDates, formatDisplayDateLocal } from '../../utils/influencerDateUtils';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
 import { getVideoWorkflow } from './CampaignStatusTracking';
+import { isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { isActiveStatus } from '../../utils/marketingUtils';
@@ -484,8 +485,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       const campaignName = r.dispatch?.campaign_name || campaign.campaign_name;
       const avatarUrl = r.dispatch?.influencer_avatar || '';
 
-      // 1. Delivered milestone — rely only on the explicit boolean field
-      const isDeliveredCompleted = !!r.delivered_confirmed;
+      // 1. Delivered milestone — rely only on genuinely confirmed delivery
+      const isDeliveredCompleted = isDeliveryStepCompleted(r);
       if (isDeliveredCompleted) {
         const dDate = parseDateOnly(r.dispatch?.expected_delivery_date || r.dispatch?.dispatch_date);
         if (dDate) {
@@ -968,7 +969,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       // Milestone Filter (Day Schedule Event List only)
       if (dayMilestoneFilter !== 'All') {
         if (dayMilestoneFilter === 'Delivered') {
-          const isCompleted = !!r.delivered_confirmed;
+          const isCompleted = isDeliveryStepCompleted(r);
           if (!isCompleted) return false;
         } else if (dayMilestoneFilter === 'Draft1') {
           const isCompleted = !!r.draft_video_url;
@@ -1138,7 +1139,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                 try {
                   metadata = JSON.parse(r.notes || '{}');
                 } catch (e) {}
-                  const isDelivered = !!r.delivered_confirmed;
+                  const isDelivered = isDeliveryStepCompleted(r);
                   const isDraft1 = !!r.draft_video_url;
                   const isDraft2 = !!r.re_draft_video_url;
                   const draft1UploadedAt = metadata.draft1_uploaded_at || metadata.draft_uploaded_at;
