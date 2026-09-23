@@ -7,7 +7,7 @@ import {
   XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2,
-  Mic, Volume2, ExternalLink
+  Mic, Volume2, ExternalLink, SlidersHorizontal
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -21,6 +21,13 @@ import { getInfluencerResolvedVideoProducts, isVideoLabel } from './AddCampaignI
 import { StatusTrackingPaymentCard, PaymentDetailsInfo } from './StatusTrackingPaymentCard';
 import { saveVideoPayment, fetchVideoPaymentTransactions, InfluencerVideoPayment, InfluencerVideoPaymentTransaction } from '../../services/influencerVideoPaymentService';
 import { upsertCampaignVideoScript, type CampaignVideoScriptRecord } from '../../services/campaignVideoScriptService';
+import { 
+  StatusTrackingFilterDrawer, 
+  type StatusTrackingFilterState, 
+  initialStatusTrackingFilterState,
+  STATUS_TRACKING_PRICE_RANGES
+} from '../../components/marketing/StatusTrackingFilterDrawer';
+import { areFilterValuesEqual, getUniqueFilterOptions } from '../../utils/filterUtils';
 
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
@@ -206,6 +213,103 @@ export const getInfluencerCampaignTotalPrice = (influencer: any, recordPricing?:
     return Number(finalPrice);
   }
   return null;
+};
+
+// =========================================================================
+// FILTER RESOLUTION HELPERS FOR VIDEOS, CATEGORIES & DELIVERY STATUS
+// =========================================================================
+export const getInfluencerAssignedVideos = (record: StatusTrackingRecord): number[] => {
+  let count = Number(record.pricing?.total_videos) || 0;
+  
+  if (Array.isArray(record.postDates) && record.postDates.length > 0) {
+    const maxPd = Math.max(...record.postDates.map(p => Number(p.video_number) || 0));
+    if (maxPd > count) count = maxPd;
+  }
+  
+  try {
+    const meta = JSON.parse(record.notes || '{}');
+    if (meta.videos && typeof meta.videos === 'object') {
+      const keys = Object.keys(meta.videos).map(k => Number(k)).filter(n => !isNaN(n));
+      if (keys.length > 0) {
+        const maxK = Math.max(...keys);
+        if (maxK > count) count = maxK;
+      }
+    }
+  } catch (e) {}
+
+  if (count <= 0) count = DEFAULT_CAMPAIGN_VIDEOS_COUNT;
+
+  const result: number[] = [];
+  for (let i = 1; i <= count; i++) {
+    result.push(i);
+  }
+  return result;
+};
+
+export const getInfluencerCategories = (record: StatusTrackingRecord): string[] => {
+  const categories: string[] = [];
+  const inf = record.influencer || {};
+  
+  if (inf.creatorCategory && typeof inf.creatorCategory === 'string') {
+    categories.push(inf.creatorCategory);
+  }
+  if (inf.category && typeof inf.category === 'string') {
+    categories.push(inf.category);
+  }
+  if ((record.dispatch as any)?.category && typeof (record.dispatch as any).category === 'string') {
+    categories.push((record.dispatch as any).category);
+  }
+
+  if (Array.isArray(inf.platforms)) {
+    inf.platforms.forEach((p: any) => {
+      if (p.performance_code && typeof p.performance_code === 'string') categories.push(p.performance_code);
+      if (p.creator_category && typeof p.creator_category === 'string') categories.push(p.creator_category);
+      if (p.category && typeof p.category === 'string') categories.push(p.category);
+    });
+  }
+
+  if (Array.isArray(inf.languages)) {
+    const vd = inf.languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+    if (vd) {
+      try {
+        const parsed = JSON.parse(vd.replace('views_data:', ''));
+        if (parsed.platform_views && typeof parsed.platform_views === 'object') {
+          Object.values(parsed.platform_views).forEach((pv: any) => {
+            if (pv?.creator_category && typeof pv.creator_category === 'string') {
+              categories.push(pv.creator_category);
+            }
+          });
+        }
+      } catch (e) {}
+    }
+  }
+
+  if (inf.instagram_view_code) categories.push(inf.instagram_view_code);
+  if (inf.facebook_view_code) categories.push(inf.facebook_view_code);
+  if (inf.youtube_view_code) categories.push(inf.youtube_view_code);
+
+  return getUniqueFilterOptions(categories);
+};
+
+export const getInfluencerDeliveryStatus = (record: StatusTrackingRecord): 'Delivery Confirmed' | 'Delivered' | 'Not Delivered' => {
+  if (isDeliveryStepCompleted(record)) {
+    return 'Delivery Confirmed';
+  }
+  
+  const dispatch = record.dispatch as any;
+  const dispatchStatus = (dispatch?.dispatch_status || '').toLowerCase();
+  const trackingStatus = (record.status || '').toLowerCase();
+  
+  if (
+    record.delivered_confirmed || 
+    dispatchStatus === 'delivered' || 
+    trackingStatus === 'delivered' ||
+    dispatch?.delivered_date
+  ) {
+    return 'Delivered';
+  }
+
+  return 'Not Delivered';
 };
 
 // =========================================================================
@@ -888,11 +992,25 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const [recordToDelete, setRecordToDelete] = useState<StatusTrackingRecord | null>(null);
   const [isDeletingSingle, setIsDeletingSingle] = useState(false);
 
-  // Filters State
+  // Advanced Filter Drawer State
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<StatusTrackingFilterState>(initialStatusTrackingFilterState);
+
+  // Search input state
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('ALL');
-  const [selectedPlatform, setSelectedPlatform] = useState('ALL');
-  const [selectedLanguage, setSelectedLanguage] = useState('ALL');
+
+  // Active filter count calculation (total individual criteria selected)
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    count += activeFilters.videos.length;
+    count += activeFilters.languages.length;
+    count += activeFilters.priceRanges.length;
+    count += activeFilters.categories.length;
+    count += activeFilters.workflowStatuses.length;
+    count += activeFilters.platforms.length;
+    count += activeFilters.deliveryStatuses.length;
+    return count;
+  }, [activeFilters]);
 
   // Modals & Menu State
   const [activeModal, setActiveModal] = useState<{ recordId: string; stageId: string } | null>(null);
@@ -996,27 +1114,156 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     };
   };
 
-  // Collect available languages across records
-  const availableLanguages = useMemo(() => {
-    const langs = new Set<string>();
+  // DYNAMIC FILTER OPTIONS POPULATED FROM LOADED CAMPAIGN INFLUENCER DATA
+  // 1. Available videos based on campaign influencer data
+  const availableFilterVideos = useMemo(() => {
+    let maxV = 1;
     activeTrackingRecords.forEach(r => {
-      (r.dispatch?.languages || []).forEach(l => {
-        if (l && typeof l === 'string') langs.add(l);
-      });
+      const vids = getInfluencerAssignedVideos(r);
+      const m = Math.max(...vids, 1);
+      if (m > maxV) maxV = m;
     });
-    return Array.from(langs).sort();
+    return Array.from({ length: maxV }, (_, i) => i + 1);
   }, [activeTrackingRecords]);
 
-  // Overall KPI Counts
+  // 2. Available languages dynamically deduplicated
+  const availableFilterLanguages = useMemo(() => {
+    const allLangs = activeTrackingRecords.flatMap(r => r.dispatch?.languages || []);
+    return getUniqueFilterOptions(allLangs);
+  }, [activeTrackingRecords]);
+
+  // 3. Available categories dynamically extracted
+  const availableFilterCategories = useMemo(() => {
+    const allCats = activeTrackingRecords.flatMap(r => getInfluencerCategories(r));
+    return getUniqueFilterOptions(allCats);
+  }, [activeTrackingRecords]);
+
+  // 4. Available platforms & combinations dynamically extracted
+  const availableFilterPlatforms = useMemo(() => {
+    const plats = new Set<string>();
+    activeTrackingRecords.forEach(r => {
+      const pList = (r.dispatch?.platforms || []).map((p: string) => p.trim()).filter(Boolean);
+      pList.forEach(p => plats.add(p));
+      if (pList.length > 1) {
+        plats.add(pList.slice().sort().join(' + '));
+      }
+    });
+    return getUniqueFilterOptions(Array.from(plats));
+  }, [activeTrackingRecords]);
+
+  // 5. Available delivery statuses dynamically extracted
+  const availableFilterDeliveryStatuses = useMemo(() => {
+    const statuses = new Set<string>();
+    activeTrackingRecords.forEach(r => {
+      statuses.add(getInfluencerDeliveryStatus(r));
+    });
+    return Array.from(statuses);
+  }, [activeTrackingRecords]);
+
+  // Filtered influencers based on user selections across 7 sections + search
+  const filteredRecords = useMemo(() => {
+    return activeTrackingRecords.filter(record => {
+      const dispatch = record.dispatch || ({} as any);
+
+      // 1. Video filter (OR within section)
+      if (activeFilters.videos.length > 0) {
+        const assignedVideos = getInfluencerAssignedVideos(record);
+        const matchesVideo = activeFilters.videos.some(v => assignedVideos.includes(v));
+        if (!matchesVideo) return false;
+      }
+
+      // 2. Language filter (OR within section)
+      if (activeFilters.languages.length > 0) {
+        const recordLangs = dispatch.languages || [];
+        const matchesLanguage = activeFilters.languages.some(filterLang => 
+          recordLangs.some((recLang: string) => areFilterValuesEqual(recLang, filterLang))
+        );
+        if (!matchesLanguage) return false;
+      }
+
+      // 3. Price filter (OR within section)
+      if (activeFilters.priceRanges.length > 0) {
+        const price = getInfluencerCampaignTotalPrice(record.influencer, record.pricing);
+        if (price === null || isNaN(price)) {
+          return false;
+        }
+        const matchesPrice = activeFilters.priceRanges.some(rangeId => {
+          const range = STATUS_TRACKING_PRICE_RANGES.find(r => r.id === rangeId);
+          if (!range) return false;
+          return price >= range.min && price <= range.max;
+        });
+        if (!matchesPrice) return false;
+      }
+
+      // 4. Category filter (OR within section)
+      if (activeFilters.categories.length > 0) {
+        const recordCategories = getInfluencerCategories(record);
+        const matchesCategory = activeFilters.categories.some(filterCat =>
+          recordCategories.some(recCat => areFilterValuesEqual(recCat, filterCat))
+        );
+        if (!matchesCategory) return false;
+      }
+
+      // 5. Workflow status filter (OR within section)
+      if (activeFilters.workflowStatuses.length > 0) {
+        const overallStatus = getOverallStatus(record);
+        let statusLabel = overallStatus.label;
+        if (statusLabel === 'Delivery Confirmed') {
+          statusLabel = 'In Progress';
+        }
+        const matchesStatus = activeFilters.workflowStatuses.some(st => 
+          areFilterValuesEqual(st, statusLabel) || areFilterValuesEqual(st, overallStatus.key)
+        );
+        if (!matchesStatus) return false;
+      }
+
+      // 6. Platform filter (OR within section)
+      if (activeFilters.platforms.length > 0) {
+        const platforms = (dispatch.platforms || []).map((p: string) => p.trim());
+        const combo = platforms.slice().sort().join(' + ');
+        
+        const matchesPlatform = activeFilters.platforms.some(filterPlat => {
+          if (areFilterValuesEqual(filterPlat, combo)) return true;
+          return platforms.some((p: string) => areFilterValuesEqual(p, filterPlat));
+        });
+        if (!matchesPlatform) return false;
+      }
+
+      // 7. Delivery status filter (OR within section)
+      if (activeFilters.deliveryStatuses.length > 0) {
+        const delStatus = getInfluencerDeliveryStatus(record);
+        const matchesDelivery = activeFilters.deliveryStatuses.some(st => 
+          areFilterValuesEqual(st, delStatus)
+        );
+        if (!matchesDelivery) return false;
+      }
+
+      // 8. Search query (AND with all filters)
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const name = (dispatch.influencer_name || '').toLowerCase();
+        const code = (dispatch.influencer_code || String(record.influencer_id)).toLowerCase();
+        const username = (dispatch.username || '').toLowerCase();
+        const phone = (dispatch.phone_number || '').toLowerCase();
+        const tracking = (dispatch.tracking_id || '').toLowerCase();
+        const matches = name.includes(q) || code.includes(q) || username.includes(q) || phone.includes(q) || tracking.includes(q);
+        if (!matches) return false;
+      }
+
+      return true;
+    });
+  }, [activeTrackingRecords, activeFilters, searchQuery]);
+
+  // Overall KPI Counts based on unique filtered influencers
   const kpiCounts = useMemo(() => {
-    const total = activeTrackingRecords.length;
+    const total = filteredRecords.length;
     let completed = 0;
     let inProgress = 0;
     let pending = 0;
     let onHold = 0;
     let notStarted = 0;
 
-    activeTrackingRecords.forEach(r => {
+    filteredRecords.forEach(r => {
       const status = getOverallStatus(r);
       if (status.key === 'COMPLETED') completed++;
       else if (status.key === 'IN_PROGRESS') inProgress++;
@@ -1040,60 +1287,61 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       notStarted,
       notStartedPct: calcPct(notStarted)
     };
-  }, [activeTrackingRecords]);
+  }, [filteredRecords]);
 
-  // Filtered influencers based on user selections
-  const filteredRecords = useMemo(() => {
-    return activeTrackingRecords.filter(record => {
-      const dispatch = record.dispatch || ({} as any);
-      const overallStatus = getOverallStatus(record);
+  // Active filter chip removal handlers
+  const removeFilterVideo = (vNum: number) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      videos: prev.videos.filter(v => v !== vNum)
+    }));
+  };
 
-      // Status filter
-      if (selectedStatus !== 'ALL') {
-        if (selectedStatus === 'IN_PROGRESS') {
-          if (overallStatus.key !== 'IN_PROGRESS') return false;
-        } else if (overallStatus.key !== selectedStatus) {
-          return false;
-        }
-      }
+  const removeFilterLanguage = (lang: string) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      languages: prev.languages.filter(l => !areFilterValuesEqual(l, lang))
+    }));
+  };
 
-      // Platform filter
-      if (selectedPlatform !== 'ALL') {
-        const platforms = dispatch.platforms || [];
-        if (!platforms.some((p: string) => p.toLowerCase() === selectedPlatform.toLowerCase())) {
-          return false;
-        }
-      }
+  const removeFilterPriceRange = (rangeId: string) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      priceRanges: prev.priceRanges.filter(id => id !== rangeId)
+    }));
+  };
 
-      // Language filter
-      if (selectedLanguage !== 'ALL') {
-        const languages = dispatch.languages || [];
-        if (!languages.includes(selectedLanguage)) {
-          return false;
-        }
-      }
+  const removeFilterCategory = (cat: string) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      categories: prev.categories.filter(c => !areFilterValuesEqual(c, cat))
+    }));
+  };
 
-      // Search Query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const name = (dispatch.influencer_name || '').toLowerCase();
-        const code = (dispatch.influencer_code || '').toLowerCase();
-        const username = (dispatch.username || '').toLowerCase();
-        const phone = (dispatch.phone_number || '').toLowerCase();
-        const tracking = (dispatch.tracking_id || '').toLowerCase();
-        const matches = name.includes(q) || code.includes(q) || username.includes(q) || phone.includes(q) || tracking.includes(q);
-        if (!matches) return false;
-      }
+  const removeFilterWorkflowStatus = (status: string) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      workflowStatuses: prev.workflowStatuses.filter(s => !areFilterValuesEqual(s, status))
+    }));
+  };
 
-      return true;
-    });
-  }, [activeTrackingRecords, selectedStatus, selectedPlatform, selectedLanguage, searchQuery]);
+  const removeFilterPlatform = (plat: string) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      platforms: prev.platforms.filter(p => !areFilterValuesEqual(p, plat))
+    }));
+  };
 
-  const handleClearFilters = () => {
+  const removeFilterDeliveryStatus = (delStatus: string) => {
+    setActiveFilters(prev => ({
+      ...prev,
+      deliveryStatuses: prev.deliveryStatuses.filter(d => !areFilterValuesEqual(d, delStatus))
+    }));
+  };
+
+  const handleClearAllFilters = () => {
+    setActiveFilters(initialStatusTrackingFilterState);
     setSearchQuery('');
-    setSelectedStatus('ALL');
-    setSelectedPlatform('ALL');
-    setSelectedLanguage('ALL');
   };
 
   // Clear All Status Tracking Records for Current Campaign
@@ -1108,10 +1356,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         toast.error(`Failed to clear Status Tracking: ${res.error || 'Unknown error'}`, { id: toastId });
       } else {
         // Reset search/filter states
-        setSearchQuery('');
-        setSelectedStatus('ALL');
-        setSelectedPlatform('ALL');
-        setSelectedLanguage('ALL');
+        handleClearAllFilters();
 
         toast.success('All Status Tracking records cleared successfully.', { id: toastId });
       }
@@ -1606,43 +1851,30 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               />
             </div>
             <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-              <select 
-                value={selectedStatus}
-                onChange={e => setSelectedStatus(e.target.value)}
-                className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+              <button
+                type="button"
+                onClick={() => setIsFilterDrawerOpen(true)}
+                className={`px-3.5 py-2 bg-[#0b1329] border ${
+                  activeFilterCount > 0 
+                    ? 'border-purple-500 text-purple-300 font-semibold bg-purple-600/10' 
+                    : 'border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                } rounded-xl text-xs sm:text-sm flex items-center gap-2 transition-colors relative cursor-pointer shadow-sm`}
+                title="Filter Status Tracking"
               >
-                <option value="ALL">All Status</option>
-                <option value="COMPLETED">Completed</option>
-                <option value="IN_PROGRESS">In Progress</option>
-                <option value="ON_HOLD">On Hold</option>
-                <option value="NOT_STARTED">Not Started</option>
-              </select>
-              <select 
-                value={selectedPlatform}
-                onChange={e => setSelectedPlatform(e.target.value)}
-                className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
-              >
-                <option value="ALL">All Platforms</option>
-                <option value="Instagram">Instagram</option>
-                <option value="YouTube">YouTube</option>
-                <option value="Facebook">Facebook</option>
-              </select>
-              <select 
-                value={selectedLanguage}
-                onChange={e => setSelectedLanguage(e.target.value)}
-                className="bg-[#0b1329] border border-slate-800/80 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer"
-              >
-                <option value="ALL">All Languages</option>
-                {availableLanguages.map(lang => (
-                  <option key={lang} value={lang}>{lang}</option>
-                ))}
-              </select>
-              {(searchQuery || selectedStatus !== 'ALL' || selectedPlatform !== 'ALL' || selectedLanguage !== 'ALL') && (
+                <SlidersHorizontal size={16} className={activeFilterCount > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                <span>Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center select-none shadow-sm">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+              {(activeFilterCount > 0 || searchQuery.trim()) && (
                 <button 
                   type="button"
-                  onClick={handleClearFilters}
-                  className="text-slate-400 hover:text-slate-200 text-xs px-2.5 py-2 rounded-xl hover:bg-slate-800/60 transition-colors"
-                  title="Reset active search and filter dropdowns"
+                  onClick={handleClearAllFilters}
+                  className="text-slate-400 hover:text-slate-200 text-xs px-2.5 py-2 rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer"
+                  title="Reset all active search and filter criteria"
                 >
                   Reset Filters
                 </button>
@@ -1659,6 +1891,73 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               </button>
             </div>
           </div>
+
+          {/* 2.1 ACTIVE FILTER CHIPS BAR */}
+          {(activeFilterCount > 0 || searchQuery.trim()) && (
+            <div className="px-3.5 py-2 bg-[#0b1329]/90 border border-slate-800/80 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-slate-400 font-medium mr-1 text-[11px]">Active Filters:</span>
+                {searchQuery.trim() && (
+                  <span className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
+                    Search: "{searchQuery.trim()}"
+                    <button onClick={() => setSearchQuery('')} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
+                  </span>
+                )}
+                {activeFilters.videos.map(vNum => (
+                  <span key={`chip-v-${vNum}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
+                    Video {vNum}
+                    <button onClick={() => removeFilterVideo(vNum)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
+                  </span>
+                ))}
+                {activeFilters.languages.map(lang => (
+                  <span key={`chip-lang-${lang}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
+                    {lang}
+                    <button onClick={() => removeFilterLanguage(lang)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
+                  </span>
+                ))}
+                {activeFilters.priceRanges.map(rangeId => {
+                  const rObj = STATUS_TRACKING_PRICE_RANGES.find(r => r.id === rangeId);
+                  return (
+                    <span key={`chip-price-${rangeId}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
+                      {rObj?.label || rangeId}
+                      <button onClick={() => removeFilterPriceRange(rangeId)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
+                    </span>
+                  );
+                })}
+                {activeFilters.categories.map(cat => (
+                  <span key={`chip-cat-${cat}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
+                    Category: {cat}
+                    <button onClick={() => removeFilterCategory(cat)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
+                  </span>
+                ))}
+                {activeFilters.workflowStatuses.map(status => (
+                  <span key={`chip-status-${status}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
+                    Status: {status}
+                    <button onClick={() => removeFilterWorkflowStatus(status)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
+                  </span>
+                ))}
+                {activeFilters.platforms.map(plat => (
+                  <span key={`chip-plat-${plat}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
+                    Platform: {plat}
+                    <button onClick={() => removeFilterPlatform(plat)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
+                  </span>
+                ))}
+                {activeFilters.deliveryStatuses.map(delStatus => (
+                  <span key={`chip-del-${delStatus}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
+                    Delivery: {delStatus}
+                    <button onClick={() => removeFilterDeliveryStatus(delStatus)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
+                  </span>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={handleClearAllFilters}
+                className="text-purple-400 hover:text-purple-300 font-semibold text-xs ml-auto transition-colors cursor-pointer"
+              >
+                Clear All
+              </button>
+            </div>
+          )}
 
           {/* 3. SUMMARY CARDS (6 Cards) */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
@@ -1749,12 +2048,25 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             ) : filteredRecords.length === 0 ? (
               <div className="flex flex-col justify-center items-center h-64 text-slate-500 italic bg-[#0b1329]/50 rounded-2xl border border-slate-800/60 p-8">
                 <div className="text-4xl mb-3 opacity-60">🎯</div>
-                <h3 className="text-slate-300 text-base font-semibold mb-1">No matching status tracking records</h3>
-                <p className="text-xs text-slate-400">
-                  {searchQuery || selectedStatus !== 'ALL' || selectedPlatform !== 'ALL' || selectedLanguage !== 'ALL'
-                    ? 'Try clearing your filters to view influencers.'
+                <h3 className="text-slate-300 text-base font-semibold mb-1">
+                  {activeFilterCount > 0 || searchQuery.trim()
+                    ? 'No influencers match the selected filters.'
+                    : 'No matching status tracking records'}
+                </h3>
+                <p className="text-xs text-slate-400 mb-3">
+                  {activeFilterCount > 0 || searchQuery.trim()
+                    ? 'Try adjusting or clearing your filters to view influencers.'
                     : 'Dispatch an influencer with Delivered shipment status to begin status tracking.'}
                 </p>
+                {(activeFilterCount > 0 || searchQuery.trim()) && (
+                  <button
+                    type="button"
+                    onClick={handleClearAllFilters}
+                    className="px-4 py-2 bg-purple-600/20 border border-purple-500/50 hover:bg-purple-600/30 text-purple-300 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Clear All Filters
+                  </button>
+                )}
               </div>
             ) : (
               filteredRecords.map(record => {
@@ -2163,6 +2475,24 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           }
         }}
         onConfirm={handleConfirmDeleteSingle}
+      />
+
+      {/* ========================================================
+          MULTI-CRITERIA STATUS TRACKING FILTER DRAWER
+      ======================================================== */}
+      <StatusTrackingFilterDrawer
+        isOpen={isFilterDrawerOpen}
+        onClose={() => setIsFilterDrawerOpen(false)}
+        filters={activeFilters}
+        onApplyFilters={setActiveFilters}
+        onResetFilters={() => setActiveFilters(initialStatusTrackingFilterState)}
+        availableOptions={{
+          videos: availableFilterVideos,
+          languages: availableFilterLanguages,
+          categories: availableFilterCategories,
+          platforms: availableFilterPlatforms,
+          deliveryStatuses: availableFilterDeliveryStatuses
+        }}
       />
 
     </div>
