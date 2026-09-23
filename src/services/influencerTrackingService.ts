@@ -133,6 +133,30 @@ export function normalizeTrackingStatus(statusText?: string, error?: string): Tr
   return 'Pending';
 }
 
+/**
+ * Normalizes courier names case-insensitively and handles whitespace differences.
+ * Resolves variations of "Delhivery" and "ST Courier", classifying others as "Other" or null if empty.
+ */
+export function normalizeCourierName(courierRaw?: string | null): 'Delhivery' | 'ST Courier' | 'Other' | null {
+  if (!courierRaw) return null;
+  const cleaned = courierRaw.trim().replace(/\s+/g, ' ').toLowerCase();
+  if (!cleaned) return null;
+  if (cleaned.includes('delhivery')) {
+    return 'Delhivery';
+  }
+  if (
+    cleaned === 'st' ||
+    cleaned.startsWith('st ') ||
+    cleaned.includes('st courier') ||
+    cleaned.includes('st-courier') ||
+    cleaned.includes('st_courier') ||
+    cleaned.includes('stcourier')
+  ) {
+    return 'ST Courier';
+  }
+  return 'Other';
+}
+
 export interface DelhiveryStatusInput {
   remarks?: string | null;
   pendingRemarks?: string | null;

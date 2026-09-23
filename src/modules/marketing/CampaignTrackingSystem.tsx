@@ -22,7 +22,8 @@ import {
   formatDeliveredDate,
   parseToYMD,
   getTodayLocalYMD,
-  isShipmentDelivered
+  isShipmentDelivered,
+  normalizeCourierName
 } from '../../services/influencerTrackingService';
 import { formatDDMMYYYY } from '../../utils/influencerDateUtils';
 import { supabase } from '../../lib/supabase';
@@ -412,15 +413,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   // True if valid campaign tracking shipments exist in the database
   const hasTrackingData = allShipments.length > 0;
 
-  // Unique couriers present in this campaign (case-insensitive deduplicated)
+  // Unique couriers present in this campaign (case-insensitive deduplicated & normalized)
   const availableCouriers = useMemo(() => {
     const map = new Map<string, string>();
     allShipments.forEach(s => {
       if (s.courier && s.courier.trim()) {
-        const clean = s.courier.trim();
-        const lower = clean.toLowerCase();
-        if (!map.has(lower)) {
-          map.set(lower, clean);
+        const norm = normalizeCourierName(s.courier);
+        if (norm && norm !== 'Other') {
+          if (!map.has(norm.toLowerCase())) {
+            map.set(norm.toLowerCase(), norm);
+          }
+        } else {
+          const clean = s.courier.trim();
+          const lower = clean.toLowerCase();
+          if (!map.has(lower)) {
+            map.set(lower, clean);
+          }
         }
       }
     });
@@ -706,9 +714,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return cells;
   }, [calendarYear, calendarMonth, deliverySchedule.byDateMap, deliverySchedule.todayYmd]);
 
-  // Filtered Shipments
-  const filteredShipments = useMemo(() => {
-    const filtered = allShipments.filter(s => {
+  // Base shipments for courier counts & table display (scoped to current campaign, filtered by status tab, status dropdown, search, delivery date, etc., WITHOUT filtering by courier)
+  const courierBaseShipments = useMemo(() => {
+    return allShipments.filter(s => {
       // 0. Delivery & Delivered Date Filter (canonical estimated_delivery_date and delivered_date)
       const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate;
       const eddYmd = edd ? parseToYMD(edd) : '';
@@ -753,12 +761,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         }
       }
 
-      // 2. Courier filter
-      if (selectedCourier !== 'All' && s.courier.toLowerCase() !== selectedCourier.toLowerCase()) {
-        return false;
-      }
-
-      // 3. Status Tab filter (pills)
+      // 2. Status Tab filter (pills)
       if (selectedStatusTab !== 'All') {
         const cat = getShipmentCategory(s);
         if (cat !== selectedStatusTab) {
@@ -766,7 +769,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         }
       }
 
-      // 4. Status Dropdown filter
+      // 3. Status Dropdown filter
       if (selectedStatusDropdown !== 'All') {
         const cat = getShipmentCategory(s);
         const display = getTrackingDisplayStatus(s);
@@ -775,7 +778,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         }
       }
 
-      // 5. Date Range filter (strictly on canonical Estimated Delivery Date, not dispatchDate/upload/order)
+      // 4. Date Range filter (strictly on canonical Estimated Delivery Date, not dispatchDate/upload/order)
       if (startDate || endDate) {
         if (!eddYmd) return false;
         if (startDate && eddYmd < startDate) return false;
@@ -784,10 +787,72 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       return true;
     });
+  }, [allShipments, selectedDeliveryDate, selectedDeliveryDateEnd, searchTerm, selectedStatusTab, selectedStatusDropdown, startDate, endDate]);
 
-    // Natural ascending sort on the filtered influencer shipments BEFORE pagination
+  // Real-time Courier Counts (Delhivery, ST Courier, Other) strictly scoped to campaign and active filters
+  const courierCounts = useMemo(() => {
+    let delhivery = 0;
+    let stCourier = 0;
+    let other = 0;
+
+    for (const s of courierBaseShipments) {
+      const norm = normalizeCourierName(s.courier);
+      if (norm === 'Delhivery') {
+        delhivery++;
+      } else if (norm === 'ST Courier') {
+        stCourier++;
+      } else if (norm === 'Other') {
+        other++;
+      }
+    }
+
+    return { delhivery, stCourier, other };
+  }, [courierBaseShipments]);
+
+  // Filtered Shipments (applies selected courier filter onto the base shipments)
+  const filteredShipments = useMemo(() => {
+    if (selectedCourier === 'All') {
+      return sortInfluencerShipmentsNaturally(courierBaseShipments);
+    }
+
+    const normSelected = normalizeCourierName(selectedCourier);
+    const filtered = courierBaseShipments.filter(s => {
+      const normShipment = normalizeCourierName(s.courier);
+      if (normSelected && normShipment) {
+        return normShipment === normSelected;
+      }
+      return s.courier.trim().toLowerCase() === selectedCourier.trim().toLowerCase();
+    });
+
     return sortInfluencerShipmentsNaturally(filtered);
-  }, [allShipments, selectedDeliveryDate, selectedDeliveryDateEnd, searchTerm, selectedCourier, selectedStatusTab, selectedStatusDropdown, startDate, endDate]);
+  }, [courierBaseShipments, selectedCourier]);
+
+  // Active states for courier filters
+  const isDelhiveryActive = 
+    selectedCourier !== 'All' && 
+    normalizeCourierName(selectedCourier) === 'Delhivery';
+
+  const isSTCourierActive = 
+    selectedCourier !== 'All' && 
+    normalizeCourierName(selectedCourier) === 'ST Courier';
+
+  const isOtherActive = 
+    selectedCourier !== 'All' && 
+    normalizeCourierName(selectedCourier) === 'Other';
+
+  // Toggle or select courier filter via badge click
+  const handleCourierBadgeClick = useCallback((targetCourier: 'Delhivery' | 'ST Courier' | 'Other') => {
+    const isCurrentlyActive = 
+      selectedCourier !== 'All' && 
+      normalizeCourierName(selectedCourier) === targetCourier;
+
+    if (isCurrentlyActive) {
+      setSelectedCourier('All');
+    } else {
+      const matched = availableCouriers.find(c => normalizeCourierName(c) === targetCourier);
+      setSelectedCourier(matched || targetCourier);
+    }
+  }, [selectedCourier, availableCouriers]);
 
   // Reset pagination whenever filters change
   useEffect(() => {
@@ -1388,8 +1453,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       ) : (
         <>
 
-      {/* 4. STATUS FILTER PILLS + ESTIMATED DELIVERY DATE + BULK MOVE */}
-      <div className="flex items-center justify-between gap-3 w-full">
+      {/* 4. STATUS FILTER PILLS + ESTIMATED DELIVERY DATE + COURIER COUNTS + BULK MOVE */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 w-full">
         {/* Status Pills + Calendar Icon (Kept together on the same row) */}
         <div className="flex items-center gap-1.5 sm:gap-2 flex-nowrap shrink-0 overflow-x-auto [scrollbar-width:none]">
           {STATUS_PILLS.map((pill) => {
@@ -1464,8 +1529,74 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           </button>
         </div>
 
-        {/* Right Action Group: Move to Status Tracking aligned to FAR RIGHT */}
-        <div className="ml-auto shrink-0 flex-shrink-0">
+        {/* Right Group: Courier Counts (Delhivery & ST Courier) + Move to Status Tracking */}
+        <div className="flex items-center gap-2 sm:gap-2.5 ml-auto shrink-0 flex-shrink-0">
+          {/* Courier Counts */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Delhivery */}
+            <button
+              type="button"
+              onClick={() => handleCourierBadgeClick('Delhivery')}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${
+                isDelhiveryActive
+                  ? 'bg-cyan-600 text-white border-cyan-400 shadow-md shadow-cyan-600/30'
+                  : 'border-cyan-800/50 text-cyan-300 hover:border-cyan-500 hover:text-cyan-200'
+              }`}
+              title={isDelhiveryActive ? 'Delhivery filter active (click to show all couriers)' : 'Filter by Delhivery'}
+            >
+              <Truck size={12} className={isDelhiveryActive ? 'text-white' : 'text-cyan-400'} />
+              <span>Delhivery</span>
+              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                isDelhiveryActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-cyan-200'
+              }`}>
+                {courierCounts.delhivery}
+              </span>
+            </button>
+
+            {/* ST Courier */}
+            <button
+              type="button"
+              onClick={() => handleCourierBadgeClick('ST Courier')}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${
+                isSTCourierActive
+                  ? 'bg-purple-600 text-white border-purple-400 shadow-md shadow-purple-600/30'
+                  : 'border-purple-800/50 text-purple-300 hover:border-purple-500 hover:text-purple-200'
+              }`}
+              title={isSTCourierActive ? 'ST Courier filter active (click to show all couriers)' : 'Filter by ST Courier'}
+            >
+              <Truck size={12} className={isSTCourierActive ? 'text-white' : 'text-purple-400'} />
+              <span>ST Courier</span>
+              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                isSTCourierActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-purple-200'
+              }`}>
+                {courierCounts.stCourier}
+              </span>
+            </button>
+
+            {/* Other Courier (only if present) */}
+            {courierCounts.other > 0 && (
+              <button
+                type="button"
+                onClick={() => handleCourierBadgeClick('Other')}
+                className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${
+                  isOtherActive
+                    ? 'bg-slate-700 text-white border-slate-500 shadow-md'
+                    : 'border-slate-800/70 text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                }`}
+                title={isOtherActive ? 'Other couriers filter active (click to show all couriers)' : 'Filter by other couriers'}
+              >
+                <Truck size={12} className={isOtherActive ? 'text-white' : 'text-slate-400'} />
+                <span>Other</span>
+                <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                  isOtherActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
+                }`}>
+                  {courierCounts.other}
+                </span>
+              </button>
+            )}
+          </div>
+
+          {/* Right Action Group: Move to Status Tracking aligned to FAR RIGHT */}
           <button
             type="button"
             onClick={handleBulkMoveToStatusTracking}
@@ -1575,9 +1706,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         {/* 3. COURIER */}
                         <td className="px-5 py-3.5">
                           <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap border ${
-                            s.courier.toLowerCase().includes('delhivery')
+                            normalizeCourierName(s.courier) === 'Delhivery'
                               ? 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300'
-                              : 'bg-purple-950/60 border-purple-800/60 text-purple-300'
+                              : (normalizeCourierName(s.courier) === 'ST Courier'
+                                ? 'bg-purple-950/60 border-purple-800/60 text-purple-300'
+                                : 'bg-slate-900 border-slate-800 text-slate-300')
                           }`}>
                             {s.courier}
                           </span>
