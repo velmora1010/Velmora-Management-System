@@ -8,7 +8,13 @@ import {
   X, 
   Truck, 
   RefreshCw,
-  ArrowRight
+  ArrowRight,
+  Eye,
+  Check,
+  Ban,
+  Layers,
+  FileText,
+  AlertCircle
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
@@ -34,8 +40,12 @@ import {
 } from '../../services/influencerTrackingService';
 import { parseToYMD } from '../../utils/influencerDateUtils';
 import { normalizeInfluencerReference } from '../../services/influencerStatusHandoffService';
-import { extractInfluencerCodeFromOrderId } from '../../services/shipmentAttemptService';
-import { normalizeOrderId, isSameUnderlyingOrder } from '../../utils/orderIdUtils';
+import { 
+  normalizeOrderId, 
+  isSameUnderlyingOrder,
+  parseDelhiveryReferenceNo,
+  ParsedDelhiveryReference
+} from '../../utils/orderIdUtils';
 import toast from 'react-hot-toast';
 
 export interface UploadResultStats {
@@ -52,7 +62,6 @@ export interface UploadResultStats {
 
 /**
  * Displays a clean, uncompressed, dark navy result toast with separate metric rows.
- * Prevents text collision/wrapping and clearly highlights success vs failure.
  */
 export function showUploadResultToast(stats: UploadResultStats) {
   toast.dismiss();
@@ -126,6 +135,45 @@ export function showUploadResultToast(stats: UploadResultStats) {
   );
 }
 
+export interface ValidParsedShipmentRow {
+  rawAwb: string;
+  orderId: string;
+  rawOrderId: string;
+  baseOrderId: string;
+  isResend: boolean;
+  attemptNumber: number;
+  consigneeName: string;
+  currentStatus: string;
+  statusType: string;
+  remarks: string;
+  pendingRemarks: string;
+  weight: string;
+  date: string;
+  edd: string;
+  deliveredDate: string;
+  city: string;
+  state: string;
+  pin: string;
+  matchedInf: CampaignInfluencer;
+}
+
+export interface ImportPreviewData {
+  file: File;
+  totalCsvRows: number;
+  validRows: ValidParsedShipmentRow[];
+  originalCount: number;
+  replacementCount: number;
+  ignoredCustomerCount: number;
+  invalidCount: number;
+  newShipmentsCount: number;
+  existingShipmentsCount: number;
+  ignoredSamples: { ref: string; reason: string }[];
+  validSamples: { ref: string; displayOrderId: string; influencerName: string; isReplacement: boolean; awb: string; status: string }[];
+  rowsWithRemarksCount: number;
+  existingMap: Map<string, InfluencerDispatchedShipment>;
+  activeCampaignInfluencers: CampaignInfluencer[];
+}
+
 export interface UploadCourierShipmentModalProps {
   campaign: Campaign;
   courier: 'ST Courier' | 'Delhivery';
@@ -143,10 +191,12 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
   onClose,
   onSuccess
 }) => {
-  const [step, setStep] = useState<'upload' | 'importing' | 'completed' | 'error'>('upload');
+  const [step, setStep] = useState<'upload' | 'preview' | 'importing' | 'completed' | 'error'>('upload');
   const [file, setFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
+  const [previewData, setPreviewData] = useState<ImportPreviewData | null>(null);
+  const [previewTab, setPreviewTab] = useState<'valid' | 'ignored'>('valid');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isExecutingRef = useRef(false);
   const processedFileRef = useRef<File | null>(null);
@@ -186,16 +236,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
     return s;
   };
 
-  const normalizePhone = (val: any): string => {
-    const s = cleanStr(val).replace(/[^0-9]/g, '');
-    return s.length >= 10 ? s.slice(-10) : s;
-  };
-
-  const normalizeCode = (val: any): string => {
-    return cleanStr(val).replace(/^#+/, '').trim().toLowerCase();
-  };
-
-  // Find header index based on possible variations (exact normalized match first, then substring)
+  // Find header index based on possible variations
   const findColumnKey = (rowKeys: string[], possibleNames: string[]): string | null => {
     // Pass 1: exact normalized match
     for (const target of possibleNames) {
@@ -207,7 +248,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
       }
     }
-    // Pass 2: substring match (only for targets with length >= 4 to avoid false positive substring matches)
+    // Pass 2: substring match (length >= 4)
     for (const target of possibleNames) {
       const normTarget = target.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
       if (normTarget.length < 4) continue;
@@ -221,7 +262,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
     return null;
   };
 
-  // Automated end-to-end upload, parse, transform, import, and sync pipeline
+  // Step 1: Parse and analyze the uploaded file without writing to database
   const executeUploadPipeline = async (selectedFile: File) => {
     if (isExecutingRef.current) return;
     isExecutingRef.current = true;
@@ -230,7 +271,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
     setUploadError(null);
     setStep('importing');
 
-    console.log(`[Upload Pipeline] Starting for ${courier}. File:`, selectedFile.name, 'Size:', selectedFile.size, 'Type:', selectedFile.type);
+    console.log(`[Upload Pipeline] Analyzing ${courier} file:`, selectedFile.name, 'Size:', selectedFile.size);
 
     const isExcel = selectedFile.name.endsWith('.xlsx') || selectedFile.name.endsWith('.xls');
     const isCsv = selectedFile.name.endsWith('.csv') || selectedFile.type.includes('csv') || selectedFile.type.includes('comma');
@@ -312,7 +353,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         deliveredDateCol = findColumnKey(headers, ['delivereddate', 'delivered_date', 'deliverydate', 'delivery_date', 'actualdeliverydate', 'actual_delivery_date']);
         weightCol = findColumnKey(headers, ['weight', 'totalweight', 'chargedweight']);
       } else {
-        // Delhivery
+        // Delhivery: strictly requires Waybill and Reference No.
         awbCol = findColumnKey(headers, ['waybill', 'waybillno', 'waybillnumber', 'awb', 'trackingnumber']);
         if (!awbCol) {
           const err = `Delhivery upload failed: Required "Waybill" column not found. Available columns: ${headers.join(', ')}`;
@@ -322,7 +363,16 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           isExecutingRef.current = false;
           return;
         }
-        orderCol = findColumnKey(headers, ['referenceno', 'reference', 'refno', 'order', 'orderid', 'orderno']);
+        // ONLY match reference columns — never use clientreference, waybill, or consignee
+        orderCol = findColumnKey(headers, ['referenceno', 'referencenumber', 'refno', 'reference', 'orderid', 'orderno', 'ordernumber', 'order']);
+        if (!orderCol) {
+          const err = `Delhivery upload failed: Required "Reference No." column not found. Available columns: ${headers.join(', ')}`;
+          setUploadError(err);
+          setStep('error');
+          toast.error('Invalid Delhivery file: "Reference No." column not found.', { duration: 6000 });
+          isExecutingRef.current = false;
+          return;
+        }
         consigneeNameCol = findColumnKey(headers, ['consigneename', 'creatorname', 'influencername', 'customername', 'name', 'recipient']);
         currentStatusCol = findColumnKey(headers, ['currentstatus', 'status', 'shipmentstatus']);
         statusTypeCol = findColumnKey(headers, ['statustype', 'type', 'shipmenttype']);
@@ -337,7 +387,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         weightCol = findColumnKey(headers, ['weight', 'amount', 'mpsamount']);
       }
 
-      // 2. Load and build canonical influencer lookup map strictly for the current campaign
+      // 2. Load active campaign influencers strictly for the current campaign
       let activeCampaignInfluencers = (influencers || []).filter(inf => 
         String(inf.is_archived).toLowerCase() !== 'true' &&
         (inf.campaign_id === undefined || String(inf.campaign_id) === String(campaign.id))
@@ -357,14 +407,23 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
       }
 
-      // Build canonical influencer code lookup map for the current campaign
+      // Build canonical campaign influencer code sets & map
+      const validCampaignCodesSet = new Set<string>();
       const codeMap = new Map<string, CampaignInfluencer>();
+
       activeCampaignInfluencers.forEach(inf => {
         if (inf.code) {
-          const norm = normalizeInfluencerReference(inf.code);
-          if (norm) codeMap.set(norm, inf);
+          const raw = String(inf.code).replace(/[\t\r\n]/g, ' ').trim();
+          const clean = raw.replace(/^#+/, '').trim().toUpperCase();
+          if (clean) {
+            validCampaignCodesSet.add(clean);
+            codeMap.set(clean, inf);
+            codeMap.set(clean.toLowerCase(), inf);
+          }
         }
       });
+
+      console.log(`[Upload Pipeline] Campaign ${campaign.id}: ${activeCampaignInfluencers.length} active influencers, ${validCampaignCodesSet.size} unique codes.`);
 
       // 3. Existing shipments in current campaign (for duplicate & reconciliation tracking)
       let existingCampaignShipments: InfluencerDispatchedShipment[] = [];
@@ -379,31 +438,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         if (k) existingMap.set(k, s);
       });
 
-      // 4. Parse rows into shipment records with PRE-PERSISTENCE customer filtering
-      const todayDate = new Date().toISOString().split('T')[0];
-      const validRows: {
-        rawAwb: string;
-        orderId: string;
-        rawOrderId: string;
-        baseOrderId: string;
-        isResend: boolean;
-        attemptNumber: number;
-        consigneeName: string;
-        currentStatus: string;
-        statusType: string;
-        remarks: string;
-        pendingRemarks: string;
-        weight: string;
-        date: string;
-        edd: string;
-        deliveredDate: string;
-        city: string;
-        state: string;
-        pin: string;
-        matchedInf: CampaignInfluencer;
-      }[] = [];
+      // 4. Parse rows with strict Reference No. validation
+      const validRows: ValidParsedShipmentRow[] = [];
+      const ignoredSamples: { ref: string; reason: string }[] = [];
+      const validSamples: { ref: string; displayOrderId: string; influencerName: string; isReplacement: boolean; awb: string; status: string }[] = [];
       let invalidRowsCount = 0;
       let ignoredCustomerRowsCount = 0;
+      let rowsWithRemarksCount = 0;
 
       rawData.forEach((row) => {
         const rawAwb = awbCol ? cleanStr(row[awbCol]) : '';
@@ -431,114 +472,150 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           return;
         }
 
-        // Match reference against current campaign influencers or existing shipments
-        let matchedInf: CampaignInfluencer | undefined;
+        if (courier === 'Delhivery') {
+          // Delhivery: ONLY Reference No. determines if this is an influencer shipment
+          const parsedRef = parseDelhiveryReferenceNo(rawOrderId, validCampaignCodesSet);
+          if (!parsedRef.isValid) {
+            if (parsedRef.rejectReason?.includes('numeric') || parsedRef.rejectReason?.includes('not found')) {
+              ignoredCustomerRowsCount++;
+            } else {
+              invalidRowsCount++;
+            }
+            if (ignoredSamples.length < 25) {
+              ignoredSamples.push({
+                ref: rawOrderId || '(Blank)',
+                reason: parsedRef.rejectReason || 'Invalid Reference No.'
+              });
+            }
+            return; // STRICT: Do NOT check any other column!
+          }
 
-        // 1. Check if AWB matches an existing campaign shipment
-        const existingShipment = rawAwb ? existingMap.get(rawAwb.toLowerCase()) : undefined;
-        if (existingShipment) {
-          matchedInf = activeCampaignInfluencers.find(i => 
-            (existingShipment.influencerId && String(i.id) === String(existingShipment.influencerId)) ||
-            (i.code && isSameUnderlyingOrder(i.code, existingShipment.influencerCode))
-          );
+          const matchedInf = codeMap.get(parsedRef.influencerCode) || codeMap.get(parsedRef.influencerCode.toLowerCase());
           if (!matchedInf) {
-            matchedInf = {
-              id: existingShipment.influencerId ? Number(existingShipment.influencerId) || existingShipment.influencerId : existingShipment.id,
-              campaign_id: campaign.id,
-              name: existingShipment.creatorName,
-              influencer_name: existingShipment.creatorName,
-              code: existingShipment.influencerCode || rawOrderId,
-              phone_number: existingShipment.phoneNumber,
-              alternative_number: existingShipment.altPhoneNumber,
-              state: existingShipment.state,
-              profile_file_url: existingShipment.profilePhoto
-            } as any;
-          }
-        }
-
-        // 2. Match by Order ID / Reference No
-        if (!matchedInf && rawOrderId) {
-          const norm = normalizeOrderId(rawOrderId);
-          const cleanNorm = norm.normalized.toLowerCase();
-          const baseNorm = norm.baseCode.toLowerCase();
-
-          if (cleanNorm && codeMap.has(cleanNorm)) {
-            matchedInf = codeMap.get(cleanNorm);
-          } else if (baseNorm && codeMap.has(baseNorm)) {
-            matchedInf = codeMap.get(baseNorm);
-          } else {
-            // Generic check across campaign influencers
-            matchedInf = activeCampaignInfluencers.find(inf => 
-              isSameUnderlyingOrder(rawOrderId, inf.code)
-            );
-          }
-        }
-
-        // 3. If not matched by orderCol, check if any column contains a valid canonical campaign influencer code
-        if (!matchedInf) {
-          for (const key of headers) {
-            const val = cleanStr(row[key]);
-            if (!val) continue;
-            const norm = normalizeOrderId(val);
-            const cleanNorm = norm.normalized.toLowerCase();
-            const baseNorm = norm.baseCode.toLowerCase();
-            if (cleanNorm && codeMap.has(cleanNorm)) {
-              matchedInf = codeMap.get(cleanNorm);
-              break;
-            }
-            if (baseNorm && codeMap.has(baseNorm)) {
-              matchedInf = codeMap.get(baseNorm);
-              break;
-            }
-            const found = activeCampaignInfluencers.find(inf => isSameUnderlyingOrder(val, inf.code));
-            if (found) {
-              matchedInf = found;
-              break;
-            }
-          }
-        }
-
-        // PRE-PERSISTENCE FILTER: Reject customer rows before they reach storage
-        if (!matchedInf) {
-          if (rawOrderId) {
             ignoredCustomerRowsCount++;
-          } else {
-            invalidRowsCount++;
+            if (ignoredSamples.length < 25) {
+              ignoredSamples.push({
+                ref: rawOrderId,
+                reason: `Influencer code "${parsedRef.influencerCode}" not found in current campaign`
+              });
+            }
+            return;
           }
-          return;
+
+          if (rawRemarks) {
+            rowsWithRemarksCount++;
+          }
+
+          const rowObj: ValidParsedShipmentRow = {
+            rawAwb,
+            orderId: parsedRef.displayOrderId,
+            rawOrderId,
+            baseOrderId: parsedRef.logicalOrderId,
+            isResend: parsedRef.isReplacement,
+            attemptNumber: parsedRef.attemptNumber,
+            consigneeName: rawConsigneeName,
+            currentStatus: rawCurrentStatus,
+            statusType: rawStatusType,
+            remarks: rawRemarks,
+            pendingRemarks: rawPendingRemarks,
+            weight: rawWeight,
+            date: rawDate,
+            edd: rawEdd,
+            deliveredDate: rawDeliveredDate,
+            city: rawCity,
+            state: rawState,
+            pin: rawPin,
+            matchedInf
+          };
+
+          validRows.push(rowObj);
+          if (validSamples.length < 25) {
+            validSamples.push({
+              ref: rawOrderId,
+              displayOrderId: parsedRef.displayOrderId,
+              influencerName: matchedInf.influencer_name || matchedInf.name || 'Influencer',
+              isReplacement: parsedRef.isReplacement,
+              awb: rawAwb,
+              status: rawCurrentStatus || rawStatusType || 'Pending'
+            });
+          }
+        } else {
+          // ST Courier
+          const parsedRef = parseDelhiveryReferenceNo(rawOrderId, validCampaignCodesSet);
+          let matchedInf = parsedRef.isValid 
+            ? (codeMap.get(parsedRef.influencerCode) || codeMap.get(parsedRef.influencerCode.toLowerCase()))
+            : undefined;
+
+          if (!matchedInf && rawOrderId) {
+            const norm = normalizeOrderId(rawOrderId);
+            if (norm.baseCode && !norm.isNumericCustomerOrder) {
+              matchedInf = codeMap.get(norm.baseCode.toUpperCase()) || codeMap.get(norm.baseCode.toLowerCase());
+            }
+          }
+
+          if (!matchedInf) {
+            if (rawOrderId) {
+              ignoredCustomerRowsCount++;
+              if (ignoredSamples.length < 25) {
+                ignoredSamples.push({
+                  ref: rawOrderId,
+                  reason: parsedRef.rejectReason || 'Influencer not found in current campaign'
+                });
+              }
+            } else {
+              invalidRowsCount++;
+            }
+            return;
+          }
+
+          if (rawRemarks) {
+            rowsWithRemarksCount++;
+          }
+
+          const orderInfo = normalizeOrderId(rawOrderId || matchedInf.code);
+          const canonicalBase = orderInfo.baseCode || (matchedInf.code ? matchedInf.code.replace(/^#+/, '') : '');
+          const resolvedOrderId = orderInfo.isResend 
+            ? `R ${canonicalBase}` 
+            : (rawOrderId ? (rawOrderId.startsWith('#') ? rawOrderId : `#${rawOrderId}`) : `#${canonicalBase}`);
+
+          const rowObj: ValidParsedShipmentRow = {
+            rawAwb,
+            orderId: resolvedOrderId,
+            rawOrderId: rawOrderId || resolvedOrderId,
+            baseOrderId: canonicalBase,
+            isResend: orderInfo.isResend,
+            attemptNumber: orderInfo.attemptNumber,
+            consigneeName: rawConsigneeName,
+            currentStatus: rawCurrentStatus,
+            statusType: rawStatusType,
+            remarks: rawRemarks,
+            pendingRemarks: rawPendingRemarks,
+            weight: rawWeight,
+            date: rawDate,
+            edd: rawEdd,
+            deliveredDate: rawDeliveredDate,
+            city: rawCity,
+            state: rawState,
+            pin: rawPin,
+            matchedInf
+          };
+
+          validRows.push(rowObj);
+          if (validSamples.length < 25) {
+            validSamples.push({
+              ref: rawOrderId,
+              displayOrderId: resolvedOrderId,
+              influencerName: matchedInf.influencer_name || matchedInf.name || 'Influencer',
+              isReplacement: orderInfo.isResend,
+              awb: rawAwb,
+              status: rawCurrentStatus || 'Pending'
+            });
+          }
         }
-
-        const orderInfo = normalizeOrderId(rawOrderId || matchedInf.code);
-        const canonicalBase = orderInfo.baseCode || (matchedInf.code ? matchedInf.code.replace(/^#+/, '') : '');
-        const resolvedOrderId = orderInfo.isResend 
-          ? `R ${canonicalBase}` 
-          : (rawOrderId ? (rawOrderId.startsWith('#') ? rawOrderId : `#${rawOrderId}`) : `#${canonicalBase}`);
-
-        validRows.push({
-          rawAwb,
-          orderId: resolvedOrderId,
-          rawOrderId: rawOrderId || resolvedOrderId,
-          baseOrderId: canonicalBase,
-          isResend: orderInfo.isResend,
-          attemptNumber: orderInfo.attemptNumber,
-          consigneeName: rawConsigneeName,
-          currentStatus: rawCurrentStatus,
-          statusType: rawStatusType,
-          remarks: rawRemarks,
-          pendingRemarks: rawPendingRemarks,
-          weight: rawWeight,
-          date: rawDate,
-          edd: rawEdd,
-          deliveredDate: rawDeliveredDate,
-          city: rawCity,
-          state: rawState,
-          pin: rawPin,
-          matchedInf
-        });
       });
 
       if (validRows.length === 0) {
-        const err = `No campaign influencer shipments found in this file (${ignoredCustomerRowsCount} customer rows ignored).`;
+        const err = `No valid campaign influencer shipments found in this file (${ignoredCustomerRowsCount} customer rows ignored).`;
         setUploadError(err);
         setStep('error');
         showUploadResultToast({
@@ -555,19 +632,84 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         return;
       }
 
-      console.log(`[Upload Pipeline] Accepted Influencers: ${validRows.length}, Ignored Customers: ${ignoredCustomerRowsCount}, Invalid: ${invalidRowsCount}`);
+      const replacementCount = validRows.filter(r => r.isResend).length;
+      const originalCount = validRows.filter(r => !r.isResend).length;
+      const newShipmentsCount = validRows.filter(r => !existingMap.has(r.rawAwb.toLowerCase())).length;
+      const existingShipmentsCount = validRows.filter(r => existingMap.has(r.rawAwb.toLowerCase())).length;
 
+      console.log(`[Upload Pipeline] Analysis Complete for ${selectedFile.name}:
+- Total CSV rows: ${rawData.length}
+- Valid influencer shipments: ${validRows.length} (Original: ${originalCount}, Replacement: ${replacementCount})
+- Ignored customer rows: ${ignoredCustomerRowsCount}
+- Invalid rows: ${invalidRowsCount}
+- New shipments: ${newShipmentsCount}
+- Existing shipments: ${existingShipmentsCount}`);
+
+      setPreviewData({
+        file: selectedFile,
+        totalCsvRows: rawData.length,
+        validRows,
+        originalCount,
+        replacementCount,
+        ignoredCustomerCount: ignoredCustomerRowsCount,
+        invalidCount: invalidRowsCount,
+        newShipmentsCount,
+        existingShipmentsCount,
+        ignoredSamples,
+        validSamples,
+        rowsWithRemarksCount,
+        existingMap,
+        activeCampaignInfluencers
+      });
+
+      setStep('preview');
+    } catch (err: any) {
+      console.error('[Upload Pipeline Error]:', err);
+      const msg = `Failed to process file: ${err?.message || String(err)}`;
+      setUploadError(msg);
+      setStep('error');
+      showUploadResultToast({
+        title: `${courier} Upload Failed`,
+        isSuccess: false,
+        acceptedCount: 0,
+        ignoredCustomerCount: 0,
+        unmatchedInvalidCount: 0,
+        updatedExistingCount: 0,
+        newShipmentsCount: 0,
+        errorMessage: msg
+      });
+    } finally {
+      isExecutingRef.current = false;
+    }
+  };
+
+  // Step 2: User confirms the preview -> execute final import & persistence
+  const executeFinalImport = async () => {
+    if (!previewData || isExecutingRef.current) return;
+    isExecutingRef.current = true;
+    setStep('importing');
+
+    const { 
+      validRows, 
+      existingMap, 
+      ignoredCustomerCount, 
+      invalidCount, 
+      totalCsvRows,
+      rowsWithRemarksCount 
+    } = previewData;
+
+    try {
       // =======================================================================
       // WORKFLOW A: ST COURIER (LIVE API SYNC ONE BY ONE)
       // =======================================================================
       if (courier === 'ST Courier') {
         setImportProgress({
-          total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount,
+          total: validRows.length,
           completed: 0,
           accepted: validRows.length,
-          ignored: ignoredCustomerRowsCount,
+          ignored: ignoredCustomerCount,
           successful: 0,
-          failed: invalidRowsCount,
+          failed: invalidCount,
           duplicates: 0,
           imported: 0,
           currentAwb: '',
@@ -579,7 +721,6 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         let liveApiPendingCount = 0;
         let completedCount = 0;
 
-        // Controlled concurrency: 2 at a time
         const concurrency = 2;
         for (let i = 0; i < validRows.length; i += concurrency) {
           const chunk = validRows.slice(i, i + concurrency);
@@ -588,7 +729,6 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             chunk.map(async (row) => {
               const inf = row.matchedInf;
               const awb = row.rawAwb.trim();
-
               const existingShipment = existingMap.get(awb.toLowerCase());
 
               const baseShipment: InfluencerDispatchedShipment = {
@@ -624,7 +764,6 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                 trackingUrl: getCourierTrackingUrl('ST Courier', awb)
               };
 
-              // Fetch live status from existing ST Courier tracking API
               const tracked = await syncSingleShipment(baseShipment, campaign.id);
               trackedShipments.push(tracked);
 
@@ -636,12 +775,12 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               completedCount++;
 
               setImportProgress({
-                total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount,
+                total: validRows.length,
                 completed: completedCount,
                 accepted: validRows.length,
-                ignored: ignoredCustomerRowsCount,
+                ignored: ignoredCustomerCount,
                 successful: liveApiSyncedCount,
-                failed: invalidRowsCount,
+                failed: invalidCount,
                 duplicates: 0,
                 imported: completedCount,
                 currentAwb: awb,
@@ -651,15 +790,15 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           );
         }
 
-        // Save only validated campaign influencer shipments to campaign database & local storage
+        // Save only validated campaign influencer shipments to Supabase
         const dbResult = await upsertCampaignShipmentsToDb(campaign.id, trackedShipments);
 
         const acceptedReported = validRows.length;
         const importedReported = dbResult.imported;
         const duplicatesReported = dbResult.duplicatesUpdated;
-        const failedReported = dbResult.failed + invalidRowsCount;
+        const failedReported = dbResult.failed + invalidCount;
 
-        // Also persist matched influencers to Supabase and Dexie
+        // Persist matched influencers to Supabase influencer_dispatch table
         for (const s of trackedShipments) {
           if (s.influencerId) {
             try {
@@ -690,10 +829,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           await logActivity({
             department: 'Marketing',
             action: 'Upload ST Courier Shipments',
-            description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Accepted: ${acceptedReported}, Ignored customer: ${ignoredCustomerRowsCount}, Invalid: ${invalidRowsCount}, Duplicates updated: ${duplicatesReported}`,
+            description: `Imported and tracked ${trackedShipments.length} ST Courier shipments for campaign "${campaign.campaign_name}". Accepted: ${acceptedReported}, Ignored customer: ${ignoredCustomerCount}, Invalid: ${invalidCount}, Duplicates updated: ${duplicatesReported}`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'ST Courier', total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, invalid: invalidRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, liveSynced: liveApiSyncedCount, livePending: liveApiPendingCount }
+            metadata: { courier: 'ST Courier', total: totalCsvRows, accepted: acceptedReported, ignoredCustomer: ignoredCustomerCount, invalid: invalidCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, liveSynced: liveApiSyncedCount, livePending: liveApiPendingCount }
           });
         } catch (e) {}
 
@@ -721,30 +860,30 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           title: 'ST Courier Upload Complete',
           isSuccess: true,
           acceptedCount: acceptedReported,
-          ignoredCustomerCount: ignoredCustomerRowsCount,
-          unmatchedInvalidCount: invalidRowsCount,
+          ignoredCustomerCount: ignoredCustomerCount,
+          unmatchedInvalidCount: invalidCount,
           updatedExistingCount: duplicatesReported,
           newShipmentsCount: importedReported
         });
 
       // =======================================================================
-      // WORKFLOW B: DELHIVERY (UPLOADED FILE STATUS AS SOURCE OF TRUTH - NO API)
+      // WORKFLOW B: DELHIVERY (UPLOADED FILE STATUS AS SOURCE OF TRUTH)
       // =======================================================================
       } else {
         setImportProgress({
-          total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount,
+          total: validRows.length,
           completed: 0,
           accepted: validRows.length,
-          ignored: ignoredCustomerRowsCount,
+          ignored: ignoredCustomerCount,
           successful: 0,
-          failed: invalidRowsCount,
+          failed: invalidCount,
           duplicates: 0,
           imported: 0,
           currentAwb: '',
-          phase: `Importing ${validRows.length} Delhivery shipments from file...`
+          phase: `Saving ${validRows.length} Delhivery shipments to database...`
         });
 
-        // Pre-fetch existing campaign dispatches in one query
+        // Pre-fetch existing campaign dispatches
         const existingDispatchesMap = new Map<string, string>();
         try {
           const { data: dispatches } = await supabaseAdmin
@@ -761,7 +900,6 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const nowTimestamp = new Date().toLocaleString();
         const delhiveryShipments: InfluencerDispatchedShipment[] = [];
         const dispatchUpdates: { id: string; courier_partner: string; tracking_id: string; dispatch_status: string; dispatch_date: string | null; expected_delivery_date: string | null; }[] = [];
-        let rowsWithRemarksCount = 0;
 
         for (let i = 0; i < validRows.length; i++) {
           const row = validRows[i];
@@ -769,10 +907,6 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           const awb = String(row.rawAwb || '').trim();
 
           const incomingRemarks = (row.remarks && row.remarks.trim()) ? row.remarks.trim() : '';
-          if (incomingRemarks) {
-            rowsWithRemarksCount++;
-          }
-
           const existingShipment = existingMap.get(awb.toLowerCase());
 
           const finalRemarks = incomingRemarks || existingShipment?.remarks || undefined;
@@ -828,7 +962,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
           delhiveryShipments.push(shipmentObj);
 
-          // Save to Dexie (only for validated campaign influencers)
+          // Save to Dexie
           try {
             await db.shipments.put({
               awb,
@@ -857,16 +991,16 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
           if (i % 25 === 0 || i === validRows.length - 1) {
             setImportProgress({
-              total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount,
+              total: validRows.length,
               completed: i + 1,
               accepted: validRows.length,
-              ignored: ignoredCustomerRowsCount,
+              ignored: ignoredCustomerCount,
               successful: i + 1,
-              failed: invalidRowsCount,
+              failed: invalidCount,
               duplicates: 0,
               imported: i + 1,
               currentAwb: awb,
-              phase: `Importing Delhivery shipments (${i + 1} of ${validRows.length})...`
+              phase: `Saving Delhivery shipments (${i + 1} of ${validRows.length})...`
             });
           }
         }
@@ -891,33 +1025,23 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           }
         }
 
-        // Save only validated campaign influencer shipments into isolated campaign database & local storage
+        // Save only validated campaign influencer shipments into Supabase
         const dbResult = await upsertCampaignShipmentsToDb(campaign.id, delhiveryShipments);
 
         const acceptedReported = validRows.length;
         const importedReported = dbResult.imported;
         const duplicatesReported = dbResult.duplicatesUpdated;
-        const failedReported = dbResult.failed + invalidRowsCount;
-
-        console.log(`[Delhivery Upload Complete]
-- Total rows read: ${rawData.length}
-- Valid influencer rows matched: ${validRows.length}
-- Rows with non-empty Remarks: ${rowsWithRemarksCount}
-- Rows with empty Remarks: ${validRows.length - rowsWithRemarksCount}
-- Ignored customer rows: ${ignoredCustomerRowsCount}
-- Invalid/Unmatched rows: ${invalidRowsCount}
-- Updated existing shipments: ${duplicatesReported}
-- New shipments created: ${importedReported}`);
+        const failedReported = dbResult.failed + invalidCount;
 
         // Log activity
         try {
           await logActivity({
             department: 'Marketing',
             action: 'Upload Delhivery Shipments',
-            description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}" (Source: Uploaded File). Accepted: ${acceptedReported}, Ignored customer: ${ignoredCustomerRowsCount}, Invalid: ${invalidRowsCount}, Duplicates updated: ${duplicatesReported}, With Remarks: ${rowsWithRemarksCount}`,
+            description: `Imported ${delhiveryShipments.length} Delhivery shipments for campaign "${campaign.campaign_name}". Accepted: ${acceptedReported}, Ignored customer: ${ignoredCustomerCount}, Invalid: ${invalidCount}, Duplicates updated: ${duplicatesReported}, With Remarks: ${rowsWithRemarksCount}`,
             record_id: String(campaign.id),
             record_name: campaign.campaign_name,
-            metadata: { courier: 'Delhivery', total: validRows.length + ignoredCustomerRowsCount + invalidRowsCount, accepted: acceptedReported, ignoredCustomer: ignoredCustomerRowsCount, invalid: invalidRowsCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, rowsWithRemarks: rowsWithRemarksCount, source: 'Uploaded File' }
+            metadata: { courier: 'Delhivery', total: totalCsvRows, accepted: acceptedReported, ignoredCustomer: ignoredCustomerCount, invalid: invalidCount, imported: importedReported, duplicates: duplicatesReported, failed: failedReported, rowsWithRemarks: rowsWithRemarksCount, source: 'Uploaded File' }
           });
         } catch (e) {}
 
@@ -946,20 +1070,20 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           title: 'Delhivery Upload Complete',
           isSuccess: true,
           acceptedCount: acceptedReported,
-          ignoredCustomerCount: ignoredCustomerRowsCount,
-          unmatchedInvalidCount: invalidRowsCount,
+          ignoredCustomerCount: ignoredCustomerCount,
+          unmatchedInvalidCount: invalidCount,
           updatedExistingCount: duplicatesReported,
           newShipmentsCount: importedReported,
           rowsWithRemarksCount: rowsWithRemarksCount
         });
       }
     } catch (err: any) {
-      console.error('[Upload Pipeline Error]:', err);
-      const msg = `Upload failed: ${err?.message || String(err)}`;
+      console.error('[Execute Final Import Error]:', err);
+      const msg = `Import failed: ${err?.message || String(err)}`;
       setUploadError(msg);
       setStep('error');
       showUploadResultToast({
-        title: `${courier} Upload Failed`,
+        title: `${courier} Import Failed`,
         isSuccess: false,
         acceptedCount: 0,
         ignoredCustomerCount: 0,
@@ -1001,10 +1125,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="bg-[#141a29] border border-slate-700/80 rounded-2xl w-full max-w-xl flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className={`bg-[#141a29] border border-slate-700/80 rounded-2xl w-full ${step === 'preview' ? 'max-w-3xl' : 'max-w-xl'} flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 transition-all`}>
         
         {/* Header */}
-        <div className="p-5 border-b border-slate-700/80 bg-[#1e2638] flex items-center justify-between shrink-0">
+        <div className="p-4 sm:p-5 border-b border-slate-700/80 bg-[#1e2638] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-purple-600/20 text-purple-400 rounded-xl border border-purple-500/30 shrink-0">
               <Truck size={22} />
@@ -1012,14 +1136,16 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold text-slate-100">
-                  Upload for {courier}
+                  {step === 'preview' ? 'Review & Confirm Import' : `Upload for ${courier}`}
                 </h2>
                 <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-purple-950/70 border border-purple-800/50 text-purple-300">
                   {courier}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                {courier === 'ST Courier' ? (
+                {step === 'preview' ? (
+                  <span>Verify detected influencer shipments before saving to database</span>
+                ) : courier === 'ST Courier' ? (
                   <span>Live status will be tracked one by one via ST Courier service</span>
                 ) : (
                   <span>Status will be extracted directly from the uploaded file</span>
@@ -1040,8 +1166,178 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         </div>
 
         {/* Content Body */}
-        <div className="p-6">
-          {/* STEP 1: IMPORTING PROGRESS (AUTOMATIC) */}
+        <div className="p-5 sm:p-6 overflow-y-auto max-h-[80vh]">
+          {/* STEP 1: IMPORT PREVIEW SUMMARY */}
+          {step === 'preview' && previewData && (
+            <div className="space-y-5 animate-fade-in">
+              {/* Notification Banner */}
+              <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl flex items-start gap-3 text-emerald-200">
+                <CheckCircle2 size={20} className="text-emerald-400 shrink-0 mt-0.5" />
+                <div className="text-xs leading-relaxed">
+                  <span className="font-bold text-emerald-300">File Analysis Complete:</span> Velmora scanned{' '}
+                  <span className="font-semibold text-white font-mono">{previewData.totalCsvRows.toLocaleString()}</span> rows from{' '}
+                  <span className="font-semibold text-white font-mono">{previewData.file.name}</span>. Identified{' '}
+                  <span className="font-bold text-emerald-400 font-mono">{previewData.validRows.length}</span> valid influencer shipments.{' '}
+                  <span className="text-emerald-300/90 font-mono">{previewData.ignoredCustomerCount.toLocaleString()}</span> unrelated customer rows will be safely excluded.
+                </div>
+              </div>
+
+              {/* 6 Key Metric Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                <div className="bg-[#101522] border border-slate-800 p-3 rounded-xl flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-slate-400">Total File Rows</span>
+                  <span className="text-xl font-bold font-mono text-slate-200">{previewData.totalCsvRows.toLocaleString()}</span>
+                  <span className="text-[10px] text-slate-500">Read from CSV</span>
+                </div>
+
+                <div className="bg-[#101522] border border-emerald-900/60 p-3 rounded-xl flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-emerald-400">Valid Shipments</span>
+                  <span className="text-xl font-bold font-mono text-emerald-400">{previewData.validRows.length}</span>
+                  <span className="text-[10px] text-emerald-400/70 font-mono">{previewData.originalCount} orig + {previewData.replacementCount} resend</span>
+                </div>
+
+                <div className="bg-[#101522] border border-amber-900/50 p-3 rounded-xl flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-amber-300">Replacement (R)</span>
+                  <span className="text-xl font-bold font-mono text-amber-300">{previewData.replacementCount}</span>
+                  <span className="text-[10px] text-amber-400/70">Re-dispatch orders</span>
+                </div>
+
+                <div className="bg-[#101522] border border-slate-800 p-3 rounded-xl flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-slate-400">Ignored Customer Rows</span>
+                  <span className="text-xl font-bold font-mono text-slate-300">{previewData.ignoredCustomerCount.toLocaleString()}</span>
+                  <span className="text-[10px] text-slate-500">Numeric/Non-campaign</span>
+                </div>
+
+                <div className="bg-[#101522] border border-slate-800 p-3 rounded-xl flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-indigo-400">New Shipments</span>
+                  <span className="text-xl font-bold font-mono text-indigo-300">{previewData.newShipmentsCount}</span>
+                  <span className="text-[10px] text-indigo-400/70">Will be inserted</span>
+                </div>
+
+                <div className="bg-[#101522] border border-slate-800 p-3 rounded-xl flex flex-col gap-1">
+                  <span className="text-[11px] font-medium text-blue-400">Existing to Update</span>
+                  <span className="text-xl font-bold font-mono text-blue-300">{previewData.existingShipmentsCount}</span>
+                  <span className="text-[10px] text-blue-400/70">Status refreshed</span>
+                </div>
+              </div>
+
+              {/* Preview Tabs: Valid vs Ignored */}
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('valid')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      previewTab === 'valid'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <CheckCircle2 size={13} />
+                    <span>Accepted Shipments ({previewData.validRows.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('ignored')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      previewTab === 'ignored'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <Ban size={13} />
+                    <span>Ignored Samples ({previewData.ignoredCustomerCount.toLocaleString()})</span>
+                  </button>
+                </div>
+
+                {/* Tab 1: Accepted Samples */}
+                {previewTab === 'valid' && (
+                  <div className="bg-[#0e1422] border border-slate-800/80 rounded-xl overflow-hidden">
+                    <div className="p-2.5 bg-slate-900/70 border-b border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                      <span className="font-semibold text-slate-300">Showing first {previewData.validSamples.length} accepted influencer shipments:</span>
+                      <span className="text-[10px] text-slate-500">Only Reference No. matches are accepted</span>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto divide-y divide-slate-800/60 text-xs">
+                      {previewData.validSamples.map((item, idx) => (
+                        <div key={idx} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-800/30 transition-colors">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold shrink-0 ${
+                              item.isReplacement 
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                            }`}>
+                              {item.displayOrderId}
+                            </span>
+                            <span className="font-medium text-slate-200 truncate">{item.influencerName}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="font-mono text-[11px] text-slate-400">{item.awb}</span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">
+                              {item.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 2: Ignored Customer Rows */}
+                {previewTab === 'ignored' && (
+                  <div className="bg-[#0e1422] border border-slate-800/80 rounded-xl overflow-hidden">
+                    <div className="p-2.5 bg-slate-900/70 border-b border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                      <span className="font-semibold text-slate-300">Sample of ignored customer rows (Total: {previewData.ignoredCustomerCount.toLocaleString()}):</span>
+                      <span className="text-[10px] text-amber-400/80">Protected: Will NOT be imported</span>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto divide-y divide-slate-800/60 text-xs">
+                      {previewData.ignoredSamples.length === 0 ? (
+                        <div className="p-4 text-center text-slate-400 text-xs">No customer rows were ignored.</div>
+                      ) : (
+                        previewData.ignoredSamples.map((item, idx) => (
+                          <div key={idx} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-800/30 transition-colors">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-mono font-semibold text-rose-300/90 bg-rose-950/40 px-2 py-0.5 rounded border border-rose-900/50">
+                                {item.ref}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-400 italic shrink-0">
+                              {item.reason}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewData(null);
+                    setStep('upload');
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-colors cursor-pointer"
+                >
+                  Cancel / Select Another File
+                </button>
+
+                <button
+                  type="button"
+                  onClick={executeFinalImport}
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-all shadow-lg shadow-emerald-950/60 flex items-center gap-2 cursor-pointer active:scale-95"
+                >
+                  <Check size={15} />
+                  <span>Confirm & Import {previewData.validRows.length} Shipments</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: IMPORTING PROGRESS (DURING FINAL PERSISTENCE) */}
           {(step === 'importing' || step === 'completed') && (
             <div className="py-6 flex flex-col items-center justify-center space-y-6 animate-fade-in">
               <div className="w-16 h-16 rounded-2xl bg-purple-950/70 border border-purple-600/60 flex items-center justify-center text-purple-400 shadow-xl shadow-purple-950/50">
@@ -1056,7 +1352,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                 <h3 className="text-base font-bold text-white">
                   {step === 'completed'
                     ? `${courier} Import Complete!`
-                    : (courier === 'ST Courier' ? 'Fetching Live ST Courier Tracking' : 'Importing Delhivery Shipments')}
+                    : (courier === 'ST Courier' ? 'Fetching Live ST Courier Tracking' : 'Saving Delhivery Shipments')}
                 </h3>
                 <p className="text-xs text-slate-400 max-w-sm">
                   {importProgress.phase || 'Processing shipments...'}
@@ -1109,7 +1405,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             </div>
           )}
 
-          {/* STEP 2: ERROR SCREEN */}
+          {/* STEP 3: ERROR SCREEN */}
           {step === 'error' && (
             <div className="space-y-5 animate-fade-in">
               <div className="p-4 bg-rose-950/60 border border-rose-800/80 rounded-2xl flex items-start gap-3.5 text-rose-200">
@@ -1155,7 +1451,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             </div>
           )}
 
-          {/* STEP 3: FALLBACK MANUAL DROPZONE */}
+          {/* STEP 4: MANUAL DROPZONE */}
           {step === 'upload' && (
             <div className="space-y-4">
               <input 
@@ -1179,8 +1475,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                   Click or drag {courier} file here to upload
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
-                  Required column: <code className="text-purple-300 bg-purple-950/60 px-1 py-0.5 rounded border border-purple-800/50 font-mono">{courier === 'ST Courier' ? 'Tracking number' : 'Waybill'}</code>
+                  Required column: <code className="text-purple-300 bg-purple-950/60 px-1 py-0.5 rounded border border-purple-800/50 font-mono">{courier === 'ST Courier' ? 'Tracking number' : 'Waybill & Reference No.'}</code>
                 </p>
+                {courier === 'Delhivery' && (
+                  <p className="text-[11px] text-slate-500 mt-2 max-w-sm">
+                    Only shipment rows whose Reference No. belongs to a valid campaign influencer (#HIS1, R HIS1, etc.) will be accepted. Customer orders are safely ignored.
+                  </p>
+                )}
               </div>
             </div>
           )}

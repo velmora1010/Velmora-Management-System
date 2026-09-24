@@ -19,6 +19,7 @@ export interface NormalizedOrderIdInfo {
   isResend: boolean;
   resendPrefix: string;
   attemptNumber: number;
+  isNumericCustomerOrder?: boolean;
 }
 
 /**
@@ -38,7 +39,8 @@ export function normalizeOrderId(
       baseCode: '',
       isResend: false,
       resendPrefix: '',
-      attemptNumber: 1
+      attemptNumber: 1,
+      isNumericCustomerOrder: false
     };
   }
 
@@ -48,6 +50,7 @@ export function normalizeOrderId(
   if (sepMatch && sepMatch[2]) {
     const attemptFromNum = sepMatch[1] ? parseInt(sepMatch[1], 10) + 1 : 2;
     const base = sepMatch[2].replace(/^#+/, '').toUpperCase();
+    const isPureDigits = /^\d+$/.test(base);
     return {
       raw,
       cleanDisplay: `R ${base}`,
@@ -55,13 +58,15 @@ export function normalizeOrderId(
       baseCode: base,
       isResend: true,
       resendPrefix: 'R',
-      attemptNumber: isNaN(attemptFromNum) ? 2 : attemptFromNum
+      attemptNumber: isNaN(attemptFromNum) ? 2 : attemptFromNum,
+      isNumericCustomerOrder: isPureDigits
     };
   }
 
   // Clean hash and internal whitespace for compact evaluation
   const withoutHash = trimmed.replace(/^#+/, '').trim();
   const compact = withoutHash.replace(/\s+/g, '').toUpperCase();
+  const isPureDigits = /^\d+$/.test(compact);
 
   // If exact compact matches a known influencer code, it is not a resend
   // (e.g. an influencer code that genuinely starts with R such as "ROHINI")
@@ -73,7 +78,8 @@ export function normalizeOrderId(
       baseCode: compact,
       isResend: false,
       resendPrefix: '',
-      attemptNumber: 1
+      attemptNumber: 1,
+      isNumericCustomerOrder: false
     };
   }
 
@@ -98,13 +104,15 @@ export function normalizeOrderId(
         baseCode: temp,
         isResend: true,
         resendPrefix: rPrefix,
-        attemptNumber: rPrefix.length + 1
+        attemptNumber: rPrefix.length + 1,
+        isNumericCustomerOrder: /^\d+$/.test(temp)
       };
     }
   }
 
   // Generic match: R (or multiple Rs / R2) followed by alphanumeric base code
   // e.g. "RHIS1", "R#HIS1", "R2HIS1", "RRMHS114"
+  // Note: If followed solely by digits (e.g. "R12345"), it is a customer return reference, not an influencer.
   const rMatch = compact.match(/^R+(\d*)([A-Za-z0-9]+)$/i);
   if (rMatch && rMatch[2]) {
     const rawRPrefix = compact.slice(0, compact.length - rMatch[2].length);
@@ -118,7 +126,8 @@ export function normalizeOrderId(
       baseCode: base,
       isResend: true,
       resendPrefix: rawRPrefix,
-      attemptNumber: isNaN(attempt) ? 2 : attempt
+      attemptNumber: isNaN(attempt) ? 2 : attempt,
+      isNumericCustomerOrder: /^\d+$/.test(base)
     };
   }
 
@@ -131,7 +140,133 @@ export function normalizeOrderId(
     baseCode,
     isResend: false,
     resendPrefix: '',
-    attemptNumber: 1
+    attemptNumber: 1,
+    isNumericCustomerOrder: isPureDigits
+  };
+}
+
+/**
+ * Result structure for parseDelhiveryReferenceNo
+ */
+export interface ParsedDelhiveryReference {
+  rawOrderId: string;
+  displayOrderId: string;
+  logicalOrderId: string;
+  influencerCode: string;
+  isReplacement: boolean;
+  attemptNumber: number;
+  isValid: boolean;
+  rejectReason?: string;
+}
+
+/**
+ * Centralized Delhivery Reference No. validator & normalizer.
+ *
+ * VALID RULES:
+ * 1. Original format:     #<VALID_INFLUENCER_CODE> or <VALID_INFLUENCER_CODE> (e.g. "#HIS1", "HIS1")
+ * 2. Replacement format:  R <VALID_INFLUENCER_CODE> or RHIS1 or #RHIS1 or R#HIS1
+ *
+ * REJECT RULES:
+ * 1. Purely numeric customer orders (e.g. "#122334", "122334", "#0055", "#9789", "#00317")
+ * 2. Arbitrary non-existent codes (e.g. "#00JH")
+ * 3. Blank or empty references
+ * 4. Any Reference No. that does not exist in the active campaign influencer records
+ */
+export function parseDelhiveryReferenceNo(
+  referenceNo?: string | null,
+  validCampaignCodesSet?: Set<string>
+): ParsedDelhiveryReference {
+  const raw = referenceNo != null ? String(referenceNo) : '';
+  const trimmed = raw.replace(/[\t\r\n]/g, ' ').trim();
+
+  if (!trimmed) {
+    return {
+      rawOrderId: raw,
+      displayOrderId: '',
+      logicalOrderId: '',
+      influencerCode: '',
+      isReplacement: false,
+      attemptNumber: 1,
+      isValid: false,
+      rejectReason: 'Reference No. is blank or missing'
+    };
+  }
+
+  // 1. Check for replacement patterns:
+  let isReplacement = false;
+  let attemptNumber = 1;
+  let codePart = '';
+
+  const sepMatch = trimmed.match(/^#?R(\d*)[\s#_\-]+([A-Za-z0-9]+)$/i);
+  if (sepMatch && sepMatch[2]) {
+    isReplacement = true;
+    attemptNumber = sepMatch[1] ? parseInt(sepMatch[1], 10) + 1 : 2;
+    codePart = sepMatch[2].replace(/^#+/, '').trim().toUpperCase();
+  } else {
+    const withoutHash = trimmed.replace(/^#+/, '').trim();
+    const compact = withoutHash.replace(/\s+/g, '').toUpperCase();
+
+    // Check if compact itself is in valid campaign codes before stripping R
+    if (validCampaignCodesSet && validCampaignCodesSet.has(compact)) {
+      isReplacement = false;
+      attemptNumber = 1;
+      codePart = compact;
+    } else {
+      const rMatch = compact.match(/^R+(\d*)([A-Za-z0-9]+)$/i);
+      if (rMatch && rMatch[2]) {
+        isReplacement = true;
+        const rawRPrefix = compact.slice(0, compact.length - rMatch[2].length);
+        const rCount = (rawRPrefix.match(/R/gi) || []).length;
+        attemptNumber = rMatch[1] ? (parseInt(rMatch[1], 10) + 1) : Math.max(2, rCount + 1);
+        codePart = rMatch[2].replace(/^#+/, '').trim().toUpperCase();
+      } else {
+        isReplacement = false;
+        attemptNumber = 1;
+        codePart = compact;
+      }
+    }
+  }
+
+  // 2. Reject purely numeric references (normal customer order IDs like 122334, 0055, 9789, 00317)
+  if (/^\d+$/.test(codePart)) {
+    return {
+      rawOrderId: raw,
+      displayOrderId: trimmed,
+      logicalOrderId: codePart,
+      influencerCode: codePart,
+      isReplacement,
+      attemptNumber,
+      isValid: false,
+      rejectReason: 'Invalid influencer order format (purely numeric customer order)'
+    };
+  }
+
+  // 3. Strict Campaign Scoping Validation:
+  // If validCampaignCodesSet is provided, verify the extracted code actually exists in the database
+  if (validCampaignCodesSet) {
+    if (!validCampaignCodesSet.has(codePart)) {
+      return {
+        rawOrderId: raw,
+        displayOrderId: isReplacement ? `R ${codePart}` : `#${codePart}`,
+        logicalOrderId: codePart,
+        influencerCode: codePart,
+        isReplacement,
+        attemptNumber,
+        isValid: false,
+        rejectReason: `Influencer code "${codePart}" not found in current campaign`
+      };
+    }
+  }
+
+  // Accepted!
+  return {
+    rawOrderId: raw,
+    displayOrderId: isReplacement ? `R ${codePart}` : `#${codePart}`,
+    logicalOrderId: codePart,
+    influencerCode: codePart,
+    isReplacement,
+    attemptNumber,
+    isValid: true
   };
 }
 
@@ -208,27 +343,36 @@ export function getReplacementOrderId(
 }
 
 /**
- * Checks if two order IDs or an order ID and a search query represent the same underlying order / influencer.
- * Supports:
- * - "#HIS1", "HIS1", "R HIS1", "RHIS1", "#RHIS1", "R#HIS1" all match each other.
+ * Checks if two order IDs represent the same underlying influencer order.
+ * - Exact base code matching by default (e.g. "#HIS1", "HIS1", "R HIS1", "RHIS1").
+ * - Substring matching is ONLY enabled when allowSubstring is explicitly true for search bar queries.
  */
 export function isSameUnderlyingOrder(
   orderA?: string | null,
   orderB?: string | null,
-  knownCodesSet?: Set<string>
+  knownCodesSet?: Set<string>,
+  allowSubstring: boolean = false
 ): boolean {
   if (!orderA || !orderB) return false;
   const a = normalizeOrderId(orderA, knownCodesSet);
   const b = normalizeOrderId(orderB, knownCodesSet);
   if (!a.baseCode || !b.baseCode) return false;
 
+  // Never match numeric customer orders to each other or to influencer codes
+  if (a.isNumericCustomerOrder || b.isNumericCustomerOrder) {
+    return a.normalized === b.normalized;
+  }
+
   // Exact base match: HIS1 === HIS1
   if (a.baseCode === b.baseCode) return true;
   // Compact normalized match: RHIS1 === RHIS1
   if (a.normalized === b.normalized) return true;
-  // Substring matching for search filtering: e.g. searching "HIS" matches "HIS1"
-  if (a.baseCode.includes(b.baseCode) || b.baseCode.includes(a.baseCode)) return true;
-  if (a.normalized.includes(b.normalized) || b.normalized.includes(a.normalized)) return true;
+
+  // Substring matching: ONLY when explicitly allowed for user search filtering!
+  if (allowSubstring) {
+    if (a.baseCode.includes(b.baseCode) || b.baseCode.includes(a.baseCode)) return true;
+    if (a.normalized.includes(b.normalized) || b.normalized.includes(a.normalized)) return true;
+  }
 
   return false;
 }

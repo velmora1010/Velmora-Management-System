@@ -1072,7 +1072,17 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
         return mapped;
       });
 
-      const sorted = sortInfluencerShipmentsNaturally(shipments);
+      // Sanitize: filter out any customer orders (purely numeric references like #10065, #00317)
+      const validShipments = shipments.filter(s => {
+        const ref = (s.influencerCode || s.orderId || '').trim();
+        const base = ref.replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim();
+        if (!base || /^\d+$/.test(base)) {
+          return false;
+        }
+        return true;
+      });
+
+      const sorted = sortInfluencerShipmentsNaturally(validShipments);
       saveCampaignShipments(cleanCampaignId, sorted);
 
       // Restore last sync timestamp from most recently synced DB record
@@ -1122,7 +1132,7 @@ export async function pruneUnmatchedCampaignTrackingShipments(
     activeInfluencers.forEach(inf => {
       if (inf.id) validIds.add(String(inf.id));
       if (inf.code) {
-        const norm = String(inf.code).replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toLowerCase();
+        const norm = String(inf.code).replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toUpperCase();
         if (norm) validCodes.add(norm);
       }
     });
@@ -1136,15 +1146,17 @@ export async function pruneUnmatchedCampaignTrackingShipments(
 
     const idsToDelete: string[] = [];
     dbShipments.forEach(s => {
-      const code1 = String(s.influencer_code || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toLowerCase();
-      const code2 = String(s.order_id || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toLowerCase();
+      const code1 = String(s.influencer_code || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
+      const code2 = String(s.order_id || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
       const infId = s.influencer_id ? String(s.influencer_id) : '';
 
       const isMatch = (code1 && validCodes.has(code1)) ||
                       (code2 && validCodes.has(code2)) ||
                       (infId && validIds.has(infId));
 
-      if (!isMatch) {
+      const isNumeric = /^\d+$/.test(code1 || code2);
+
+      if (!isMatch || isNumeric) {
         idsToDelete.push(s.id);
       }
     });
