@@ -1331,9 +1331,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-4 animate-fade-in w-full max-w-full min-w-0">
       {/* SEARCH & CONTROLS TOOLBAR (Always visible) */}
-      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-2.5">
+      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-2.5 w-full max-w-full min-w-0">
         {/* 1. Search Box (Adjusts size based on data presence) */}
         <div className={`relative ${hasTrackingData ? 'w-full sm:w-72 lg:w-80' : 'w-full sm:w-80 lg:w-96'} shrink-0`}>
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
@@ -1712,21 +1712,32 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       )}
 
       {/* 5. SHIPMENT TABLE + PAGINATION (FULL WIDTH) */}
-      <div className="flex flex-col bg-[#0b1220] border border-slate-800/90 rounded-2xl overflow-hidden shadow-xl w-full">
+      <div className="flex flex-col bg-[#0b1220] border border-slate-800/90 rounded-2xl overflow-hidden shadow-xl w-full max-w-full min-w-0">
           {/* Table Container with Internal Vertical Scroll */}
-          <div className="overflow-x-auto max-h-[640px] overflow-y-auto [scrollbar-width:thin]">
-            <table className="w-full text-left text-xs border-collapse">
+          <div className="w-full max-w-full min-w-0 max-h-[640px] overflow-y-auto overflow-x-auto [scrollbar-width:thin]">
+            <table className="w-full max-w-full table-fixed text-left text-xs border-collapse">
+              <colgroup>
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '8.5%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '17%' }} />
+                <col style={{ width: '9.5%' }} />
+                <col style={{ width: '11.5%' }} />
+                <col style={{ width: '9.5%' }} />
+                <col style={{ width: '10%' }} />
+              </colgroup>
               <thead className="bg-[#0e1626] text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10 select-none">
                 <tr>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">ORDER ID</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">AWB NUMBER</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">COURIER</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">STATUS</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left">REMARKS</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left whitespace-nowrap">DISPATCHED DATE</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left whitespace-nowrap">ESTIMATED DELIVERY DATE</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-left whitespace-nowrap">DELIVERED DATE</th>
-                  <th className="px-5 py-3.5 bg-[#0e1626] text-right min-w-[120px]">ACTIONS</th>
+                  <th className="px-2.5 sm:px-3 py-3.5 bg-[#0e1626] text-left">ORDER ID</th>
+                  <th className="px-2.5 sm:px-3 py-3.5 bg-[#0e1626] text-left">AWB NUMBER</th>
+                  <th className="px-2.5 sm:px-3 py-3.5 bg-[#0e1626] text-left">COURIER</th>
+                  <th className="px-2.5 sm:px-3 py-3.5 bg-[#0e1626] text-left">STATUS</th>
+                  <th className="px-2.5 sm:px-3 py-3.5 bg-[#0e1626] text-left">REMARKS</th>
+                  <th className="px-2.5 sm:px-3 py-3.5 bg-[#0e1626] text-left whitespace-nowrap">DISPATCHED DATE</th>
+                  <th className="px-2.5 sm:px-3 py-3.5 bg-[#0e1626] text-left leading-tight">ESTIMATED DELIVERY DATE</th>
+                  <th className="px-2.5 sm:px-3 py-3.5 bg-[#0e1626] text-left whitespace-nowrap">DELIVERED DATE</th>
+                  <th className="px-2 sm:px-2.5 py-3.5 bg-[#0e1626] text-right">ACTIONS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
@@ -1761,30 +1772,28 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         className="transition-colors hover:bg-slate-850/40"
                       >
                         {/* 1. ORDER ID */}
-                        <td className="px-5 py-3.5 font-mono font-bold text-slate-200">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span>{displayOrderId}</span>
-                            {isResendAttempt ? (
-                              <span className="px-1.5 py-0.5 text-[10px] font-sans font-semibold rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        <td className="px-2.5 sm:px-3 py-3 font-mono font-bold text-slate-200">
+                          <div className="flex flex-col gap-0.5 items-start">
+                            <span className="whitespace-nowrap text-slate-100 font-bold">
+                              {displayOrderId}
+                            </span>
+                            {isResendAttempt && (
+                              <span className="inline-block px-1.5 py-0.5 text-[9px] font-sans font-bold rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 whitespace-nowrap leading-none">
                                 Re-dispatch
-                              </span>
-                            ) : (
-                              <span className="px-1.5 py-0.5 text-[10px] font-sans font-medium rounded bg-slate-800 text-slate-400 border border-slate-700/60">
-                                Original
                               </span>
                             )}
                           </div>
                         </td>
 
                         {/* 2. AWB NUMBER */}
-                        <td className="px-5 py-3.5 font-mono font-bold text-slate-200">
+                        <td className="px-2.5 sm:px-3 py-3 font-mono font-bold text-slate-200">
                           {s.awbNumber ? (
-                            <div className="flex items-center gap-2">
-                              <span>{s.awbNumber}</span>
+                            <div className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+                              <span className="truncate" title={s.awbNumber}>{s.awbNumber}</span>
                               <button
                                 type="button"
                                 onClick={() => handleCopyAwb(s.awbNumber)}
-                                className="p-1 text-slate-500 hover:text-purple-300 rounded transition-colors cursor-pointer"
+                                className="p-1 text-slate-500 hover:text-purple-300 rounded transition-colors cursor-pointer shrink-0"
                                 title="Copy AWB"
                                 aria-label="Copy AWB"
                               >
@@ -1797,8 +1806,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         </td>
 
                         {/* 3. COURIER */}
-                        <td className="px-5 py-3.5">
-                          <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap border ${
+                        <td className="px-2.5 sm:px-3 py-3">
+                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap border ${
                             normalizeCourierName(s.courier) === 'Delhivery'
                               ? 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300'
                               : (normalizeCourierName(s.courier) === 'ST Courier'
@@ -1810,18 +1819,18 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         </td>
 
                         {/* 4. STATUS */}
-                        <td className="px-5 py-3.5">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${badgeStyle.dot}`} />
-                            <span>{displayStatus}</span>
+                        <td className="px-2.5 sm:px-3 py-3">
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold border whitespace-nowrap ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${badgeStyle.dot} shrink-0`} />
+                            <span className="truncate">{displayStatus}</span>
                           </span>
                         </td>
 
                         {/* 5. REMARKS */}
-                        <td className="px-5 py-3.5 text-slate-300">
+                        <td className="px-2.5 sm:px-3 py-3 text-slate-300 overflow-hidden">
                           {s.remarks && s.remarks.trim() ? (
                             <span 
-                              className="block max-w-[150px] truncate text-slate-300 font-medium cursor-help hover:text-white transition-colors" 
+                              className="block w-full truncate text-slate-300 font-medium cursor-help hover:text-white transition-colors text-[11px]" 
                               title={s.remarks.trim()}
                             >
                               {s.remarks.trim()}
@@ -1832,7 +1841,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         </td>
 
                         {/* 6. DISPATCHED DATE */}
-                        <td className="px-5 py-3.5 font-medium text-slate-200 whitespace-nowrap">
+                        <td className="px-2.5 sm:px-3 py-3 font-medium text-slate-200 whitespace-nowrap text-[11px]">
                           {(() => {
                             const dateVal = s.dispatchedDate || s.dispatchDate;
                             const formatted = formatDispatchedDate(dateVal);
@@ -1847,8 +1856,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           })()}
                         </td>
 
-                        {/* 6. ESTIMATED DELIVERY DATE */}
-                        <td className="px-5 py-3.5 font-medium text-slate-200 whitespace-nowrap">
+                        {/* 7. ESTIMATED DELIVERY DATE */}
+                        <td className="px-2.5 sm:px-3 py-3 font-medium text-slate-200 whitespace-nowrap text-[11px]">
                           {(() => {
                             const dateVal = s.estimatedDeliveryDate || s.expectedDeliveryDate;
                             const formatted = formatEstimatedDeliveryDate(dateVal);
@@ -1863,8 +1872,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           })()}
                         </td>
 
-                        {/* 7. DELIVERED DATE */}
-                        <td className="px-5 py-3.5 font-medium text-slate-200 whitespace-nowrap">
+                        {/* 8. DELIVERED DATE */}
+                        <td className="px-2.5 sm:px-3 py-3 font-medium text-slate-200 whitespace-nowrap text-[11px]">
                           {(() => {
                             const formatted = formatDeliveredDate(s.deliveredDate);
                             if (formatted === '—') {
@@ -1878,27 +1887,27 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                           })()}
                         </td>
 
-                        {/* 8. ACTIONS */}
-                        <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
+                        {/* 9. ACTIONS */}
+                        <td className="px-2 sm:px-2.5 py-3 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1 shrink-0">
                             <button
                               type="button"
                               onClick={() => setActiveTrackingModalShipment(s)}
-                              className="w-7 h-7 rounded-lg bg-slate-900 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                              className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-lg bg-slate-900 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
                               title="View Shipment Details"
                               aria-label="View Shipment Details"
                             >
-                              <Eye size={13} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
+                              <Eye size={12} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
                             </button>
 
                             <button
                               type="button"
                               onClick={() => setShipmentToDelete(s)}
-                              className="w-7 h-7 rounded-lg bg-slate-900 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 border border-slate-700/80 hover:border-rose-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                              className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-lg bg-slate-900 hover:bg-rose-950/70 text-slate-400 hover:text-rose-400 border border-slate-700/80 hover:border-rose-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
                               title="Delete Shipment"
                               aria-label="Delete Shipment"
                             >
-                              <Trash2 size={13} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-rose-400" />
+                              <Trash2 size={12} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-rose-400" />
                             </button>
 
                             {(() => {
@@ -1927,11 +1936,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                                     <button
                                       type="button"
                                       disabled
-                                      className="w-7 h-7 rounded-lg bg-emerald-950/60 border border-emerald-700/60 text-emerald-400 transition-all flex items-center justify-center cursor-default shadow-sm shrink-0"
+                                      className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-lg bg-emerald-950/60 border border-emerald-700/60 text-emerald-400 transition-all flex items-center justify-center cursor-default shadow-sm shrink-0"
                                       title={`Already added to Status Tracking (${matchedInfluencer?.code || matchedInfluencer?.influencer_name || ''})`}
                                       aria-label="Already added to Status Tracking"
                                     >
-                                      <Check size={13} className="text-emerald-400" />
+                                      <Check size={12} className="text-emerald-400" />
                                     </button>
                                   );
                                 }
@@ -1947,14 +1956,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                                       }
                                     }}
                                     disabled={isMoving || isMovingToStatus}
-                                    className="w-7 h-7 rounded-lg bg-purple-600 hover:bg-purple-500 text-white shadow-sm hover:shadow-purple-600/30 transition-all flex items-center justify-center cursor-pointer group shrink-0 disabled:opacity-50"
+                                    className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-lg bg-purple-600 hover:bg-purple-500 text-white shadow-sm hover:shadow-purple-600/30 transition-all flex items-center justify-center cursor-pointer group shrink-0 disabled:opacity-50"
                                     title={matchedInfluencer ? `Move ${matchedInfluencer.code || matchedInfluencer.influencer_name} to Status Tracking` : 'Move to Status Tracking'}
                                     aria-label="Move to Status Tracking"
                                   >
                                     {isMoving ? (
-                                      <RefreshCw size={13} className="animate-spin text-white" />
+                                      <RefreshCw size={12} className="animate-spin text-white" />
                                     ) : (
-                                      <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform text-white" />
+                                      <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform text-white" />
                                     )}
                                   </button>
                                 );
@@ -1964,11 +1973,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                                 <button
                                   type="button"
                                   disabled
-                                  className="w-7 h-7 rounded-lg bg-slate-900/60 text-slate-600 border border-slate-800/80 transition-all flex items-center justify-center cursor-not-allowed shadow-sm shrink-0"
+                                  className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-lg bg-slate-900/60 text-slate-600 border border-slate-800/80 transition-all flex items-center justify-center cursor-not-allowed shadow-sm shrink-0"
                                   title="Only Delivered shipments qualify for Status Tracking"
                                   aria-label="Move to Status Tracking (Disabled - Only Delivered shipments qualify)"
                                 >
-                                  <ArrowRight size={13} className="opacity-30" />
+                                  <ArrowRight size={12} className="opacity-30" />
                                 </button>
                               );
                             })()}
