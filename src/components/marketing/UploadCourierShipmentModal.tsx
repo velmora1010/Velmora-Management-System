@@ -40,6 +40,7 @@ import {
 } from '../../services/influencerTrackingService';
 import { parseToYMD } from '../../utils/influencerDateUtils';
 import { normalizeInfluencerReference } from '../../services/influencerStatusHandoffService';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import { 
   normalizeOrderId, 
   isSameUnderlyingOrder,
@@ -389,22 +390,29 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
       // 2. Load active campaign influencers strictly for the current campaign
       let activeCampaignInfluencers = (influencers || []).filter(inf => 
-        String(inf.is_archived).toLowerCase() !== 'true' &&
+        isActiveStatus(inf.is_archived) &&
         (inf.campaign_id === undefined || String(inf.campaign_id) === String(campaign.id))
       );
 
-      if (activeCampaignInfluencers.length === 0) {
-        try {
-          const { data: dbInfs } = await supabase
-            .from(SUPABASE_TABLES.influencersInfo)
-            .select('*')
-            .eq('campaign_id', String(campaign.id));
-          if (dbInfs && dbInfs.length > 0) {
-            activeCampaignInfluencers = dbInfs.filter(i => String(i.is_archived).toLowerCase() !== 'true') as any[];
-          }
-        } catch (e) {
-          console.warn('Fallback loading active influencers for upload failed:', e);
+      // Always query Supabase directly to ensure we have the complete, authoritative list of campaign influencers
+      try {
+        const { data: dbInfs } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('*')
+          .eq('campaign_id', String(campaign.id));
+        if (dbInfs && dbInfs.length > 0) {
+          const dbActive = dbInfs.filter(i => isActiveStatus(i.is_archived)) as CampaignInfluencer[];
+          const infMap = new Map<string, CampaignInfluencer>();
+          activeCampaignInfluencers.forEach(inf => {
+            if (inf.id) infMap.set(String(inf.id), inf);
+          });
+          dbActive.forEach(inf => {
+            if (inf.id && !infMap.has(String(inf.id))) infMap.set(String(inf.id), inf);
+          });
+          activeCampaignInfluencers = Array.from(infMap.values());
         }
+      } catch (e) {
+        console.warn('Fallback loading active influencers for upload failed:', e);
       }
 
       // Build canonical campaign influencer code sets & map

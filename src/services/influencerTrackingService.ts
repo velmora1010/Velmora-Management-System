@@ -6,6 +6,7 @@ import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer } from '../types';
 import { parseToYMD, formatDisplayDateLocal, getTodayLocalYMD } from '../utils/influencerDateUtils';
 import { normalizeOrderId, formatDisplayOrderId } from '../utils/orderIdUtils';
+import { isActiveStatus } from '../utils/marketingUtils';
 import {
   naturalCompareInfluencerCodes,
   naturalCompareCodes,
@@ -736,6 +737,8 @@ export function upsertCampaignShipments(
   const shipmentMap = new Map<string, InfluencerDispatchedShipment>();
 
   existing.forEach(s => {
+    const code = (s.influencerCode || s.orderId || '').replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim();
+    if (code && /^\d+$/.test(code)) return;
     const courier = (s.courier || '').toLowerCase().trim();
     const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
     const key = `${courier}__${awb}`;
@@ -746,6 +749,8 @@ export function upsertCampaignShipments(
   });
 
   newShipments.forEach(s => {
+    const code = (s.influencerCode || s.orderId || '').replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim();
+    if (code && /^\d+$/.test(code)) return;
     const courier = (s.courier || '').toLowerCase().trim();
     const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
     const key = `${courier}__${awb}`;
@@ -1121,15 +1126,28 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
  */
 export async function pruneUnmatchedCampaignTrackingShipments(
   campaignId: string | number,
-  activeInfluencers: CampaignInfluencer[]
+  activeInfluencers?: CampaignInfluencer[]
 ): Promise<number> {
   const cleanCampaignId = String(campaignId).trim();
-  if (!cleanCampaignId || !activeInfluencers || activeInfluencers.length === 0) return 0;
+  if (!cleanCampaignId) return 0;
 
   try {
+    let influencersList = activeInfluencers;
+    if (!influencersList || influencersList.length === 0) {
+      const { data: dbInfs } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencersInfo)
+        .select('*')
+        .eq('campaign_id', cleanCampaignId);
+      if (dbInfs && dbInfs.length > 0) {
+        influencersList = dbInfs.filter(i => isActiveStatus(i.is_archived)) as any[];
+      }
+    }
+
+    if (!influencersList || influencersList.length === 0) return 0;
+
     const validCodes = new Set<string>();
     const validIds = new Set<string>();
-    activeInfluencers.forEach(inf => {
+    influencersList.forEach(inf => {
       if (inf.id) validIds.add(String(inf.id));
       if (inf.code) {
         const norm = String(inf.code).replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toUpperCase();
@@ -1137,29 +1155,42 @@ export async function pruneUnmatchedCampaignTrackingShipments(
       }
     });
 
-    const { data: dbShipments, error } = await supabaseAdmin
-      .from(SUPABASE_TABLES.influencerTrackingShipments)
-      .select('id, awb_number, influencer_code, order_id, influencer_id')
-      .eq('campaign_id', cleanCampaignId);
-
-    if (error || !dbShipments || dbShipments.length === 0) return 0;
-
     const idsToDelete: string[] = [];
-    dbShipments.forEach(s => {
-      const code1 = String(s.influencer_code || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
-      const code2 = String(s.order_id || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
-      const infId = s.influencer_id ? String(s.influencer_id) : '';
+    const pageSize = 1000;
+    let from = 0;
+    let hasMore = true;
 
-      const isMatch = (code1 && validCodes.has(code1)) ||
-                      (code2 && validCodes.has(code2)) ||
-                      (infId && validIds.has(infId));
+    while (hasMore) {
+      const { data: dbShipments, error } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerTrackingShipments)
+        .select('id, awb_number, influencer_code, order_id, influencer_id')
+        .eq('campaign_id', cleanCampaignId)
+        .range(from, from + pageSize - 1);
 
-      const isNumeric = /^\d+$/.test(code1 || code2);
+      if (error || !dbShipments || dbShipments.length === 0) break;
 
-      if (!isMatch || isNumeric) {
-        idsToDelete.push(s.id);
+      dbShipments.forEach(s => {
+        const code1 = String(s.influencer_code || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
+        const code2 = String(s.order_id || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
+        const infId = s.influencer_id ? String(s.influencer_id) : '';
+
+        const isMatch = (code1 && validCodes.has(code1)) ||
+                        (code2 && validCodes.has(code2)) ||
+                        (infId && validIds.has(infId));
+
+        const isNumeric = /^\d+$/.test(code1 || code2);
+
+        if (!isMatch || isNumeric) {
+          idsToDelete.push(s.id);
+        }
+      });
+
+      if (dbShipments.length < pageSize) {
+        hasMore = false;
+      } else {
+        from += pageSize;
       }
-    });
+    }
 
     if (idsToDelete.length > 0) {
       console.log(`[Tracking Cleanup] Pruning ${idsToDelete.length} customer/unmatched shipments for campaign ${cleanCampaignId}`);
@@ -1228,9 +1259,65 @@ export async function upsertCampaignShipmentsToDb(
       };
     }
 
+    // Gatekeeper: filter incoming shipments to ensure only legitimate influencer shipments are written to DB
+    const validCodesSet = new Set<string>();
+    const validIdsSet = new Set<string>();
+    try {
+      const { data: dbInfs } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencersInfo)
+        .select('id, code, is_archived')
+        .eq('campaign_id', cleanCampaignId);
+      if (dbInfs && dbInfs.length > 0) {
+        dbInfs.forEach(inf => {
+          if (isActiveStatus(inf.is_archived)) {
+            if (inf.id) validIdsSet.add(String(inf.id));
+            if (inf.code) {
+              const c = String(inf.code).replace(/[\t\r\n]/g, ' ').trim().replace(/^#+/, '').trim().toUpperCase();
+              if (c) validCodesSet.add(c);
+            }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Could not fetch active campaign influencer codes for upsert gatekeeper:', e);
+    }
+
+    const strictlyValid = valid.filter(s => {
+      const orderIdStr = String(s.orderId || s.rawOrderId || '').trim();
+      const codeStr = String(s.influencerCode || '').trim();
+      const infId = s.influencerId ? String(s.influencerId) : '';
+
+      const code1 = orderIdStr.replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
+      const code2 = codeStr.replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
+
+      if (/^\d+$/.test(code1) || /^\d+$/.test(code2)) {
+        return false;
+      }
+
+      if (validCodesSet.size > 0) {
+        const isMatched = (code1 && validCodesSet.has(code1)) ||
+                          (code2 && validCodesSet.has(code2)) ||
+                          (infId && validIdsSet.has(infId));
+        return Boolean(isMatched);
+      }
+      return true;
+    });
+
+    if (strictlyValid.length === 0) {
+      return {
+        success: true,
+        total: shipments.length,
+        imported: 0,
+        duplicatesUpdated: 0,
+        failed: shipments.length,
+        shipments: localMerged,
+        errors: ['No valid campaign influencer shipments matched']
+      };
+    }
+
     // Deduplicate incoming batch by (campaign_id, courier, awb_number)
     const payloadMap = new Map<string, any>();
-    valid.forEach(s => {
+    strictlyValid.forEach(s => {
       const p = mapShipmentToDbPayload(s, cleanCampaignId);
       const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
       payloadMap.set(key, p);

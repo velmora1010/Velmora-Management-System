@@ -39,6 +39,8 @@ import {
   type ShipmentAttempt 
 } from '../../services/shipmentAttemptService';
 import { supabase } from '../../lib/supabase';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import {
@@ -263,12 +265,12 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     const fetchActive = async () => {
       if (!campaign?.id) return;
       try {
-        const { data } = await supabase
+        const { data } = await supabaseAdmin
           .from(SUPABASE_TABLES.influencersInfo)
           .select('*')
           .eq('campaign_id', String(campaign.id));
         if (data && data.length > 0) {
-          const active = data.filter((i: any) => String(i.is_archived).toLowerCase() !== 'true');
+          const active = data.filter((i: any) => isActiveStatus(i.is_archived));
           setDbActiveInfluencers(active as any[]);
         }
       } catch (e) {
@@ -307,12 +309,12 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       // 1. Ensure we have candidate influencers to validate against
       let activeInfs = candidateInfluencers;
       if (activeInfs.length === 0) {
-        const { data } = await supabase
+        const { data } = await supabaseAdmin
           .from(SUPABASE_TABLES.influencersInfo)
           .select('*')
           .eq('campaign_id', String(campaign.id));
         if (data && data.length > 0) {
-          activeInfs = data.filter((i: any) => String(i.is_archived).toLowerCase() !== 'true') as any[];
+          activeInfs = data.filter((i: any) => isActiveStatus(i.is_archived)) as any[];
           setDbActiveInfluencers(activeInfs);
         }
       }
