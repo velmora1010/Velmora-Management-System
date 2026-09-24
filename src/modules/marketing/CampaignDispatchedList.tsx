@@ -1125,7 +1125,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const isLoading = (isInfluencersLoading || isDispatchLoading) && baseInfluencers.length === 0;
 
   return (
-    <div className="space-y-6 animate-fade-in text-slate-200 w-full max-w-full min-w-0">
+    <div className="space-y-6 text-slate-200 w-full max-w-full min-w-0">
       {/* Header Container - Single Horizontal Status & Action Toolbar (Strictly 1 Row) */}
       <div className="bg-[#0c1424] px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-700/80 shadow-lg shadow-purple-950/20 flex items-center justify-between gap-1.5 sm:gap-2 w-full min-w-0">
         {/* GROUP 1: [Back] [Active] [Pending] [Dispatched] */}

@@ -316,7 +316,7 @@ export const CampaignAnalytics: React.FC<CampaignAnalyticsProps> = ({ campaign, 
   }
 
   return (
-    <div className="animate-fade-in space-y-6 pb-12">
+    <div className="space-y-6 pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-100">Campaign Analytics</h2>

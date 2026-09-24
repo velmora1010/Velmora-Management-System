@@ -2298,7 +2298,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           <div 
             ref={listScrollContainerRef}
             onScroll={handleListScroll}
-            className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3 scroll-smooth"
+            className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3"
           >
             {isLoading ? (
               <div className="flex justify-center items-center h-64 text-slate-400">
@@ -2853,7 +2853,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   }
 
   return (
-    <div className="flex flex-col h-full space-y-4 animate-fade-in overflow-hidden">
+    <div className="flex flex-col h-full space-y-4 overflow-hidden">
       
       {/* 1. TOP NAVIGATION & INFLUENCER HEADER */}
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0 shadow-md">

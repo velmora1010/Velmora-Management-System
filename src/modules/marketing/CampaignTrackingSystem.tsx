@@ -1385,7 +1385,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   };
 
   return (
-    <div className="space-y-4 animate-fade-in w-full max-w-full min-w-0">
+    <div className="space-y-4 w-full max-w-full min-w-0">
       {/* SEARCH & CONTROLS TOOLBAR (Always visible) */}
       <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-2.5 w-full max-w-full min-w-0">
         {/* 1. Search Box (Adjusts size based on data presence) */}

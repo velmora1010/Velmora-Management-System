@@ -1893,7 +1893,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         </div>
 
         <div className={activeTab === 'pricing' ? '' : 'hidden'}>
-          <div className="space-y-8 animate-fade-in text-slate-200">
+          <div className="space-y-8 text-slate-200">
             {/* VIDEO PRICING SECTION */}
             <div>
               <div className="flex justify-between items-center mb-6">
@@ -2164,7 +2164,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
           </div>
         </div>
         <div className={activeTab === 'products' ? '' : 'hidden'}>
-          <div className="space-y-6 animate-fade-in text-slate-200">
+          <div className="space-y-6 text-slate-200">
             {!pricing.total_videos || pricing.total_videos <= 0 ? (
               <div className="text-slate-500 text-center py-10 italic">No products selected yet. Fill in Pricing Info first.</div>
             ) : (

@@ -884,7 +884,7 @@ export const CampaignInfluencerAnalytics: React.FC<CampaignInfluencerAnalyticsPr
   };
 
   return (
-    <div className="space-y-8 p-4 lg:p-6 animate-fade-in text-slate-200 pb-12">
+    <div className="space-y-8 p-4 lg:p-6 text-slate-200 pb-12">
 
       {/* Analytics Toolbar Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/80 p-5 rounded-2xl border border-slate-800 shadow-xl">

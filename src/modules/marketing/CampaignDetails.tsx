@@ -413,7 +413,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   };
 
   return (
-    <div className="animate-fade-in text-slate-200">
+    <div className="text-slate-200">
       {/* Dashboard Header Menu */}
       <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
@@ -479,7 +479,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
       </div>
 
       {/* Analytics Widgets Specific to Campaign */}
-      {currentView !== 'analytics' && currentView !== 'calendar' && (
+      {currentView !== 'analytics' && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
           <div className="text-slate-400 text-sm mb-1">Budget Used</div>

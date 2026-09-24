@@ -101,7 +101,7 @@ export const CampaignForm: React.FC<CampaignFormProps> = ({ onSuccess, onCancel 
   };
 
   return (
-    <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-6 animate-fade-in">
+    <div className="bg-slate-800/50 rounded-xl border border-slate-700 p-6">
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-700">
         <h2 className="text-xl font-semibold text-slate-200">Create Influencer Campaign</h2>
       </div>

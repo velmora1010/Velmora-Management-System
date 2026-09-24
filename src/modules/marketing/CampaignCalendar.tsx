@@ -1086,7 +1086,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   // RENDER DETAILED DAY SCHEDULE VIEW
   if (selectedDateStr) {
     return (
-      <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col min-h-[850px] animate-fade-in text-slate-200">
+      <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col min-h-[850px] text-slate-200">
         
         {/* Day Schedule Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-5 border-b border-slate-700 bg-slate-800/50 gap-4 shrink-0">
@@ -1530,7 +1530,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   const TABS = ['All', 'Delivered', 'Draft', 'Draft On Time', 'Draft Delayed', 'Payment', 'Payment On Time', 'Payment Delayed', 'Final Post'] as const;
 
   return (
-    <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col min-h-[850px] relative text-slate-200 animate-fade-in">
+    <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col min-h-[850px] relative text-slate-200">
       
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-slate-700 bg-slate-800/50 gap-4 shrink-0">
@@ -1736,7 +1736,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             {/* Days Grid Container */}
             <div 
               key={monthChangeTrigger}
-              className="flex-1 grid grid-cols-7 auto-rows-fr bg-slate-950/20 divide-x divide-y divide-slate-800/60 animate-fade-in min-h-[560px]"
+              className="flex-1 grid grid-cols-7 auto-rows-fr bg-slate-950/20 divide-x divide-y divide-slate-800/60 min-h-[560px]"
             >
               {daysGrid.map((day, idx) => {
                 const dayEvents = day.isCurrentMonth ? (eventsByDate[day.dateStr] || []) : [];

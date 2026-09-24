@@ -65,7 +65,7 @@ export const MarketingHome: React.FC = () => {
       case 'home':
       default:
         return (
-          <div className="animate-fade-in p-6">
+          <div className="p-6">
             <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-800">
               <div className="flex items-center gap-3">
                 <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl">

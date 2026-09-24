@@ -9,7 +9,7 @@ interface CampaignInfoTabProps {
 
 export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ campaign, onEditCampaign }) => {
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         
         {/* Basic Information */}
