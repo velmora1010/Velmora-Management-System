@@ -413,7 +413,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   };
 
   return (
-    <div className="text-slate-200">
+    <div className="text-slate-200 w-full max-w-full min-w-0">
       {/* Dashboard Header Menu */}
       <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">

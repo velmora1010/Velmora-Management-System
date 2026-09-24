@@ -2031,7 +2031,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   }, [selectedVideo, activeTrackingRecords, trackingRecords]);
 
   return (
-    <div className="bg-[#070c18] rounded-2xl border border-slate-800/80 overflow-hidden flex flex-col h-[calc(100vh-120px)] min-h-[750px] shadow-2xl p-5 gap-4">
+    <div className="bg-[#070c18] rounded-2xl border border-slate-800/80 overflow-hidden flex flex-col h-[calc(100vh-120px)] min-h-[750px] shadow-2xl p-3 sm:p-5 gap-4 w-full max-w-full min-w-0">
       
       {/* =========================================================================
           LEVEL 2: DEDICATED VIDEO DETAIL VIEW
@@ -2298,7 +2298,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           <div 
             ref={listScrollContainerRef}
             onScroll={handleListScroll}
-            className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3"
+            className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1 space-y-3 w-full max-w-full"
           >
             {isLoading ? (
               <div className="flex justify-center items-center h-64 text-slate-400">
@@ -2349,45 +2349,45 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   <div 
                     key={record.id}
                     id={`st-card-${record.dispatch_id || record.id}`}
-                    className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-4 transition-all duration-200 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4"
+                    className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-3 sm:p-3.5 transition-all duration-200 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 w-full min-w-0"
                   >
                     {/* LEFT SECTION: Compact Code Badge, Profile, Name, Username */}
-                    <div className="flex items-center gap-3 shrink-0 min-w-[220px]">
+                    <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 w-auto max-w-[175px] sm:max-w-[195px] xl:max-w-[225px] min-w-0">
                       {/* Compact Influencer Code Badge */}
-                      <div className="px-2.5 py-1 rounded-lg bg-[#070c18] border border-slate-700/80 text-white font-mono font-bold text-xs tracking-wider shrink-0 shadow-sm text-center">
+                      <div className="px-2 py-0.5 rounded-md bg-[#070c18] border border-slate-700/80 text-white font-mono font-bold text-[11px] sm:text-xs tracking-wider shrink-0 shadow-sm text-center">
                         {influencerCode}
                       </div>
 
                       {/* Profile Avatar */}
-                      <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
+                      <div className="w-8 h-8 sm:w-9 sm:h-9 lg:w-10 lg:h-10 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
                         {avatarUrl ? (
                           <img src={avatarUrl} alt={influencerName} className="w-full h-full object-cover" />
                         ) : (
-                          <span className="text-slate-400 font-extrabold text-sm">{influencerName.charAt(0) || '?'}</span>
+                          <span className="text-slate-400 font-extrabold text-xs sm:text-sm">{influencerName.charAt(0) || '?'}</span>
                         )}
                       </div>
 
                       {/* Influencer Name & Username */}
-                      <div className="truncate min-w-0">
-                        <h4 className="text-white font-bold text-sm sm:text-base leading-tight truncate max-w-[170px]" title={influencerName}>
+                      <div className="truncate min-w-0 flex-1">
+                        <h4 className="text-white font-bold text-xs sm:text-sm leading-tight truncate" title={influencerName}>
                           {influencerName}
                         </h4>
-                        <p className="text-slate-400 text-xs font-medium mt-0.5 truncate max-w-[170px]" title={username}>
+                        <p className="text-slate-400 text-[10px] sm:text-xs font-medium mt-0.5 truncate" title={username}>
                           {username}
                         </p>
                       </div>
                     </div>
 
                     {/* CENTER SECTION: 7 Horizontal Stages (Delivery + 6 Videos) */}
-                    <div className="flex-1 px-2 py-1 max-w-3xl mx-auto w-full">
-                      <div className="flex items-center justify-between w-full">
+                    <div className="flex-1 px-1 sm:px-2 py-0.5 min-w-0 w-full">
+                      <div className="flex items-center w-full min-w-0">
                         
                         {/* 1. STEP 1: DELIVERY CONFIRMATION STAGE */}
                         {(() => {
                           const isReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED';
                           return (
                             <div 
-                              className="flex flex-col items-center cursor-pointer group relative select-none"
+                              className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
                               onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
                               title={
                                 isDelivered 
@@ -2397,7 +2397,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                   : 'STEP 1: Delivery Confirmation: Not Started (Click to confirm)'
                               }
                             >
-                              <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${
+                              <div className={`w-7 h-7 sm:w-8 sm:h-8 lg:w-9 lg:h-9 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${
                                 isDelivered 
                                   ? 'bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-110'
                                   : isReDispatch
@@ -2405,18 +2405,18 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                   : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
                               }`}>
                                 {isDelivered ? (
-                                  <Check size={18} strokeWidth={3} className="text-white" />
+                                  <Check size={15} strokeWidth={3} className="text-white sm:w-4 sm:h-4" />
                                 ) : isReDispatch ? (
-                                  <AlertTriangle size={17} className="text-amber-400" />
+                                  <AlertTriangle size={14} className="text-amber-400 sm:w-4 sm:h-4" />
                                 ) : (
-                                  <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">1</span>
+                                  <span className="font-bold text-[11px] sm:text-xs text-slate-400 group-hover:text-white">1</span>
                                 )}
                               </div>
-                              <div className="flex flex-col items-center mt-1.5">
-                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                              <div className="flex flex-col items-center mt-1 text-center min-w-0">
+                                <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-wider block whitespace-nowrap">
                                   STEP 1
                                 </span>
-                                <span className={`text-[10px] sm:text-[11px] text-center w-20 sm:w-24 leading-tight transition-colors ${
+                                <span className={`text-[9px] sm:text-[10px] lg:text-[11px] text-center leading-tight transition-colors whitespace-nowrap block ${
                                   isDelivered 
                                     ? 'text-emerald-400 font-bold' 
                                     : isReDispatch
@@ -2431,7 +2431,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         })()}
 
                         {/* Connecting Line from Delivery to Video 1 */}
-                        <div className="flex-1 h-[2px] mx-1 sm:mx-2 -mt-4 transition-colors duration-300">
+                        <div className="flex-1 min-w-[6px] sm:min-w-[10px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
                           <div className={`h-full w-full rounded-full ${
                             isDelivered ? 'bg-emerald-500/80' : 'bg-slate-700/60'
                           }`} />
@@ -2465,7 +2465,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             <React.Fragment key={`v-${vNum}`}>
                               {/* Video Stage Node */}
                               <div 
-                                className="flex flex-col items-center cursor-pointer group relative select-none"
+                                className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
                                 onClick={() => {
                                   if (!isDelivered) {
                                     toast.error('Please complete Step 1: Delivery Confirmation first.');
@@ -2476,27 +2476,27 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 }}
                                 title={`STEP ${stepNumber}: Video ${vNum} (${vw.completedCount} of ${vw.totalSteps} completed)`}
                               >
-                                <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
+                                <div className={`w-7 h-7 sm:w-8 sm:h-8 lg:w-9 lg:h-9 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${circleStyle}`}>
                                   {isVCompleted ? (
-                                    <Check size={18} strokeWidth={3} className="text-white" />
+                                    <Check size={15} strokeWidth={3} className="text-white sm:w-4 sm:h-4" />
                                   ) : isReDraftReq ? (
-                                    <span className="font-black text-xs text-amber-400 tracking-tight">RD</span>
+                                    <span className="font-black text-[10px] sm:text-xs text-amber-400 tracking-tight">RD</span>
                                   ) : isVInProgress ? (
-                                    <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
+                                    <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-white animate-ping"></span>
                                   ) : (
-                                    <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">{stepNumber}</span>
+                                    <span className="font-bold text-[11px] sm:text-xs text-slate-400 group-hover:text-white">{stepNumber}</span>
                                   )}
                                 </div>
-                                <div className="flex flex-col items-center mt-1.5">
-                                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                                <div className="flex flex-col items-center mt-1 text-center min-w-0">
+                                  <span className="text-[8px] sm:text-[9px] font-bold text-slate-500 uppercase tracking-wider block whitespace-nowrap">
                                     STEP {stepNumber}
                                   </span>
-                                  <span className={`text-[10px] sm:text-[11px] text-center w-16 sm:w-20 leading-tight transition-colors ${labelStyle}`}>
+                                  <span className={`text-[9px] sm:text-[10px] lg:text-[11px] text-center leading-tight transition-colors whitespace-nowrap block ${labelStyle}`}>
                                     Video {vNum}
                                   </span>
                                   {isReDraftReq && (
-                                    <span className="text-[9px] font-bold text-amber-400 bg-amber-950/90 border border-amber-800/80 px-1.5 py-0.5 rounded mt-0.5 whitespace-nowrap shadow-sm">
-                                      Re-Draft Req
+                                    <span className="text-[8px] font-bold text-amber-400 bg-amber-950/90 border border-amber-800/80 px-1 py-0.2 rounded mt-0.5 whitespace-nowrap shadow-sm">
+                                      RD Req
                                     </span>
                                   )}
                                 </div>
@@ -2504,7 +2504,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                               {/* Connecting Line between Videos */}
                               {idx !== videoWorkflows.length - 1 && (
-                                <div className="flex-1 h-[2px] mx-1 sm:mx-2 -mt-4 transition-colors duration-300">
+                                <div className="flex-1 min-w-[6px] sm:min-w-[10px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
                                   <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500' : isVInProgress ? 'bg-blue-500/50' : 'bg-slate-700/60'}`} />
                                 </div>
                               )}
@@ -2515,24 +2515,24 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     </div>
 
                     {/* RIGHT SECTION: Overall Status & Three-Dot Menu */}
-                    <div className="flex items-center gap-3 shrink-0 justify-end min-w-[150px]">
+                    <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 justify-end w-auto min-w-0">
                       {/* Status Badge */}
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border shadow-sm ${overallStatus.badgeClass}`}>
-                        <span className={`w-2 h-2 rounded-full ${overallStatus.dotClass}`}></span>
+                      <span className={`px-2 sm:px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-bold flex items-center gap-1.5 border shadow-sm whitespace-nowrap shrink-0 ${overallStatus.badgeClass}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${overallStatus.dotClass}`}></span>
                         <span>{overallStatus.label}</span>
                       </span>
 
                       {/* Three-Dot Menu */}
-                      <div className="relative three-dot-menu-container">
+                      <div className="relative three-dot-menu-container shrink-0">
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
                             setOpenMenuId(isMenuOpen ? null : record.id);
                           }}
-                          className="w-8 h-8 rounded-lg bg-[#070c18] hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+                          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#070c18] hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
                           title="More actions"
                         >
-                          <MoreHorizontal size={16} />
+                          <MoreHorizontal size={15} />
                         </button>
 
                         {isMenuOpen && (
