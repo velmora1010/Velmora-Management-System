@@ -5,6 +5,7 @@ import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer } from '../types';
 import { parseToYMD, formatDisplayDateLocal, getTodayLocalYMD } from '../utils/influencerDateUtils';
+import { normalizeOrderId, formatDisplayOrderId } from '../utils/orderIdUtils';
 import {
   naturalCompareInfluencerCodes,
   naturalCompareCodes,
@@ -23,7 +24,9 @@ export {
   sortInfluencerShipmentsNaturally,
   parseToYMD,
   formatDisplayDateLocal,
-  getTodayLocalYMD
+  getTodayLocalYMD,
+  normalizeOrderId,
+  formatDisplayOrderId
 };
 
 export type TrackingStatusCategory = 
@@ -44,6 +47,10 @@ export interface InfluencerDispatchedShipment {
   username: string;
   influencerCode: string;
   orderId?: string;
+  rawOrderId?: string;
+  baseOrderId?: string;
+  isResend?: boolean;
+  attemptNumber?: number;
   profilePhoto: string;
   phoneNumber: string;
   altPhoneNumber: string;
@@ -100,18 +107,44 @@ export function normalizeTrackingStatus(statusText?: string, error?: string): Tr
 
   const s = statusText.toLowerCase().trim();
 
-  if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
-    return 'Out for Delivery';
-  }
-  if (s.includes('in transit') || s.includes('transit') || s.includes('vehicle departed') || s.includes('departed') || s.includes('forwarded') || s.includes('arrived')) {
-    return 'In Transit';
-  }
+  // 1. Delivered (check not undelivered)
   if (s.includes('delivered') && !s.includes('undelivered')) {
     return 'Delivered';
   }
-  if (s.includes('failed')) {
+  // 2. Out for Delivery
+  if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
+    return 'Out for Delivery';
+  }
+  // 3. Failed Attempt
+  if (
+    s.includes('attempt') ||
+    s.includes('failed') ||
+    s.includes('undelivered') ||
+    s.includes('refused') ||
+    s.includes('door locked') ||
+    s.includes('delivery attempted')
+  ) {
     return 'Failed Attempt';
   }
+  // 4. In Transit
+  if (
+    s.includes('in transit') ||
+    s.includes('transit') ||
+    s.includes('vehicle departed') ||
+    s.includes('departed') ||
+    s.includes('forwarded') ||
+    s.includes('arrived') ||
+    s.includes('hub') ||
+    s.includes('dispatched') ||
+    s.includes('shipped')
+  ) {
+    return 'In Transit';
+  }
+  // 5. Info Received
+  if (s.includes('info received') || s.includes('shipment created') || s.includes('booked') || s.includes('consignment booked') || s.includes('manifest')) {
+    return 'Info Received';
+  }
+  // 6. Exception
   if (
     s.includes('exception') || 
     s.includes('error') || 
@@ -123,9 +156,7 @@ export function normalizeTrackingStatus(statusText?: string, error?: string): Tr
   ) {
     return 'Exception';
   }
-  if (s.includes('info received') || s.includes('shipment created') || s.includes('booked') || s.includes('manifest')) {
-    return 'Info Received';
-  }
+  // 7. Expired
   if (s.includes('expired')) {
     return 'Expired';
   }
@@ -604,10 +635,61 @@ export function clearTrackingCache(campaignId: string | number) {
   } catch (e) {}
 }
 
-export function getLastCampaignSyncTime(campaignId: string | number): string | null {
+/**
+ * Formats a date/time string or Date into standard sync timestamp:
+ * e.g. "24 Sep 2026, 09:38 AM" in local timezone.
+ */
+export function formatSyncTimestamp(dateInput?: string | number | Date | null): string {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+
+  const day = d.getDate();
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = months[d.getMonth()];
+  const year = d.getFullYear();
+
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  const hoursStr = String(hours).padStart(2, '0');
+
+  return `${day} ${month} ${year}, ${hoursStr}:${minutes} ${ampm}`;
+}
+
+export function getLastCampaignSyncTime(
+  campaignId: string | number,
+  shipments?: InfluencerDispatchedShipment[]
+): string | null {
   if (typeof window === 'undefined') return null;
+  const cleanId = String(campaignId).trim();
   try {
-    return localStorage.getItem(`influencer_tracking_last_sync_${campaignId}`) || null;
+    const cached = localStorage.getItem(`influencer_tracking_last_sync_${cleanId}`);
+    if (cached && cached.trim()) return cached.trim();
+
+    // Inspect shipments in memory or database for maximum last_synced_at
+    if (shipments && shipments.length > 0) {
+      let maxIso: string | null = null;
+      shipments.forEach(s => {
+        const syncAt = (s as any).last_synced_at || (s as any).lastSyncedAt;
+        if (syncAt) {
+          const parsed = new Date(syncAt);
+          if (!isNaN(parsed.getTime())) {
+            const iso = parsed.toISOString();
+            if (!maxIso || iso > maxIso) maxIso = iso;
+          }
+        }
+      });
+      if (maxIso) {
+        const formatted = formatSyncTimestamp(maxIso);
+        localStorage.setItem(`influencer_tracking_last_sync_${cleanId}`, formatted);
+        return formatted;
+      }
+    }
+
+    return null;
   } catch (e) {
     return null;
   }
@@ -615,11 +697,10 @@ export function getLastCampaignSyncTime(campaignId: string | number): string | n
 
 export function setLastCampaignSyncTime(campaignId: string | number, timestamp: string) {
   if (typeof window === 'undefined') return;
+  const cleanId = String(campaignId).trim();
   try {
-    localStorage.setItem(`influencer_tracking_last_sync_${campaignId}`, timestamp);
-  } catch (e) {
-    // Ignore
-  }
+    localStorage.setItem(`influencer_tracking_last_sync_${cleanId}`, timestamp);
+  } catch (e) {}
 }
 
 /**
@@ -764,6 +845,10 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
 
   let resolvedRemarks = row.remarks || undefined;
   let resolvedDeliveredDate = row.delivered_date || row.deliveredDate || undefined;
+  let resolvedRawOrderId: string | undefined = undefined;
+  let resolvedBaseOrderId: string | undefined = undefined;
+  let resolvedIsResend: boolean | undefined = undefined;
+  let resolvedAttemptNumber: number | undefined = undefined;
 
   // If Supabase schema lacks dedicated remarks/delivered_date columns, decode from sync_error JSON
   if (row.sync_error && typeof row.sync_error === 'string' && row.sync_error.startsWith('{')) {
@@ -771,7 +856,20 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
       const meta = JSON.parse(row.sync_error);
       if (!resolvedRemarks && meta.remarks) resolvedRemarks = meta.remarks;
       if (!resolvedDeliveredDate && meta.delivered_date) resolvedDeliveredDate = meta.delivered_date;
+      if (meta.raw_order_id) resolvedRawOrderId = meta.raw_order_id;
+      if (meta.base_order_id) resolvedBaseOrderId = meta.base_order_id;
+      if (meta.is_resend !== undefined) resolvedIsResend = Boolean(meta.is_resend);
+      if (meta.attempt_number !== undefined) resolvedAttemptNumber = Number(meta.attempt_number);
     } catch (e) {}
+  }
+
+  // Derive normalized fields if not explicitly stored in sync_error
+  const fallbackRef = resolvedRawOrderId || row.order_id || row.influencer_code;
+  if (fallbackRef) {
+    const norm = normalizeOrderId(fallbackRef);
+    if (!resolvedBaseOrderId) resolvedBaseOrderId = norm.baseCode || undefined;
+    if (resolvedIsResend === undefined && norm.isResend) resolvedIsResend = true;
+    if (resolvedAttemptNumber === undefined && norm.attemptNumber > 1) resolvedAttemptNumber = norm.attemptNumber;
   }
 
   return {
@@ -781,6 +879,10 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
     username: row.username || '—',
     influencerCode: row.influencer_code || row.order_id || '',
     orderId: row.order_id || undefined,
+    rawOrderId: resolvedRawOrderId || row.order_id || undefined,
+    baseOrderId: resolvedBaseOrderId || undefined,
+    isResend: resolvedIsResend,
+    attemptNumber: resolvedAttemptNumber,
     profilePhoto: row.profile_photo || '',
     phoneNumber: row.phone_number || '',
     altPhoneNumber: row.alt_phone_number || '',
@@ -798,7 +900,7 @@ export function mapDbRowToShipment(row: any): InfluencerDispatchedShipment {
     deliveredDate: resolvedDeliveredDate,
     status: displayStatus,
     statusCategory: statusCategory,
-    rawStatus: row.raw_status || row.status || 'In Transit',
+    rawStatus: row.raw_status || row.status || 'Pending',
     remarks: resolvedRemarks,
     pendingRemarks: row.pending_remarks || undefined,
     currentStatus: row.current_status || undefined,
@@ -828,18 +930,23 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
   const edd = s.estimatedDeliveryDate || s.expectedDeliveryDate || null;
   const displayStatus = getTrackingDisplayStatus(s);
 
-  // Safely encode metadata into sync_error so remarks and delivered_date are persisted directly into Supabase
-  let syncErrorPayload = s.syncError || null;
-  const remarksClean = (s.remarks && s.remarks.trim()) ? s.remarks.trim() : null;
-  const deliveredDateClean = (s.deliveredDate && s.deliveredDate.trim()) ? s.deliveredDate.trim() : null;
-  if (remarksClean || deliveredDateClean) {
+  // Safely encode metadata into sync_error so remarks, delivered_date, and resend info are persisted directly into Supabase
+  let metaObj: any = {};
+  if (s.syncError && typeof s.syncError === 'string' && s.syncError.startsWith('{')) {
     try {
-      syncErrorPayload = JSON.stringify({
-        remarks: remarksClean,
-        delivered_date: deliveredDateClean
-      });
+      metaObj = JSON.parse(s.syncError);
     } catch (e) {}
   }
+  const remarksClean = (s.remarks && s.remarks.trim()) ? s.remarks.trim() : null;
+  const deliveredDateClean = (s.deliveredDate && s.deliveredDate.trim()) ? s.deliveredDate.trim() : null;
+  if (remarksClean) metaObj.remarks = remarksClean;
+  if (deliveredDateClean) metaObj.delivered_date = deliveredDateClean;
+  if (s.rawOrderId) metaObj.raw_order_id = s.rawOrderId;
+  if (s.baseOrderId) metaObj.base_order_id = s.baseOrderId;
+  if (s.isResend !== undefined) metaObj.is_resend = s.isResend;
+  if (s.attemptNumber !== undefined) metaObj.attempt_number = s.attemptNumber;
+
+  let syncErrorPayload = Object.keys(metaObj).length > 0 ? JSON.stringify(metaObj) : (s.syncError || null);
 
   const payload: any = {
     campaign_id: String(campaignId),
@@ -847,7 +954,7 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
     creator_name: s.creatorName || null,
     username: s.username || null,
     influencer_code: s.influencerCode || null,
-    order_id: s.orderId || (s.influencerCode ? s.influencerCode : null),
+    order_id: s.orderId || s.rawOrderId || (s.influencerCode ? s.influencerCode : null),
     awb_number: awb,
     courier,
     status: displayStatus,
@@ -856,7 +963,7 @@ export function mapShipmentToDbPayload(s: InfluencerDispatchedShipment, campaign
     dispatch_date: s.dispatchedDate || s.dispatchDate || null,
     expected_delivery_date: edd,
     tracking_url: s.trackingUrl || getCourierTrackingUrl(courier, awb),
-    raw_status: s.rawStatus || s.status || 'In Transit',
+    raw_status: s.rawStatus || s.status || 'Pending',
     last_location: s.lastLocation || null,
     tracking_date_time: s.trackingDateTime || null,
     profile_photo: s.profilePhoto || null,
@@ -967,6 +1074,23 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
 
       const sorted = sortInfluencerShipmentsNaturally(shipments);
       saveCampaignShipments(cleanCampaignId, sorted);
+
+      // Restore last sync timestamp from most recently synced DB record
+      let maxSyncIso: string | null = null;
+      allRows.forEach(row => {
+        const syncAt = row.last_synced_at || row.lastSyncedAt;
+        if (syncAt) {
+          const parsed = new Date(syncAt);
+          if (!isNaN(parsed.getTime())) {
+            const iso = parsed.toISOString();
+            if (!maxSyncIso || iso > maxSyncIso) maxSyncIso = iso;
+          }
+        }
+      });
+      if (maxSyncIso) {
+        setLastCampaignSyncTime(cleanCampaignId, formatSyncTimestamp(maxSyncIso));
+      }
+
       return sorted;
     }
 
@@ -1224,8 +1348,23 @@ export async function upsertCampaignShipmentsToDb(
   }
 }
 
+export function hasShipmentDataChanged(
+  oldShipment: InfluencerDispatchedShipment,
+  updated: InfluencerDispatchedShipment
+): boolean {
+  if (oldShipment.status !== updated.status) return true;
+  if ((oldShipment.rawStatus || '').trim().toLowerCase() !== (updated.rawStatus || '').trim().toLowerCase()) return true;
+  if ((updated.remarks && updated.remarks.trim()) && updated.remarks.trim() !== (oldShipment.remarks || '').trim()) return true;
+  if ((updated.deliveredDate && updated.deliveredDate.trim()) && updated.deliveredDate.trim() !== (oldShipment.deliveredDate || '').trim()) return true;
+  if ((updated.dispatchedDate && updated.dispatchedDate.trim()) && updated.dispatchedDate.trim() !== (oldShipment.dispatchedDate || oldShipment.dispatchDate || '').trim()) return true;
+  if ((updated.estimatedDeliveryDate && updated.estimatedDeliveryDate.trim()) && updated.estimatedDeliveryDate.trim() !== (oldShipment.estimatedDeliveryDate || '').trim()) return true;
+  if ((updated.lastLocation && updated.lastLocation.trim()) && updated.lastLocation.trim() !== (oldShipment.lastLocation || '').trim()) return true;
+  return false;
+}
+
 /**
- * Sync single shipment using existing courier tracking API and Dexie DB.
+ * Sync single shipment using official ST Courier tracking integration.
+ * STRICT: Operates ONLY on ST Courier. Delhivery shipments are never touched.
  */
 export async function syncSingleShipment(
   shipment: InfluencerDispatchedShipment,
@@ -1233,15 +1372,11 @@ export async function syncSingleShipment(
 ): Promise<InfluencerDispatchedShipment> {
   const awb = shipment.awbNumber?.trim();
   const courier = shipment.courier?.trim() || 'ST Courier';
-  const isDelhivery = courier.toLowerCase().includes('delhivery');
+  const isST = normalizeCourierName(courier) === 'ST Courier';
 
-  if (isDelhivery) {
-    return {
-      ...shipment,
-      statusSource: 'Uploaded Delhivery File',
-      sourceType: 'UPLOADED_FILE',
-      syncError: 'Live API sync is only for ST Courier. Delhivery status is sourced from uploaded file.'
-    };
+  // Strict requirement: Never touch or sync Delhivery shipments
+  if (!isST) {
+    return shipment;
   }
 
   if (!awb) {
@@ -1251,25 +1386,87 @@ export async function syncSingleShipment(
     };
   }
 
-  const nowStr = new Date().toLocaleString();
+  const nowIso = new Date().toISOString();
+  const nowFormatted = formatSyncTimestamp(nowIso);
 
   try {
     const apiResult = await trackingService.syncTracking(awb, 'ST Courier');
 
-    const rawStatus = apiResult?.status || '';
-    const isSuccess = Boolean(apiResult?.success);
+    const rawStatus = apiResult?.rawStatus || apiResult?.status || '';
+    const isSuccess = Boolean(apiResult?.success) && Boolean(rawStatus);
     const trackingError = apiResult?.error || apiResult?.trackingError;
     const lastLocation = apiResult?.lastLocation || '-';
     const trackingDateTime = apiResult?.trackingDateTime || '-';
+    const returnedRemarks = apiResult?.remarks;
+    const returnedDeliveredDate = apiResult?.deliveryDate;
+    const returnedDispatchedDate = apiResult?.dispatchedDate;
+    const returnedEdd = apiResult?.estimatedDeliveryDate;
 
-    let normalized: TrackingStatusCategory;
-    if (isSuccess && rawStatus) {
-      normalized = normalizeTrackingStatus(rawStatus);
-    } else if (trackingError === 'Sync not available for this courier') {
-      normalized = normalizeTrackingStatus(shipment.rawStatus || 'Pending');
-    } else {
-      normalized = normalizeTrackingStatus(rawStatus || 'Exception');
+    if (!isSuccess) {
+      // Failed AWB handling: Keep existing shipment data intact and mark failed
+      const failedShipment: InfluencerDispatchedShipment = {
+        ...shipment,
+        lastSyncedAt: nowFormatted,
+        syncError: trackingError || 'Tracking Not Found / Unreachable'
+      };
+      upsertCampaignShipments(campaignId, [failedShipment]);
+
+      try {
+        let updateQuery = supabaseAdmin
+          .from(SUPABASE_TABLES.influencerTrackingShipments)
+          .update({
+            last_synced_at: nowIso,
+            sync_error: trackingError || 'Tracking Not Found / Unreachable',
+            updated_at: nowIso
+          });
+        if (shipment.id && shipment.id.length === 36 && shipment.id.includes('-')) {
+          updateQuery = updateQuery.eq('id', shipment.id);
+        } else {
+          updateQuery = updateQuery.eq('campaign_id', String(campaignId)).eq('awb_number', awb);
+        }
+        await updateQuery;
+      } catch (e) {}
+
+      return failedShipment;
     }
+
+    const normalized = normalizeTrackingStatus(rawStatus);
+
+    // Remarks: Actual latest ST Courier tracking remark/event
+    const finalRemarks = (returnedRemarks && String(returnedRemarks).trim())
+      ? String(returnedRemarks).trim()
+      : (rawStatus || shipment.remarks);
+
+    // Delivered Date: Populate ONLY from actual courier tracking data when delivered
+    let finalDeliveredDate = shipment.deliveredDate;
+    if (normalized === 'Delivered') {
+      if (returnedDeliveredDate && String(returnedDeliveredDate).trim()) {
+        finalDeliveredDate = String(returnedDeliveredDate).trim();
+      } else if (!finalDeliveredDate && trackingDateTime && trackingDateTime !== '-') {
+        finalDeliveredDate = trackingDateTime;
+      }
+    } else {
+      // If not delivered, preserve existing deliveredDate only if previously set, or undefined
+      finalDeliveredDate = shipment.deliveredDate || undefined;
+    }
+
+    // Dispatched Date: Update from booking date if available, otherwise preserve
+    const finalDispatchedDate = (returnedDispatchedDate && String(returnedDispatchedDate).trim())
+      ? String(returnedDispatchedDate).trim()
+      : (shipment.dispatchedDate || shipment.dispatchDate);
+
+    // Estimated Delivery Date: Preserve existing value
+    const finalEdd = (returnedEdd && String(returnedEdd).trim())
+      ? String(returnedEdd).trim()
+      : (shipment.estimatedDeliveryDate || shipment.expectedDeliveryDate);
+
+    const finalLocation = (lastLocation && lastLocation !== '-')
+      ? lastLocation
+      : shipment.lastLocation;
+
+    const finalTrackingDateTime = (trackingDateTime && trackingDateTime !== '-')
+      ? trackingDateTime
+      : shipment.trackingDateTime;
 
     // Save to Dexie db.shipments for persistent cross-module tracking history
     try {
@@ -1278,8 +1475,8 @@ export async function syncSingleShipment(
         orderId: shipment.influencerCode || shipment.id,
         status: rawStatus || normalized,
         state: apiResult?.state || shipment.state || 'Unknown',
-        lastLocation,
-        trackingDateTime,
+        lastLocation: finalLocation || '-',
+        trackingDateTime: finalTrackingDateTime || '-',
         department: (apiResult?.state === 'Tamil Nadu') ? 'Tamil Nadu' : 'Other State',
         lastSyncedAt: Date.now()
       });
@@ -1287,53 +1484,71 @@ export async function syncSingleShipment(
       console.warn('Dexie shipment cache update failed:', dbErr);
     }
 
-    // Save to local campaign cache
-    const cache = getTrackingCache(campaignId);
-    cache[awb] = {
+    const updatedShipment: InfluencerDispatchedShipment = {
+      ...shipment,
       status: normalized,
       rawStatus: rawStatus || normalized,
       statusSource: 'Live ST Courier Tracking',
       sourceType: 'LIVE_API',
-      lastLocation: lastLocation !== '-' ? lastLocation : undefined,
-      trackingDateTime: trackingDateTime !== '-' ? trackingDateTime : undefined,
-      lastSyncedAt: nowStr,
-      syncError: isSuccess ? undefined : trackingError
-    };
-    saveTrackingCache(campaignId, cache);
-
-    const updatedShipment: InfluencerDispatchedShipment = {
-      ...shipment,
-      status: normalized,
-      rawStatus: rawStatus || (isSuccess ? normalized : 'Tracking Failed'),
-      statusSource: 'Live ST Courier Tracking',
-      sourceType: 'LIVE_API',
-      lastLocation: lastLocation !== '-' ? lastLocation : shipment.lastLocation,
-      trackingDateTime: trackingDateTime !== '-' ? trackingDateTime : shipment.trackingDateTime,
-      lastSyncedAt: nowStr,
-      syncError: isSuccess ? undefined : trackingError
+      remarks: finalRemarks,
+      deliveredDate: finalDeliveredDate,
+      dispatchedDate: finalDispatchedDate,
+      dispatchDate: finalDispatchedDate || shipment.dispatchDate,
+      estimatedDeliveryDate: finalEdd,
+      expectedDeliveryDate: finalEdd,
+      lastLocation: finalLocation,
+      trackingDateTime: finalTrackingDateTime,
+      lastSyncedAt: nowFormatted,
+      syncError: undefined
     };
 
-    // Keep persistent campaign storage synchronized
+    // Keep persistent local storage synchronized
     upsertCampaignShipments(campaignId, [updatedShipment]);
 
     // Update Supabase database
     try {
-      await supabase
+      const metaObj: any = {};
+      if (finalRemarks) metaObj.remarks = finalRemarks;
+      if (finalDeliveredDate) metaObj.delivered_date = finalDeliveredDate;
+      if (finalDispatchedDate) metaObj.dispatch_date = finalDispatchedDate;
+      if (shipment.rawOrderId) metaObj.raw_order_id = shipment.rawOrderId;
+      if (shipment.baseOrderId) metaObj.base_order_id = shipment.baseOrderId;
+      if (shipment.isResend !== undefined) metaObj.is_resend = shipment.isResend;
+      if (shipment.attemptNumber !== undefined) metaObj.attempt_number = shipment.attemptNumber;
+
+      const syncErrorPayload = Object.keys(metaObj).length > 0 ? JSON.stringify(metaObj) : null;
+
+      const updateData: any = {
+        status: normalized,
+        raw_status: rawStatus,
+        status_source: 'st_courier',
+        source_type: 'LIVE_API',
+        last_location: finalLocation || null,
+        tracking_date_time: finalTrackingDateTime || null,
+        last_synced_at: nowIso,
+        sync_error: syncErrorPayload,
+        updated_at: nowIso
+      };
+
+      if (finalRemarks) updateData.remarks = finalRemarks;
+      if (finalDeliveredDate) updateData.delivered_date = finalDeliveredDate;
+      if (finalDispatchedDate) updateData.dispatch_date = finalDispatchedDate;
+      if (finalEdd) updateData.expected_delivery_date = finalEdd;
+
+      let updateQuery = supabaseAdmin
         .from(SUPABASE_TABLES.influencerTrackingShipments)
-        .update({
-          status: normalized,
-          raw_status: rawStatus || (isSuccess ? normalized : 'Tracking Failed'),
-          status_source: 'st_courier',
-          source_type: 'LIVE_API',
-          last_location: lastLocation !== '-' ? lastLocation : (shipment.lastLocation || null),
-          tracking_date_time: trackingDateTime !== '-' ? trackingDateTime : (shipment.trackingDateTime || null),
-          last_synced_at: new Date().toISOString(),
-          sync_error: isSuccess ? null : (trackingError || null),
-          updated_at: new Date().toISOString()
-        })
-        .eq('campaign_id', String(campaignId))
-        .eq('courier', shipment.courier || 'ST Courier')
-        .eq('awb_number', awb);
+        .update(updateData);
+
+      if (shipment.id && shipment.id.length === 36 && shipment.id.includes('-')) {
+        updateQuery = updateQuery.eq('id', shipment.id);
+      } else {
+        updateQuery = updateQuery.eq('campaign_id', String(campaignId)).eq('awb_number', awb);
+      }
+
+      const { error: updateErr } = await updateQuery;
+      if (updateErr) {
+        console.warn('Supabase shipment status sync update failed:', updateErr);
+      }
     } catch (dbErr) {
       console.warn('Supabase shipment status sync update failed:', dbErr);
     }
@@ -1341,86 +1556,64 @@ export async function syncSingleShipment(
     return updatedShipment;
   } catch (err: any) {
     const errorMsg = err.message || String(err);
-    const normalized: TrackingStatusCategory = 'Exception';
-
-    const cache = getTrackingCache(campaignId);
-    cache[awb] = {
-      status: normalized,
-      rawStatus: 'Tracking Failed',
-      statusSource: 'Live ST Courier Tracking',
-      sourceType: 'LIVE_API',
-      lastSyncedAt: nowStr,
-      syncError: errorMsg
-    };
-    saveTrackingCache(campaignId, cache);
-
+    // Keep existing shipment data intact on error
     const failedShipment: InfluencerDispatchedShipment = {
       ...shipment,
-      status: normalized,
-      rawStatus: 'Tracking Failed',
-      statusSource: 'Live ST Courier Tracking',
-      sourceType: 'LIVE_API',
-      lastSyncedAt: nowStr,
+      lastSyncedAt: nowFormatted,
       syncError: errorMsg
     };
 
     upsertCampaignShipments(campaignId, [failedShipment]);
-
-    // Update Supabase database
-    try {
-      await supabase
-        .from(SUPABASE_TABLES.influencerTrackingShipments)
-        .update({
-          status: normalized,
-          raw_status: 'Tracking Failed',
-          status_source: 'st_courier',
-          source_type: 'LIVE_API',
-          last_synced_at: new Date().toISOString(),
-          sync_error: errorMsg,
-          updated_at: new Date().toISOString()
-        })
-        .eq('campaign_id', String(campaignId))
-        .eq('courier', shipment.courier || 'ST Courier')
-        .eq('awb_number', awb);
-    } catch (dbErr) {}
-
     return failedShipment;
   }
 }
 
+export interface SyncAllShipmentsResult {
+  totalChecked: number;
+  updatedCount: number;
+  unchangedCount: number;
+  successful: number;
+  failed: number;
+  results: InfluencerDispatchedShipment[];
+}
+
 /**
- * Bulk sync eligible shipments for a campaign with concurrency control.
- * Only applies to ST Courier shipments. Delhivery shipments are skipped.
+ * Bulk sync ST Courier shipments for a campaign with concurrency control.
+ * STRICT: Only processes shipments where courier is ST Courier. Delhivery is strictly skipped.
  */
 export async function syncAllShipments(
   shipments: InfluencerDispatchedShipment[],
   campaignId: string | number,
   onProgress?: (progress: { completed: number; total: number; successful: number; failed: number; currentAwb: string }) => void
-): Promise<{ successful: number; failed: number; skippedDelhivery: number; results: InfluencerDispatchedShipment[] }> {
-  // Only sync ST Courier shipments that have an AWB and are not already Delivered or RTO
+): Promise<SyncAllShipmentsResult> {
+  const cleanCampaignId = String(campaignId).trim();
+  // Filter ONLY ST Courier shipments that have a valid AWB number
   const eligible = shipments.filter(s => {
-    if (!s.awbNumber || !s.awbNumber.trim()) return false;
-    const isST = (s.courier || '').toLowerCase().includes('st courier');
-    if (!isST) return false;
-    const st = s.status;
-    return st !== 'Delivered' && !s.rawStatus.toLowerCase().includes('rto');
+    const isST = normalizeCourierName(s.courier) === 'ST Courier';
+    const hasAwb = Boolean(s.awbNumber && s.awbNumber.trim());
+    return isST && hasAwb;
   });
 
-  const skippedDelhivery = shipments.filter(s =>
-    (s.courier || '').toLowerCase().includes('delhivery')
-  ).length;
-
   if (eligible.length === 0) {
-    return { successful: 0, failed: 0, skippedDelhivery, results: shipments };
+    return {
+      totalChecked: 0,
+      updatedCount: 0,
+      unchangedCount: 0,
+      successful: 0,
+      failed: 0,
+      results: shipments
+    };
   }
 
   let completed = 0;
   let successful = 0;
   let failed = 0;
+  let updatedCount = 0;
+  let unchangedCount = 0;
   const resultMap = new Map<string, InfluencerDispatchedShipment>();
 
-  // Process in small batches of 2 concurrent calls to prevent rate limits
-  const concurrency = 2;
+  // Process in concurrent batches of 4
+  const concurrency = 4;
   for (let i = 0; i < eligible.length; i += concurrency) {
     const chunk = eligible.slice(i, i + concurrency);
     
@@ -1431,16 +1624,22 @@ export async function syncAllShipments(
           total: eligible.length,
           successful,
           failed,
-          currentAwb: shipment.awbNumber
+          currentAwb: shipment.awbNumber || ''
         });
 
-        const updated = await syncSingleShipment(shipment, campaignId);
+        const updated = await syncSingleShipment(shipment, cleanCampaignId);
         resultMap.set(shipment.id, updated);
 
-        if (!updated.syncError && updated.status !== 'Exception') {
-          successful++;
-        } else {
+        const isFailed = Boolean(updated.syncError);
+        if (isFailed) {
           failed++;
+        } else {
+          successful++;
+          if (hasShipmentDataChanged(shipment, updated)) {
+            updatedCount++;
+          } else {
+            unchangedCount++;
+          }
         }
         completed++;
 
@@ -1449,21 +1648,20 @@ export async function syncAllShipments(
           total: eligible.length,
           successful,
           failed,
-          currentAwb: shipment.awbNumber
+          currentAwb: shipment.awbNumber || ''
         });
       })
     );
   }
 
-  const nowTimestamp = new Date().toLocaleString();
-  setLastCampaignSyncTime(campaignId, nowTimestamp);
-
   const finalResults = shipments.map(s => resultMap.get(s.id) || s);
 
   return {
+    totalChecked: eligible.length,
+    updatedCount,
+    unchangedCount,
     successful,
     failed,
-    skippedDelhivery,
     results: finalResults
   };
 }

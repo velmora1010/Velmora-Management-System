@@ -5,6 +5,7 @@ import { getCanonicalInfluencerPostDates, formatDisplayDateLocal } from '../../u
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
 import { getVideoWorkflow } from './CampaignStatusTracking';
 import { isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
+import { shipmentAttemptService, type ShipmentAttempt } from '../../services/shipmentAttemptService';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { isActiveStatus } from '../../utils/marketingUtils';
@@ -363,6 +364,32 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   // Platform details map loaded reactively
   const [influencerPlatforms, setInfluencerPlatforms] = useState<Record<string, string[]>>({});
 
+  // Shipment attempts chain for calendar delivery events
+  const [campaignShipmentAttempts, setCampaignShipmentAttempts] = useState<ShipmentAttempt[]>([]);
+
+  useEffect(() => {
+    if (!campaign?.id) return;
+    let isMounted = true;
+    const fetchAttempts = async () => {
+      try {
+        const data = await shipmentAttemptService.getCampaignShipmentAttempts(campaign.id);
+        if (isMounted) setCampaignShipmentAttempts(data);
+      } catch (e) {
+        console.error('Error loading campaign shipment attempts for calendar:', e);
+      }
+    };
+    fetchAttempts();
+
+    const handleUpdate = () => {
+      fetchAttempts();
+    };
+    window.addEventListener('shipment_attempts_updated', handleUpdate);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('shipment_attempts_updated', handleUpdate);
+    };
+  }, [campaign?.id]);
+
   // Generate today string
   const todayStr = useMemo(() => {
     return parseDateOnly(new Date(), 2026);
@@ -485,26 +512,57 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       const campaignName = r.dispatch?.campaign_name || campaign.campaign_name;
       const avatarUrl = r.dispatch?.influencer_avatar || '';
 
-      // 1. Delivered milestone — rely only on genuinely confirmed delivery
-      const isDeliveredCompleted = isDeliveryStepCompleted(r);
-      if (isDeliveredCompleted) {
-        const dDate = parseDateOnly(r.dispatch?.expected_delivery_date || r.dispatch?.dispatch_date);
-        if (dDate) {
-          list.push({
-            id: `${r.id}-delivered`,
-            recordId: r.id,
-            type: 'Delivered',
-            label: 'Delivered',
-            icon: '📦',
-            colorClass: 'bg-green-500/10 border border-green-500/30 text-green-400',
-            dateStr: dDate,
-            influencerName,
-            influencerUsername,
-            influencerCode,
-            campaignName,
-            avatarUrl,
-            record: r
-          });
+      // 1. Delivered milestone(s) — support multiple shipment attempts if present
+      const attemptsForInf = campaignShipmentAttempts.filter(
+        a => String(a.influencer_id) === String(r.influencer_id) && a.delivery_confirmed
+      );
+
+      if (attemptsForInf.length > 0) {
+        attemptsForInf.forEach(att => {
+          const dDate = parseDateOnly(att.delivered_date || att.estimated_delivery_date || att.dispatch_date);
+          if (dDate) {
+            const isReplacement = att.shipment_type === 'RE_DISPATCH' || att.attempt_number > 1;
+            list.push({
+              id: `${r.id}-attempt-${att.id}`,
+              recordId: r.id,
+              type: 'Delivered',
+              label: isReplacement ? `Delivered (Attempt ${att.attempt_number})` : 'Delivered (Attempt 1)',
+              icon: '📦',
+              colorClass: isReplacement 
+                ? 'bg-purple-500/10 border border-purple-500/30 text-purple-400' 
+                : 'bg-green-500/10 border border-green-500/30 text-green-400',
+              dateStr: dDate,
+              influencerName,
+              influencerUsername,
+              influencerCode,
+              campaignName,
+              avatarUrl,
+              record: r
+            });
+          }
+        });
+      } else {
+        // Fallback to record-based delivery milestone
+        const isDeliveredCompleted = isDeliveryStepCompleted(r);
+        if (isDeliveredCompleted) {
+          const dDate = parseDateOnly(r.dispatch?.expected_delivery_date || r.dispatch?.dispatch_date);
+          if (dDate) {
+            list.push({
+              id: `${r.id}-delivered`,
+              recordId: r.id,
+              type: 'Delivered',
+              label: 'Delivered',
+              icon: '📦',
+              colorClass: 'bg-green-500/10 border border-green-500/30 text-green-400',
+              dateStr: dDate,
+              influencerName,
+              influencerUsername,
+              influencerCode,
+              campaignName,
+              avatarUrl,
+              record: r
+            });
+          }
         }
       }
 
@@ -707,7 +765,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     }
 
     return list;
-  }, [activeTrackingRecords, activeInfluencers, campaign, campaignBills, todayStr]);
+  }, [activeTrackingRecords, activeInfluencers, campaign, campaignBills, todayStr, campaignShipmentAttempts]);
 
   // Calculate Today's Stats dynamically adapting to active filters
   const todaySummaryStats = useMemo(() => {

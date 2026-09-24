@@ -34,6 +34,8 @@ import {
 } from '../../services/influencerTrackingService';
 import { parseToYMD } from '../../utils/influencerDateUtils';
 import { normalizeInfluencerReference } from '../../services/influencerStatusHandoffService';
+import { extractInfluencerCodeFromOrderId } from '../../services/shipmentAttemptService';
+import { normalizeOrderId, isSameUnderlyingOrder } from '../../utils/orderIdUtils';
 import toast from 'react-hot-toast';
 
 export interface UploadResultStats {
@@ -382,6 +384,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
       const validRows: {
         rawAwb: string;
         orderId: string;
+        rawOrderId: string;
+        baseOrderId: string;
+        isResend: boolean;
+        attemptNumber: number;
         consigneeName: string;
         currentStatus: string;
         statusType: string;
@@ -433,7 +439,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         if (existingShipment) {
           matchedInf = activeCampaignInfluencers.find(i => 
             (existingShipment.influencerId && String(i.id) === String(existingShipment.influencerId)) ||
-            (i.code && normalizeInfluencerReference(i.code) === normalizeInfluencerReference(existingShipment.influencerCode))
+            (i.code && isSameUnderlyingOrder(i.code, existingShipment.influencerCode))
           );
           if (!matchedInf) {
             matchedInf = {
@@ -452,9 +458,19 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
         // 2. Match by Order ID / Reference No
         if (!matchedInf && rawOrderId) {
-          const normCode = normalizeInfluencerReference(rawOrderId);
-          if (codeMap.has(normCode)) {
-            matchedInf = codeMap.get(normCode);
+          const norm = normalizeOrderId(rawOrderId);
+          const cleanNorm = norm.normalized.toLowerCase();
+          const baseNorm = norm.baseCode.toLowerCase();
+
+          if (cleanNorm && codeMap.has(cleanNorm)) {
+            matchedInf = codeMap.get(cleanNorm);
+          } else if (baseNorm && codeMap.has(baseNorm)) {
+            matchedInf = codeMap.get(baseNorm);
+          } else {
+            // Generic check across campaign influencers
+            matchedInf = activeCampaignInfluencers.find(inf => 
+              isSameUnderlyingOrder(rawOrderId, inf.code)
+            );
           }
         }
 
@@ -463,9 +479,20 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           for (const key of headers) {
             const val = cleanStr(row[key]);
             if (!val) continue;
-            const normC = normalizeInfluencerReference(val);
-            if (codeMap.has(normC)) {
-              matchedInf = codeMap.get(normC);
+            const norm = normalizeOrderId(val);
+            const cleanNorm = norm.normalized.toLowerCase();
+            const baseNorm = norm.baseCode.toLowerCase();
+            if (cleanNorm && codeMap.has(cleanNorm)) {
+              matchedInf = codeMap.get(cleanNorm);
+              break;
+            }
+            if (baseNorm && codeMap.has(baseNorm)) {
+              matchedInf = codeMap.get(baseNorm);
+              break;
+            }
+            const found = activeCampaignInfluencers.find(inf => isSameUnderlyingOrder(val, inf.code));
+            if (found) {
+              matchedInf = found;
               break;
             }
           }
@@ -481,9 +508,14 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           return;
         }
 
+        const orderInfo = normalizeOrderId(rawOrderId || matchedInf.code);
         validRows.push({
           rawAwb,
-          orderId: matchedInf.code || rawOrderId,
+          orderId: rawOrderId || (matchedInf.code ? (matchedInf.code.startsWith('#') ? matchedInf.code : `#${matchedInf.code}`) : ''),
+          rawOrderId: rawOrderId || (matchedInf.code ? (matchedInf.code.startsWith('#') ? matchedInf.code : `#${matchedInf.code}`) : ''),
+          baseOrderId: orderInfo.baseCode || (matchedInf.code ? matchedInf.code.replace(/^#+/, '') : ''),
+          isResend: orderInfo.isResend,
+          attemptNumber: orderInfo.attemptNumber,
           consigneeName: rawConsigneeName,
           currentStatus: rawCurrentStatus,
           statusType: rawStatusType,
@@ -551,18 +583,20 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             chunk.map(async (row) => {
               const inf = row.matchedInf;
               const awb = row.rawAwb.trim();
-              const orderId = row.orderId || inf.code || '';
 
-              const existingShipment = existingMap.get(awb.toLowerCase()) || 
-                (inf.code ? Array.from(existingMap.values()).find(s => (s.influencerCode || '').toLowerCase() === inf.code?.toLowerCase()) : undefined);
+              const existingShipment = existingMap.get(awb.toLowerCase());
 
               const baseShipment: InfluencerDispatchedShipment = {
-                id: existingShipment?.id || inf.dispatchDetails?.id || String(inf.id),
+                id: existingShipment?.id || crypto.randomUUID(),
                 influencerId: String(inf.id),
                 creatorName: inf.influencer_name || inf.name || existingShipment?.creatorName || 'Influencer',
                 username: inf.platforms?.find(p => p.username)?.username || existingShipment?.username || `@${inf.influencer_name}`,
-                influencerCode: inf.code || orderId || existingShipment?.influencerCode || '',
-                orderId: orderId || existingShipment?.orderId || undefined,
+                influencerCode: inf.code || row.baseOrderId || existingShipment?.influencerCode || '',
+                orderId: row.orderId || existingShipment?.orderId || undefined,
+                rawOrderId: row.rawOrderId || existingShipment?.rawOrderId || undefined,
+                baseOrderId: row.baseOrderId || existingShipment?.baseOrderId || undefined,
+                isResend: row.isResend !== undefined ? row.isResend : existingShipment?.isResend,
+                attemptNumber: row.attemptNumber || existingShipment?.attemptNumber,
                 profilePhoto: inf.profile_file_url || existingShipment?.profilePhoto || '',
                 phoneNumber: inf.phone_number || existingShipment?.phoneNumber || '',
                 altPhoneNumber: inf.alternative_number || existingShipment?.altPhoneNumber || '',
@@ -728,15 +762,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           const row = validRows[i];
           const inf = row.matchedInf;
           const awb = String(row.rawAwb || '').trim();
-          const orderId = row.orderId || inf.code || '';
 
           const incomingRemarks = (row.remarks && row.remarks.trim()) ? row.remarks.trim() : '';
           if (incomingRemarks) {
             rowsWithRemarksCount++;
           }
 
-          const existingShipment = existingMap.get(awb.toLowerCase()) || 
-            (inf.code ? Array.from(existingMap.values()).find(s => (s.influencerCode || '').toLowerCase() === inf.code?.toLowerCase()) : undefined);
+          const existingShipment = existingMap.get(awb.toLowerCase());
 
           const finalRemarks = incomingRemarks || existingShipment?.remarks || undefined;
           const incomingDeliveredDate = (row.deliveredDate && row.deliveredDate.trim()) ? row.deliveredDate.trim() : '';
@@ -751,12 +783,16 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           const normalizedEdd = row.edd ? (parseToYMD(row.edd) || row.edd) : (existingShipment?.estimatedDeliveryDate || existingShipment?.expectedDeliveryDate || '');
 
           const shipmentObj: InfluencerDispatchedShipment = {
-            id: existingShipment?.id || inf.dispatchDetails?.id || String(inf.id),
+            id: existingShipment?.id || crypto.randomUUID(),
             influencerId: String(inf.id),
             creatorName: inf.influencer_name || inf.name || existingShipment?.creatorName || 'Influencer',
             username: inf.platforms?.find(p => p.username)?.username || existingShipment?.username || `@${inf.influencer_name}`,
-            influencerCode: inf.code || orderId || existingShipment?.influencerCode || '',
-            orderId: orderId || existingShipment?.orderId || undefined,
+            influencerCode: inf.code || row.baseOrderId || existingShipment?.influencerCode || '',
+            orderId: row.orderId || existingShipment?.orderId || undefined,
+            rawOrderId: row.rawOrderId || existingShipment?.rawOrderId || undefined,
+            baseOrderId: row.baseOrderId || existingShipment?.baseOrderId || undefined,
+            isResend: row.isResend !== undefined ? row.isResend : existingShipment?.isResend,
+            attemptNumber: row.attemptNumber || existingShipment?.attemptNumber,
             profilePhoto: inf.profile_file_url || existingShipment?.profilePhoto || '',
             phoneNumber: inf.phone_number || existingShipment?.phoneNumber || '',
             altPhoneNumber: inf.alternative_number || existingShipment?.altPhoneNumber || '',
@@ -791,7 +827,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           try {
             await db.shipments.put({
               awb,
-              orderId: orderId || awb,
+              orderId: shipmentObj.orderId || awb,
               status: displayStatus,
               state: row.state || 'Unknown',
               lastLocation: '-',

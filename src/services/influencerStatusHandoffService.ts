@@ -11,6 +11,8 @@ import {
   deleteSingleCampaignShipmentFromDb,
   fetchCampaignShipmentsFromDb
 } from './influencerTrackingService';
+import { extractInfluencerCodeFromOrderId } from './shipmentAttemptService';
+import { normalizeOrderId, isSameUnderlyingOrder } from '../utils/orderIdUtils';
 
 /**
  * Extracts the numeric integer value from an influencer code.
@@ -137,18 +139,19 @@ export function compareShipmentsByInfluencerCodeNaturally(
 export function sortInfluencerShipmentsNaturally<T>(shipments: T[]): T[] {
   return [...shipments].sort(compareShipmentsByInfluencerCodeNaturally);
 }
-
 /**
  * Normalizes an influencer code or shipment order reference for canonical comparison.
  * - converts to string
  * - trims whitespace
  * - removes leading "#"
  * - converts to lowercase
- * Example: "#HIS1", "HIS1", " his1 ", "#his1" all resolve to "his1"
- * But "#4536" resolves to "4536", which will only match if an actual campaign influencer has code "4536".
+ * - strips resend R prefixes when matching to base influencer
+ * Example: "#HIS1", "HIS1", " his1 ", "#his1", "R HIS1", "RHIS1" all resolve to "his1"
  */
 export function normalizeInfluencerReference(value: any): string {
   if (value === undefined || value === null) return '';
+  const info = normalizeOrderId(value);
+  if (info.baseCode) return info.baseCode.toLowerCase();
   return String(value)
     .replace(/[\t\r\n]/g, ' ')
     .trim()
@@ -182,16 +185,24 @@ export function matchShipmentToInfluencer(
 ): InfluencerMatchResult {
   const cleanShipCode = normalizeInfluencerReference(shipment.influencerCode);
   const cleanOrderId = normalizeInfluencerReference(shipment.orderId);
+  const shipOrderInfo = normalizeOrderId(shipment.orderId || (shipment as any).rawOrderId || shipment.influencerCode);
+  const shipCodeInfo = normalizeOrderId(shipment.influencerCode);
   const cleanShipInfId = shipment.influencerId ? String(shipment.influencerId).trim() : '';
   const cleanAwb = (shipment.awbNumber || '').trim().toLowerCase();
 
   // -------------------------------------------------------------
   // Priority 1: Influencer Code
   // -------------------------------------------------------------
-  if (cleanShipCode) {
+  if (cleanShipCode || shipCodeInfo.baseCode) {
+    const strippedShipCode = shipCodeInfo.baseCode.toLowerCase();
     const infByCode = campaignInfluencers.find(inf => {
       const code = normalizeInfluencerReference(inf.code);
-      return code && code === cleanShipCode;
+      const infOrder = normalizeOrderId(inf.code);
+      return code && (
+        code === cleanShipCode || 
+        code === strippedShipCode ||
+        infOrder.baseCode === shipCodeInfo.baseCode
+      );
     });
     if (infByCode) {
       const dispatch = dispatchRecords.find(d => String(d.influencer_id) === String(infByCode.id));
@@ -205,7 +216,12 @@ export function matchShipmentToInfluencer(
 
     const dispByCode = dispatchRecords.find(d => {
       const code = normalizeInfluencerReference((d as any).influencer_code);
-      return code && code === cleanShipCode;
+      const dispOrder = normalizeOrderId((d as any).influencer_code);
+      return code && (
+        code === cleanShipCode || 
+        code === strippedShipCode ||
+        dispOrder.baseCode === shipCodeInfo.baseCode
+      );
     });
     if (dispByCode) {
       const inf = campaignInfluencers.find(i => String(i.id) === String(dispByCode.influencer_id));
@@ -239,10 +255,16 @@ export function matchShipmentToInfluencer(
   // -------------------------------------------------------------
   // Priority 3: Order ID / shipment relationship matching canonical Influencer Code
   // -------------------------------------------------------------
-  if (cleanOrderId) {
+  if (cleanOrderId || shipOrderInfo.baseCode) {
+    const strippedOrderId = shipOrderInfo.baseCode.toLowerCase();
     const infByOrderAsCode = campaignInfluencers.find(inf => {
       const code = normalizeInfluencerReference(inf.code);
-      return code && code === cleanOrderId;
+      const infOrder = normalizeOrderId(inf.code);
+      return code && (
+        code === cleanOrderId || 
+        code === strippedOrderId ||
+        infOrder.baseCode === shipOrderInfo.baseCode
+      );
     });
     if (infByOrderAsCode) {
       const dispatch = dispatchRecords.find(d => String(d.influencer_id) === String(infByOrderAsCode.id));
@@ -250,7 +272,7 @@ export function matchShipmentToInfluencer(
         matchedInfluencer: infByOrderAsCode,
         matchedDispatch: dispatch,
         matchPriority: 3,
-        matchReason: `Matched Order ID to Influencer Code: ${infByOrderAsCode.code}`
+        matchReason: `Matched Order ID (${shipment.orderId || cleanOrderId}) to Influencer Code: ${infByOrderAsCode.code}`
       };
     }
   }
@@ -447,7 +469,12 @@ export async function resolveShipmentInfluencerId(
   }
 
   // Layer 4: Direct DB lookup in influencers_info_rows by code or orderId
-  const searchCodes = [cleanCode, cleanOrderId].filter(Boolean);
+  const searchCodes = [
+    cleanCode, 
+    cleanOrderId,
+    extractInfluencerCodeFromOrderId(cleanCode),
+    extractInfluencerCodeFromOrderId(cleanOrderId)
+  ].filter(Boolean);
   if (searchCodes.length > 0) {
     try {
       let query = supabaseAdmin
@@ -464,7 +491,12 @@ export async function resolveShipmentInfluencerId(
       if (!infErr && infRows && infRows.length > 0) {
         const matched = infRows.find(inf => {
           const infCode = (inf.code || '').replace(/^#+/, '').trim().toLowerCase();
-          return searchCodes.some(sc => sc.toLowerCase() === infCode || sc === String(inf.id));
+          const infBaseCode = normalizeOrderId(inf.code).baseCode.toLowerCase();
+          return searchCodes.some(sc => {
+            const scLower = sc.toLowerCase();
+            const scBase = normalizeOrderId(sc).baseCode.toLowerCase();
+            return scLower === infCode || (infBaseCode && scBase === infBaseCode) || sc === String(inf.id);
+          });
         });
         if (matched?.id) {
           return String(matched.id);
@@ -497,6 +529,22 @@ export interface HandoffResult {
 export function isDeliveryStepCompleted(record: any): boolean {
   if (!record) return false;
 
+  // Check if re-dispatch is required or issue reported
+  let meta: any = null;
+  try {
+    meta = typeof record.notes === 'string' ? JSON.parse(record.notes) : record.notes;
+  } catch (e) {}
+
+  const rawStatus = (record.status || '').toLowerCase();
+  if (
+    rawStatus.includes('re-dispatch') ||
+    rawStatus.includes('redispatch') ||
+    meta?.re_dispatch_required ||
+    meta?.issue_reported
+  ) {
+    return false;
+  }
+
   // If explicitly not confirmed, definitely not completed
   if (!record.delivered_confirmed) return false;
 
@@ -506,12 +554,9 @@ export function isDeliveryStepCompleted(record: any): boolean {
   }
 
   // Check notes for metadata delivery_photo_url
-  try {
-    const meta = typeof record.notes === 'string' ? JSON.parse(record.notes) : record.notes;
-    if (meta?.delivery_photo_url && typeof meta.delivery_photo_url === 'string' && meta.delivery_photo_url.trim() !== '') {
-      return true;
-    }
-  } catch (e) {}
+  if (meta?.delivery_photo_url && typeof meta.delivery_photo_url === 'string' && meta.delivery_photo_url.trim() !== '') {
+    return true;
+  }
 
   // Preserve legacy records from older campaigns that had already progressed to later workflow steps
   if (
@@ -580,7 +625,7 @@ export async function handoffDeliveredShipmentToStatusTracking(
     // 1. Check if Status Tracking record already exists for (campaign_id, influencer_id)
     const { data: existing, error: findError } = await supabaseAdmin
       .from(SUPABASE_TABLES.influencerStatus)
-      .select('id, current_step, notes, delivered_confirmed')
+      .select('id, current_step, notes, delivered_confirmed, status')
       .eq('campaign_id', cleanCampaignId)
       .eq('influencer_id', cleanInfId);
 
@@ -592,8 +637,36 @@ export async function handoffDeliveredShipmentToStatusTracking(
     if (existing && existing.length > 0) {
       // Idempotent: preserve all existing progress!
       const existingRow = existing[0];
+      let meta: any = {};
+      try {
+        meta = typeof existingRow.notes === 'string' ? JSON.parse(existingRow.notes) : existingRow.notes;
+      } catch (e) {}
+
+      // If this influencer was previously marked for re-dispatch / had an issue reported:
+      if (meta?.re_dispatch_required || meta?.issue_reported || (existingRow as any).status === 'Re-Dispatch Required') {
+        // Reset Step 1 to NOT started for the newly delivered replacement shipment
+        meta.re_dispatch_required = false;
+        meta.issue_reported = false;
+        meta.delivered_confirmed = false;
+        meta.delivery_photo_url = null;
+        meta.replacement_delivered_at = new Date().toISOString();
+
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerStatus)
+          .update({
+            current_step: 0,
+            delivered_confirmed: false,
+            delivery_photo_url: null,
+            status: 'Not Started',
+            notes: JSON.stringify(meta),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingRow.id);
+      }
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+        window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
       }
       return {
         success: true,

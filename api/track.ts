@@ -225,85 +225,149 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
 
       const htmlContent = await fetchRes.text();
       
-      let parsedStatus = '';
-      const currentStatusMatch = htmlContent.match(/Current\s+Status[^>]*>\s*(?:<[^>]*>\s*)*([^<]+)/i);
-      if (currentStatusMatch && currentStatusMatch[1]) {
-        parsedStatus = currentStatusMatch[1].trim();
-      }
+      const statusMatch = htmlContent.match(/Current\s+Status\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+      const rawCurrentStatus = statusMatch ? statusMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
-      let deliveryDate = '';
-      const deliveryDateMatch = htmlContent.match(/Delivery\s+Date\/Time[^>]*>\s*(?:<[^>]*>\s*)*([^<]+)/i);
-      if (deliveryDateMatch && deliveryDateMatch[1]) {
-        deliveryDate = deliveryDateMatch[1].trim();
-      }
+      const bookMatch = htmlContent.match(/Book\s+Date\/Time\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+      const bookDateTime = bookMatch ? bookMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
-      // Timeline latest event check as verification/fallback
-      let latestTimelineStatus = '';
-      try {
-        const eventRegex = /((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}\s*<br\s*\/?>\s*\d{1,2}:\d{2}\s+(?:AM|PM))/gi;
-        const eventMatches = [];
-        let match;
-        while ((match = eventRegex.exec(htmlContent)) !== null) {
-          eventMatches.push({
-            index: match.index,
-            length: match[1].length,
-            dateStr: match[1].replace(/<br\s*\/?>/i, ' ').replace(/\s+/g, ' ').trim()
-          });
+      const delivMatch = htmlContent.match(/Delivery\s+Date\/Time\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+      const deliveryDateTime = delivMatch ? delivMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
+      let latestEvent = '';
+      let latestLocation = '';
+      let latestDateTime = '';
+
+      const timelineBlockMatch = htmlContent.match(/class="[^"]*tl24[^"]*"[^>]*>([\s\S]*?)(?:<div[^>]*class="[^"]*tl24[^"]*"|<\/div>\s*<\/div>\s*<\/div>\s*<\/div>)/i);
+      if (timelineBlockMatch) {
+        const block = timelineBlockMatch[1];
+        
+        const timeMatch = block.match(/width:\s*25%[^>]*>([\s\S]*?)<\/div>/i);
+        if (timeMatch) {
+          latestDateTime = timeMatch[1].replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
         }
 
-        const timelineEvents: { date: Date; status: string }[] = [];
-        for (let i = 0; i < eventMatches.length; i++) {
-          const curr = eventMatches[i];
-          const nextIndex = i + 1 < eventMatches.length ? eventMatches[i + 1].index : htmlContent.length;
-          const textSegment = htmlContent.substring(curr.index + curr.length, Math.min(curr.index + 1500, nextIndex));
-          
-          // Clean up the HTML from the segment to extract the event description
-          const cleanText = textSegment.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-          
-          const eventDate = parseTimelineDate(curr.dateStr);
-          if (eventDate) {
-            timelineEvents.push({
-              date: eventDate,
-              status: cleanText
-            });
-          }
+        const descMatch = block.match(/width:\s*65%[^>]*>([\s\S]*?)<\/div>/i);
+        if (descMatch) {
+          const parts = descMatch[1].split(/<br\s*\/?>/gi).map(s => s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+          latestEvent = parts[0] || '';
+          latestLocation = parts.slice(1).join(' - ');
         }
-
-        if (timelineEvents.length > 0) {
-          // Sort descending chronologically
-          timelineEvents.sort((a, b) => b.date.getTime() - a.date.getTime());
-          latestTimelineStatus = timelineEvents[0].status;
-        }
-      } catch (e) {
-        console.error('[ST TRACKING] Timeline parsing error:', e);
       }
 
-      // Determine the final status to use, preferring parsedStatus then falling back to latestTimelineStatus
-      const finalRawStatus = parsedStatus || latestTimelineStatus || '';
+      // Determine the primary status: prioritize rawCurrentStatus from table, or latest event
+      const finalRawStatus = rawCurrentStatus || latestEvent || '';
       const normalized = normalizeStatus(finalRawStatus);
+
+      // Latest actual event is used for the application's REMARKS column
+      const remarks = latestEvent || rawCurrentStatus || undefined;
+      const finalDeliveryDate = (normalized === 'Delivered' && deliveryDateTime) ? deliveryDateTime : undefined;
+      const finalDispatchedDate = bookDateTime ? bookDateTime.split(' ')[0] : undefined;
 
       // Development diagnostics
       console.log(`[ST TRACKING] AWB: ${awbNumber}`);
-      console.log(`[ST TRACKING] Raw Current Status: ${parsedStatus || 'N/A'}`);
-      console.log(`[ST TRACKING] Latest Event: ${latestTimelineStatus || 'N/A'}`);
+      console.log(`[ST TRACKING] Raw Status: ${finalRawStatus}`);
       console.log(`[ST TRACKING] Normalized Status: ${normalized}`);
-      console.log(`[ST TRACKING] Delivery Date: ${deliveryDate || 'N/A'}`);
-      console.log(`[ST TRACKING] API Success: true`);
+      console.log(`[ST TRACKING] Remarks: ${remarks || 'N/A'}`);
+      console.log(`[ST TRACKING] Delivery Date: ${finalDeliveryDate || 'N/A'}`);
+      console.log(`[ST TRACKING] Dispatched Date: ${finalDispatchedDate || 'N/A'}`);
 
-      if (normalized) {
-        res.statusCode = 200;
-        res.end(JSON.stringify({
-          success: true,
-          status: normalized,
-          deliveryDate: deliveryDate || undefined,
-          lastSyncedAt: nowStr
-        }));
-      } else {
+      // Verify AWB match if present on page
+      const pageAwbMatch = htmlContent.match(/Status\s+of\s+AWB\s+No\.?\s*<span[^>]*>([a-zA-Z0-9]+)/i);
+      const returnedAwb = pageAwbMatch ? pageAwbMatch[1].trim() : '';
+      if (returnedAwb && returnedAwb.toLowerCase() !== awbNumber.toLowerCase()) {
         res.statusCode = 200;
         res.end(JSON.stringify({
           success: false,
           status: 'Unable to fetch',
-          error: htmlContent.includes('No Record Found') ? 'No Record Found' : 'Could not parse status from ST Courier response',
+          error: `Returned AWB (${returnedAwb}) does not match requested AWB (${awbNumber})`,
+          lastSyncedAt: nowStr
+        }));
+        return;
+      }
+
+      // If neither table status nor timeline event was matched
+      if (!finalRawStatus || (!statusMatch && !timelineBlockMatch)) {
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          success: false,
+          status: 'Unable to fetch',
+          error: htmlContent.includes('No Record') ? 'No Record Found on ST Courier' : 'Tracking information not found on ST Courier',
+          lastSyncedAt: nowStr
+        }));
+        return;
+      }
+
+      res.statusCode = 200;
+      res.end(JSON.stringify({
+        success: true,
+        status: normalized,
+        rawStatus: finalRawStatus,
+        remarks: remarks,
+        deliveryDate: finalDeliveryDate,
+        dispatchedDate: finalDispatchedDate,
+        lastLocation: latestLocation || undefined,
+        trackingDateTime: latestDateTime || deliveryDateTime || bookDateTime || undefined,
+        lastSyncedAt: nowStr
+      }));
+    } else if (courier === 'Delhivery' || courier.toLowerCase().includes('delhivery')) {
+      try {
+        const dlvRes = await fetch(`https://dlv-api.delhivery.com/v3/unified-tracking?wbn=${encodeURIComponent(awbNumber)}`, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Origin': 'https://www.delhivery.com',
+            'Referer': 'https://www.delhivery.com/',
+            'Accept': 'application/json, text/plain, */*'
+          },
+          signal: AbortSignal.timeout(15000)
+        });
+
+        if (!dlvRes.ok) {
+          throw new Error(`Delhivery tracking endpoint HTTP ${dlvRes.status} (${dlvRes.statusText})`);
+        }
+
+        const dlvData = await dlvRes.json();
+        if (dlvData.statusCode === 200 && Array.isArray(dlvData.data) && dlvData.data.length > 0) {
+          const pkg = dlvData.data[0];
+          const rawStatus = pkg.status?.status || pkg.hqStatus || '';
+          const normalized = normalizeStatus(rawStatus);
+          const remarks = pkg.status?.instructions || pkg.trackingStates?.[0]?.scans?.[0]?.scanNslRemark || undefined;
+          const deliveryDate = (normalized === 'Delivered' && pkg.deliveryDate) ? pkg.deliveryDate : undefined;
+          const promiseDeliveryDate = pkg.promiseDeliveryDate || undefined;
+          const lastLocation = pkg.destination || pkg.trackingStates?.[0]?.scans?.[0]?.scannedLocation || undefined;
+          const trackingDateTime = pkg.status?.statusDateTime || undefined;
+
+          console.log(`[DELHIVERY TRACKING] AWB: ${awbNumber}, Status: ${normalized}, Raw: ${rawStatus}, Remarks: ${remarks || 'None'}, Delivery Date: ${deliveryDate || 'None'}`);
+
+          res.statusCode = 200;
+          res.end(JSON.stringify({
+            success: true,
+            status: normalized,
+            rawStatus: rawStatus,
+            remarks: remarks || undefined,
+            deliveryDate: deliveryDate || undefined,
+            estimatedDeliveryDate: promiseDeliveryDate || undefined,
+            lastLocation: lastLocation || undefined,
+            trackingDateTime: trackingDateTime || undefined,
+            lastSyncedAt: nowStr
+          }));
+        } else {
+          res.statusCode = 200;
+          res.end(JSON.stringify({
+            success: false,
+            status: 'Tracking Not Found',
+            error: dlvData.message || 'No tracking record found for this Delhivery waybill',
+            lastSyncedAt: nowStr
+          }));
+        }
+      } catch (dlvErr: any) {
+        console.error('[DELHIVERY TRACKING] Error:', dlvErr);
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          success: false,
+          status: 'Unable to fetch',
+          error: dlvErr.message || String(dlvErr),
           lastSyncedAt: nowStr
         }));
       }
@@ -394,7 +458,7 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
         }));
       }
     } else {
-      // Delhivery, Ekart, and any other unsupported couriers
+      // Ekart, and any other unsupported couriers
       res.statusCode = 200;
       res.end(JSON.stringify({
         success: false,

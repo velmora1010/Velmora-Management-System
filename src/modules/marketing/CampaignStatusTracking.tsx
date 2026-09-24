@@ -28,6 +28,12 @@ import {
   STATUS_TRACKING_PRICE_RANGES
 } from '../../components/marketing/StatusTrackingFilterDrawer';
 import { areFilterValuesEqual, getUniqueFilterOptions } from '../../utils/filterUtils';
+import { 
+  shipmentAttemptService, 
+  type ShipmentAttempt, 
+  type ShipmentIssueType,
+  cleanCodeRef
+} from '../../services/shipmentAttemptService';
 
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
@@ -1054,6 +1060,22 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
     const rawStatus = (record.status || '').toLowerCase();
 
+    // Re-Dispatch Required: if shipment issue reported or re-dispatch required
+    if (
+      rawStatus.includes('re-dispatch') ||
+      rawStatus.includes('redispatch') ||
+      metadata.re_dispatch_required ||
+      metadata.shipment_issue ||
+      metadata.issue_reported
+    ) {
+      return {
+        key: 'RE_DISPATCH_REQUIRED',
+        label: 'Re-Dispatch Required',
+        badgeClass: 'bg-amber-950/80 text-amber-300 border-amber-600/60',
+        dotClass: 'bg-amber-400'
+      };
+    }
+
     // On Hold
     if (rawStatus === 'on_hold' || rawStatus === 'on hold' || metadata.on_hold) {
       return {
@@ -1261,6 +1283,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     let inProgress = 0;
     let pending = 0;
     let onHold = 0;
+    let reDispatch = 0;
     let notStarted = 0;
 
     filteredRecords.forEach(r => {
@@ -1269,6 +1292,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       else if (status.key === 'IN_PROGRESS') inProgress++;
       else if (status.key === 'PENDING') pending++;
       else if (status.key === 'ON_HOLD') onHold++;
+      else if (status.key === 'RE_DISPATCH_REQUIRED') reDispatch++;
       else if (status.key === 'NOT_STARTED') notStarted++;
     });
 
@@ -1284,6 +1308,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       pendingPct: calcPct(pending),
       onHold,
       onHoldPct: calcPct(onHold),
+      reDispatch,
+      reDispatchPct: calcPct(reDispatch),
       notStarted,
       notStartedPct: calcPct(notStarted)
     };
@@ -1391,42 +1417,117 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }
   };
 
-  // Milestone Save Handler for Top-Level Delivery & Modals
+  // Milestone Save Handler for Top-Level Delivery & Modals (Step 1 Delivery Confirmation or Re-Dispatch Issue)
   const handleDeliverySave = async (recordId: string, data: any) => {
     const record = activeTrackingRecords.find(r => r.id === recordId) || trackingRecords.find(r => r.id === recordId);
     if (!record) return;
 
-    if (!data.delivered_confirmed || !data.delivery_photo_url || !String(data.delivery_photo_url).trim()) {
-      toast.error('Please confirm delivery and upload the delivery proof photo before completing Step 1.');
-      return;
-    }
+    const toastId = toast.loading('Saving delivery status...');
 
-    let metadata: any = {};
     try {
-      metadata = JSON.parse(record.notes || '{}');
-    } catch (e) {
-      metadata = {};
-    }
+      // Ensure we have an active shipment attempt for this influencer
+      let attemptId = data.attempt_id;
+      if (!attemptId) {
+        const latest = await shipmentAttemptService.getLatestShipmentAttempt(record.campaign_id, record.influencer_id);
+        if (latest) {
+          attemptId = latest.id;
+        } else {
+          const initial = await shipmentAttemptService.createInitialShipmentAttempt({
+            campaign_id: record.campaign_id,
+            influencer_id: record.influencer_id,
+            influencer_code: record.dispatch?.influencer_code || record.influencer_id,
+            courier: record.dispatch?.courier_partner,
+            awb_number: record.dispatch?.tracking_id,
+            order_id: (record.dispatch as any)?.order_id
+          });
+          if (initial) attemptId = initial.id;
+        }
+      }
 
-    metadata.last_updated = new Date().toISOString();
-    metadata.delivered_confirmed = true;
-    metadata.delivery_photo_url = data.delivery_photo_url;
+      let metadata: any = {};
+      try {
+        metadata = JSON.parse(record.notes || '{}');
+      } catch (e) {
+        metadata = {};
+      }
 
-    const updates: Partial<StatusTrackingRecord> = {
-      delivered_confirmed: true,
-      delivery_photo_url: data.delivery_photo_url,
-      current_step: Math.max(record.current_step || 0, 1),
-      status: 'Active',
-      notes: JSON.stringify(metadata)
-    };
+      if (data.option === 'PRODUCT_ISSUE') {
+        if (!data.issue_type) {
+          toast.error('Please select an issue type.', { id: toastId });
+          return;
+        }
 
-    const result = await saveMilestone(recordId, updates);
-    if (result.success) {
-      toast.success('Delivery confirmation saved successfully.');
-      await refresh();
-      setActiveModal(null);
-    } else {
-      toast.error('Failed to save delivery: ' + (result.error?.message || 'Unknown error'));
+        if (attemptId) {
+          await shipmentAttemptService.reportShipmentIssue(attemptId, {
+            issue_type: data.issue_type,
+            issue_remarks: data.issue_remarks,
+            issue_proof_url: data.issue_proof_url
+          });
+        }
+
+        metadata.last_updated = new Date().toISOString();
+        metadata.issue_reported = true;
+        metadata.issue_type = data.issue_type;
+        metadata.issue_remarks = data.issue_remarks || '';
+        metadata.issue_proof_url = data.issue_proof_url || '';
+        metadata.re_dispatch_required = true;
+        metadata.delivered_confirmed = false;
+
+        const updates: Partial<StatusTrackingRecord> = {
+          delivered_confirmed: false,
+          current_step: 0,
+          status: 'Re-Dispatch Required',
+          notes: JSON.stringify(metadata)
+        };
+
+        const result = await saveMilestone(recordId, updates);
+        if (result.success) {
+          toast.success('Shipment issue reported. Influencer moved to Re-Dispatch in Logistics.', { id: toastId });
+          await refresh();
+          setActiveModal(null);
+        } else {
+          toast.error('Failed to report issue: ' + (result.error?.message || 'Unknown error'), { id: toastId });
+        }
+      } else {
+        // Option A: NO_ISSUE (Standard delivery confirmation)
+        if (!data.delivered_confirmed || !data.delivery_photo_url || !String(data.delivery_photo_url).trim()) {
+          toast.error('Please confirm delivery and upload the delivery proof photo before completing Step 1.', { id: toastId });
+          return;
+        }
+
+        if (attemptId) {
+          await shipmentAttemptService.confirmShipmentDelivery(attemptId, data.delivery_photo_url);
+        }
+
+        metadata.last_updated = new Date().toISOString();
+        metadata.delivered_confirmed = true;
+        metadata.delivery_photo_url = data.delivery_photo_url;
+        delete metadata.re_dispatch_required;
+        delete metadata.issue_reported;
+        delete metadata.issue_type;
+        delete metadata.issue_remarks;
+        delete metadata.issue_proof_url;
+
+        const updates: Partial<StatusTrackingRecord> = {
+          delivered_confirmed: true,
+          delivery_photo_url: data.delivery_photo_url,
+          current_step: Math.max(record.current_step || 0, 1),
+          status: 'Active',
+          notes: JSON.stringify(metadata)
+        };
+
+        const result = await saveMilestone(recordId, updates);
+        if (result.success) {
+          toast.success('Delivery confirmation saved successfully.', { id: toastId });
+          await refresh();
+          setActiveModal(null);
+        } else {
+          toast.error('Failed to save delivery: ' + (result.error?.message || 'Unknown error'), { id: toastId });
+        }
+      }
+    } catch (err: any) {
+      console.error('handleDeliverySave error:', err);
+      toast.error('Failed to save delivery status: ' + (err?.message || String(err)), { id: toastId });
     }
   };
 
@@ -2121,33 +2222,52 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       <div className="flex items-center justify-between w-full">
                         
                         {/* 1. STEP 1: DELIVERY CONFIRMATION STAGE */}
-                        <div 
-                          className="flex flex-col items-center cursor-pointer group relative select-none"
-                          onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
-                          title={isDelivered ? 'STEP 1: Delivery Confirmed (Click to view/edit)' : 'STEP 1: Delivery Confirmation: Not Started (Click to confirm)'}
-                        >
-                          <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${
-                            isDelivered 
-                              ? 'bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-110'
-                              : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
-                          }`}>
-                            {isDelivered ? (
-                              <Check size={18} strokeWidth={3} className="text-white" />
-                            ) : (
-                              <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">1</span>
-                            )}
-                          </div>
-                          <div className="flex flex-col items-center mt-1.5">
-                            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
-                              STEP 1
-                            </span>
-                            <span className={`text-[10px] sm:text-[11px] text-center w-20 sm:w-24 leading-tight transition-colors ${
-                              isDelivered ? 'text-emerald-400 font-bold' : 'text-slate-400'
-                            }`}>
-                              Delivery
-                            </span>
-                          </div>
-                        </div>
+                        {(() => {
+                          const isReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED';
+                          return (
+                            <div 
+                              className="flex flex-col items-center cursor-pointer group relative select-none"
+                              onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
+                              title={
+                                isDelivered 
+                                  ? 'STEP 1: Delivery Confirmed (Click to view/edit)' 
+                                  : isReDispatch
+                                  ? 'STEP 1: Re-Dispatch Required (Click to review issue & attempts)'
+                                  : 'STEP 1: Delivery Confirmation: Not Started (Click to confirm)'
+                              }
+                            >
+                              <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${
+                                isDelivered 
+                                  ? 'bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-110'
+                                  : isReDispatch
+                                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-[0_0_12px_rgba(245,158,11,0.25)] hover:scale-110'
+                                  : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
+                              }`}>
+                                {isDelivered ? (
+                                  <Check size={18} strokeWidth={3} className="text-white" />
+                                ) : isReDispatch ? (
+                                  <AlertTriangle size={17} className="text-amber-400" />
+                                ) : (
+                                  <span className="font-bold text-xs sm:text-sm text-slate-400 group-hover:text-white">1</span>
+                                )}
+                              </div>
+                              <div className="flex flex-col items-center mt-1.5">
+                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                                  STEP 1
+                                </span>
+                                <span className={`text-[10px] sm:text-[11px] text-center w-20 sm:w-24 leading-tight transition-colors ${
+                                  isDelivered 
+                                    ? 'text-emerald-400 font-bold' 
+                                    : isReDispatch
+                                    ? 'text-amber-400 font-bold'
+                                    : 'text-slate-400'
+                                }`}>
+                                  {isReDispatch ? 'Re-Dispatch' : 'Delivery'}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Connecting Line from Delivery to Video 1 */}
                         <div className="flex-1 h-[2px] mx-1 sm:mx-2 -mt-4 transition-colors duration-300">
@@ -2324,7 +2444,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
         return (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden animate-fade-in relative">
+            <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in relative">
               <div className="flex justify-between items-center p-5 border-b border-slate-800 bg-[#070c18]">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
@@ -2879,113 +2999,561 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 // SUB-FORM COMPONENTS (Maintained & Enhanced for all Steps)
 // =========================================================================
 
-// --- STEP: Delivery Confirmation ---
+// --- STEP: Delivery Confirmation (Option A: No Issue vs Option B: Re-Dispatch Required + Shipment History) ---
 const DeliveredForm = ({ record, onSave }: any) => {
   const isInitiallyCompleted = isDeliveryStepCompleted(record);
-  const [photo, setPhoto] = useState(record.delivery_photo_url || '');
-  const [confirmed, setConfirmed] = useState(isInitiallyCompleted);
-  const [file, setFile] = useState<File | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [preview, setPreview] = useState<string | null>(photo || null);
+  
+  let metadata: any = {};
+  try {
+    metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+  } catch (e) {
+    metadata = {};
+  }
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const rawStatus = (record.status || '').toLowerCase();
+  const hasExistingIssue = Boolean(
+    rawStatus.includes('re-dispatch') || 
+    rawStatus.includes('redispatch') || 
+    metadata.re_dispatch_required || 
+    metadata.issue_reported
+  );
+
+  // Segmented Selection: 'NO_ISSUE' | 'PRODUCT_ISSUE'
+  const [selectedOption, setSelectedOption] = useState<'NO_ISSUE' | 'PRODUCT_ISSUE'>(
+    hasExistingIssue ? 'PRODUCT_ISSUE' : 'NO_ISSUE'
+  );
+
+  // Option A State: Normal Delivery Confirmation
+  const [confirmed, setConfirmed] = useState(isInitiallyCompleted);
+  const [deliveryPhoto, setDeliveryPhoto] = useState<string>(
+    record.delivery_photo_url || metadata.delivery_photo_url || ''
+  );
+  const [deliveryFile, setDeliveryFile] = useState<File | null>(null);
+  const [deliveryPreview, setDeliveryPreview] = useState<string | null>(
+    record.delivery_photo_url || metadata.delivery_photo_url || null
+  );
+
+  // Option B State: Product Issue / Re-Dispatch
+  const [issueType, setIssueType] = useState<ShipmentIssueType>(
+    (metadata.issue_type as ShipmentIssueType) || 'DAMAGED_PRODUCT'
+  );
+  const [issueRemarks, setIssueRemarks] = useState<string>(metadata.issue_remarks || '');
+  const [issuePhoto, setIssuePhoto] = useState<string>(metadata.issue_proof_url || '');
+  const [issueFile, setIssueFile] = useState<File | null>(null);
+  const [issuePreview, setIssuePreview] = useState<string | null>(metadata.issue_proof_url || null);
+
+  // Processing state
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Shipment History Attempts Chain State
+  const [attempts, setAttempts] = useState<ShipmentAttempt[]>([]);
+  const [isLoadingAttempts, setIsLoadingAttempts] = useState(false);
+
+  // Load shipment attempts chain from Supabase
+  const loadAttempts = useCallback(async () => {
+    if (!record?.campaign_id || !record?.influencer_id) return;
+    setIsLoadingAttempts(true);
+    try {
+      const data = await shipmentAttemptService.getShipmentAttempts(record.campaign_id, record.influencer_id);
+      setAttempts(data);
+    } catch (e) {
+      console.error('Error loading shipment attempts:', e);
+    } finally {
+      setIsLoadingAttempts(false);
+    }
+  }, [record?.campaign_id, record?.influencer_id]);
+
+  useEffect(() => {
+    loadAttempts();
+  }, [loadAttempts]);
+
+  // Handlers for Delivery Photo (Option A)
+  const handleDeliveryPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      setPreview(URL.createObjectURL(selectedFile));
+      const f = e.target.files[0];
+      setDeliveryFile(f);
+      setDeliveryPreview(URL.createObjectURL(f));
     }
   };
 
+  // Handlers for Issue Photo (Option B)
+  const handleIssuePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const f = e.target.files[0];
+      setIssueFile(f);
+      setIssuePreview(URL.createObjectURL(f));
+    }
+  };
+
+  const uploadFileToStorage = async (fileToUpload: File, subfolder: string = 'delivery') => {
+    const fileExt = fileToUpload.name.split('.').pop();
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `dispatch/${subfolder}/${fileName}`;
+
+    const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, fileToUpload);
+    if (error) throw error;
+
+    const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
+    return publicData.publicUrl;
+  };
+
+  // Active attempt ID if existing
+  const currentAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+  // Save / Submit Handler
   const handleSave = async () => {
-    if (!confirmed || (!file && (!photo || !photo.trim()))) {
-      toast.error('Please confirm delivery and upload the delivery proof photo before completing Step 1.');
-      return;
-    }
+    setIsSubmitting(true);
+    try {
+      if (selectedOption === 'PRODUCT_ISSUE') {
+        // Option B: Report Issue & Move to Re-Dispatch
+        if (!issueType) {
+          toast.error('Please select the type of product issue.');
+          setIsSubmitting(false);
+          return;
+        }
 
-    setIsUploading(true);
-    let finalUrl = photo;
+        let finalIssueUrl = issuePhoto;
+        if (issueFile) {
+          try {
+            finalIssueUrl = await uploadFileToStorage(issueFile, 'issues');
+            setIssuePhoto(finalIssueUrl);
+          } catch (err) {
+            console.error('Error uploading issue photo:', err);
+            toast.error('Failed to upload issue proof photo. Please try again.');
+            setIsSubmitting(false);
+            return;
+          }
+        }
 
-    if (file) {
-      try {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const filePath = `dispatch/${fileName}`;
+        await onSave({
+          option: 'PRODUCT_ISSUE',
+          attempt_id: currentAttempt?.id,
+          issue_type: issueType,
+          issue_remarks: issueRemarks.trim(),
+          issue_proof_url: finalIssueUrl
+        });
+      } else {
+        // Option A: Confirm Delivery Successfully
+        if (!confirmed) {
+          toast.error('Please check the confirmation box indicating the package was delivered.');
+          setIsSubmitting(false);
+          return;
+        }
 
-        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, file);
-        if (error) throw error;
+        let finalDeliveryUrl = deliveryPhoto;
+        if (deliveryFile) {
+          try {
+            finalDeliveryUrl = await uploadFileToStorage(deliveryFile, 'delivery');
+            setDeliveryPhoto(finalDeliveryUrl);
+          } catch (err) {
+            console.error('Error uploading delivery photo:', err);
+            toast.error('Failed to upload delivery proof photo. Please try again.');
+            setIsSubmitting(false);
+            return;
+          }
+        }
 
-        const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
-        finalUrl = publicData.publicUrl;
-        setPhoto(finalUrl);
-      } catch (err) {
-        console.error('Error uploading photo:', err);
-        toast.error('Failed to upload delivery proof photo. Please try again.');
-        setIsUploading(false);
-        return;
+        if (!finalDeliveryUrl || !finalDeliveryUrl.trim()) {
+          toast.error('Please upload a delivery proof photo before confirming Step 1.');
+          setIsSubmitting(false);
+          return;
+        }
+
+        await onSave({
+          option: 'NO_ISSUE',
+          attempt_id: currentAttempt?.id,
+          delivered_confirmed: true,
+          delivery_photo_url: finalDeliveryUrl
+        });
       }
+    } catch (e: any) {
+      console.error('DeliveredForm handleSave error:', e);
+      toast.error('An error occurred while saving: ' + (e?.message || String(e)));
+    } finally {
+      setIsSubmitting(false);
     }
-
-    if (!finalUrl || !finalUrl.trim()) {
-      toast.error('Please confirm delivery and upload the delivery proof photo before completing Step 1.');
-      setIsUploading(false);
-      return;
-    }
-
-    await onSave({ 
-      delivery_photo_url: finalUrl, 
-      delivered_confirmed: true
-    });
-    setIsUploading(false);
   };
 
   return (
-    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
-        <input 
-          type="checkbox" 
-          id="delivered-confirmed"
-          checked={confirmed}
-          onChange={(e) => setConfirmed(e.target.checked)}
-          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
-        />
-        <label htmlFor="delivered-confirmed" className="text-sm font-medium text-slate-200 cursor-pointer">
-          Yes, the package has been delivered and confirmed by the creator.
-        </label>
+    <div className="space-y-6">
+      {/* 1. SEGMENTED OPTION SELECTOR (Option A vs Option B) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Option A: Product Received Successfully */}
+        <button
+          type="button"
+          onClick={() => setSelectedOption('NO_ISSUE')}
+          className={`p-4 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between ${
+            selectedOption === 'NO_ISSUE'
+              ? 'bg-emerald-950/40 border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/50'
+              : 'bg-[#070c18] border-slate-800 hover:border-slate-700 opacity-75 hover:opacity-100'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+              selectedOption === 'NO_ISSUE' ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-400'
+            }`}>
+              <Check size={18} strokeWidth={2.5} />
+            </div>
+            <div>
+              <span className="text-sm font-bold text-white block">
+                Product Received Successfully
+              </span>
+              <span className="text-xs text-slate-400 mt-1 block leading-relaxed">
+                No issue with the shipment. Package verified and delivered to creator.
+              </span>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span>Unlocks Video Workflow</span>
+          </div>
+        </button>
+
+        {/* Option B: Product Issue Reported */}
+        <button
+          type="button"
+          onClick={() => setSelectedOption('PRODUCT_ISSUE')}
+          className={`p-4 rounded-xl border text-left transition-all duration-200 flex flex-col justify-between ${
+            selectedOption === 'PRODUCT_ISSUE'
+              ? 'bg-amber-950/40 border-amber-500/80 shadow-[0_0_15px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/50'
+              : 'bg-[#070c18] border-slate-800 hover:border-slate-700 opacity-75 hover:opacity-100'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+              selectedOption === 'PRODUCT_ISSUE' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+            }`}>
+              <AlertTriangle size={18} strokeWidth={2.5} />
+            </div>
+            <div>
+              <span className="text-sm font-bold text-white block">
+                Product Issue Reported
+              </span>
+              <span className="text-xs text-slate-400 mt-1 block leading-relaxed">
+                Damaged, missing, or incorrect product requiring replacement re-dispatch.
+              </span>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-amber-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            <span>Triggers Re-Dispatch in Logistics</span>
+          </div>
+        </button>
       </div>
 
-      <div>
-        <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
-          Delivery Proof Photo
-        </label>
-        <div className="border-2 border-dashed border-slate-700/80 rounded-xl p-4 text-center relative hover:border-emerald-500 transition-colors bg-[#0b1329] min-h-[200px] flex items-center justify-center">
-          {preview ? (
-            <div className="relative w-full aspect-video">
-              <img src={preview} alt="Delivery Proof" className="w-full h-full object-contain rounded-lg" />
+      {/* 2. OPTION BODY FORMS */}
+      {selectedOption === 'NO_ISSUE' ? (
+        /* ================= OPTION A FORM ================= */
+        <div className="bg-[#070c18] border border-slate-800/90 rounded-xl p-5 space-y-5 animate-fade-in">
+          {/* Confirmation Checkbox */}
+          <div className="flex items-start gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+            <input 
+              type="checkbox" 
+              id="delivered-confirmed"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+              className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 mt-0.5 cursor-pointer" 
+            />
+            <label htmlFor="delivered-confirmed" className="text-xs sm:text-sm font-medium text-slate-200 cursor-pointer select-none">
+              Yes, the creator has received the package intact with all required products.
+            </label>
+          </div>
+
+          {/* Delivery Proof Photo Dropzone */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Delivery Proof Photo <span className="text-emerald-400">*</span>
+              </label>
+              {deliveryPreview && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeliveryPhoto('');
+                    setDeliveryFile(null);
+                    setDeliveryPreview(null);
+                  }}
+                  className="text-[11px] text-rose-400 hover:text-rose-300 underline"
+                >
+                  Remove Photo
+                </button>
+              )}
             </div>
-          ) : (
-            <div className="py-8 flex flex-col items-center">
-              <UploadCloud className="text-slate-500 mb-2" size={32} />
-              <span className="text-sm text-slate-300 font-medium mb-1">Click to upload delivery photo</span>
-              <span className="text-xs text-slate-500">PNG, JPG up to 5MB</span>
+
+            <div className="border-2 border-dashed border-slate-700/80 rounded-xl p-4 text-center relative hover:border-emerald-500/70 transition-colors bg-[#0b1329] min-h-[160px] flex items-center justify-center">
+              {deliveryPreview ? (
+                <div className="relative w-full max-h-56 flex items-center justify-center">
+                  <img src={deliveryPreview} alt="Delivery Proof" className="max-h-56 max-w-full object-contain rounded-lg shadow-md" />
+                </div>
+              ) : (
+                <div className="py-6 flex flex-col items-center">
+                  <UploadCloud className="text-slate-500 mb-2" size={32} />
+                  <span className="text-xs sm:text-sm text-slate-300 font-medium mb-1">Click or drag delivery confirmation image</span>
+                  <span className="text-[11px] text-slate-500">PNG, JPG, WEBP up to 5MB</span>
+                </div>
+              )}
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={handleDeliveryPhotoUpload} 
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+              />
             </div>
-          )}
-          <input 
-            type="file" 
-            accept="image/*" 
-            onChange={handlePhotoUpload} 
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-          />
+          </div>
         </div>
+      ) : (
+        /* ================= OPTION B FORM ================= */
+        <div className="bg-[#070c18] border border-amber-900/40 rounded-xl p-5 space-y-5 animate-fade-in">
+          {/* Warning Banner */}
+          <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-3.5 flex items-start gap-3">
+            <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
+            <div className="text-xs text-amber-200/90 leading-relaxed">
+              <span className="font-bold text-amber-300 block mb-0.5">Re-Dispatch Action:</span>
+              Reporting an issue marks this creator for <strong className="text-white">Re-Dispatch in Influencer Logistics</strong>. Step 1 will remain uncompleted and video production will stay locked until the replacement package is delivered.
+            </div>
+          </div>
+
+          {/* Issue Type Selector */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-2 uppercase tracking-wider">
+              Issue Type <span className="text-amber-400">*</span>
+            </label>
+            <select
+              value={issueType}
+              onChange={(e) => setIssueType(e.target.value as ShipmentIssueType)}
+              className="w-full bg-[#0b1329] border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 transition-colors cursor-pointer"
+            >
+              <option value="DAMAGED_PRODUCT">Damaged Product / Broken packaging</option>
+              <option value="MISSING_ITEMS">Missing Items / Incomplete box</option>
+              <option value="WRONG_PRODUCT">Wrong Product / Incorrect variant</option>
+              <option value="LOST_IN_TRANSIT">Lost in Transit / Delivery failed</option>
+              <option value="OTHER">Other shipment issue</option>
+            </select>
+          </div>
+
+          {/* Issue Remarks Textarea */}
+          <div>
+            <label className="block text-xs font-bold text-slate-300 mb-2 uppercase tracking-wider">
+              Issue Remarks / Creator Feedback
+            </label>
+            <textarea
+              rows={3}
+              value={issueRemarks}
+              onChange={(e) => setIssueRemarks(e.target.value)}
+              placeholder="Provide specific notes regarding the issue (e.g. bottles leaked, wrong shade received, courier delivered empty box)..."
+              className="w-full bg-[#0b1329] border border-slate-700 rounded-xl p-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-colors resize-none"
+            />
+          </div>
+
+          {/* Issue Proof Photo Dropzone */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Issue Proof Photo (Optional but recommended)
+              </label>
+              {issuePreview && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIssuePhoto('');
+                    setIssueFile(null);
+                    setIssuePreview(null);
+                  }}
+                  className="text-[11px] text-rose-400 hover:text-rose-300 underline"
+                >
+                  Remove Photo
+                </button>
+              )}
+            </div>
+
+            <div className="border-2 border-dashed border-amber-900/50 rounded-xl p-4 text-center relative hover:border-amber-500/70 transition-colors bg-[#0b1329] min-h-[140px] flex items-center justify-center">
+              {issuePreview ? (
+                <div className="relative w-full max-h-52 flex items-center justify-center">
+                  <img src={issuePreview} alt="Issue Proof" className="max-h-52 max-w-full object-contain rounded-lg shadow-md" />
+                </div>
+              ) : (
+                <div className="py-5 flex flex-col items-center">
+                  <UploadCloud className="text-amber-500/60 mb-2" size={28} />
+                  <span className="text-xs sm:text-sm text-slate-300 font-medium mb-1">Upload damage / missing item photo</span>
+                  <span className="text-[11px] text-slate-500">PNG, JPG, WEBP up to 5MB</span>
+                </div>
+              )}
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={handleIssuePhotoUpload} 
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. SHIPMENT HISTORY & ATTEMPTS TIMELINE */}
+      <div className="bg-[#070c18] border border-slate-800 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
+            <History size={15} className="text-indigo-400" />
+            <span>Shipment Attempts & History</span>
+          </div>
+          {isLoadingAttempts && (
+            <span className="text-[10px] text-slate-500 flex items-center gap-1">
+              <Loader2 size={12} className="animate-spin" /> Loading chain...
+            </span>
+          )}
+        </div>
+
+        {attempts.length === 0 ? (
+          <div className="bg-[#0b1329] rounded-lg p-3 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono font-bold text-[10px]">
+                Attempt 1
+              </span>
+              <span>{record.dispatch?.courier_partner || 'Courier'} &bull; Order: #{record.dispatch?.influencer_code || record.influencer_id}</span>
+            </div>
+            <span className="text-slate-500 font-mono text-[11px]">
+              AWB: {record.dispatch?.tracking_id || '—'}
+            </span>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {attempts.map((att, idx) => {
+              const isReplacement = att.shipment_type === 'RE_DISPATCH' || att.attempt_number > 1;
+              const hasIssue = Boolean(att.issue_reported || att.issue_type);
+              const isDelivered = Boolean(att.delivery_confirmed);
+
+              return (
+                <div 
+                  key={att.id || idx}
+                  className={`rounded-xl p-3 border text-xs transition-all ${
+                    hasIssue 
+                      ? 'bg-amber-950/20 border-amber-800/40' 
+                      : isDelivered 
+                      ? 'bg-emerald-950/20 border-emerald-800/40' 
+                      : 'bg-[#0b1329] border-slate-800'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+                        isReplacement
+                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                          : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                      }`}>
+                        Attempt {att.attempt_number} {isReplacement ? '(Re-Dispatch)' : '(Original)'}
+                      </span>
+                      <span className="font-mono text-white font-semibold">
+                        {att.order_id || `#${record.dispatch?.influencer_code || record.influencer_id}`}
+                      </span>
+                      <span className="text-slate-400">
+                        {att.courier || record.dispatch?.courier_partner || 'Courier'}
+                      </span>
+                      {att.awb_number && (
+                        <span className="text-slate-400 font-mono text-[11px]">
+                          &bull; AWB: {att.awb_number}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {att.dispatch_date && (
+                        <span className="text-slate-500 text-[11px]">
+                          {att.dispatch_date}
+                        </span>
+                      )}
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        hasIssue
+                          ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          : isDelivered
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          : 'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}>
+                        {hasIssue ? `Issue: ${att.issue_type?.replace(/_/g, ' ')}` : isDelivered ? 'Delivered' : (att.shipment_status || 'Pending')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Issue details if present on this attempt */}
+                  {hasIssue && (
+                    <div className="mt-2 pt-2 border-t border-amber-800/30 flex items-start justify-between gap-3 text-[11px] text-amber-200/90">
+                      <div>
+                        {att.issue_remarks ? (
+                          <span>{att.issue_remarks}</span>
+                        ) : (
+                          <span className="italic text-amber-300/70">No additional remarks provided</span>
+                        )}
+                      </div>
+                      {att.issue_proof_url && (
+                        <a 
+                          href={att.issue_proof_url} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="shrink-0 text-amber-400 hover:text-amber-300 underline font-medium flex items-center gap-1"
+                        >
+                          <Eye size={12} /> View Proof
+                        </a>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Delivery proof if confirmed on this attempt */}
+                  {isDelivered && att.delivery_proof_url && (
+                    <div className="mt-2 pt-2 border-t border-emerald-800/30 flex items-center justify-between text-[11px] text-emerald-300">
+                      <span>Delivery confirmed by creator</span>
+                      <a 
+                        href={att.delivery_proof_url} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-emerald-400 hover:text-emerald-300 underline font-medium flex items-center gap-1"
+                      >
+                        <Eye size={12} /> View Proof
+                      </a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-      
-      <div className="flex justify-end pt-2 border-t border-slate-800">
-        <button 
-          onClick={handleSave} 
-          disabled={isUploading}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-500/20"
-        >
-          {isUploading ? 'Saving...' : 'Save Delivery Details'}
-        </button>
+
+      {/* 4. ACTIONS FOOTER */}
+      <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+        {selectedOption === 'PRODUCT_ISSUE' ? (
+          <button 
+            type="button"
+            onClick={handleSave} 
+            disabled={isSubmitting}
+            className="bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-6 py-2.5 rounded-xl text-xs sm:text-sm transition-all duration-200 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 size={16} className="animate-spin" /> Reporting Issue...
+              </>
+            ) : (
+              <>
+                <AlertTriangle size={16} /> Report Issue & Request Re-Dispatch
+              </>
+            )}
+          </button>
+        ) : (
+          <button 
+            type="button"
+            onClick={handleSave} 
+            disabled={isSubmitting}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-2.5 rounded-xl text-xs sm:text-sm transition-all duration-200 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 size={16} className="animate-spin" /> Saving Delivery...
+              </>
+            ) : (
+              <>
+                <Check size={16} strokeWidth={3} /> Confirm Delivery & Unlock Video Steps
+              </>
+            )}
+          </button>
+        )}
       </div>
     </div>
   );

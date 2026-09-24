@@ -17,7 +17,8 @@ export default defineConfig({
                 query[key] = val;
               });
 
-              const { default: handler } = await import('./api/track');
+              const mod = await server.ssrLoadModule('./api/track.ts');
+              const handler = mod.default;
               const extendedReq = Object.assign(req, { query });
               await handler(extendedReq, res);
             } catch (err: any) {

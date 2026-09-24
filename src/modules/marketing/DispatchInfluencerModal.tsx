@@ -20,12 +20,23 @@ import {
   Weight,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   Layers
 } from 'lucide-react';
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
 import { getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
-import { isInfluencerDispatched, getLocalDateKey } from '../../utils/marketingUtils';
+import { 
+  isInfluencerDispatched, 
+  getLocalDateKey, 
+  normalizeToLocalDateKey, 
+  addDaysToDateString 
+} from '../../utils/marketingUtils';
+import { 
+  shipmentAttemptService, 
+  type ShipmentAttempt, 
+  generateReDispatchOrderId 
+} from '../../services/shipmentAttemptService';
 
 // Central Price Config Rules
 export const PRODUCT_PRICES: Record<string, number> = {
@@ -126,11 +137,32 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   const [totalValue, setTotalValue] = useState('0');
   const [totalWeight, setTotalWeight] = useState(dispatchDetails?.total_weight || '');
   
-  // Dispatch Details
+  // Dispatch Details - Auto-fill Dispatch Date with current local date, and calculate EDD (+4 days)
+  const initialDispatchDate = dispatchDetails?.dispatch_date 
+    ? (normalizeToLocalDateKey(dispatchDetails.dispatch_date) || getLocalDateKey()) 
+    : getLocalDateKey();
+
+  const initialExpectedDeliveryDate = dispatchDetails?.expected_delivery_date 
+    ? (normalizeToLocalDateKey(dispatchDetails.expected_delivery_date) || addDaysToDateString(initialDispatchDate, 4))
+    : addDaysToDateString(initialDispatchDate, 4);
+
   const [courierPartner, setCourierPartner] = useState(dispatchDetails?.courier_partner || '');
   const [trackingId, setTrackingId] = useState(dispatchDetails?.tracking_id || '');
-  const [dispatchDate, setDispatchDate] = useState(dispatchDetails?.dispatch_date || getLocalDateKey());
-  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(dispatchDetails?.expected_delivery_date || '');
+  const [dispatchDate, setDispatchDate] = useState(initialDispatchDate);
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(initialExpectedDeliveryDate);
+  const [hasManuallyEditedDeliveryDate, setHasManuallyEditedDeliveryDate] = useState(Boolean(dispatchDetails?.expected_delivery_date));
+
+  const handleDispatchDateChange = (newDate: string) => {
+    setDispatchDate(newDate);
+    if (!hasManuallyEditedDeliveryDate && newDate) {
+      setExpectedDeliveryDate(addDaysToDateString(newDate, 4));
+    }
+  };
+
+  const handleExpectedDeliveryDateChange = (newDate: string) => {
+    setExpectedDeliveryDate(newDate);
+    setHasManuallyEditedDeliveryDate(true);
+  };
   
   // Photos
   const [productPhotoFile, setProductPhotoFile] = useState<File | null>(null);
@@ -152,17 +184,28 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     if (d) {
       if (d.courier_partner) setCourierPartner(d.courier_partner);
       if (d.tracking_id) setTrackingId(d.tracking_id);
-      if (d.dispatch_date) {
-        setDispatchDate(d.dispatch_date);
+      
+      const dispDate = d.dispatch_date 
+        ? (normalizeToLocalDateKey(d.dispatch_date) || getLocalDateKey()) 
+        : getLocalDateKey();
+      setDispatchDate(dispDate);
+
+      if (d.expected_delivery_date) {
+        setExpectedDeliveryDate(normalizeToLocalDateKey(d.expected_delivery_date) || addDaysToDateString(dispDate, 4));
+        setHasManuallyEditedDeliveryDate(true);
       } else {
-        setDispatchDate(getLocalDateKey());
+        setExpectedDeliveryDate(addDaysToDateString(dispDate, 4));
+        setHasManuallyEditedDeliveryDate(false);
       }
-      if (d.expected_delivery_date) setExpectedDeliveryDate(d.expected_delivery_date);
+
       if (d.total_weight) setTotalWeight(d.total_weight);
       if (d.product_photo_url) setProductPhotoPreview(d.product_photo_url);
       if (d.dispatch_photo_url) setDispatchPhotoPreview(d.dispatch_photo_url);
     } else {
-      setDispatchDate(getLocalDateKey());
+      const todayStr = getLocalDateKey();
+      setDispatchDate(todayStr);
+      setExpectedDeliveryDate(addDaysToDateString(todayStr, 4));
+      setHasManuallyEditedDeliveryDate(false);
     }
   }, [influencer]);
 
@@ -195,12 +238,42 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
 
   const isAlreadyDispatched = isInfluencerDispatched(influencer);
 
+  // Shipment attempts for Re-Dispatch tracking
+  const [attempts, setAttempts] = useState<ShipmentAttempt[]>([]);
+
+  useEffect(() => {
+    if (!campaign?.id || !influencer?.id) return;
+    let isMounted = true;
+    (async () => {
+      try {
+        const data = await shipmentAttemptService.getShipmentAttempts(campaign.id, influencer.id);
+        if (isMounted) setAttempts(data);
+      } catch (e) {
+        console.error('Error fetching attempts for dispatch modal:', e);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, [campaign?.id, influencer?.id]);
+
+  const rawDispStatus = (influencer.dispatchDetails?.dispatch_status || (influencer as any).dispatch_status || '').toLowerCase();
+  const prevAttemptWithIssue = attempts.slice().reverse().find(a => a.issue_reported);
+  const isReDispatchMode = rawDispStatus.includes('re_dispatch') || rawDispStatus.includes('re-dispatch') || Boolean(prevAttemptWithIssue);
+  const nextAttemptNumber = attempts.length > 0 ? attempts[attempts.length - 1].attempt_number + (isReDispatchMode ? 1 : 0) : (isReDispatchMode ? 2 : 1);
+  const reDispatchOrderId = generateReDispatchOrderId(influencer.code, courierPartner, Math.max(nextAttemptNumber, 2));
+
   const [showConfirmStep, setShowConfirmStep] = useState(false);
 
   const executeDispatch = async (status: 'Dispatched' | 'Pending Confirmation') => {
+    if (isSubmitting) return;
+
     const creatorName = influencer.influencer_name || influencer.name;
-    if (!creatorName || !dispatchDate) {
-      toast.error('Please fill in Creator Name and Dispatch Date.');
+    if (!creatorName || !creatorName.trim()) {
+      toast.error('Please fill in Creator Name.');
+      return;
+    }
+    
+    if (!dispatchDate) {
+      toast.error('Please enter a valid Dispatch Date.');
       return;
     }
     
@@ -212,7 +285,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     const payload: DispatchPayload = {
       influencer_id: String(influencer.id),
       campaign_id: String(campaign.id),
-      creator_name: creatorName,
+      creator_name: creatorName.trim(),
       phone_number: phone || null,
       alternative_phone_number: altPhone || null,
       address: address || null,
@@ -233,11 +306,13 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       dispatch_date: dispatchDate,
       expected_delivery_date: expectedDeliveryDate || null,
       dispatch_status: status,
-      influencer_code: influencer.code || null
+      influencer_code: influencer.code || null,
+      order_id: isReDispatchMode ? reDispatchOrderId : (attempts[0]?.order_id || null),
+      is_re_dispatch: isReDispatchMode
     };
 
-    const success = await dispatchInfluencer(payload, productPhotoFile, dispatchPhotoFile);
-    if (success) {
+    const result = await dispatchInfluencer(payload, productPhotoFile, dispatchPhotoFile);
+    if (result.success) {
       if (status === 'Dispatched') {
         toast.success('Influencer marked as Dispatched successfully!');
       } else {
@@ -245,7 +320,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       }
       onSuccess();
     } else {
-      toast.error('Failed to save dispatch details. Please check and try again.');
+      toast.error(result.error ? `Failed to save dispatch details: ${result.error}` : 'Failed to save dispatch details. Please check and try again.');
     }
   };
 
@@ -311,6 +386,41 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
 
         {/* Scrollable Form Body */}
         <form onSubmit={handleFormSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/60 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600">
+          
+          {/* Re-Dispatch Notice Banner */}
+          {isReDispatchMode && (
+            <div className="mb-5 bg-amber-950/30 border border-amber-500/40 rounded-2xl p-4 flex items-start gap-3.5 shadow-lg shadow-amber-950/20 animate-fade-in">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
+                <AlertTriangle size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[11px] uppercase tracking-wider rounded">
+                    Re-Dispatch (Attempt #{nextAttemptNumber})
+                  </span>
+                  <span className="text-white font-bold text-sm">
+                    Replacement Shipment for {influencer.code || influencer.name}
+                  </span>
+                </div>
+                {prevAttemptWithIssue && (
+                  <div className="mt-2 text-xs text-amber-200/90 leading-relaxed bg-[#0b101b]/60 p-2.5 rounded-xl border border-amber-900/40">
+                    <strong className="text-amber-300">Previous Attempt #{prevAttemptWithIssue.attempt_number} Issue:</strong>{' '}
+                    <span>{prevAttemptWithIssue.issue_type?.replace(/_/g, ' ')}</span>
+                    {prevAttemptWithIssue.issue_remarks && (
+                      <span className="block text-slate-300 mt-0.5">&ldquo;{prevAttemptWithIssue.issue_remarks}&rdquo;</span>
+                    )}
+                  </div>
+                )}
+                <div className="mt-2 flex items-center gap-2 text-xs text-slate-300 font-mono">
+                  <span>Dynamic Order ID:</span>
+                  <span className="px-2 py-0.5 rounded bg-[#0b101b] border border-amber-500/40 text-amber-400 font-bold">
+                    {reDispatchOrderId}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
             
             {/* Left Column */}
@@ -678,7 +788,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <input 
                         type="date" 
                         value={dispatchDate} 
-                        onChange={e => setDispatchDate(e.target.value)} 
+                        onChange={e => handleDispatchDateChange(e.target.value)} 
                         required 
                         className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark] transition-colors" 
                       />
@@ -691,7 +801,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <input 
                         type="date" 
                         value={expectedDeliveryDate} 
-                        onChange={e => setExpectedDeliveryDate(e.target.value)} 
+                        onChange={e => handleExpectedDeliveryDateChange(e.target.value)} 
                         className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark] transition-colors" 
                       />
                     </div>
@@ -717,7 +827,8 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <button
                   type="button"
                   onClick={() => setShowConfirmStep(false)}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer border border-slate-700 transition-colors"
+                  disabled={isSubmitting}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer border border-slate-700 transition-colors disabled:opacity-50"
                 >
                   Back to Edit
                 </button>
@@ -725,10 +836,13 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                   type="button"
                   onClick={() => executeDispatch('Dispatched')}
                   disabled={isSubmitting}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer disabled:opacity-50 transition-all"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
                   {isSubmitting ? (
-                    <>Confirming...</>
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Saving Dispatch...
+                    </>
                   ) : (
                     <>
                       <CheckCircle size={14} />
@@ -748,10 +862,17 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                   type="button" 
                   onClick={() => executeDispatch('Pending Confirmation')}
                   disabled={isSubmitting}
-                  className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                  className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
                   title="Save entered dispatch information as draft without marking as officially dispatched"
                 >
-                  Save Details (Draft)
+                  {isSubmitting ? (
+                    <>
+                      <span className="w-3 h-3 border-2 border-slate-300/30 border-t-slate-300 rounded-full animate-spin" />
+                      Saving Draft...
+                    </>
+                  ) : (
+                    'Save Details (Draft)'
+                  )}
                 </button>
               )}
             </div>
@@ -771,10 +892,13 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                   type="button" 
                   onClick={() => executeDispatch('Dispatched')}
                   disabled={isSubmitting || selectedProducts.length === 0} 
-                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isSubmitting ? (
-                    <>Saving...</>
+                    <>
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Saving Dispatch...
+                    </>
                   ) : (
                     <>
                       <Truck size={16} />
@@ -787,10 +911,13 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                   <button 
                     type="submit" 
                     disabled={isSubmitting || selectedProducts.length === 0} 
-                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     {isSubmitting ? (
-                      <>Saving...</>
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Saving Dispatch...
+                      </>
                     ) : (
                       <>
                         <Truck size={16} />

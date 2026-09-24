@@ -16,6 +16,7 @@ import {
   Square, 
   Users, 
   AlertCircle, 
+  AlertTriangle,
   Check, 
   ArrowRight,
   Eye,
@@ -33,7 +34,7 @@ import {
 import toast from 'react-hot-toast';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
-import { isActiveStatus, isInfluencerDispatched, isInfluencerInPrepareDispatch } from '../../utils/marketingUtils';
+import { isActiveStatus, isInfluencerDispatched, isInfluencerInPrepareDispatch, isInfluencerReDispatch } from '../../utils/marketingUtils';
 import { 
   getUniqueFilterOptions, 
   areFilterValuesEqual 
@@ -153,7 +154,7 @@ export const matchesWeightRange = (weightGrams: number | null, rangeId: string):
   }
 };
 
-export { isInfluencerDispatched, isInfluencerInPrepareDispatch };
+export { isInfluencerDispatched, isInfluencerInPrepareDispatch, isInfluencerReDispatch };
 
 export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({ 
   campaign, 
@@ -2904,8 +2905,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </div>
         </div>
 
-        {/* Right: Influencer Code + View (eye) Button */}
+        {/* Right: Re-Dispatch Badge + Influencer Code + View (eye) Button */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {isInfluencerReDispatch(inf, dispatchRecords) && (
+            <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold uppercase rounded shadow-sm">
+              Re-Dispatch
+            </span>
+          )}
           {inf.code && (
             <span className="px-2.5 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shadow-sm">
               {inf.code}
@@ -2932,12 +2938,15 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   function renderPrepareDispatchCard(inf: CampaignInfluencer) {
     const username = getInfluencerUsername(inf);
     const isDispatched = isInfluencerDispatched(inf, dispatchRecords);
+    const isReDispatch = isInfluencerReDispatch(inf, dispatchRecords);
 
     return (
       <div 
         key={inf.id}
         className={`bg-[#0b1220]/90 border rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3 transition-colors shadow-sm ${
-          isDispatched 
+          isReDispatch
+            ? 'border-amber-800/60 hover:border-amber-600/80 bg-amber-950/10'
+            : isDispatched 
             ? 'border-emerald-900/60 hover:border-emerald-700/60' 
             : 'border-purple-800/50 hover:border-purple-600/70'
         }`}
@@ -2945,7 +2954,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         {/* Left: Profile Photo + Username */}
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden flex items-center justify-center text-white font-bold text-sm sm:text-base border-2 shrink-0 shadow-sm ${
-            isDispatched 
+            isReDispatch
+              ? 'bg-amber-600 border-amber-500/40 text-slate-950'
+              : isDispatched 
               ? 'bg-emerald-600 border-emerald-500/30' 
               : 'bg-purple-600 border-purple-500/30'
           }`}>
@@ -2969,14 +2980,18 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <div className="min-w-0 flex-1">
             <h3 
               className={`font-bold text-sm sm:text-base truncate transition-colors ${
-                isDispatched ? 'text-emerald-100 hover:text-emerald-300' : 'text-slate-100 hover:text-purple-300'
+                isReDispatch ? 'text-amber-100 hover:text-amber-300' : isDispatched ? 'text-emerald-100 hover:text-emerald-300' : 'text-slate-100 hover:text-purple-300'
               }`}
               title={username}
             >
               {username}
             </h3>
             <div className="flex items-center gap-1.5 mt-0.5">
-              {isDispatched ? (
+              {isReDispatch ? (
+                <span className="text-[10px] text-amber-300 bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-500/40 flex items-center gap-1 font-bold">
+                  <AlertTriangle size={10} /> Re-Dispatch Required
+                </span>
+              ) : isDispatched ? (
                 <span className="text-[10px] text-emerald-300 bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-800/40 flex items-center gap-1 font-medium">
                   <Check size={10} /> Dispatched
                 </span>
@@ -3020,6 +3035,16 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             >
               <Eye size={14} />
               <span>View</span>
+            </button>
+          ) : isReDispatch ? (
+            <button
+              type="button"
+              onClick={() => handleDispatchClick(inf)}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold rounded-xl shadow-md shadow-amber-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Dispatch replacement for this influencer"
+            >
+              <Package size={14} />
+              <span>Re-Dispatch</span>
             </button>
           ) : (
             <button

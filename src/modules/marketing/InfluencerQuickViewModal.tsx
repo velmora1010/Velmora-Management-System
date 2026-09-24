@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   X, 
   User, 
@@ -12,7 +12,11 @@ import {
   CheckCircle, 
   Layers, 
   Mail,
-  Share2
+  Share2,
+  History,
+  AlertTriangle,
+  Eye,
+  Loader2
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { 
@@ -21,6 +25,7 @@ import {
   getInfluencerResolvedVideoProducts 
 } from './AddCampaignInfluencer';
 import { normalizeStateName } from './CampaignDispatchedList';
+import { shipmentAttemptService, type ShipmentAttempt } from '../../services/shipmentAttemptService';
 
 export interface InfluencerQuickViewModalProps {
   influencer: CampaignInfluencer;
@@ -47,6 +52,27 @@ export const InfluencerQuickViewModal: React.FC<InfluencerQuickViewModalProps> =
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  // Load shipment attempts chain
+  const [attempts, setAttempts] = useState<ShipmentAttempt[]>([]);
+  const [isLoadingAttempts, setIsLoadingAttempts] = useState(false);
+
+  useEffect(() => {
+    if (!campaign?.id || !influencer?.id) return;
+    let isMounted = true;
+    (async () => {
+      setIsLoadingAttempts(true);
+      try {
+        const data = await shipmentAttemptService.getShipmentAttempts(campaign.id, influencer.id);
+        if (isMounted) setAttempts(data);
+      } catch (e) {
+        console.error('Error fetching attempts for quick view modal:', e);
+      } finally {
+        if (isMounted) setIsLoadingAttempts(false);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, [campaign?.id, influencer?.id]);
 
   // Clean Instagram / Platform username
   const username = (() => {
@@ -509,6 +535,125 @@ export const InfluencerQuickViewModal: React.FC<InfluencerQuickViewModalProps> =
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Section 5: Shipment Attempts Chain */}
+          <div className="bg-[#0e172a]/70 border border-slate-800/80 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-purple-400">
+                <History size={15} className="text-purple-400" />
+                <span>Shipment Attempts Chain</span>
+              </div>
+              {isLoadingAttempts && (
+                <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                  <Loader2 size={12} className="animate-spin" /> Loading...
+                </span>
+              )}
+            </div>
+
+            {attempts.length === 0 ? (
+              <div className="bg-[#0b101c] border border-slate-800/60 rounded-xl p-3 text-xs text-slate-400 flex items-center justify-between">
+                <span>Original Attempt 1 &bull; {dispatchRecord?.courier_partner || 'Courier'}</span>
+                <span className="font-mono text-slate-500">AWB: {dispatchRecord?.tracking_id || '—'}</span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {attempts.map((att, idx) => {
+                  const isReplacement = att.shipment_type === 'RE_DISPATCH' || att.attempt_number > 1;
+                  const hasIssue = Boolean(att.issue_reported || att.issue_type);
+                  const isDelivered = Boolean(att.delivery_confirmed);
+
+                  return (
+                    <div 
+                      key={att.id || idx}
+                      className={`rounded-xl p-3 border text-xs ${
+                        hasIssue 
+                          ? 'bg-amber-950/20 border-amber-800/40' 
+                          : isDelivered 
+                          ? 'bg-emerald-950/20 border-emerald-800/40' 
+                          : 'bg-[#0b101c] border-slate-800/60'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+                            isReplacement
+                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                              : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                          }`}>
+                            Attempt {att.attempt_number} {isReplacement ? '(Re-Dispatch)' : '(Original)'}
+                          </span>
+                          <span className="font-mono text-white font-semibold">
+                            {att.order_id || `#${influencer.code || influencer.id}`}
+                          </span>
+                          <span className="text-slate-400">
+                            {att.courier || dispatchRecord?.courier_partner || 'Courier'}
+                          </span>
+                          {att.awb_number && (
+                            <span className="text-slate-400 font-mono text-[11px]">
+                              &bull; AWB: {att.awb_number}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {att.dispatch_date && (
+                            <span className="text-slate-500 text-[11px]">
+                              {att.dispatch_date}
+                            </span>
+                          )}
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            hasIssue
+                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                              : isDelivered
+                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}>
+                            {hasIssue ? `Issue: ${att.issue_type?.replace(/_/g, ' ')}` : isDelivered ? 'Delivered' : (att.shipment_status || 'Pending')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {hasIssue && (
+                        <div className="mt-2 pt-2 border-t border-amber-800/30 flex items-start justify-between gap-3 text-[11px] text-amber-200/90">
+                          <div>
+                            {att.issue_remarks ? (
+                              <span>{att.issue_remarks}</span>
+                            ) : (
+                              <span className="italic text-amber-300/70">No remarks provided</span>
+                            )}
+                          </div>
+                          {att.issue_proof_url && (
+                            <a 
+                              href={att.issue_proof_url} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="shrink-0 text-amber-400 hover:text-amber-300 underline font-medium flex items-center gap-1"
+                            >
+                              <Eye size={12} /> View Proof
+                            </a>
+                          )}
+                        </div>
+                      )}
+
+                      {isDelivered && att.delivery_proof_url && (
+                        <div className="mt-2 pt-2 border-t border-emerald-800/30 flex items-center justify-between text-[11px] text-emerald-300">
+                          <span>Delivery confirmed</span>
+                          <a 
+                            href={att.delivery_proof_url} 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="text-emerald-400 hover:text-emerald-300 underline font-medium flex items-center gap-1"
+                          >
+                            <Eye size={12} /> View Proof
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
         </div>
