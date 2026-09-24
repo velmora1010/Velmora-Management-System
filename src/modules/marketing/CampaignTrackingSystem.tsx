@@ -26,7 +26,18 @@ import {
   normalizeCourierName
 } from '../../services/influencerTrackingService';
 import { formatDDMMYYYY } from '../../utils/influencerDateUtils';
-import { normalizeOrderId, isSameUnderlyingOrder, formatDisplayOrderId } from '../../utils/orderIdUtils';
+import { 
+  normalizeOrderId, 
+  isSameUnderlyingOrder, 
+  formatDisplayOrderId,
+  isReplacementOrderId,
+  getOriginalOrderId,
+  normalizeOrderIdForDisplay
+} from '../../utils/orderIdUtils';
+import { 
+  shipmentAttemptService, 
+  type ShipmentAttempt 
+} from '../../services/shipmentAttemptService';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
@@ -60,7 +71,8 @@ import {
   Upload,
   ChevronDown,
   Eye,
-  ArrowRight
+  ArrowRight,
+  RotateCcw
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { UploadCourierShipmentModal } from '../../components/marketing/UploadCourierShipmentModal';
@@ -205,6 +217,44 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       console.error('Failed loading status tracking influencer IDs:', e);
     }
   }, [campaign?.id]);
+
+  // Shipment attempts chain for tracking merge detection and confirmation
+  const [campaignAttempts, setCampaignAttempts] = useState<ShipmentAttempt[]>([]);
+  const [replacementShipmentToConfirm, setReplacementShipmentToConfirm] = useState<InfluencerDispatchedShipment | null>(null);
+
+  const loadCampaignAttempts = useCallback(async () => {
+    if (!campaign?.id) return;
+    try {
+      const attempts = await shipmentAttemptService.getCampaignShipmentAttempts(campaign.id);
+      setCampaignAttempts(attempts);
+    } catch (e) {
+      console.warn('Failed loading campaign shipment attempts:', e);
+    }
+  }, [campaign?.id]);
+
+  useEffect(() => {
+    loadCampaignAttempts();
+    const onAttemptsUpdated = () => {
+      loadCampaignAttempts();
+      loadStatusTrackingInfluencerIds();
+    };
+    window.addEventListener('shipment_attempts_updated', onAttemptsUpdated);
+    window.addEventListener('status_tracking_updated', onAttemptsUpdated);
+    return () => {
+      window.removeEventListener('shipment_attempts_updated', onAttemptsUpdated);
+      window.removeEventListener('status_tracking_updated', onAttemptsUpdated);
+    };
+  }, [loadCampaignAttempts, loadStatusTrackingInfluencerIds]);
+
+  const attachedAwbs = useMemo(() => {
+    const set = new Set<string>();
+    campaignAttempts.forEach(a => {
+      if (a.awb_number) {
+        set.add(a.awb_number.trim().toLowerCase());
+      }
+    });
+    return set;
+  }, [campaignAttempts]);
 
   // Campaign active influencers from DB (fallback if parent did not supply allActiveInfluencers)
   const [dbActiveInfluencers, setDbActiveInfluencers] = useState<CampaignInfluencer[]>([]);
@@ -1053,21 +1103,40 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   // Delivered shipments eligible to move to Status Tracking (not yet added)
   const eligibleForStatusTrackingCount = useMemo(() => {
     let count = 0;
-    const seen = new Set<string>();
+    const seenAwbs = new Set<string>();
+    const seenOriginalInfs = new Set<string>();
+
     for (const s of allShipments) {
       if (isShipmentDelivered(s)) {
-        const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
-        if (matchedInfluencer) {
-          const infId = String(matchedInfluencer.id);
-          if (!existingStatusInfluencerIds.has(infId) && !seen.has(infId)) {
+        const rawOrd = s.orderId || (s as any).rawOrderId || s.influencerCode;
+        const isRep = Boolean(
+          isReplacementOrderId(rawOrd) || 
+          isReplacementOrderId(s.influencerCode) || 
+          (s as any).isResend || 
+          (Number((s as any).attemptNumber) > 1)
+        );
+        const cleanAwb = (s.awbNumber || '').trim().toLowerCase();
+
+        if (isRep) {
+          if (cleanAwb && !attachedAwbs.has(cleanAwb) && !seenAwbs.has(cleanAwb)) {
             count++;
-            seen.add(infId);
+            seenAwbs.add(cleanAwb);
+          }
+        } else {
+          const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
+          if (matchedInfluencer) {
+            const infId = String(matchedInfluencer.id);
+            const isAwbAttached = Boolean(cleanAwb && attachedAwbs.has(cleanAwb));
+            if (!isAwbAttached && !existingStatusInfluencerIds.has(infId) && !seenOriginalInfs.has(infId)) {
+              count++;
+              seenOriginalInfs.add(infId);
+            }
           }
         }
       }
     }
     return count;
-  }, [allShipments, candidateInfluencers, dispatchRecords, existingStatusInfluencerIds]);
+  }, [allShipments, attachedAwbs, candidateInfluencers, dispatchRecords, existingStatusInfluencerIds]);
 
   // Move single delivered shipment to Status Tracking
   const handleMoveToStatusTracking = async (shipment: InfluencerDispatchedShipment) => {
@@ -1676,7 +1745,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                       (s as any).isResend,
                       (s as any).attemptNumber
                     );
-                    const isResendAttempt = Boolean((s as any).isResend || ((s as any).attemptNumber && (s as any).attemptNumber > 1));
+                    const rawOrd = s.orderId || (s as any).rawOrderId || s.influencerCode;
+                    const isResendAttempt = Boolean(
+                      isReplacementOrderId(rawOrd) ||
+                      isReplacementOrderId(s.influencerCode) ||
+                      (s as any).isResend || 
+                      ((s as any).attemptNumber && (s as any).attemptNumber > 1)
+                    );
                     const displayStatus = getTrackingDisplayStatus(s);
                     const badgeStyle = getTrackingStatusBadgeStyle(displayStatus);
 
@@ -1689,9 +1764,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         <td className="px-5 py-3.5 font-mono font-bold text-slate-200">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span>{displayOrderId}</span>
-                            {isResendAttempt && (
+                            {isResendAttempt ? (
                               <span className="px-1.5 py-0.5 text-[10px] font-sans font-semibold rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                                Attempt {(s as any).attemptNumber || 2}
+                                Re-dispatch
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 text-[10px] font-sans font-medium rounded bg-slate-800 text-slate-400 border border-slate-700/60">
+                                Original
                               </span>
                             )}
                           </div>
@@ -1824,8 +1903,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
                             {(() => {
                               const isDelivered = isShipmentDelivered(s);
+                              const rawOrd = s.orderId || (s as any).rawOrderId || s.influencerCode;
+                              const isReplacement = Boolean(
+                                isReplacementOrderId(rawOrd) || 
+                                isReplacementOrderId(s.influencerCode) || 
+                                (s as any).isResend || 
+                                (Number((s as any).attemptNumber) > 1)
+                              );
                               const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
-                              const isAlreadyAdded = matchedInfluencer && existingStatusInfluencerIds.has(String(matchedInfluencer.id));
+                              const cleanAwb = (s.awbNumber || '').trim().toLowerCase();
+
+                              const isAwbAttached = Boolean(cleanAwb && attachedAwbs.has(cleanAwb));
+                              const isInfluencerInStatus = Boolean(matchedInfluencer && existingStatusInfluencerIds.has(String(matchedInfluencer.id)));
+
+                              // If replacement shipment: already added if this specific AWB is attached
+                              // If original shipment: already added if its AWB is attached OR influencer already in status tracking
+                              const isAlreadyAdded = isReplacement ? isAwbAttached : (isAwbAttached || isInfluencerInStatus);
                               const isMoving = movingShipmentId === s.id;
 
                               if (isDelivered) {
@@ -1846,7 +1939,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                                 return (
                                   <button
                                     type="button"
-                                    onClick={() => handleMoveToStatusTracking(s)}
+                                    onClick={() => {
+                                      if (isReplacement) {
+                                        setReplacementShipmentToConfirm(s);
+                                      } else {
+                                        handleMoveToStatusTracking(s);
+                                      }
+                                    }}
                                     disabled={isMoving || isMovingToStatus}
                                     className="w-7 h-7 rounded-lg bg-purple-600 hover:bg-purple-500 text-white shadow-sm hover:shadow-purple-600/30 transition-all flex items-center justify-center cursor-pointer group shrink-0 disabled:opacity-50"
                                     title={matchedInfluencer ? `Move ${matchedInfluencer.code || matchedInfluencer.influencer_name} to Status Tracking` : 'Move to Status Tracking'}
@@ -2598,6 +2697,114 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           </div>
         </div>
       )}
+
+      {/* 6. Replacement Shipment Detected Confirmation Modal */}
+      {replacementShipmentToConfirm && (() => {
+        const s = replacementShipmentToConfirm;
+        const rawOrd = s.orderId || (s as any).rawOrderId || s.influencerCode;
+        const baseCode = getOriginalOrderId(rawOrd) || getOriginalOrderId(s.influencerCode);
+        const cleanBase = baseCode ? baseCode.replace(/^#+/, '').toUpperCase() : '';
+        const originalOrderDisplay = `#${cleanBase}`;
+        const replacementOrderDisplay = `R ${cleanBase}`;
+        const awbDisplay = s.awbNumber || '—';
+        const isConfirming = movingShipmentId === s.id;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div 
+              className="bg-[#0e1626] border border-purple-500/40 rounded-2xl max-w-lg w-full p-6 shadow-2xl shadow-purple-950/50 flex flex-col gap-5 text-slate-100 animate-in zoom-in-95 duration-200"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="replacement-modal-title"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                    <RotateCcw size={20} />
+                  </div>
+                  <div>
+                    <h3 id="replacement-modal-title" className="text-base font-bold text-white">
+                      Replacement Shipment Detected
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Confirm merging replacement delivery into existing influencer workflow
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => !isConfirming && setReplacementShipmentToConfirm(null)}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Comparison Card */}
+              <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-[#090f1a] border border-slate-800">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Original Order</span>
+                  <span className="font-mono font-bold text-base text-blue-300">{originalOrderDisplay}</span>
+                  <span className="text-[10px] text-slate-400">Attempt 1 (Original)</span>
+                </div>
+
+                <div className="flex flex-col gap-1 pl-3 border-l border-slate-800">
+                  <span className="text-[11px] font-semibold text-purple-300 uppercase tracking-wider">Replacement Shipment</span>
+                  <span className="font-mono font-bold text-base text-purple-300">{replacementOrderDisplay}</span>
+                  <span className="text-[10px] text-purple-400 font-medium">Re-dispatch Attempt</span>
+                </div>
+
+                <div className="col-span-2 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Courier & AWB:</span>
+                  <span className="font-mono font-bold text-slate-200">
+                    {s.courier || 'Courier'} &bull; {awbDisplay}
+                  </span>
+                </div>
+              </div>
+
+              {/* Clear Explanation */}
+              <div className="bg-purple-950/30 border border-purple-800/40 rounded-xl p-3.5 text-xs text-purple-200 leading-relaxed">
+                This shipment (<strong className="font-mono text-purple-100">{replacementOrderDisplay}</strong>) is a replacement shipment for original order <strong className="font-mono text-purple-100">{originalOrderDisplay}</strong>. Both shipment records belong to the same influencer order. Moving this replacement shipment to Status Tracking will continue the existing <strong className="font-mono text-purple-100">{originalOrderDisplay}</strong> workflow using the replacement delivery attempt.
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isConfirming}
+                  onClick={() => setReplacementShipmentToConfirm(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isConfirming}
+                  onClick={async () => {
+                    await handleMoveToStatusTracking(s);
+                    setReplacementShipmentToConfirm(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 border border-purple-500 shadow-md shadow-purple-600/30 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isConfirming ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" />
+                      <span>Moving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} />
+                      <span>Confirm & Move to Status Tracking</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

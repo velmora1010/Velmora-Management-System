@@ -509,11 +509,16 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
 
         const orderInfo = normalizeOrderId(rawOrderId || matchedInf.code);
+        const canonicalBase = orderInfo.baseCode || (matchedInf.code ? matchedInf.code.replace(/^#+/, '') : '');
+        const resolvedOrderId = orderInfo.isResend 
+          ? `R ${canonicalBase}` 
+          : (rawOrderId ? (rawOrderId.startsWith('#') ? rawOrderId : `#${rawOrderId}`) : `#${canonicalBase}`);
+
         validRows.push({
           rawAwb,
-          orderId: rawOrderId || (matchedInf.code ? (matchedInf.code.startsWith('#') ? matchedInf.code : `#${matchedInf.code}`) : ''),
-          rawOrderId: rawOrderId || (matchedInf.code ? (matchedInf.code.startsWith('#') ? matchedInf.code : `#${matchedInf.code}`) : ''),
-          baseOrderId: orderInfo.baseCode || (matchedInf.code ? matchedInf.code.replace(/^#+/, '') : ''),
+          orderId: resolvedOrderId,
+          rawOrderId: rawOrderId || resolvedOrderId,
+          baseOrderId: canonicalBase,
           isResend: orderInfo.isResend,
           attemptNumber: orderInfo.attemptNumber,
           consigneeName: rawConsigneeName,

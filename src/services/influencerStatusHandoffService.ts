@@ -11,8 +11,19 @@ import {
   deleteSingleCampaignShipmentFromDb,
   fetchCampaignShipmentsFromDb
 } from './influencerTrackingService';
-import { extractInfluencerCodeFromOrderId } from './shipmentAttemptService';
-import { normalizeOrderId, isSameUnderlyingOrder } from '../utils/orderIdUtils';
+import { 
+  shipmentAttemptService,
+  extractInfluencerCodeFromOrderId,
+  type ShipmentAttempt
+} from './shipmentAttemptService';
+import { 
+  normalizeOrderId, 
+  isSameUnderlyingOrder,
+  isReplacementOrderId,
+  getOriginalOrderId,
+  normalizeOrderIdForDisplay,
+  getReplacementOrderId
+} from '../utils/orderIdUtils';
 
 /**
  * Extracts the numeric integer value from an influencer code.
@@ -83,13 +94,14 @@ export function getShipmentInfluencerCode(s: any): string {
 }
 
 /**
- * Stable comparator for shipment records ordered by natural influencer code ascending.
- * Secondary order:
- * 1. Influencer code natural sort
- * 2. Video number if available
- * 3. AWB number
- * 4. dispatchDate or created_at
- * 5. Record ID
+ * Stable comparator for shipment records ordered naturally by canonical Influencer Order:
+ * 1. Base Canonical Influencer Code natural sort (e.g. HIS1 before HIS2, HIS3, etc.)
+ * 2. Original shipment attempt ALWAYS appears first for each influencer code
+ * 3. Replacement shipment attempt(s) appear IMMEDIATELY after original attempt (e.g. #HIS1 then R HIS1, then #HIS2, then #HIS3, etc.)
+ * 4. Attempt number ascending (Attempt 1 < Attempt 2 < Attempt 3)
+ * 5. AWB number
+ * 6. dispatchDate or created_at
+ * 7. Record ID
  */
 export function compareShipmentsByInfluencerCodeNaturally(
   a: any,
@@ -98,13 +110,44 @@ export function compareShipmentsByInfluencerCodeNaturally(
   const codeA = getShipmentInfluencerCode(a);
   const codeB = getShipmentInfluencerCode(b);
 
-  const codeComparison = naturalCompareInfluencerCodes(codeA, codeB);
-  if (codeComparison !== 0) {
-    return codeComparison;
+  const rawOrdA = a?.orderId || a?.rawOrderId || a?.baseOrderId || codeA;
+  const rawOrdB = b?.orderId || b?.rawOrderId || b?.baseOrderId || codeB;
+
+  const baseA = getOriginalOrderId(rawOrdA) || getOriginalOrderId(codeA) || codeA;
+  const baseB = getOriginalOrderId(rawOrdB) || getOriginalOrderId(codeB) || codeB;
+
+  // 1. Natural comparison on canonical base codes (e.g. HIS1 vs HIS2 vs HIS3)
+  const baseComparison = naturalCompareInfluencerCodes(baseA, baseB);
+  if (baseComparison !== 0) {
+    return baseComparison;
+  }
+
+  // 2. Same base code: Original shipment MUST come before replacement shipment
+  const isRepA = Boolean(
+    isReplacementOrderId(rawOrdA) || 
+    isReplacementOrderId(codeA) || 
+    a?.isResend || 
+    (Number(a?.attemptNumber) > 1)
+  );
+  const isRepB = Boolean(
+    isReplacementOrderId(rawOrdB) || 
+    isReplacementOrderId(codeB) || 
+    b?.isResend || 
+    (Number(b?.attemptNumber) > 1)
+  );
+
+  if (!isRepA && isRepB) return -1;
+  if (isRepA && !isRepB) return 1;
+
+  // 3. Same category (e.g. both replacements): order by attempt number
+  const attemptA = Number(a?.attemptNumber || (isRepA ? 2 : 1));
+  const attemptB = Number(b?.attemptNumber || (isRepB ? 2 : 1));
+  if (attemptA !== attemptB) {
+    return attemptA - attemptB;
   }
 
   // Stable secondary sorts:
-  // 1. Video number if available
+  // 4. Video number if available
   const videoNumA = a?.videoNumber ?? a?.video_number ?? a?.videoNo ?? null;
   const videoNumB = b?.videoNumber ?? b?.video_number ?? b?.videoNo ?? null;
   if (videoNumA !== null && videoNumB !== null && videoNumA !== videoNumB) {
@@ -115,21 +158,21 @@ export function compareShipmentsByInfluencerCodeNaturally(
     }
   }
 
-  // 2. AWB number
+  // 5. AWB number
   const awbA = String(a?.awbNumber || a?.awb_number || '').trim();
   const awbB = String(b?.awbNumber || b?.awb_number || '').trim();
   if (awbA !== awbB) {
     return awbA.localeCompare(awbB, undefined, { numeric: true, sensitivity: 'base' });
   }
 
-  // 3. dispatchDate or created_at
-  const dateA = a?.dispatchDate || a?.created_at || '';
-  const dateB = b?.dispatchDate || b?.created_at || '';
+  // 6. dispatchDate or created_at
+  const dateA = a?.dispatchDate || a?.dispatchedDate || a?.created_at || '';
+  const dateB = b?.dispatchDate || b?.dispatchedDate || b?.created_at || '';
   if (dateA !== dateB) {
     return String(dateA).localeCompare(String(dateB));
   }
 
-  // 4. Record ID
+  // 7. Record ID
   return String(a?.id || '').localeCompare(String(b?.id || ''));
 }
 
@@ -634,6 +677,16 @@ export async function handoffDeliveredShipmentToStatusTracking(
       return { success: false, alreadyExisted: false, error: findError.message };
     }
 
+    const rawOrd = shipment.orderId || (shipment as any).rawOrderId || (shipment as any).baseOrderId || shipment.influencerCode;
+    const isReplacement = Boolean(
+      isReplacementOrderId(rawOrd) || 
+      isReplacementOrderId(shipment.influencerCode) || 
+      (shipment as any).isResend || 
+      (Number((shipment as any).attemptNumber) > 1)
+    );
+    const baseCode = getOriginalOrderId(rawOrd) || getOriginalOrderId(matchedInfluencer.code) || matchedInfluencer.code;
+    const cleanBaseCode = baseCode ? baseCode.replace(/^#+/, '').toUpperCase() : '';
+
     if (existing && existing.length > 0) {
       // Idempotent: preserve all existing progress!
       const existingRow = existing[0];
@@ -642,13 +695,119 @@ export async function handoffDeliveredShipmentToStatusTracking(
         meta = typeof existingRow.notes === 'string' ? JSON.parse(existingRow.notes) : existingRow.notes;
       } catch (e) {}
 
-      // If this influencer was previously marked for re-dispatch / had an issue reported:
-      if (meta?.re_dispatch_required || meta?.issue_reported || (existingRow as any).status === 'Re-Dispatch Required') {
-        // Reset Step 1 to NOT started for the newly delivered replacement shipment
+      // Ensure historical attempts exist in shipment_attempts table
+      const existingAttempts = await shipmentAttemptService.getShipmentAttempts(cleanCampaignId, cleanInfId);
+
+      // If no initial attempt was recorded in shipment_attempts yet, create Attempt 1 using original dispatch
+      let prevAttempt = existingAttempts.length > 0 ? existingAttempts[existingAttempts.length - 1] : null;
+      if (existingAttempts.length === 0) {
+        const origDispatch = matchedDispatch || dispatches.find(d => String(d.influencer_id) === cleanInfId);
+        const origAttempt = await shipmentAttemptService.createInitialShipmentAttempt({
+          campaign_id: cleanCampaignId,
+          influencer_id: cleanInfId,
+          influencer_code: cleanBaseCode || matchedInfluencer.code,
+          courier: origDispatch?.courier_partner || shipment.courier,
+          awb_number: origDispatch?.tracking_id || meta?.source_awb || null,
+          order_id: `#${cleanBaseCode}`,
+          dispatch_date: origDispatch?.dispatch_date || null,
+          estimated_delivery_date: origDispatch?.expected_delivery_date || null,
+          remarks: (origDispatch as any)?.remarks || null
+        });
+        if (origAttempt) {
+          prevAttempt = origAttempt;
+        }
+      }
+
+      if (isReplacement) {
+        // Find if this replacement attempt (by AWB) was already recorded
+        const cleanAwb = (shipment.awbNumber || '').trim().toLowerCase();
+        let targetAttempt = existingAttempts.find(a => cleanAwb && a.awb_number && a.awb_number.trim().toLowerCase() === cleanAwb);
+
+        if (!targetAttempt) {
+          const nextAttemptNumber = prevAttempt ? prevAttempt.attempt_number + 1 : 2;
+          const repOrderId = `R ${cleanBaseCode}`;
+          const nowIso = new Date().toISOString();
+          const deliveredDateVal = shipment.deliveredDate || nowIso.split('T')[0];
+
+          const payload = {
+            campaign_id: cleanCampaignId,
+            influencer_id: Number(cleanInfId),
+            parent_attempt_id: prevAttempt ? prevAttempt.id : null,
+            attempt_number: nextAttemptNumber,
+            shipment_type: 'RE_DISPATCH' as const,
+            courier: shipment.courier || prevAttempt?.courier || null,
+            order_id: repOrderId,
+            awb_number: shipment.awbNumber || null,
+            shipment_status: 'Delivered',
+            dispatch_date: shipment.dispatchedDate || shipment.dispatchDate || nowIso.split('T')[0],
+            estimated_delivery_date: shipment.estimatedDeliveryDate || shipment.expectedDeliveryDate || null,
+            delivered_date: deliveredDateVal,
+            remarks: shipment.remarks || null,
+            issue_reported: false,
+            delivery_confirmed: false,
+            status_tracking_started: true,
+            created_at: nowIso,
+            updated_at: nowIso
+          };
+
+          const { data: newAtt, error: attErr } = await supabaseAdmin
+            .from(SUPABASE_TABLES.shipmentAttempts)
+            .insert([payload])
+            .select()
+            .single();
+
+          if (!attErr && newAtt) {
+            targetAttempt = newAtt as ShipmentAttempt;
+          }
+        }
+
+        // Attach replacement shipment to existing #HIS1 influencer status record
+        // Step 1 starts uncompleted ("Not Started") ready for new proof photo
         meta.re_dispatch_required = false;
         meta.issue_reported = false;
         meta.delivered_confirmed = false;
         meta.delivery_photo_url = null;
+        meta.active_attempt_id = targetAttempt?.id;
+        meta.source_awb = shipment.awbNumber;
+        meta.source_courier = shipment.courier;
+        meta.delivered_date = shipment.deliveredDate;
+        meta.replacement_delivered_at = new Date().toISOString();
+
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerStatus)
+          .update({
+            current_step: 0,
+            delivered_confirmed: false,
+            delivery_photo_url: null,
+            status: 'Not Started',
+            notes: JSON.stringify(meta),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingRow.id);
+
+        // Update dispatch tracking info to match latest replacement attempt
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .update({
+            dispatch_status: 'Tracking',
+            tracking_id: shipment.awbNumber || undefined,
+            courier_partner: shipment.courier || undefined,
+            dispatch_date: shipment.dispatchedDate || shipment.dispatchDate || undefined,
+            expected_delivery_date: shipment.estimatedDeliveryDate || shipment.expectedDeliveryDate || undefined,
+            delivered_date: shipment.deliveredDate || undefined
+          })
+          .eq('campaign_id', isNaN(Number(cleanCampaignId)) ? cleanCampaignId : Number(cleanCampaignId))
+          .eq('influencer_id', Number(cleanInfId));
+
+      } else if (meta?.re_dispatch_required || meta?.issue_reported || (existingRow as any).status === 'Re-Dispatch Required') {
+        // Non-replacement shipment re-delivered after an issue
+        meta.re_dispatch_required = false;
+        meta.issue_reported = false;
+        meta.delivered_confirmed = false;
+        meta.delivery_photo_url = null;
+        meta.source_awb = shipment.awbNumber;
+        meta.source_courier = shipment.courier;
+        meta.delivered_date = shipment.deliveredDate;
         meta.replacement_delivered_at = new Date().toISOString();
 
         await supabaseAdmin
@@ -667,6 +826,7 @@ export async function handoffDeliveredShipmentToStatusTracking(
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
         window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
+        window.dispatchEvent(new CustomEvent('shipment_attempts_updated', { detail: { campaignId: cleanCampaignId } }));
       }
       return {
         success: true,
@@ -766,7 +926,20 @@ export async function handoffDeliveredShipmentToStatusTracking(
     const maxId = maxData && maxData.length > 0 ? Number(maxData[0].id) : 0;
     const nextId = isNaN(maxId) ? 1 : maxId + 1;
 
-    // 4. Insert new Status Tracking row (Step 1 Delivery is confirmed)
+    // 4. Record Attempt 1 in shipment_attempts
+    await shipmentAttemptService.createInitialShipmentAttempt({
+      campaign_id: cleanCampaignId,
+      influencer_id: cleanInfId,
+      influencer_code: cleanBaseCode || matchedInfluencer.code,
+      courier: shipment.courier,
+      awb_number: shipment.awbNumber,
+      order_id: `#${cleanBaseCode}`,
+      dispatch_date: shipment.dispatchedDate || shipment.dispatchDate,
+      estimated_delivery_date: shipment.estimatedDeliveryDate || shipment.expectedDeliveryDate,
+      remarks: shipment.remarks
+    });
+
+    // 5. Insert new Status Tracking row (Step 1 Delivery starts uncompleted, ready for confirmation photo)
     const nowIso = new Date().toISOString();
     const deliveredDateVal = shipment.deliveredDate || nowIso.split('T')[0];
     const initialNotes = JSON.stringify({
@@ -805,7 +978,7 @@ export async function handoffDeliveredShipmentToStatusTracking(
       return { success: false, alreadyExisted: false, error: insertError.message };
     }
 
-    // 5. Dispatch sync events to refresh UI immediately
+    // 6. Dispatch sync events to refresh UI immediately
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail: { campaignId: cleanCampaignId } }));
       window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: cleanCampaignId } }));

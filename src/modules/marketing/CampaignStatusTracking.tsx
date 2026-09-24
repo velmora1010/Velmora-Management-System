@@ -14,6 +14,7 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes, isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
+import { getOriginalOrderId } from '../../utils/orderIdUtils';
 import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 import toast from 'react-hot-toast';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
@@ -2173,7 +2174,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               filteredRecords.map(record => {
                 const dispatch = record.dispatch || ({} as any);
                 const avatarUrl = dispatch.influencer_avatar;
-                const influencerCode = dispatch.influencer_code || record.influencer_id;
+                const rawCode = dispatch.influencer_code || record.influencer_id;
+                const canonicalBase = getOriginalOrderId(rawCode) || String(rawCode).replace(/^#+/, '');
+                const influencerCode = `#${canonicalBase}`;
                 const influencerName = dispatch.influencer_name || 'Unknown Influencer';
                 const username = dispatch.username || '—';
 
@@ -2638,7 +2641,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   onSaveStep
 }) => {
   const dispatch = record.dispatch || ({} as any);
-  const influencerCode = dispatch.influencer_code || record.influencer_id;
+  const rawCode = dispatch.influencer_code || record.influencer_id;
+  const canonicalBase = getOriginalOrderId(rawCode) || String(rawCode).replace(/^#+/, '');
+  const influencerCode = `#${canonicalBase}`;
   const influencerName = dispatch.influencer_name || 'Unknown Influencer';
   const username = dispatch.username || '—';
   const avatarUrl = dispatch.influencer_avatar;
