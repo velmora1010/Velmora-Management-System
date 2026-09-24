@@ -31,18 +31,22 @@ export const MainLayout = () => {
 
   useEffect(() => {
     const path = location.pathname;
+    const fullPath = `${location.pathname}${location.search}`;
     const firstSegment = path.split('/')[1];
     if (firstSegment && firstSegment !== 'login' && firstSegment !== 'archive' && firstSegment !== 'settings' && path !== '/') {
       let deptName = firstSegment;
       if (firstSegment === 'tickets') {
         deptName = 'customer-tickets';
       }
-      saveDepartmentNavigation(deptName, path);
+      saveDepartmentNavigation(deptName, fullPath);
     }
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
   
   const handleLogout = async () => {
     clearNavigationState();
+    try {
+      sessionStorage.clear();
+    } catch (e) {}
     await supabase.auth.signOut();
     navigate('/login', { replace: true });
   };

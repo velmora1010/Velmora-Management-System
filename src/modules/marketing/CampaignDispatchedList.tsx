@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { 
   Search, 
@@ -166,16 +167,45 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const { influencers: hookInfluencers, isLoading: isInfluencersLoading, refresh: refreshInfluencers } = useCampaignInfluencers(campaign.id);
   const { dispatchRecords, isLoading: isDispatchLoading, refresh: refreshDispatch } = useCampaignDispatch(campaign.id);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Workflow Tab Navigation ('logistics' | 'prepare_dispatch' | 'dispatched')
-  const [currentTab, setCurrentTab] = useState<LogisticsTab>('logistics');
+  const validLogisticsTabs: LogisticsTab[] = ['logistics', 'prepare_dispatch', 'dispatched'];
+  const tabParam = searchParams.get('logisticsTab');
+  const currentTab: LogisticsTab = (tabParam && validLogisticsTabs.includes(tabParam as LogisticsTab))
+    ? (tabParam as LogisticsTab)
+    : 'logistics';
 
   // Dispatched subview ('batches' | 'tracking') - default is 'batches'
-  const [dispatchedSubView, setDispatchedSubView] = useState<'batches' | 'tracking'>('batches');
+  const subviewParam = searchParams.get('dispatchedView');
+  const dispatchedSubView: 'batches' | 'tracking' = (subviewParam === 'tracking')
+    ? 'tracking'
+    : 'batches';
 
-  // Reset dispatched subview when campaign changes
-  useEffect(() => {
-    setDispatchedSubView('batches');
-  }, [campaign.id]);
+  const setCurrentTab = useCallback((tab: LogisticsTab) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (tab === 'logistics') {
+      newParams.delete('logisticsTab');
+      newParams.delete('dispatchedView');
+    } else {
+      newParams.set('logisticsTab', tab);
+      if (tab !== 'dispatched') {
+        newParams.delete('dispatchedView');
+      }
+    }
+    setSearchParams(newParams);
+  }, [searchParams, setSearchParams]);
+
+  const setDispatchedSubView = useCallback((sub: 'batches' | 'tracking') => {
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('logisticsTab', 'dispatched');
+    if (sub === 'batches') {
+      newParams.delete('dispatchedView');
+    } else {
+      newParams.set('dispatchedView', sub);
+    }
+    setSearchParams(newParams);
+  }, [searchParams, setSearchParams]);
 
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');

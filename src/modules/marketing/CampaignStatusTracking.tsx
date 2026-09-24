@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Campaign } from '../../types';
 import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStatusTracking';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
@@ -993,18 +994,46 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     deleteStatusTrackingRecord
   } = useCampaignStatusTracking(campaign.id);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Scroll Container & State Persistence Refs
+  const listScrollContainerRef = useRef<HTMLDivElement>(null);
+  const savedScrollTopRef = useRef<number>(0);
+  const lastOpenedRecordIdRef = useRef<string | null>(null);
+
   // Clear All & Single Delete Confirmation States
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState<StatusTrackingRecord | null>(null);
   const [isDeletingSingle, setIsDeletingSingle] = useState(false);
 
-  // Advanced Filter Drawer State
+  // Advanced Filter Drawer State (persisted per campaign across navigation & refreshes)
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<StatusTrackingFilterState>(initialStatusTrackingFilterState);
+  const [activeFilters, setActiveFilters] = useState<StatusTrackingFilterState>(() => {
+    try {
+      const saved = sessionStorage.getItem(`st_filters_${campaign.id}`);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return initialStatusTrackingFilterState;
+  });
 
-  // Search input state
-  const [searchQuery, setSearchQuery] = useState('');
+  // Search input state (persisted per campaign across navigation & refreshes)
+  const [searchQuery, setSearchQuery] = useState<string>(() => {
+    return sessionStorage.getItem(`st_search_${campaign.id}`) || '';
+  });
+
+  // Persist filters and search query
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(`st_filters_${campaign.id}`, JSON.stringify(activeFilters));
+    } catch (e) {}
+  }, [activeFilters, campaign.id]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(`st_search_${campaign.id}`, searchQuery);
+    } catch (e) {}
+  }, [searchQuery, campaign.id]);
 
   // Active filter count calculation (total individual criteria selected)
   const activeFilterCount = useMemo(() => {
@@ -1025,7 +1054,100 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const [detailsRecord, setDetailsRecord] = useState<StatusTrackingRecord | null>(null);
 
   // LEVEL 2 VIEW STATE: null = Main List View; object = Video Detail View
-  const [selectedVideo, setSelectedVideo] = useState<{ recordId: string; videoNumber: number } | null>(null);
+  // Initialized from URL query params (stInfluencer, stVideo)
+  const [selectedVideo, setSelectedVideo] = useState<{ recordId: string; videoNumber: number } | null>(() => {
+    const stInf = searchParams.get('stInfluencer');
+    const stVid = searchParams.get('stVideo');
+    if (stInf) {
+      return { recordId: stInf, videoNumber: parseInt(stVid || '1', 10) || 1 };
+    }
+    return null;
+  });
+
+  // Synchronize selectedVideo with URL query parameters (e.g. browser back/forward or direct refresh)
+  useEffect(() => {
+    const stInf = searchParams.get('stInfluencer');
+    const stVid = searchParams.get('stVideo');
+    if (stInf) {
+      const vNum = parseInt(stVid || '1', 10) || 1;
+      setSelectedVideo(prev => {
+        if (prev?.recordId === stInf && prev?.videoNumber === vNum) return prev;
+        return { recordId: stInf, videoNumber: vNum };
+      });
+    } else {
+      setSelectedVideo(null);
+    }
+  }, [searchParams]);
+
+  // Navigation handlers for detail view and list view
+  const handleOpenVideo = useCallback((record: StatusTrackingRecord, videoNumber: number) => {
+    if (listScrollContainerRef.current) {
+      const currentScroll = listScrollContainerRef.current.scrollTop;
+      savedScrollTopRef.current = currentScroll;
+      sessionStorage.setItem(`st_scroll_${campaign.id}`, String(currentScroll));
+    }
+    const recId = record.id;
+    lastOpenedRecordIdRef.current = recId;
+    sessionStorage.setItem(`st_last_record_${campaign.id}`, recId);
+
+    const influencerIdentifier = record.dispatch?.influencer_code || record.id;
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('stInfluencer', influencerIdentifier);
+      next.set('stVideo', String(videoNumber));
+      return next;
+    });
+    setSelectedVideo({ recordId: record.id, videoNumber });
+  }, [campaign.id, setSearchParams]);
+
+  const handleBackFromDetail = useCallback(() => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('stInfluencer');
+      next.delete('stVideo');
+      return next;
+    });
+    setSelectedVideo(null);
+  }, [setSearchParams]);
+
+  const handleSwitchVideo = useCallback((recordId: string, videoNumber: number) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('stVideo', String(videoNumber));
+      return next;
+    });
+    setSelectedVideo(prev => prev ? { ...prev, videoNumber } : { recordId, videoNumber });
+  }, [setSearchParams]);
+
+  const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const top = e.currentTarget.scrollTop;
+    savedScrollTopRef.current = top;
+    sessionStorage.setItem(`st_scroll_${campaign.id}`, String(top));
+  }, [campaign.id]);
+
+  // Scroll restoration: when returning to list view, smoothly restore exact scroll position
+  useEffect(() => {
+    if (!selectedVideo && !isLoading && listScrollContainerRef.current) {
+      const savedPos = savedScrollTopRef.current || Number(sessionStorage.getItem(`st_scroll_${campaign.id}`) || '0');
+      if (savedPos > 0) {
+        listScrollContainerRef.current.scrollTop = savedPos;
+        const raf = requestAnimationFrame(() => {
+          if (listScrollContainerRef.current) {
+            listScrollContainerRef.current.scrollTop = savedPos;
+          }
+        });
+        return () => cancelAnimationFrame(raf);
+      } else {
+        const lastRecordId = lastOpenedRecordIdRef.current || sessionStorage.getItem(`st_last_record_${campaign.id}`);
+        if (lastRecordId) {
+          const el = document.getElementById(`st-card-${lastRecordId}`);
+          if (el) {
+            el.scrollIntoView({ block: 'nearest' });
+          }
+        }
+      }
+    }
+  }, [selectedVideo, isLoading, campaign.id]);
 
   // Close menus on click outside
   useEffect(() => {
@@ -1885,9 +2007,28 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   }, []);
 
   // Check active record for Level 2 Video Detail View
-  const selectedRecord = selectedVideo 
-    ? (activeTrackingRecords.find(r => String(r.id) === String(selectedVideo.recordId)) || trackingRecords.find(r => String(r.id) === String(selectedVideo.recordId)) || null)
-    : null;
+  const selectedRecord = useMemo(() => {
+    if (!selectedVideo) return null;
+    const targetId = String(selectedVideo.recordId).trim().toLowerCase();
+    const cleanTargetId = targetId.replace(/^#+/, '');
+
+    return (
+      activeTrackingRecords.find(r => {
+        const rId = String(r.id).toLowerCase();
+        const code = (r.dispatch?.influencer_code || '').trim().toLowerCase();
+        const cleanCode = code.replace(/^#+/, '');
+        const infId = String(r.influencer_id || '').toLowerCase();
+        return rId === targetId || code === targetId || cleanCode === cleanTargetId || infId === targetId;
+      }) ||
+      trackingRecords.find(r => {
+        const rId = String(r.id).toLowerCase();
+        const code = (r.dispatch?.influencer_code || '').trim().toLowerCase();
+        const cleanCode = code.replace(/^#+/, '');
+        const infId = String(r.influencer_id || '').toLowerCase();
+        return rId === targetId || code === targetId || cleanCode === cleanTargetId || infId === targetId;
+      }) || null
+    );
+  }, [selectedVideo, activeTrackingRecords, trackingRecords]);
 
   return (
     <div className="bg-[#070c18] rounded-2xl border border-slate-800/80 overflow-hidden flex flex-col h-[calc(100vh-120px)] min-h-[750px] shadow-2xl p-5 gap-4">
@@ -1895,14 +2036,27 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       {/* =========================================================================
           LEVEL 2: DEDICATED VIDEO DETAIL VIEW
       ========================================================================= */}
-      {selectedVideo && selectedRecord ? (
-        <VideoDetailView 
-          record={selectedRecord}
-          videoNumber={selectedVideo.videoNumber}
-          onBack={() => setSelectedVideo(null)}
-          onSwitchVideo={(num) => setSelectedVideo({ recordId: selectedRecord.id, videoNumber: num })}
-          onSaveStep={(stepId, data, completed) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed)}
-        />
+      {selectedVideo ? (
+        selectedRecord ? (
+          <VideoDetailView 
+            record={selectedRecord}
+            videoNumber={selectedVideo.videoNumber}
+            onBack={handleBackFromDetail}
+            onSwitchVideo={(num) => handleSwitchVideo(selectedRecord.id, num)}
+            onSaveStep={(stepId, data, completed) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed)}
+          />
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center min-h-[400px] text-slate-400">
+            <RefreshCcw size={32} className="animate-spin text-purple-400 mb-3" />
+            <p className="text-sm font-medium text-slate-300">Loading influencer workflow...</p>
+            <button 
+              onClick={handleBackFromDetail} 
+              className="mt-4 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold"
+            >
+              Back to List
+            </button>
+          </div>
+        )
       ) : (
         /* =========================================================================
             LEVEL 1: MAIN STATUS TRACKING LIST VIEW
@@ -2141,7 +2295,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           </div>
 
           {/* 4. DEDICATED INTERNAL VERTICAL SCROLL CONTAINER */}
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3 scroll-smooth">
+          <div 
+            ref={listScrollContainerRef}
+            onScroll={handleListScroll}
+            className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-3 scroll-smooth"
+          >
             {isLoading ? (
               <div className="flex justify-center items-center h-64 text-slate-400">
                 <RefreshCcw size={22} className="animate-spin mr-2 text-blue-400" />
@@ -2314,7 +2472,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                     setActiveModal({ recordId: record.id, stageId: 'delivered' });
                                     return;
                                   }
-                                  setSelectedVideo({ recordId: record.id, videoNumber: vNum });
+                                  handleOpenVideo(record, vNum);
                                 }}
                                 title={`STEP ${stepNumber}: Video ${vNum} (${vw.completedCount} of ${vw.totalSteps} completed)`}
                               >

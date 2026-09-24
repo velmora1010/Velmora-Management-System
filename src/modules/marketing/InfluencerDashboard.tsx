@@ -8,6 +8,7 @@ import { EditCampaignModal } from './EditCampaignModal';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { saveDepartmentNavigation } from '../../utils/navigationPersistence';
 import { supabase } from '../../lib/supabase';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { buildPickListRecords } from '../../config/skuMapping';
@@ -43,28 +44,58 @@ export const InfluencerDashboard: React.FC<InfluencerDashboardProps> = ({ onBack
 
   // Resolve Campaign ID against campaigns data without resetting view on refetch
   useEffect(() => {
-    if (campaignIdParam && campaigns.length > 0) {
-      const match = campaigns.find(c => String(c.id) === String(campaignIdParam));
-      if (match) {
-        setSelectedCampaign(match);
-      } else if (!isLoading) {
-        console.warn(`[NAV] Saved campaign ID ${campaignIdParam} not found, resetting.`);
+    let isCancelled = false;
+
+    const resolveCampaign = async () => {
+      if (!campaignIdParam) {
         setSelectedCampaign(null);
-        const newParams = new URLSearchParams(searchParams);
-        newParams.delete('view');
-        newParams.delete('campaignId');
-        newParams.delete('subview');
-        newParams.delete('editInfluencerId');
-        setSearchParams(newParams);
-        saveDepartmentNavigation('marketing', '/marketing', {
-          dashboardView: 'overview',
-          selectedCampaignId: undefined
-        });
+        return;
       }
-    } else if (!campaignIdParam) {
-      setSelectedCampaign(null);
-    }
-  }, [campaigns, campaignIdParam, isLoading]);
+
+      // If already resolved to this campaign, nothing to do
+      if (selectedCampaign && String(selectedCampaign.id) === String(campaignIdParam)) {
+        return;
+      }
+
+      // 1. Check current campaigns list
+      if (campaigns.length > 0) {
+        const match = campaigns.find(c => String(c.id) === String(campaignIdParam));
+        if (match) {
+          if (!isCancelled) setSelectedCampaign(match);
+          return;
+        }
+      }
+
+      // 2. Fetch directly by ID from Supabase to prevent race conditions during refresh
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('influencer_create_campaigns_rows')
+          .select('*')
+          .eq('id', String(campaignIdParam))
+          .maybeSingle();
+
+        if (data && !error && !isCancelled) {
+          const normalized: Campaign = {
+            ...data,
+            campaign_name: String(data.campaign_name || data.name || data.title || 'Untitled Campaign'),
+            status: data.status || 'draft',
+            total_budget: data.total_budget || 0,
+            expected_influencers: data.expected_influencers || 0
+          };
+          setSelectedCampaign(normalized);
+          return;
+        }
+      } catch (err) {
+        console.warn('[NAV] Direct fetch for campaign ID failed:', err);
+      }
+    };
+
+    resolveCampaign();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [campaigns, campaignIdParam, selectedCampaign]);
 
   useEffect(() => {
     if (state?.openCampaignId && campaigns.length > 0) {

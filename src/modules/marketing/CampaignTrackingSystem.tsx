@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import type { DispatchDetails } from '../../hooks/marketing/useCampaignDispatch';
 import type { DispatchBatch } from '../../services/dispatchBatchService';
@@ -126,10 +127,61 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   onRefreshData
 }) => {
 
-  // Filters State
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStatusTab, setSelectedStatusTab] = useState<TrackingStatusCategory>('All');
-  const [selectedCourier, setSelectedCourier] = useState('All');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Filters State (persisted via URL and sessionStorage)
+  const [searchTerm, setSearchTerm] = useState<string>(() => {
+    return sessionStorage.getItem(`tracking_search_${campaign.id}`) || '';
+  });
+
+  const [selectedStatusTab, setSelectedStatusTabState] = useState<TrackingStatusCategory>(() => {
+    return (searchParams.get('trackingStatus') as TrackingStatusCategory) || 'All';
+  });
+
+  const [selectedCourier, setSelectedCourierState] = useState<string>(() => {
+    return searchParams.get('trackingCourier') || 'All';
+  });
+
+  const setSelectedStatusTab = (tab: TrackingStatusCategory) => {
+    setSelectedStatusTabState(tab);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (tab && tab !== 'All') {
+        next.set('trackingStatus', tab);
+      } else {
+        next.delete('trackingStatus');
+      }
+      return next;
+    });
+  };
+
+  const setSelectedCourier = (courier: string) => {
+    setSelectedCourierState(courier);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (courier && courier !== 'All') {
+        next.set('trackingCourier', courier);
+      } else {
+        next.delete('trackingCourier');
+      }
+      return next;
+    });
+  };
+
+  // Keep in sync if searchParams change externally (e.g. browser back/forward)
+  useEffect(() => {
+    const tabParam = (searchParams.get('trackingStatus') as TrackingStatusCategory) || 'All';
+    const courierParam = searchParams.get('trackingCourier') || 'All';
+    setSelectedStatusTabState(tabParam);
+    setSelectedCourierState(courierParam);
+  }, [searchParams]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(`tracking_search_${campaign.id}`, searchTerm);
+    } catch (e) {}
+  }, [searchTerm, campaign.id]);
+
   const [selectedStatusDropdown, setSelectedStatusDropdown] = useState('All');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');

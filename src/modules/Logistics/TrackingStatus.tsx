@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import db from '../../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
@@ -22,8 +23,34 @@ const TABS = [
 type TabType = typeof TABS[number];
 
 export const TrackingStatus: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<TabType>('All');
+  
+  const statusParam = searchParams.get('status') as TabType;
+  const initialTab: TabType = (statusParam && TABS.includes(statusParam)) ? statusParam : 'All';
+  const [activeTab, setActiveTabState] = useState<TabType>(initialTab);
+
+  const setActiveTab = (tab: TabType) => {
+    setActiveTabState(tab);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (tab && tab !== 'All') {
+        next.set('status', tab);
+      } else {
+        next.delete('status');
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const sParam = searchParams.get('status') as TabType;
+    if (sParam && TABS.includes(sParam)) {
+      setActiveTabState(sParam);
+    } else {
+      setActiveTabState('All');
+    }
+  }, [searchParams]);
   const [syncingIds, setSyncingIds] = useState<number[]>([]);
   const [isBulkSyncing, setIsBulkSyncing] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{
