@@ -249,170 +249,7 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6 scrollbar-thin scrollbar-thumb-slate-700">
 
-          {/* 1. VIDEO / CONTENT FILTER */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
-                <Video size={14} />
-                <span>VIDEO</span>
-              </div>
-              {availableOptions.videos.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleSelectAllVideos}
-                  className="text-[11px] text-purple-400 hover:text-purple-300 font-medium cursor-pointer transition-colors"
-                >
-                  {draft.videos.length === availableOptions.videos.length ? 'Clear All' : 'Select All'}
-                </button>
-              )}
-            </div>
-            
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setDraft(prev => ({ ...prev, videos: [] }))}
-                className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
-                  draft.videos.length === 0
-                    ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
-                }`}
-              >
-                {draft.videos.length === 0 && <Check size={12} />}
-                All Videos
-              </button>
-              {availableOptions.videos.map(videoNum => {
-                const active = draft.videos.includes(videoNum);
-                return (
-                  <button
-                    type="button"
-                    key={`video-${videoNum}`}
-                    onClick={() => toggleVideo(videoNum)}
-                    className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
-                      active
-                        ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
-                    }`}
-                  >
-                    {active && <Check size={12} />}
-                    Video {videoNum}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <hr className="border-slate-800" />
-
-          {/* 2. LANGUAGE FILTER */}
-          <div className="space-y-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
-              <Globe size={14} />
-              <span>LANGUAGE</span>
-            </div>
-            {availableOptions.languages.length === 0 ? (
-              <p className="text-xs text-slate-500 italic">No language data found in campaign influencers</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg">
-                {availableOptions.languages.map(lang => {
-                  const active = draft.languages.some(l => areFilterValuesEqual(l, lang));
-                  return (
-                    <button
-                      type="button"
-                      key={lang}
-                      onClick={() => toggleLanguage(lang)}
-                      className={`px-3 py-1.5 text-xs rounded-full transition-colors flex items-center gap-1.5 cursor-pointer ${
-                        active
-                          ? 'bg-purple-600 text-white font-medium shadow-sm'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
-                      }`}
-                    >
-                      {active && <Check size={12} />}
-                      {lang}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <hr className="border-slate-800" />
-
-          {/* 3. PRICE FILTER */}
-          <div className="space-y-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
-              <IndianRupee size={14} />
-              <span>PRICE</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setDraft(prev => ({ ...prev, priceRanges: [] }))}
-                className={`col-span-2 p-2 text-xs rounded-lg border text-center transition-colors font-medium cursor-pointer ${
-                  draft.priceRanges.length === 0
-                    ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
-                }`}
-              >
-                All Price Ranges
-              </button>
-              {STATUS_TRACKING_PRICE_RANGES.map(range => {
-                const active = draft.priceRanges.includes(range.id);
-                return (
-                  <button
-                    type="button"
-                    key={range.id}
-                    onClick={() => togglePriceRange(range.id)}
-                    className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
-                      active
-                        ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
-                    }`}
-                  >
-                    {active && <Check size={12} />}
-                    {range.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <hr className="border-slate-800" />
-
-          {/* 4. CATEGORY FILTER */}
-          <div className="space-y-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
-              <Tag size={14} />
-              <span>CATEGORY</span>
-            </div>
-            {availableOptions.categories.length === 0 ? (
-              <p className="text-xs text-slate-500 italic">No category data found in campaign influencers</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg">
-                {availableOptions.categories.map(cat => {
-                  const active = draft.categories.some(c => areFilterValuesEqual(c, cat));
-                  return (
-                    <button
-                      type="button"
-                      key={cat}
-                      onClick={() => toggleCategory(cat)}
-                      className={`px-3 py-1.5 text-xs rounded-full transition-colors flex items-center gap-1.5 cursor-pointer ${
-                        active
-                          ? 'bg-purple-600 text-white font-medium shadow-sm'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
-                      }`}
-                    >
-                      {active && <Check size={12} />}
-                      {cat}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <hr className="border-slate-800" />
-
-          {/* 5. WORKFLOW STATUS FILTER */}
+          {/* 1. WORKFLOW STATUS */}
           <div className="space-y-3">
             <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
               <Activity size={14} />
@@ -429,7 +266,7 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
                 }`}
               >
                 {draft.workflowStatuses.length === 0 && <Check size={12} />}
-                All Statuses
+                All Workflow Status
               </button>
               {STATUS_TRACKING_WORKFLOW_STATUSES.map(status => {
                 const active = draft.workflowStatuses.some(s => areFilterValuesEqual(s, status));
@@ -454,7 +291,49 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
 
           <hr className="border-slate-800" />
 
-          {/* 6. PLATFORM FILTER */}
+          {/* 2. DELIVERY STATUS */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
+              <Truck size={14} />
+              <span>DELIVERY STATUS</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, deliveryStatuses: [] }))}
+                className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
+                  draft.deliveryStatuses.length === 0
+                    ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                }`}
+              >
+                {draft.deliveryStatuses.length === 0 && <Check size={12} />}
+                All Delivery Status
+              </button>
+              {deliveryOptions.map(delStatus => {
+                const active = draft.deliveryStatuses.some(d => areFilterValuesEqual(d, delStatus));
+                return (
+                  <button
+                    type="button"
+                    key={delStatus}
+                    onClick={() => toggleDeliveryStatus(delStatus)}
+                    className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
+                      active
+                        ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                    }`}
+                  >
+                    {active && <Check size={12} />}
+                    {delStatus}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <hr className="border-slate-800" />
+
+          {/* 3. PLATFORM */}
           <div className="space-y-3">
             <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
               <Share2 size={14} />
@@ -500,20 +379,66 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
 
           <hr className="border-slate-800" />
 
-          {/* 7. DELIVERY STATUS FILTER */}
+          {/* 4. LANGUAGE */}
           <div className="space-y-3">
             <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
-              <Truck size={14} />
-              <span>DELIVERY STATUS</span>
+              <Globe size={14} />
+              <span>LANGUAGE</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {deliveryOptions.map(delStatus => {
-                const active = draft.deliveryStatuses.some(d => areFilterValuesEqual(d, delStatus));
+            {availableOptions.languages.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">No language data found in campaign influencers</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg">
+                {availableOptions.languages.map(lang => {
+                  const active = draft.languages.some(l => areFilterValuesEqual(l, lang));
+                  return (
+                    <button
+                      type="button"
+                      key={lang}
+                      onClick={() => toggleLanguage(lang)}
+                      className={`px-3 py-1.5 text-xs rounded-full transition-colors flex items-center gap-1.5 cursor-pointer ${
+                        active
+                          ? 'bg-purple-600 text-white font-medium shadow-sm'
+                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                      }`}
+                    >
+                      {active && <Check size={12} />}
+                      {lang}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <hr className="border-slate-800" />
+
+          {/* 5. PRICE */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
+              <IndianRupee size={14} />
+              <span>PRICE</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, priceRanges: [] }))}
+                className={`col-span-2 p-2.5 text-xs rounded-lg border text-center transition-colors font-medium cursor-pointer ${
+                  draft.priceRanges.length === 0
+                    ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                }`}
+              >
+                {draft.priceRanges.length === 0 && <Check size={12} className="inline mr-1" />}
+                All Price Ranges
+              </button>
+              {STATUS_TRACKING_PRICE_RANGES.map(range => {
+                const active = draft.priceRanges.includes(range.id);
                 return (
                   <button
                     type="button"
-                    key={delStatus}
-                    onClick={() => toggleDeliveryStatus(delStatus)}
+                    key={range.id}
+                    onClick={() => togglePriceRange(range.id)}
                     className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
                       active
                         ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
@@ -521,7 +446,7 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
                     }`}
                   >
                     {active && <Check size={12} />}
-                    {delStatus}
+                    {range.label}
                   </button>
                 );
               })}
