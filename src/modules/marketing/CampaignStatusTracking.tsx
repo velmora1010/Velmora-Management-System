@@ -2135,15 +2135,20 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   Reset Filters
                 </button>
               )}
+              {/* Clear All Button (permanently disabled as requested) */}
               <button 
                 type="button"
-                onClick={() => setIsClearModalOpen(true)}
-                disabled={isClearing || activeTrackingRecords.length === 0}
-                className="border border-rose-500/50 hover:bg-rose-500/10 disabled:opacity-40 disabled:hover:bg-transparent text-rose-400 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer disabled:cursor-not-allowed"
-                title="Clear all Status Tracking records for this campaign"
+                disabled
+                aria-disabled="true"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                className="border border-slate-700/80 bg-slate-900 text-slate-400 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap opacity-40 cursor-not-allowed select-none"
+                title="Clear All is disabled"
               >
-                <Trash2 size={15} className={isClearing ? 'animate-spin' : ''} />
-                {isClearing ? 'Clearing...' : 'Clear All'}
+                <Trash2 size={15} className="text-rose-400/60" />
+                <span>Clear All</span>
               </button>
             </div>
           </div>
