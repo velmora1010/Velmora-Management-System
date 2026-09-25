@@ -156,15 +156,30 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   });
 
   const [selectedStatusTab, setSelectedStatusTabState] = useState<TrackingStatusCategory>(() => {
-    return (searchParams.get('trackingStatus') as TrackingStatusCategory) || 'All';
+    const fromUrl = searchParams.get('trackingStatus') as TrackingStatusCategory | null;
+    if (fromUrl) return fromUrl;
+    try {
+      const fromSession = sessionStorage.getItem(`tracking_status_${campaign.id}`) as TrackingStatusCategory | null;
+      if (fromSession && fromSession !== 'All') return fromSession;
+    } catch (e) {}
+    return 'All';
   });
 
   const [selectedCourier, setSelectedCourierState] = useState<string>(() => {
-    return searchParams.get('trackingCourier') || 'All';
+    const fromUrl = searchParams.get('trackingCourier');
+    if (fromUrl) return fromUrl;
+    try {
+      const fromSession = sessionStorage.getItem(`tracking_courier_${campaign.id}`);
+      if (fromSession && fromSession !== 'All') return fromSession;
+    } catch (e) {}
+    return 'All';
   });
 
   const setSelectedStatusTab = (tab: TrackingStatusCategory) => {
     setSelectedStatusTabState(tab);
+    try {
+      sessionStorage.setItem(`tracking_status_${campaign.id}`, tab);
+    } catch (e) {}
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       if (tab && tab !== 'All') {
@@ -173,11 +188,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         next.delete('trackingStatus');
       }
       return next;
-    });
+    }, { replace: true });
   };
 
   const setSelectedCourier = (courier: string) => {
     setSelectedCourierState(courier);
+    try {
+      sessionStorage.setItem(`tracking_courier_${campaign.id}`, courier);
+    } catch (e) {}
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       if (courier && courier !== 'All') {
@@ -186,16 +204,26 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         next.delete('trackingCourier');
       }
       return next;
-    });
+    }, { replace: true });
   };
 
   // Keep in sync if searchParams change externally (e.g. browser back/forward)
   useEffect(() => {
-    const tabParam = (searchParams.get('trackingStatus') as TrackingStatusCategory) || 'All';
-    const courierParam = searchParams.get('trackingCourier') || 'All';
-    setSelectedStatusTabState(tabParam);
-    setSelectedCourierState(courierParam);
-  }, [searchParams]);
+    const rawTab = searchParams.get('trackingStatus') as TrackingStatusCategory | null;
+    if (rawTab && rawTab !== selectedStatusTab) {
+      setSelectedStatusTabState(rawTab);
+      try {
+        sessionStorage.setItem(`tracking_status_${campaign.id}`, rawTab);
+      } catch (e) {}
+    }
+    const rawCourier = searchParams.get('trackingCourier');
+    if (rawCourier && rawCourier !== selectedCourier) {
+      setSelectedCourierState(rawCourier);
+      try {
+        sessionStorage.setItem(`tracking_courier_${campaign.id}`, rawCourier);
+      } catch (e) {}
+    }
+  }, [searchParams, selectedStatusTab, selectedCourier, campaign.id]);
 
   useEffect(() => {
     try {
@@ -292,6 +320,16 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     } catch (e) {}
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
+      if (selectedStatusTab && selectedStatusTab !== 'All') {
+        next.set('trackingStatus', selectedStatusTab);
+      } else {
+        next.delete('trackingStatus');
+      }
+      if (selectedCourier && selectedCourier !== 'All') {
+        next.set('trackingCourier', selectedCourier);
+      } else {
+        next.delete('trackingCourier');
+      }
       if (validPage > 1) {
         next.set('trackingPage', String(validPage));
       } else {
@@ -299,7 +337,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       }
       return next;
     }, { replace: true });
-  }, [campaign.id, setSearchParams]);
+  }, [campaign.id, selectedStatusTab, selectedCourier, setSearchParams]);
 
   // Keep currentPage state in sync if searchParams change externally (e.g. back/forward or navigation restore)
   useEffect(() => {
