@@ -109,8 +109,29 @@ const STATUS_PILLS: TrackingStatusCategory[] = [
   'Delivered',
   'Out for Delivery',
   'Info Received',
-  'Expired'
+  'Expired',
+  'Re-Dispatch'
 ];
+
+export function isShipmentReDispatch(
+  s: InfluencerDispatchedShipment,
+  dispatchRecords?: DispatchDetails[]
+): boolean {
+  if (s.isResend === true || (s as any).is_resend === true) return true;
+  if ((s.attemptNumber && s.attemptNumber > 1) || ((s as any).attempt_number && (s as any).attempt_number > 1)) return true;
+  const rawOrd = s.orderId || (s as any).rawOrderId || (s as any).raw_order_id;
+  if (rawOrd && isReplacementOrderId(rawOrd)) return true;
+  if (s.influencerCode && isReplacementOrderId(s.influencerCode)) return true;
+
+  if (dispatchRecords && s.influencerId) {
+    const disp = dispatchRecords.find(d => String(d.influencer_id) === String(s.influencerId));
+    if (disp) {
+      const st = (disp.dispatch_status || '').trim().toLowerCase();
+      if (st === 're_dispatch' || st === 're-dispatch' || st === 'redispatch') return true;
+    }
+  }
+  return false;
+}
 
 export const getShipmentCategory = (s: InfluencerDispatchedShipment): TrackingStatusCategory => {
   const displayStatus = getTrackingDisplayStatus(s);
@@ -243,9 +264,53 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     };
   }, [isUploadDropdownOpen]);
 
-  // Pagination State
-  const [currentPage, setCurrentPage] = useState(1);
+  // Pagination State (persisted via URL query param and sessionStorage fallback per campaign)
+  const getInitialPage = (): number => {
+    const fromUrl = searchParams.get('trackingPage');
+    if (fromUrl) {
+      const parsed = parseInt(fromUrl, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    try {
+      const fromSession = sessionStorage.getItem(`tracking_page_${campaign.id}`);
+      if (fromSession) {
+        const parsed = parseInt(fromSession, 10);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    } catch (e) {}
+    return 1;
+  };
+
+  const [currentPage, setCurrentPageState] = useState<number>(getInitialPage);
   const [pageSize, setPageSize] = useState(10);
+
+  const changePage = useCallback((newPage: number) => {
+    const validPage = Math.max(1, newPage);
+    setCurrentPageState(validPage);
+    try {
+      sessionStorage.setItem(`tracking_page_${campaign.id}`, String(validPage));
+    } catch (e) {}
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (validPage > 1) {
+        next.set('trackingPage', String(validPage));
+      } else {
+        next.delete('trackingPage');
+      }
+      return next;
+    }, { replace: true });
+  }, [campaign.id, setSearchParams]);
+
+  // Keep currentPage state in sync if searchParams change externally (e.g. back/forward or navigation restore)
+  useEffect(() => {
+    const pageParam = searchParams.get('trackingPage');
+    if (pageParam) {
+      const parsed = parseInt(pageParam, 10);
+      if (!isNaN(parsed) && parsed > 0 && parsed !== currentPage) {
+        setCurrentPageState(parsed);
+      }
+    }
+  }, [searchParams, currentPage]);
 
   // Syncing state
   const [syncingIds, setSyncingIds] = useState<string[]>([]);
@@ -389,10 +454,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   }, [campaign.id, candidateInfluencers, loadStatusTrackingInfluencerIds]);
 
   // Reload cache and shipments when campaign changes
+  const prevCampaignIdRef = useRef(campaign.id);
   useEffect(() => {
     loadShipments();
-    setCurrentPage(1);
-  }, [loadShipments]);
+    if (prevCampaignIdRef.current !== campaign.id) {
+      prevCampaignIdRef.current = campaign.id;
+      changePage(1);
+    }
+  }, [loadShipments, campaign.id, changePage]);
 
   // Listen to external tracking and status updates across tabs or modules
   useEffect(() => {
@@ -588,6 +657,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Status Tab Counts for the pills
   const statusTabCounts = useMemo(() => {
+    const redispatchCount = allShipments.filter(s => isShipmentReDispatch(s, dispatchRecords)).length;
     const counts: Record<TrackingStatusCategory, number> = {
       All: allShipments.length,
       Exception: kpis.exception,
@@ -597,10 +667,11 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       Delivered: kpis.delivered,
       'Out for Delivery': kpis.outForDelivery,
       'Info Received': kpis.infoReceived,
-      Expired: kpis.expired
+      Expired: kpis.expired,
+      'Re-Dispatch': redispatchCount
     };
     return counts;
-  }, [allShipments, kpis]);
+  }, [allShipments, kpis, dispatchRecords]);
 
   // Delivery & Delivered Schedule grouping from allShipments
   const deliverySchedule = useMemo(() => {
@@ -894,18 +965,30 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       // 2. Status Tab filter (pills)
       if (selectedStatusTab !== 'All') {
-        const cat = getShipmentCategory(s);
-        if (cat !== selectedStatusTab) {
-          return false;
+        if (selectedStatusTab === 'Re-Dispatch') {
+          if (!isShipmentReDispatch(s, dispatchRecords)) {
+            return false;
+          }
+        } else {
+          const cat = getShipmentCategory(s);
+          if (cat !== selectedStatusTab) {
+            return false;
+          }
         }
       }
 
       // 3. Status Dropdown filter
       if (selectedStatusDropdown !== 'All') {
-        const cat = getShipmentCategory(s);
-        const display = getTrackingDisplayStatus(s);
-        if (cat !== selectedStatusDropdown && display !== selectedStatusDropdown) {
-          return false;
+        if (selectedStatusDropdown === 'Re-Dispatch') {
+          if (!isShipmentReDispatch(s, dispatchRecords)) {
+            return false;
+          }
+        } else {
+          const cat = getShipmentCategory(s);
+          const display = getTrackingDisplayStatus(s);
+          if (cat !== selectedStatusDropdown && display !== selectedStatusDropdown) {
+            return false;
+          }
         }
       }
 
@@ -918,7 +1001,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       return true;
     });
-  }, [allShipments, selectedDeliveryDate, selectedDeliveryDateEnd, searchTerm, selectedStatusTab, selectedStatusDropdown, startDate, endDate]);
+  }, [allShipments, selectedDeliveryDate, selectedDeliveryDateEnd, searchTerm, selectedStatusTab, selectedStatusDropdown, startDate, endDate, dispatchRecords]);
 
   // Real-time Courier Counts (Delhivery, ST Courier, Other) strictly scoped to campaign and active filters
   const courierCounts = useMemo(() => {
@@ -985,15 +1068,71 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
   }, [selectedCourier, availableCouriers]);
 
-  // Reset pagination whenever filters change
+  // Reset pagination whenever user explicitly changes filters
+  const prevFiltersRef = useRef({
+    searchTerm,
+    selectedCourier,
+    selectedStatusTab,
+    selectedStatusDropdown,
+    startDate,
+    endDate,
+    selectedDeliveryDate,
+    selectedDeliveryDateEnd
+  });
+  const isInitialMountRef = useRef(true);
+
   useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, selectedCourier, selectedStatusTab, selectedStatusDropdown, startDate, endDate, selectedDeliveryDate, selectedDeliveryDateEnd]);
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+    const prev = prevFiltersRef.current;
+    const hasChanged = 
+      prev.searchTerm !== searchTerm ||
+      prev.selectedCourier !== selectedCourier ||
+      prev.selectedStatusTab !== selectedStatusTab ||
+      prev.selectedStatusDropdown !== selectedStatusDropdown ||
+      prev.startDate !== startDate ||
+      prev.endDate !== endDate ||
+      prev.selectedDeliveryDate !== selectedDeliveryDate ||
+      prev.selectedDeliveryDateEnd !== selectedDeliveryDateEnd;
+
+    if (hasChanged) {
+      prevFiltersRef.current = {
+        searchTerm,
+        selectedCourier,
+        selectedStatusTab,
+        selectedStatusDropdown,
+        startDate,
+        endDate,
+        selectedDeliveryDate,
+        selectedDeliveryDateEnd
+      };
+      changePage(1);
+    }
+  }, [
+    searchTerm,
+    selectedCourier,
+    selectedStatusTab,
+    selectedStatusDropdown,
+    startDate,
+    endDate,
+    selectedDeliveryDate,
+    selectedDeliveryDateEnd,
+    changePage
+  ]);
 
   // Paginated Shipments
   const totalShipmentsCount = filteredShipments.length;
   const totalPages = Math.max(1, Math.ceil(totalShipmentsCount / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  // Clamping: If the dataset has fewer total pages than current page, clamp to highest valid page
+  useEffect(() => {
+    if (!isLoadingDb && totalShipmentsCount > 0 && currentPage > totalPages) {
+      changePage(totalPages);
+    }
+  }, [isLoadingDb, totalShipmentsCount, totalPages, currentPage, changePage]);
 
   const paginatedShipments = useMemo(() => {
     const startIdx = (safeCurrentPage - 1) * pageSize;
@@ -1085,7 +1224,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       setSelectedDeliveryDate(null);
       setStartDate('');
       setEndDate('');
-      setCurrentPage(1);
+      changePage(1);
 
       // Re-verify from DB
       await loadShipments();
@@ -1504,6 +1643,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               <option value="Pending">Pending</option>
               <option value="Info Received">Info Received</option>
               <option value="Expired">Expired</option>
+              <option value="Re-Dispatch">Re-Dispatch</option>
             </select>
 
             {/* 6. Date Range Inputs (From - To for Estimated Delivery Date) */}
@@ -1615,6 +1755,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               badgeBorderClass = isActive
                 ? 'bg-cyan-600 text-white border-cyan-500'
                 : 'border-cyan-800/40 text-cyan-400 hover:border-cyan-600';
+            } else if (pill === 'Re-Dispatch') {
+              badgeBorderClass = isActive
+                ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-600/30'
+                : 'border-amber-800/40 text-amber-300 hover:border-amber-600';
             }
 
             return (
@@ -2055,7 +2199,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                onClick={() => changePage(Math.max(1, safeCurrentPage - 1))}
                 disabled={safeCurrentPage === 1}
                 className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-slate-900 flex items-center justify-center text-slate-300 cursor-pointer"
                 title="Previous page"
@@ -2080,7 +2224,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => setCurrentPage(pageNum)}
+                    onClick={() => changePage(pageNum)}
                     className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
                       isActive
                         ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/40'
@@ -2094,7 +2238,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
               <button
                 type="button"
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                onClick={() => changePage(Math.min(totalPages, safeCurrentPage + 1))}
                 disabled={safeCurrentPage >= totalPages}
                 className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-slate-900 flex items-center justify-center text-slate-300 cursor-pointer"
                 title="Next page"
@@ -2110,7 +2254,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                 value={pageSize}
                 onChange={(e) => {
                   setPageSize(Number(e.target.value));
-                  setCurrentPage(1);
+                  changePage(1);
                 }}
                 className="bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
               >

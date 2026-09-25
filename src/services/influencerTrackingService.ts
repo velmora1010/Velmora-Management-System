@@ -39,7 +39,8 @@ export type TrackingStatusCategory =
   | 'Failed Attempt'
   | 'Pending'
   | 'Info Received'
-  | 'Expired';
+  | 'Expired'
+  | 'Re-Dispatch';
 
 export interface InfluencerDispatchedShipment {
   id: string; // Dispatch record id, awb, or unique id
