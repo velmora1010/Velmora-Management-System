@@ -175,7 +175,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return 'All';
   });
 
+  const isInternalUpdateRef = useRef(false);
+
   const setSelectedStatusTab = (tab: TrackingStatusCategory) => {
+    isInternalUpdateRef.current = true;
     setSelectedStatusTabState(tab);
     setCurrentPageState(1);
     try {
@@ -195,6 +198,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   };
 
   const setSelectedCourier = (courier: string) => {
+    isInternalUpdateRef.current = true;
     setSelectedCourierState(courier);
     setCurrentPageState(1);
     try {
@@ -215,21 +219,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Keep in sync if searchParams change externally (e.g. browser back/forward)
   useEffect(() => {
+    if (isInternalUpdateRef.current) {
+      isInternalUpdateRef.current = false;
+      return;
+    }
     const rawTab = (searchParams.get('trackingStatus') as TrackingStatusCategory) || 'All';
-    if (rawTab !== selectedStatusTab) {
-      setSelectedStatusTabState(rawTab);
-      try {
-        sessionStorage.setItem(`tracking_status_${campaign.id}`, rawTab);
-      } catch (e) {}
-    }
+    setSelectedStatusTabState(rawTab);
+    try {
+      sessionStorage.setItem(`tracking_status_${campaign.id}`, rawTab);
+    } catch (e) {}
+
     const rawCourier = searchParams.get('trackingCourier') || 'All';
-    if (rawCourier !== selectedCourier) {
-      setSelectedCourierState(rawCourier);
-      try {
-        sessionStorage.setItem(`tracking_courier_${campaign.id}`, rawCourier);
-      } catch (e) {}
-    }
-  }, [searchParams, selectedStatusTab, selectedCourier, campaign.id]);
+    setSelectedCourierState(rawCourier);
+    try {
+      sessionStorage.setItem(`tracking_courier_${campaign.id}`, rawCourier);
+    } catch (e) {}
+  }, [searchParams, campaign.id]);
 
   useEffect(() => {
     try {
@@ -326,6 +331,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   const changePage = useCallback((newPage: number) => {
     const validPage = Math.max(1, newPage);
+    isInternalUpdateRef.current = true;
     console.log('[TRACKING CHANGE PAGE HANDLER]', {
       handler: 'entered',
       requestedPage: newPage,
@@ -366,15 +372,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Keep currentPage state in sync if searchParams change externally (e.g. back/forward or navigation restore)
   useEffect(() => {
-    const pageParam = searchParams.get('trackingPage');
-    if (pageParam) {
-      const parsed = parseInt(pageParam, 10);
-      if (!isNaN(parsed) && parsed > 0 && parsed !== currentPage) {
-        console.log('[TRACKING URL SYNC] Page update from searchParams:', parsed);
-        setCurrentPageState(parsed);
-      }
+    if (isInternalUpdateRef.current) {
+      return;
     }
-  }, [searchParams, currentPage]);
+    const pageParam = searchParams.get('trackingPage');
+    const parsed = pageParam ? parseInt(pageParam, 10) : 1;
+    const targetPage = (!isNaN(parsed) && parsed > 0) ? parsed : 1;
+    if (targetPage !== currentPageRef.current) {
+      console.log('[TRACKING URL SYNC] Page update from searchParams:', targetPage);
+      setCurrentPageState(targetPage);
+    }
+  }, [searchParams]);
 
   // Syncing state
   const [syncingIds, setSyncingIds] = useState<string[]>([]);
