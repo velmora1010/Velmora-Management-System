@@ -312,21 +312,38 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [currentPage, setCurrentPageState] = useState<number>(getInitialPage);
   const [pageSize, setPageSize] = useState(10);
 
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+  const selectedStatusTabRef = useRef(selectedStatusTab);
+  selectedStatusTabRef.current = selectedStatusTab;
+  const selectedCourierRef = useRef(selectedCourier);
+  selectedCourierRef.current = selectedCourier;
+
   const changePage = useCallback((newPage: number) => {
     const validPage = Math.max(1, newPage);
+    console.log('[TRACKING CHANGE PAGE HANDLER]', {
+      handler: 'entered',
+      requestedPage: newPage,
+      validPage,
+      currentPageBefore: currentPageRef.current,
+      selectedStatusTab: selectedStatusTabRef.current,
+      selectedCourier: selectedCourierRef.current
+    });
     setCurrentPageState(validPage);
     try {
       sessionStorage.setItem(`tracking_page_${campaign.id}`, String(validPage));
     } catch (e) {}
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
-      if (selectedStatusTab && selectedStatusTab !== 'All') {
-        next.set('trackingStatus', selectedStatusTab);
+      const tab = selectedStatusTabRef.current;
+      const courier = selectedCourierRef.current;
+      if (tab && tab !== 'All') {
+        next.set('trackingStatus', tab);
       } else {
         next.delete('trackingStatus');
       }
-      if (selectedCourier && selectedCourier !== 'All') {
-        next.set('trackingCourier', selectedCourier);
+      if (courier && courier !== 'All') {
+        next.set('trackingCourier', courier);
       } else {
         next.delete('trackingCourier');
       }
@@ -337,7 +354,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       }
       return next;
     }, { replace: true });
-  }, [campaign.id, selectedStatusTab, selectedCourier, setSearchParams]);
+  }, [campaign.id, setSearchParams]);
+
+  const changePageRef = useRef(changePage);
+  changePageRef.current = changePage;
 
   // Keep currentPage state in sync if searchParams change externally (e.g. back/forward or navigation restore)
   useEffect(() => {
@@ -345,6 +365,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     if (pageParam) {
       const parsed = parseInt(pageParam, 10);
       if (!isNaN(parsed) && parsed > 0 && parsed !== currentPage) {
+        console.log('[TRACKING URL SYNC] Page update from searchParams:', parsed);
         setCurrentPageState(parsed);
       }
     }
@@ -497,9 +518,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     loadShipments();
     if (prevCampaignIdRef.current !== campaign.id) {
       prevCampaignIdRef.current = campaign.id;
-      changePage(1);
+      changePageRef.current(1);
     }
-  }, [loadShipments, campaign.id, changePage]);
+  }, [loadShipments, campaign.id]);
 
   // Listen to external tracking and status updates across tabs or modules
   useEffect(() => {
@@ -1136,6 +1157,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       prev.selectedDeliveryDateEnd !== selectedDeliveryDateEnd;
 
     if (hasChanged) {
+      console.log('[TRACKING FILTERS CHANGED - RESETTING PAGE TO 1]', {
+        prev: prevFiltersRef.current,
+        next: {
+          searchTerm,
+          selectedCourier,
+          selectedStatusTab,
+          selectedStatusDropdown,
+          startDate,
+          endDate,
+          selectedDeliveryDate,
+          selectedDeliveryDateEnd
+        }
+      });
       prevFiltersRef.current = {
         searchTerm,
         selectedCourier,
@@ -1146,7 +1180,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         selectedDeliveryDate,
         selectedDeliveryDateEnd
       };
-      changePage(1);
+      changePageRef.current(1);
     }
   }, [
     searchTerm,
@@ -1156,8 +1190,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     startDate,
     endDate,
     selectedDeliveryDate,
-    selectedDeliveryDateEnd,
-    changePage
+    selectedDeliveryDateEnd
   ]);
 
   // Paginated Shipments
@@ -1168,14 +1201,28 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   // Clamping: If the dataset has fewer total pages than current page, clamp to highest valid page
   useEffect(() => {
     if (!isLoadingDb && totalShipmentsCount > 0 && currentPage > totalPages) {
-      changePage(totalPages);
+      console.log('[TRACKING CLAMPING TRIGGERED]', { currentPage, totalPages, totalShipmentsCount });
+      changePageRef.current(totalPages);
     }
-  }, [isLoadingDb, totalShipmentsCount, totalPages, currentPage, changePage]);
+  }, [isLoadingDb, totalShipmentsCount, totalPages, currentPage]);
 
   const paginatedShipments = useMemo(() => {
     const startIdx = (safeCurrentPage - 1) * pageSize;
     return filteredShipments.slice(startIdx, startIdx + pageSize);
   }, [filteredShipments, safeCurrentPage, pageSize]);
+
+  // Debug logging as requested in Step 2.3
+  console.log('[TRACKING PAGE DEBUG]', {
+    filter: selectedStatusTab,
+    currentPage,
+    safeCurrentPage,
+    pageSize,
+    filteredCount: filteredShipments.length,
+    totalPages,
+    startIndex: (safeCurrentPage - 1) * pageSize,
+    endIndex: Math.min((safeCurrentPage - 1) * pageSize + pageSize, filteredShipments.length),
+    displayedCount: paginatedShipments.length
+  });
 
   // Generate clean, strictly non-colliding pagination items
   const paginationItems = useMemo(() => {
@@ -2237,7 +2284,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => changePage(Math.max(1, safeCurrentPage - 1))}
+                onClick={() => {
+                  const targetPage = Math.max(1, safeCurrentPage - 1);
+                  console.log('[TRACKING PAGINATION]', {
+                    activeFilter: selectedStatusTab,
+                    currentPageBefore: currentPage,
+                    requestedPage: targetPage,
+                    filteredCount: filteredShipments.length,
+                    totalPages
+                  });
+                  changePage(targetPage);
+                }}
                 disabled={safeCurrentPage === 1}
                 className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-slate-900 flex items-center justify-center text-slate-300 cursor-pointer"
                 title="Previous page"
@@ -2262,7 +2319,16 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                   <button
                     key={item.key}
                     type="button"
-                    onClick={() => changePage(pageNum)}
+                    onClick={() => {
+                      console.log('[TRACKING PAGINATION]', {
+                        activeFilter: selectedStatusTab,
+                        currentPageBefore: currentPage,
+                        requestedPage: pageNum,
+                        filteredCount: filteredShipments.length,
+                        totalPages
+                      });
+                      changePage(pageNum);
+                    }}
                     className={`w-7 h-7 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
                       isActive
                         ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/40'
@@ -2276,7 +2342,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
               <button
                 type="button"
-                onClick={() => changePage(Math.min(totalPages, safeCurrentPage + 1))}
+                onClick={() => {
+                  const targetPage = Math.min(totalPages, safeCurrentPage + 1);
+                  console.log('[TRACKING PAGINATION]', {
+                    activeFilter: selectedStatusTab,
+                    currentPageBefore: currentPage,
+                    requestedPage: targetPage,
+                    filteredCount: filteredShipments.length,
+                    totalPages
+                  });
+                  changePage(targetPage);
+                }}
                 disabled={safeCurrentPage >= totalPages}
                 className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-slate-900 flex items-center justify-center text-slate-300 cursor-pointer"
                 title="Next page"
