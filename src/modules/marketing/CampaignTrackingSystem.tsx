@@ -177,8 +177,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   const setSelectedStatusTab = (tab: TrackingStatusCategory) => {
     setSelectedStatusTabState(tab);
+    setCurrentPageState(1);
     try {
       sessionStorage.setItem(`tracking_status_${campaign.id}`, tab);
+      sessionStorage.setItem(`tracking_page_${campaign.id}`, '1');
     } catch (e) {}
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
@@ -187,14 +189,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       } else {
         next.delete('trackingStatus');
       }
+      next.delete('trackingPage');
       return next;
     }, { replace: true });
   };
 
   const setSelectedCourier = (courier: string) => {
     setSelectedCourierState(courier);
+    setCurrentPageState(1);
     try {
       sessionStorage.setItem(`tracking_courier_${campaign.id}`, courier);
+      sessionStorage.setItem(`tracking_page_${campaign.id}`, '1');
     } catch (e) {}
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
@@ -203,21 +208,22 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       } else {
         next.delete('trackingCourier');
       }
+      next.delete('trackingPage');
       return next;
     }, { replace: true });
   };
 
   // Keep in sync if searchParams change externally (e.g. browser back/forward)
   useEffect(() => {
-    const rawTab = searchParams.get('trackingStatus') as TrackingStatusCategory | null;
-    if (rawTab && rawTab !== selectedStatusTab) {
+    const rawTab = (searchParams.get('trackingStatus') as TrackingStatusCategory) || 'All';
+    if (rawTab !== selectedStatusTab) {
       setSelectedStatusTabState(rawTab);
       try {
         sessionStorage.setItem(`tracking_status_${campaign.id}`, rawTab);
       } catch (e) {}
     }
-    const rawCourier = searchParams.get('trackingCourier');
-    if (rawCourier && rawCourier !== selectedCourier) {
+    const rawCourier = searchParams.get('trackingCourier') || 'All';
+    if (rawCourier !== selectedCourier) {
       setSelectedCourierState(rawCourier);
       try {
         sessionStorage.setItem(`tracking_courier_${campaign.id}`, rawCourier);
@@ -231,7 +237,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     } catch (e) {}
   }, [searchTerm, campaign.id]);
 
-  const [selectedStatusDropdown, setSelectedStatusDropdown] = useState('All');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -1022,7 +1027,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         }
       }
 
-      // 2. Status Tab filter (pills)
+      // 2. Status / Re-Dispatch Filter
       if (selectedStatusTab !== 'All') {
         if (selectedStatusTab === 'Re-Dispatch') {
           if (!isShipmentReDispatch(s, dispatchRecords)) {
@@ -1036,22 +1041,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         }
       }
 
-      // 3. Status Dropdown filter
-      if (selectedStatusDropdown !== 'All') {
-        if (selectedStatusDropdown === 'Re-Dispatch') {
-          if (!isShipmentReDispatch(s, dispatchRecords)) {
-            return false;
-          }
-        } else {
-          const cat = getShipmentCategory(s);
-          const display = getTrackingDisplayStatus(s);
-          if (cat !== selectedStatusDropdown && display !== selectedStatusDropdown) {
-            return false;
-          }
-        }
-      }
-
-      // 4. Date Range filter (strictly on canonical Estimated Delivery Date, not dispatchDate/upload/order)
+      // 3. Date Range filter (strictly on canonical Estimated Delivery Date, not dispatchDate/upload/order)
       if (startDate || endDate) {
         if (!eddYmd) return false;
         if (startDate && eddYmd < startDate) return false;
@@ -1060,7 +1050,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       return true;
     });
-  }, [allShipments, selectedDeliveryDate, selectedDeliveryDateEnd, searchTerm, selectedStatusTab, selectedStatusDropdown, startDate, endDate, dispatchRecords]);
+  }, [allShipments, selectedDeliveryDate, selectedDeliveryDateEnd, searchTerm, selectedStatusTab, startDate, endDate, dispatchRecords]);
 
   // Real-time Courier Counts (Delhivery, ST Courier, Other) strictly scoped to campaign and active filters
   const courierCounts = useMemo(() => {
@@ -1132,7 +1122,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     searchTerm,
     selectedCourier,
     selectedStatusTab,
-    selectedStatusDropdown,
     startDate,
     endDate,
     selectedDeliveryDate,
@@ -1150,7 +1139,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       prev.searchTerm !== searchTerm ||
       prev.selectedCourier !== selectedCourier ||
       prev.selectedStatusTab !== selectedStatusTab ||
-      prev.selectedStatusDropdown !== selectedStatusDropdown ||
       prev.startDate !== startDate ||
       prev.endDate !== endDate ||
       prev.selectedDeliveryDate !== selectedDeliveryDate ||
@@ -1163,7 +1151,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           searchTerm,
           selectedCourier,
           selectedStatusTab,
-          selectedStatusDropdown,
           startDate,
           endDate,
           selectedDeliveryDate,
@@ -1174,7 +1161,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         searchTerm,
         selectedCourier,
         selectedStatusTab,
-        selectedStatusDropdown,
         startDate,
         endDate,
         selectedDeliveryDate,
@@ -1186,7 +1172,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     searchTerm,
     selectedCourier,
     selectedStatusTab,
-    selectedStatusDropdown,
     startDate,
     endDate,
     selectedDeliveryDate,
@@ -1211,17 +1196,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return filteredShipments.slice(startIdx, startIdx + pageSize);
   }, [filteredShipments, safeCurrentPage, pageSize]);
 
-  // Debug logging as requested in Step 2.3
-  console.log('[TRACKING PAGE DEBUG]', {
-    filter: selectedStatusTab,
-    currentPage,
-    safeCurrentPage,
+  // Debug logging as requested in Step 4
+  console.log('[TRACKING FILTER DEBUG]', {
+    activeFilter: selectedStatusTab,
+    rawShipmentCount: allShipments.length,
+    filteredShipmentCount: filteredShipments.length,
+    currentPage: safeCurrentPage,
     pageSize,
-    filteredCount: filteredShipments.length,
-    totalPages,
-    startIndex: (safeCurrentPage - 1) * pageSize,
-    endIndex: Math.min((safeCurrentPage - 1) * pageSize + pageSize, filteredShipments.length),
-    displayedCount: paginatedShipments.length
+    displayedCount: paginatedShipments.length,
+    firstDisplayedOrderId: paginatedShipments[0]?.orderId || paginatedShipments[0]?.influencerCode || 'none'
   });
 
   // Generate clean, strictly non-colliding pagination items
@@ -1305,7 +1288,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       setSearchTerm('');
       setSelectedCourier('All');
       setSelectedStatusTab('All');
-      setSelectedStatusDropdown('All');
       setSelectedDeliveryDate(null);
       setStartDate('');
       setEndDate('');
@@ -1715,8 +1697,8 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
             {/* 5. All Status */}
             <select
-              value={selectedStatusDropdown}
-              onChange={(e) => setSelectedStatusDropdown(e.target.value)}
+              value={selectedStatusTab}
+              onChange={(e) => setSelectedStatusTab(e.target.value as TrackingStatusCategory)}
               className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
             >
               <option value="All">All Status</option>

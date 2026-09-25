@@ -405,8 +405,9 @@ export function resolveDelhiveryCategory(
     return 'Failed Attempt';
   }
 
-  // 3. Delivered (CRITICAL: NEVER match if 'undelivered' is present!)
-  if (!isUndelivered && (combined.includes('delivered') || combined.includes('dlvd'))) {
+  // 3. Delivered (CRITICAL: NEVER match if 'undelivered' is present, unless displayStatus is explicitly Delivered!)
+  const isDisplayDelivered = Boolean(displayStatus && (displayStatus.toLowerCase().trim() === 'delivered' || displayStatus.toLowerCase().trim().startsWith('delivered')));
+  if ((!isUndelivered || isDisplayDelivered) && (combined.includes('delivered') || combined.includes('dlvd'))) {
     return 'Delivered';
   }
 
