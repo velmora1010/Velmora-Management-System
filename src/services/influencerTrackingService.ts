@@ -5,7 +5,7 @@ import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer } from '../types';
 import { parseToYMD, formatDisplayDateLocal, getTodayLocalYMD } from '../utils/influencerDateUtils';
-import { normalizeOrderId, formatDisplayOrderId } from '../utils/orderIdUtils';
+import { normalizeOrderId, formatDisplayOrderId, getOriginalOrderId } from '../utils/orderIdUtils';
 import { isActiveStatus } from '../utils/marketingUtils';
 import {
   naturalCompareInfluencerCodes,
@@ -1170,8 +1170,10 @@ export async function pruneUnmatchedCampaignTrackingShipments(
       if (error || !dbShipments || dbShipments.length === 0) break;
 
       dbShipments.forEach(s => {
-        const code1 = String(s.influencer_code || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
-        const code2 = String(s.order_id || '').replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
+        const infCodeRaw = String(s.influencer_code || '').trim();
+        const orderIdRaw = String(s.order_id || '').trim();
+        const code1 = getOriginalOrderId(infCodeRaw, validCodes);
+        const code2 = getOriginalOrderId(orderIdRaw, validCodes);
         const infId = s.influencer_id ? String(s.influencer_id) : '';
 
         const isMatch = (code1 && validCodes.has(code1)) ||
@@ -1287,8 +1289,8 @@ export async function upsertCampaignShipmentsToDb(
       const codeStr = String(s.influencerCode || '').trim();
       const infId = s.influencerId ? String(s.influencerId) : '';
 
-      const code1 = orderIdStr.replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
-      const code2 = codeStr.replace(/[\t\r\n]/g, ' ').trim().replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim().toUpperCase();
+      const code1 = getOriginalOrderId(orderIdStr, validCodesSet);
+      const code2 = getOriginalOrderId(codeStr, validCodesSet);
 
       if (/^\d+$/.test(code1) || /^\d+$/.test(code2)) {
         return false;

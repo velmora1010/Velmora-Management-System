@@ -580,7 +580,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             rowsWithRemarksCount++;
           }
 
-          const orderInfo = normalizeOrderId(rawOrderId || matchedInf.code);
+          const orderInfo = normalizeOrderId(rawOrderId || matchedInf.code, validCampaignCodesSet);
           const canonicalBase = orderInfo.baseCode || (matchedInf.code ? matchedInf.code.replace(/^#+/, '') : '');
           const resolvedOrderId = orderInfo.isResend 
             ? `R ${canonicalBase}` 

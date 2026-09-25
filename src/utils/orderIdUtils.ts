@@ -110,26 +110,10 @@ export function normalizeOrderId(
     }
   }
 
-  // Generic match: R (or multiple Rs / R2) followed by alphanumeric base code
-  // e.g. "RHIS1", "R#HIS1", "R2HIS1", "RRMHS114"
-  // Note: If followed solely by digits (e.g. "R12345"), it is a customer return reference, not an influencer.
-  const rMatch = compact.match(/^R+(\d*)([A-Za-z0-9]+)$/i);
-  if (rMatch && rMatch[2]) {
-    const rawRPrefix = compact.slice(0, compact.length - rMatch[2].length);
-    const rCount = (rawRPrefix.match(/R/gi) || []).length;
-    const attempt = rMatch[1] ? (parseInt(rMatch[1], 10) + 1) : Math.max(2, rCount + 1);
-    const base = rMatch[2].replace(/^#+/, '').toUpperCase();
-    return {
-      raw,
-      cleanDisplay: `R ${base}`,
-      normalized: compact,
-      baseCode: base,
-      isResend: true,
-      resendPrefix: rawRPrefix,
-      attemptNumber: isNaN(attempt) ? 2 : attempt,
-      isNumericCustomerOrder: /^\d+$/.test(base)
-    };
-  }
+  // Note: We do NOT blindly strip leading 'R' from compact codes without separators
+  // unless knownCodesSet explicitly matched above. Codes like "RJS136", "RJ01", "ROHINI"
+  // are genuine original influencer/state codes, NOT resends. Resends always feature
+  // an explicit separator (e.g. "R RJS136", "R-HIS1", "R#HIS1") or knownCodesSet confirmation.
 
   // Fallback for standard original code (e.g. "HIS1", "#HIS1", "MHS114")
   const baseCode = compact.replace(/^#+/, '');
@@ -211,19 +195,32 @@ export function parseDelhiveryReferenceNo(
       isReplacement = false;
       attemptNumber = 1;
       codePart = compact;
-    } else {
-      const rMatch = compact.match(/^R+(\d*)([A-Za-z0-9]+)$/i);
-      if (rMatch && rMatch[2]) {
+    } else if (validCampaignCodesSet) {
+      // Check stripping leading 'R' progressively only if confirmed by valid campaign codes (e.g. "RHIS1" -> "HIS1")
+      let rPrefix = '';
+      let temp = compact;
+      let found = false;
+      while (temp.length > 1 && temp.startsWith('R')) {
+        rPrefix += 'R';
+        temp = temp.slice(1);
+        if (validCampaignCodesSet.has(temp)) {
+          found = true;
+          break;
+        }
+      }
+      if (found) {
         isReplacement = true;
-        const rawRPrefix = compact.slice(0, compact.length - rMatch[2].length);
-        const rCount = (rawRPrefix.match(/R/gi) || []).length;
-        attemptNumber = rMatch[1] ? (parseInt(rMatch[1], 10) + 1) : Math.max(2, rCount + 1);
-        codePart = rMatch[2].replace(/^#+/, '').trim().toUpperCase();
+        attemptNumber = rPrefix.length + 1;
+        codePart = temp;
       } else {
         isReplacement = false;
         attemptNumber = 1;
         codePart = compact;
       }
+    } else {
+      isReplacement = false;
+      attemptNumber = 1;
+      codePart = compact;
     }
   }
 
