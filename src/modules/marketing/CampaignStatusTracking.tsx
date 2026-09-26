@@ -3580,17 +3580,17 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             const nextStepCompleted = idx < videoData.configs.length - 1 && !!videoData.steps[videoData.configs[idx + 1].id]?.completed;
             const isLineActive = isCompleted && nextStepCompleted;
 
-            let circleStyle = "bg-[#070c18] text-slate-400 border border-slate-700 hover:border-slate-500 hover:text-white";
-            let labelStyle = "text-slate-400";
+            let circleStyle = "bg-[#070c18] text-slate-400 border border-slate-700/80 group-hover:border-slate-500 group-hover:text-slate-200 group-hover:scale-105";
+            let labelStyle = "text-slate-400 group-hover:text-slate-200";
 
             if (isSelected) {
-              circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400";
+              circleStyle = "bg-blue-600 text-white shadow-[0_0_18px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400 scale-105";
               labelStyle = "text-blue-400 font-bold";
             } else if (isCompleted) {
-              circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400";
+              circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 group-hover:scale-105";
               labelStyle = "text-emerald-400 font-bold";
             } else if (isStepReDraftReq) {
-              circleStyle = "bg-amber-950/80 text-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.6)] border border-amber-500 ring-2 ring-amber-500/40 animate-pulse";
+              circleStyle = "bg-amber-950/80 text-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.6)] border border-amber-500 ring-2 ring-amber-500/40 animate-pulse group-hover:scale-105";
               labelStyle = "text-amber-400 font-bold";
             }
 
@@ -3624,14 +3624,14 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
                     </span>
                   )}
                   {isSelected && (
-                    <div className="absolute -bottom-2 w-1.5 h-1.5 rounded-full bg-blue-400"></div>
+                    <div className="absolute -bottom-2 w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_#60a5fa]"></div>
                   )}
                 </div>
 
                 {/* Connecting Line */}
                 {idx !== videoData.configs.length - 1 && (
                   <div className="flex-1 h-[2px] mx-2 -mt-6 transition-colors duration-300">
-                    <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500' : isCompleted ? 'bg-blue-500/60' : 'bg-slate-800'}`} />
+                    <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : isCompleted ? 'bg-blue-500/60' : 'bg-slate-800'}`} />
                   </div>
                 )}
               </React.Fragment>
@@ -3641,11 +3641,11 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
       </div>
 
       {/* 3. ACTIVE STEP INTERACTIVE WORKFLOW PANEL */}
-      <div className="flex-1 min-h-0 bg-[#0b1329] border border-slate-800 rounded-2xl p-5 overflow-y-auto shadow-md">
+      <div className="flex-1 min-h-0 bg-[#0b1329] border border-slate-800 border-t-2 border-t-blue-500/80 rounded-2xl p-5 overflow-y-auto shadow-md [scrollbar-color:#334155_transparent] [scrollbar-width:thin]">
         <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center">
-              <activeStepConfig.icon size={19} />
+            <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/40 text-blue-400 flex items-center justify-center shadow-sm">
+              <activeStepConfig.icon size={20} />
             </div>
             <div>
               <h4 className="text-base font-bold text-white leading-none">
@@ -3661,12 +3661,13 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             </div>
           </div>
 
-          <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+          <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
             activeStepState.completed 
               ? 'bg-emerald-950/80 text-emerald-400 border-emerald-700/60' 
               : 'bg-slate-900 text-slate-400 border-slate-800'
           }`}>
-            {activeStepState.completed ? '✓ Completed' : '○ In Progress / Not Started'}
+            <span className={`w-2 h-2 rounded-full ${activeStepState.completed ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+            {activeStepState.completed ? 'Completed' : 'In Progress / Not Started'}
           </span>
         </div>
 
