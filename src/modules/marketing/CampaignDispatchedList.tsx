@@ -860,7 +860,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     const map = new Map<string, typeof processedBatches>();
     prepareDispatchBatches.forEach(b => {
       if (b.isPendingAction) {
-        const key = getBatchLocalDateKey(b.batch);
+        const key = getBatchLocalDateKey(b.batch) || getTodayDateKey();
         if (key) {
           const list = map.get(key) || [];
           list.push(b);
@@ -894,7 +894,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const displayedPrepareDispatchBatches = useMemo(() => {
     const activeDateKey = selectedCalendarDate || getTodayDateKey();
     return prepareDispatchBatches.filter(b => {
-      const key = getBatchLocalDateKey(b.batch);
+      const key = getBatchLocalDateKey(b.batch) || getTodayDateKey();
       return key === activeDateKey;
     });
   }, [prepareDispatchBatches, selectedCalendarDate]);
@@ -903,6 +903,38 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const displayedPreparePendingInfluencersCount = useMemo(() => {
     return displayedPrepareDispatchBatches.reduce((acc, b) => acc + b.pendingCount, 0);
   }, [displayedPrepareDispatchBatches]);
+
+  // Handler for Prepare Dispatch navigation & batch creation
+  const handlePrepareDispatchClick = () => {
+    // 1. If influencers are selected in Logistics, move them to Prepare Dispatch (creates ONE batch & navigates)
+    if (selectedInfluencerObjects.length > 0) {
+      handleMoveToPrepareDispatch();
+      return;
+    }
+
+    // 2. If already on prepare_dispatch, toggle back to logistics
+    if (currentTab === 'prepare_dispatch') {
+      setCurrentTab('logistics');
+      return;
+    }
+
+    // 3. Otherwise navigate to prepare_dispatch
+    // Smartly pick target date: today if today has batches, or the latest date with pending batches, or today
+    let targetDate = getTodayDateKey();
+    if (!pendingBatchDateMap.has(targetDate) && pendingBatchDateMap.size > 0) {
+      const datesWithBatches = Array.from(pendingBatchDateMap.keys()).sort().reverse();
+      if (datesWithBatches.length > 0) {
+        targetDate = datesWithBatches[0];
+      }
+    }
+    setSelectedCalendarDate(targetDate);
+    setCurrentTab('prepare_dispatch');
+
+    // 4. If there are no pending prepare dispatch batches and no influencers selected, inform the user
+    if (prepareDispatchInfluencers.length === 0) {
+      toast('Select influencers from Logistics using Bulk Select to create a new dispatch batch.', { icon: 'ℹ️' });
+    }
+  };
 
   const MONTH_NAMES = useMemo(() => [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -1238,15 +1270,8 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           {/* 6. Prepare Dispatch */}
           <button
             type="button"
-            onClick={() => {
-              if (currentTab === 'prepare_dispatch') {
-                setCurrentTab('logistics');
-              } else {
-                setSelectedCalendarDate(getTodayDateKey());
-                setCurrentTab('prepare_dispatch');
-                setDispatchedSubView('batches');
-              }
-            }}
+            onClick={handlePrepareDispatchClick}
+            disabled={isMovingToPrepare}
             className={`h-9 px-2.5 sm:px-3.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               currentTab === 'prepare_dispatch'
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/40'
@@ -1254,9 +1279,17 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             }`}
             title="Prepare Dispatch"
           >
-            <Truck size={14} className={currentTab === 'prepare_dispatch' ? 'text-white' : 'text-purple-400'} />
-            <span>Prepare Dispatch</span>
-            {prepareDispatchInfluencers.length > 0 && (
+            {isMovingToPrepare ? (
+              <RefreshCcw size={14} className="animate-spin text-purple-400" />
+            ) : (
+              <Truck size={14} className={currentTab === 'prepare_dispatch' ? 'text-white' : 'text-purple-400'} />
+            )}
+            <span>{isMovingToPrepare ? 'Preparing...' : 'Prepare Dispatch'}</span>
+            {selectedInfluencerObjects.length > 0 && currentTab === 'logistics' ? (
+              <span className="bg-white text-purple-900 text-[11px] font-extrabold rounded-full px-1.5 py-0.2 ml-0.5 animate-pulse">
+                {selectedInfluencerObjects.length}
+              </span>
+            ) : prepareDispatchInfluencers.length > 0 ? (
               <span className={`text-[11px] font-extrabold rounded-full px-2 py-0.5 leading-none ${
                 currentTab === 'prepare_dispatch'
                   ? 'bg-purple-950 text-white border border-purple-400/30 shadow-inner'
@@ -1264,7 +1297,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               }`}>
                 {prepareDispatchInfluencers.length}
               </span>
-            )}
+            ) : null}
           </button>
 
           {/* 7. Dispatched (Second Dispatched - Main Navigation Button) */}
@@ -2076,15 +2109,32 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             </button>
             <h3 className="text-base font-semibold text-slate-200 mb-1">
               {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey()
-                ? 'No Prepare Dispatch Batches for Today'
+                ? (prepareDispatchBatches.length > 0 ? 'No Prepare Dispatch Batches for Today' : 'No Prepare Dispatch Batches')
                 : 'No Batches on Selected Date'}
             </h3>
             <p className="text-sm text-slate-400 max-w-md mx-auto">
               {(selectedCalendarDate || getTodayDateKey()) === getTodayDateKey()
-                ? 'New batches created today will appear here.'
+                ? (prepareDispatchBatches.length > 0 
+                    ? `You have ${prepareDispatchBatches.length} pending batch${prepareDispatchBatches.length === 1 ? '' : 'es'} created on other dates.`
+                    : 'Select influencers in Logistics to create a new dispatch batch.')
                 : `No Prepare Dispatch batches were created on ${selectedCalendarDisplayDate}.`}
             </p>
             <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
+              {prepareDispatchBatches.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const datesWithBatches = Array.from(pendingBatchDateMap.keys()).sort().reverse();
+                    if (datesWithBatches.length > 0) {
+                      setSelectedCalendarDate(datesWithBatches[0]);
+                    }
+                  }}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Package size={14} />
+                  <span>View Pending Batches ({prepareDispatchBatches.length})</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setIsCalendarOpen(true)}
