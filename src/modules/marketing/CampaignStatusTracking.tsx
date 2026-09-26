@@ -5,10 +5,10 @@ import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStat
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
 import { 
   Clock, Package, Phone, FileText, Video, Check, 
-  XCircle, PauseCircle, Users, Target, Search, Trash2, MoreHorizontal, 
+  XCircle, PauseCircle, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2,
-  Mic, Volume2, ExternalLink, SlidersHorizontal
+  Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, Activity, Truck, Share2, Globe, GitBranch
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -27,7 +27,9 @@ import {
   StatusTrackingFilterDrawer, 
   type StatusTrackingFilterState, 
   initialStatusTrackingFilterState,
-  STATUS_TRACKING_PRICE_RANGES
+  STATUS_TRACKING_PRICE_RANGES,
+  STATUS_TRACKING_WORKFLOW_STATUSES,
+  STATUS_TRACKING_DELIVERY_STATUSES
 } from '../../components/marketing/StatusTrackingFilterDrawer';
 import { areFilterValuesEqual, getUniqueFilterOptions } from '../../utils/filterUtils';
 import { 
@@ -45,7 +47,37 @@ interface CampaignStatusTrackingProps {
 // Configurable default videos count for this campaign
 export const DEFAULT_CAMPAIGN_VIDEOS_COUNT = 6;
 
-export type WorkflowStepKey = 'video1' | 'video2' | 'video3' | 'video4' | 'video5' | 'video6';
+export type WorkflowStepKey = 'delivery' | 'video1' | 'video2' | 'video3' | 'video4' | 'video5' | 'video6';
+
+export const normalizeWorkflowStepId = (val: string): string => {
+  if (!val) return '';
+  const s = val.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.includes('sharescript') || s === 'script') return 'share_script';
+  if (s.includes('callexplain') || s.includes('call') || s.includes('explain')) return 'call_explain';
+  if (s.includes('advance') || s.includes('payadvance')) return 'pay_advance';
+  if (s.includes('timeline')) return 'timeline';
+  if (s.includes('draft')) return 'draft';
+  if (s.includes('postdate') || s.includes('post')) return 'post_date';
+  if (s.includes('payment') || s.includes('finalpayment')) return 'payment';
+  if (s.includes('deliveryconfirmed')) return 'Delivery Confirmed';
+  if (s.includes('notdelivered')) return 'Not Delivered';
+  if (s.includes('delivered')) return 'Delivered';
+  return val;
+};
+
+export const normalizeWorkflowStepLabel = (val: string): string => {
+  const id = normalizeWorkflowStepId(val);
+  switch (id) {
+    case 'share_script': return 'Share Script';
+    case 'call_explain': return 'Call & Explain';
+    case 'pay_advance': return 'Advance Payment';
+    case 'timeline': return 'Timeline';
+    case 'draft': return 'Draft';
+    case 'post_date': return 'Post Date';
+    case 'payment': return 'Payment';
+    default: return val;
+  }
+};
 
 export interface VideoStepConfig {
   id: string;
@@ -946,6 +978,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
     steps[cfg.id] = { completed, data };
   });
 
+  const isDelivered = isDeliveryStepCompleted(record);
+  const assignedVideos = getInfluencerAssignedVideos(record);
+  const isAssigned = assignedVideos.includes(videoNum);
+
   const draftStep = steps['draft'];
   const draftApprovalStatus = draftStep?.data?.approval_status || '';
   const isReDraftRequired = draftApprovalStatus === 'Not Approved';
@@ -957,20 +993,26 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
   const totalSteps = configs.length;
 
   let status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' = 'NOT_STARTED';
-  if (completedCount === totalSteps) {
+  if (!isDelivered || !isAssigned) {
+    status = 'NOT_STARTED';
+  } else if (completedCount === totalSteps) {
     status = 'COMPLETED';
   } else if (completedCount > 0 || isReDraftRequired) {
     status = 'IN_PROGRESS';
   }
 
   // Active step calculation:
-  // If Re-Draft is required, active step MUST remain 'draft'
-  let activeStepId = configs[0].id;
-  if (isReDraftRequired) {
+  // If delivery is not completed or influencer not assigned to this video, no step in this video is active yet
+  let activeStepId = '';
+  if (!isDelivered || !isAssigned) {
+    activeStepId = '';
+  } else if (isReDraftRequired) {
     activeStepId = 'draft';
+  } else if (completedCount === totalSteps) {
+    activeStepId = '';
   } else {
     const firstIncomplete = configs.find(c => !steps[c.id]?.completed);
-    activeStepId = firstIncomplete ? firstIncomplete.id : configs[configs.length - 1].id;
+    activeStepId = firstIncomplete ? firstIncomplete.id : '';
   }
 
   return {
@@ -1009,33 +1051,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const [recordToDelete, setRecordToDelete] = useState<StatusTrackingRecord | null>(null);
   const [isDeletingSingle, setIsDeletingSingle] = useState(false);
 
-  // Advanced Filter Drawer State (persisted per campaign across navigation & refreshes)
+  // Advanced Filter Drawer State
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<StatusTrackingFilterState>(() => {
-    try {
-      const saved = sessionStorage.getItem(`st_filters_${campaign.id}`);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return initialStatusTrackingFilterState;
-  });
+  const [activeFilters, setActiveFilters] = useState<StatusTrackingFilterState>(initialStatusTrackingFilterState);
 
-  // Search input state (persisted per campaign across navigation & refreshes)
-  const [searchQuery, setSearchQuery] = useState<string>(() => {
-    return sessionStorage.getItem(`st_search_${campaign.id}`) || '';
-  });
-
-  // Persist filters and search query
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(`st_filters_${campaign.id}`, JSON.stringify(activeFilters));
-    } catch (e) {}
-  }, [activeFilters, campaign.id]);
-
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(`st_search_${campaign.id}`, searchQuery);
-    } catch (e) {}
-  }, [searchQuery, campaign.id]);
+  // Search input state
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Active filter count calculation (total individual criteria selected)
   const activeFilterCount = useMemo(() => {
@@ -1071,33 +1092,41 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   }, [selectedWorkflowStep]);
 
   // LEVEL 2 VIEW STATE: null = Main List View; object = Video Detail View
-  // Initialized from URL query params (stInfluencer, stVideo)
-  const [selectedVideo, setSelectedVideo] = useState<{ recordId: string; videoNumber: number } | null>(() => {
+  // Initialized from URL query params (stInfluencer, stVideo, stStep)
+  const [selectedVideo, setSelectedVideo] = useState<{ recordId: string; videoNumber: number; stepId?: string | null } | null>(() => {
     const stInf = searchParams.get('stInfluencer');
     const stVid = searchParams.get('stVideo');
+    const stStep = searchParams.get('stStep');
     if (stInf) {
-      return { recordId: stInf, videoNumber: parseInt(stVid || '1', 10) || 1 };
+      return { recordId: stInf, videoNumber: parseInt(stVid || '1', 10) || 1, stepId: stStep || null };
     }
     return null;
+  });
+
+  const [selectedVideoStep, setSelectedVideoStep] = useState<string | null>(() => {
+    return searchParams.get('stStep') || null;
   });
 
   // Synchronize selectedVideo with URL query parameters (e.g. browser back/forward or direct refresh)
   useEffect(() => {
     const stInf = searchParams.get('stInfluencer');
     const stVid = searchParams.get('stVideo');
+    const stStep = searchParams.get('stStep');
     if (stInf) {
       const vNum = parseInt(stVid || '1', 10) || 1;
       setSelectedVideo(prev => {
-        if (prev?.recordId === stInf && prev?.videoNumber === vNum) return prev;
-        return { recordId: stInf, videoNumber: vNum };
+        if (prev?.recordId === stInf && prev?.videoNumber === vNum && prev?.stepId === (stStep || null)) return prev;
+        return { recordId: stInf, videoNumber: vNum, stepId: stStep || null };
       });
+      setSelectedVideoStep(stStep || null);
     } else {
       setSelectedVideo(null);
+      setSelectedVideoStep(null);
     }
   }, [searchParams]);
 
   // Navigation handlers for detail view and list view
-  const handleOpenVideo = useCallback((record: StatusTrackingRecord, videoNumber: number) => {
+  const handleOpenVideo = useCallback((record: StatusTrackingRecord, videoNumber: number, stepId?: string) => {
     if (listScrollContainerRef.current) {
       const currentScroll = listScrollContainerRef.current.scrollTop;
       savedScrollTopRef.current = currentScroll;
@@ -1112,9 +1141,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       const next = new URLSearchParams(prev);
       next.set('stInfluencer', influencerIdentifier);
       next.set('stVideo', String(videoNumber));
+      if (stepId) {
+        next.set('stStep', stepId);
+      } else {
+        next.delete('stStep');
+      }
       return next;
     });
-    setSelectedVideo({ recordId: record.id, videoNumber });
+    setSelectedVideoStep(stepId || null);
+    setSelectedVideo({ recordId: record.id, videoNumber, stepId: stepId || null });
   }, [campaign.id, setSearchParams]);
 
   const handleBackFromDetail = useCallback(() => {
@@ -1122,18 +1157,26 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       const next = new URLSearchParams(prev);
       next.delete('stInfluencer');
       next.delete('stVideo');
+      next.delete('stStep');
       return next;
     });
     setSelectedVideo(null);
+    setSelectedVideoStep(null);
   }, [setSearchParams]);
 
-  const handleSwitchVideo = useCallback((recordId: string, videoNumber: number) => {
+  const handleSwitchVideo = useCallback((recordId: string, videoNumber: number, stepId?: string) => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.set('stVideo', String(videoNumber));
+      if (stepId) {
+        next.set('stStep', stepId);
+      } else {
+        next.delete('stStep');
+      }
       return next;
     });
-    setSelectedVideo(prev => prev ? { ...prev, videoNumber } : { recordId, videoNumber });
+    setSelectedVideoStep(stepId || null);
+    setSelectedVideo(prev => prev ? { ...prev, videoNumber, stepId: stepId || null } : { recordId, videoNumber, stepId: stepId || null });
   }, [setSearchParams]);
 
   const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -1166,12 +1209,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }
   }, [selectedVideo, isLoading, campaign.id]);
 
-  // Close menus on click outside
+  // Close menus and filter dropdowns on click outside
   useEffect(() => {
     const handleDocumentClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest('.three-dot-menu-container')) {
         setOpenMenuId(null);
+      }
+      if (!target.closest('.status-tracking-filter-dropdown-container')) {
+        setOpenFilterDropdown(null);
       }
     };
     document.addEventListener('click', handleDocumentClick);
@@ -1366,17 +1412,28 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matchesCategory) return false;
       }
 
-      // 5. Workflow status filter (OR within section)
+      // 5. Workflow Step filter (OR within section)
       if (activeFilters.workflowStatuses.length > 0) {
-        const overallStatus = getOverallStatus(record);
-        let statusLabel = overallStatus.label;
-        if (statusLabel === 'Delivery Confirmed') {
-          statusLabel = 'In Progress';
+        if ((selectedWorkflowStep as any) === 'delivery') {
+          const delStatus = getInfluencerDeliveryStatus(record);
+          const matches = activeFilters.workflowStatuses.some(st => 
+            areFilterValuesEqual(st, delStatus) || areFilterValuesEqual(normalizeWorkflowStepId(st), delStatus)
+          );
+          if (!matches) return false;
+        } else {
+          const vData = getVideoWorkflow(record, selectedVideoNumber);
+          const activeStepId = vData.activeStepId;
+          const matches = activeFilters.workflowStatuses.some(st => {
+            const norm = normalizeWorkflowStepId(st);
+            if (norm === activeStepId) return true;
+            if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
+            if (norm === 'pay_advance' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
+            const cfg = vData.configs.find(c => c.id === norm || areFilterValuesEqual(c.label, st) || areFilterValuesEqual(c.shortLabel, st));
+            if (cfg && cfg.id === activeStepId) return true;
+            return false;
+          });
+          if (!matches) return false;
         }
-        const matchesStatus = activeFilters.workflowStatuses.some(st => 
-          areFilterValuesEqual(st, statusLabel) || areFilterValuesEqual(st, overallStatus.key)
-        );
-        if (!matchesStatus) return false;
       }
 
       // 6. Platform filter (OR within section)
@@ -1414,7 +1471,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
       return true;
     });
-  }, [activeTrackingRecords, activeFilters, searchQuery]);
+  }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber]);
 
   // Overall KPI Counts based on unique filtered influencers
   const kpiCounts = useMemo(() => {
@@ -1503,6 +1560,155 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       ...prev,
       deliveryStatuses: prev.deliveryStatuses.filter(d => !areFilterValuesEqual(d, delStatus))
     }));
+  };
+
+  // Dynamic step options for Workflow Step dropdown
+  const workflowStepOptions = useMemo(() => {
+    if ((selectedWorkflowStep as any) === 'delivery') {
+      return [
+        { id: 'all', label: 'All Steps', count: activeTrackingRecords.length },
+        { id: 'not_delivered', label: 'Not Delivered', count: activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Not Delivered').length },
+        { id: 'delivered', label: 'Delivered', count: activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivered').length },
+        { id: 'delivery_confirmed', label: 'Delivery Confirmed', count: activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivery Confirmed').length },
+      ];
+    }
+    const configs = selectedVideoNumber === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
+    const base = configs.map(cfg => {
+      const label = cfg.id === 'pay_advance' ? 'Advance Payment' : (cfg.id === 'timeline' ? 'Timeline' : (cfg.id === 'call_explain' ? 'Call & Explain' : cfg.label));
+      const count = activeTrackingRecords.filter(r => {
+        const vData = getVideoWorkflow(r, selectedVideoNumber);
+        return vData.activeStepId === cfg.id;
+      }).length;
+      return {
+        id: cfg.id,
+        label,
+        count,
+        icon: cfg.icon
+      };
+    });
+
+    if (selectedVideoNumber === 1) {
+      const paymentCount = activeTrackingRecords.filter(r => {
+        const vData = getVideoWorkflow(r, 1);
+        return vData.activeStepId === 'payment' || vData.activeStepId === 'pay_advance';
+      }).length;
+      const advIdx = base.findIndex(b => b.id === 'pay_advance');
+      const paymentOpt = {
+        id: 'payment',
+        label: 'Payment',
+        count: paymentCount,
+        icon: IndianRupee
+      };
+      if (advIdx >= 0) {
+        base.splice(advIdx + 1, 0, paymentOpt);
+      } else {
+        base.push(paymentOpt);
+      }
+    }
+
+    return [
+      { id: 'all', label: 'All Steps', count: activeTrackingRecords.length },
+      ...base
+    ];
+  }, [selectedWorkflowStep, selectedVideoNumber, activeTrackingRecords]);
+
+  // Matching counts for toolbar badge indicators
+  const matchingWorkflowCount = useMemo(() => {
+    if (activeFilters.workflowStatuses.length === 0) return activeTrackingRecords.length;
+    return activeTrackingRecords.filter(record => {
+      if ((selectedWorkflowStep as any) === 'delivery') {
+        const delStatus = getInfluencerDeliveryStatus(record);
+        return activeFilters.workflowStatuses.some(st => 
+          areFilterValuesEqual(st, delStatus) || areFilterValuesEqual(normalizeWorkflowStepId(st), delStatus)
+        );
+      } else {
+        const vData = getVideoWorkflow(record, selectedVideoNumber);
+        const activeStepId = vData.activeStepId;
+        return activeFilters.workflowStatuses.some(st => {
+          const norm = normalizeWorkflowStepId(st);
+          if (norm === activeStepId) return true;
+          if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
+          if (norm === 'pay_advance' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
+          const cfg = vData.configs.find(c => c.id === norm || areFilterValuesEqual(c.label, st) || areFilterValuesEqual(c.shortLabel, st));
+          return !!(cfg && cfg.id === activeStepId);
+        });
+      }
+    }).length;
+  }, [activeTrackingRecords, activeFilters.workflowStatuses, selectedWorkflowStep, selectedVideoNumber]);
+
+  const matchingDeliveryCount = useMemo(() => {
+    if (activeFilters.deliveryStatuses.length === 0) return activeTrackingRecords.length;
+    return activeTrackingRecords.filter(record => {
+      const delStatus = getInfluencerDeliveryStatus(record);
+      return activeFilters.deliveryStatuses.some(st => areFilterValuesEqual(st, delStatus));
+    }).length;
+  }, [activeTrackingRecords, activeFilters.deliveryStatuses]);
+
+  // Dropdown filter state & toggle handlers
+  const [openFilterDropdown, setOpenFilterDropdown] = useState<'workflow' | 'delivery' | 'platform' | 'language' | 'price' | null>(null);
+
+  const toggleFilterWorkflowStatus = (stepId: string) => {
+    if (stepId === 'all') {
+      setActiveFilters(prev => ({ ...prev, workflowStatuses: [] }));
+      return;
+    }
+    setActiveFilters(prev => {
+      const exists = prev.workflowStatuses.some(s => s === stepId || normalizeWorkflowStepId(s) === normalizeWorkflowStepId(stepId));
+      return {
+        ...prev,
+        workflowStatuses: exists
+          ? prev.workflowStatuses.filter(s => s !== stepId && normalizeWorkflowStepId(s) !== normalizeWorkflowStepId(stepId))
+          : [...prev.workflowStatuses, stepId]
+      };
+    });
+  };
+
+  const toggleFilterDeliveryStatus = (status: string) => {
+    setActiveFilters(prev => {
+      const exists = prev.deliveryStatuses.some(s => areFilterValuesEqual(s, status));
+      return {
+        ...prev,
+        deliveryStatuses: exists
+          ? prev.deliveryStatuses.filter(s => !areFilterValuesEqual(s, status))
+          : [...prev.deliveryStatuses, status]
+      };
+    });
+  };
+
+  const toggleFilterPlatform = (plat: string) => {
+    setActiveFilters(prev => {
+      const exists = prev.platforms.some(p => areFilterValuesEqual(p, plat));
+      return {
+        ...prev,
+        platforms: exists
+          ? prev.platforms.filter(p => !areFilterValuesEqual(p, plat))
+          : [...prev.platforms, plat]
+      };
+    });
+  };
+
+  const toggleFilterLanguage = (lang: string) => {
+    setActiveFilters(prev => {
+      const exists = prev.languages.some(l => areFilterValuesEqual(l, lang));
+      return {
+        ...prev,
+        languages: exists
+          ? prev.languages.filter(l => !areFilterValuesEqual(l, lang))
+          : [...prev.languages, lang]
+      };
+    });
+  };
+
+  const toggleFilterPriceRange = (rangeId: string) => {
+    setActiveFilters(prev => {
+      const exists = prev.priceRanges.includes(rangeId);
+      return {
+        ...prev,
+        priceRanges: exists
+          ? prev.priceRanges.filter(id => id !== rangeId)
+          : [...prev.priceRanges, rangeId]
+      };
+    });
   };
 
   const handleClearAllFilters = () => {
@@ -2058,6 +2264,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           <VideoDetailView 
             record={selectedRecord}
             videoNumber={selectedVideo.videoNumber}
+            initialStepId={selectedVideoStep || selectedVideo.stepId}
             onBack={handleBackFromDetail}
             onSwitchVideo={(num) => handleSwitchVideo(selectedRecord.id, num)}
             onSaveStep={(stepId, data, completed) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed)}
@@ -2194,33 +2401,407 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             </div>
           </div>
 
-          {/* 2. FILTER BAR */}
-          <div className="flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
-            <div className="relative flex-1 w-full">
-              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input 
-                type="text" 
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search influencer name, phone, code or tracking ID..."
-                className="w-full bg-[#0b1329] border border-slate-800/80 rounded-xl pl-10 pr-4 py-2 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
-              />
+          {/* 2. COMPACT INLINE FILTER & SEARCH TOOLBAR */}
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 shrink-0 relative z-30">
+            {/* LEFT: 5 FILTER DROPDOWNS: 1. WORKFLOW STEP, 2. DELIVERY STATUS, 3. PLATFORM, 4. LANGUAGE, 5. PRICE */}
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {/* 1. WORKFLOW STEP */}
+              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'workflow' ? 'z-50' : 'z-20'}`}>
+                <button
+                  type="button"
+                  onClick={() => setOpenFilterDropdown(prev => prev === 'workflow' ? null : 'workflow')}
+                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
+                    activeFilters.workflowStatuses.length > 0
+                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
+                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <GitBranch size={13} className={activeFilters.workflowStatuses.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                  <span>
+                    {activeFilters.workflowStatuses.length === 1
+                      ? (workflowStepOptions.find(o => 
+                          areFilterValuesEqual(o.id, activeFilters.workflowStatuses[0]) || 
+                          areFilterValuesEqual(o.label, activeFilters.workflowStatuses[0]) || 
+                          areFilterValuesEqual(normalizeWorkflowStepId(o.id), normalizeWorkflowStepId(activeFilters.workflowStatuses[0]))
+                        )?.label || 'Workflow Step')
+                      : 'Workflow Step'}
+                  </span>
+                  {activeFilters.workflowStatuses.length > 0 ? (
+                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1.5 flex items-center justify-center">
+                      {matchingWorkflowCount}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-500 font-normal">All</span>
+                  )}
+                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'workflow' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openFilterDropdown === 'workflow' && (
+                  <div className="absolute top-full left-0 mt-1.5 w-60 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFilters(prev => ({ ...prev, workflowStatuses: [] }));
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        activeFilters.workflowStatuses.length === 0
+                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                      }`}
+                    >
+                      <span>All Steps</span>
+                      <span className="text-[10px] text-slate-400 font-normal">({activeTrackingRecords.length})</span>
+                    </button>
+                    <div className="h-px bg-slate-800 my-1" />
+                    {workflowStepOptions.filter(opt => opt.id !== 'all').map(step => {
+                      const isSelected = activeFilters.workflowStatuses.some(s => 
+                        areFilterValuesEqual(s, step.id) || areFilterValuesEqual(s, step.label) || areFilterValuesEqual(normalizeWorkflowStepId(s), step.id)
+                      );
+                      const stepCount = (selectedWorkflowStep as any) === 'delivery'
+                        ? activeTrackingRecords.filter(r => {
+                            const ds = getInfluencerDeliveryStatus(r);
+                            return areFilterValuesEqual(ds, step.id) || areFilterValuesEqual(normalizeWorkflowStepId(ds), step.id);
+                          }).length
+                        : activeTrackingRecords.filter(r => {
+                            const vd = getVideoWorkflow(r, selectedVideoNumber);
+                            const norm = normalizeWorkflowStepId(step.id);
+                            if (norm === 'payment') return vd.activeStepId === 'payment' || vd.activeStepId === 'pay_advance';
+                            if (norm === 'pay_advance') return vd.activeStepId === 'pay_advance' || vd.activeStepId === 'payment';
+                            return vd.activeStepId === norm;
+                          }).length;
+
+                      return (
+                        <button
+                          key={step.id}
+                          type="button"
+                          onClick={() => toggleFilterWorkflowStatus(step.id)}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
+                            }`}>
+                              {isSelected && <Check size={10} strokeWidth={3} />}
+                            </span>
+                            <span>{step.label}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-normal">({stepCount})</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 2. DELIVERY STATUS */}
+              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'delivery' ? 'z-50' : 'z-20'}`}>
+                <button
+                  type="button"
+                  onClick={() => setOpenFilterDropdown(prev => prev === 'delivery' ? null : 'delivery')}
+                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
+                    activeFilters.deliveryStatuses.length > 0
+                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
+                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <Truck size={13} className={activeFilters.deliveryStatuses.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                  <span>
+                    {activeFilters.deliveryStatuses.length === 1
+                      ? activeFilters.deliveryStatuses[0]
+                      : 'Delivery Status'}
+                  </span>
+                  {activeFilters.deliveryStatuses.length > 0 ? (
+                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1.5 flex items-center justify-center">
+                      {matchingDeliveryCount}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-500 font-normal">All</span>
+                  )}
+                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'delivery' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openFilterDropdown === 'delivery' && (
+                  <div className="absolute top-full left-0 mt-1.5 w-52 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFilters(prev => ({ ...prev, deliveryStatuses: [] }));
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        activeFilters.deliveryStatuses.length === 0
+                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                      }`}
+                    >
+                      <span>All Delivery Statuses</span>
+                      <span className="text-[10px] text-slate-400 font-normal">({activeTrackingRecords.length})</span>
+                    </button>
+                    <div className="h-px bg-slate-800 my-1" />
+                    {STATUS_TRACKING_DELIVERY_STATUSES.map(st => {
+                      const isSelected = activeFilters.deliveryStatuses.some(s => areFilterValuesEqual(s, st));
+                      const countForDelivery = activeTrackingRecords.filter(r => areFilterValuesEqual(getInfluencerDeliveryStatus(r), st)).length;
+                      return (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => toggleFilterDeliveryStatus(st)}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
+                            }`}>
+                              {isSelected && <Check size={10} strokeWidth={3} />}
+                            </span>
+                            <span>{st}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-normal">({countForDelivery})</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 3. PLATFORM */}
+              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'platform' ? 'z-50' : 'z-20'}`}>
+                <button
+                  type="button"
+                  onClick={() => setOpenFilterDropdown(prev => prev === 'platform' ? null : 'platform')}
+                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
+                    activeFilters.platforms.length > 0
+                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
+                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <Share2 size={13} className={activeFilters.platforms.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                  <span>Platform</span>
+                  {activeFilters.platforms.length > 0 ? (
+                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center">
+                      {activeFilters.platforms.length}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-500 font-normal">All</span>
+                  )}
+                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'platform' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openFilterDropdown === 'platform' && (
+                  <div className="absolute top-full left-0 mt-1.5 w-52 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFilters(prev => ({ ...prev, platforms: [] }));
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        activeFilters.platforms.length === 0
+                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                      }`}
+                    >
+                      <span>All Platforms</span>
+                    </button>
+                    <div className="h-px bg-slate-800 my-1" />
+                    {(availableFilterPlatforms.length > 0 ? availableFilterPlatforms : ['Instagram', 'YouTube']).map(plat => {
+                      const isSelected = activeFilters.platforms.some(p => areFilterValuesEqual(p, plat));
+                      return (
+                        <button
+                          key={plat}
+                          type="button"
+                          onClick={() => toggleFilterPlatform(plat)}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
+                            }`}>
+                              {isSelected && <Check size={10} strokeWidth={3} />}
+                            </span>
+                            <span>{plat}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 4. LANGUAGE */}
+              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'language' ? 'z-50' : 'z-20'}`}>
+                <button
+                  type="button"
+                  onClick={() => setOpenFilterDropdown(prev => prev === 'language' ? null : 'language')}
+                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
+                    activeFilters.languages.length > 0
+                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
+                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <Globe size={13} className={activeFilters.languages.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                  <span>Language</span>
+                  {activeFilters.languages.length > 0 ? (
+                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center">
+                      {activeFilters.languages.length}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-500 font-normal">All</span>
+                  )}
+                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'language' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openFilterDropdown === 'language' && (
+                  <div className="absolute top-full left-0 mt-1.5 w-52 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFilters(prev => ({ ...prev, languages: [] }));
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        activeFilters.languages.length === 0
+                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                      }`}
+                    >
+                      <span>All Languages</span>
+                    </button>
+                    <div className="h-px bg-slate-800 my-1" />
+                    {(availableFilterLanguages.length > 0 ? availableFilterLanguages : ['Malayalam', 'Tamil', 'Kannada', 'Telugu', 'Hindi', 'English']).map(lang => {
+                      const isSelected = activeFilters.languages.some(l => areFilterValuesEqual(l, lang));
+                      return (
+                        <button
+                          key={lang}
+                          type="button"
+                          onClick={() => toggleFilterLanguage(lang)}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
+                            }`}>
+                              {isSelected && <Check size={10} strokeWidth={3} />}
+                            </span>
+                            <span>{lang}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 5. PRICE */}
+              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'price' ? 'z-50' : 'z-20'}`}>
+                <button
+                  type="button"
+                  onClick={() => setOpenFilterDropdown(prev => prev === 'price' ? null : 'price')}
+                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
+                    activeFilters.priceRanges.length > 0
+                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
+                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <IndianRupee size={13} className={activeFilters.priceRanges.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                  <span>Price</span>
+                  {activeFilters.priceRanges.length > 0 ? (
+                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center">
+                      {activeFilters.priceRanges.length}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-500 font-normal">All</span>
+                  )}
+                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'price' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openFilterDropdown === 'price' && (
+                  <div className="absolute top-full left-0 sm:left-auto sm:right-0 mt-1.5 w-56 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveFilters(prev => ({ ...prev, priceRanges: [] }));
+                      }}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                        activeFilters.priceRanges.length === 0
+                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                      }`}
+                    >
+                      <span>All Price Ranges</span>
+                    </button>
+                    <div className="h-px bg-slate-800 my-1" />
+                    {STATUS_TRACKING_PRICE_RANGES.map(range => {
+                      const isSelected = activeFilters.priceRanges.includes(range.id);
+                      return (
+                        <button
+                          key={range.id}
+                          type="button"
+                          onClick={() => toggleFilterPriceRange(range.id)}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
+                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
+                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
+                            }`}>
+                              {isSelected && <Check size={10} strokeWidth={3} />}
+                            </span>
+                            <span>{range.label}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+
+            {/* RIGHT: SEARCH BAR + ICON-ONLY FILTERS BUTTON + RESET FILTERS */}
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
+              <span className="text-xs text-slate-400 font-medium px-1 whitespace-nowrap hidden sm:inline-block">
+                {filteredRecords.length} {filteredRecords.length === 1 ? 'Influencer' : 'Influencers'}
+              </span>
+              <div className="relative w-full sm:w-[300px] md:w-[320px] lg:w-[340px] shrink-0">
+                <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Search influencer, phone, code..."
+                  className="w-full h-[38px] sm:h-[40px] bg-[#0b1329] border border-slate-800/80 rounded-xl pl-9 pr-4 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+                />
+              </div>
+              {/* Filter drawer button: Icon alone */}
               <button
                 type="button"
                 onClick={() => setIsFilterDrawerOpen(true)}
-                className={`px-3.5 py-2 bg-[#0b1329] border ${
+                className={`w-[38px] h-[38px] sm:w-[40px] sm:h-[40px] bg-[#0b1329] border ${
                   activeFilterCount > 0 
                     ? 'border-purple-500 text-purple-300 font-semibold bg-purple-600/10' 
                     : 'border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
-                } rounded-xl text-xs sm:text-sm flex items-center gap-2 transition-colors relative cursor-pointer shadow-sm`}
-                title="Filter Status Tracking"
+                } rounded-xl flex items-center justify-center transition-colors relative cursor-pointer shadow-sm shrink-0`}
+                title="Filter Options"
               >
                 <SlidersHorizontal size={16} className={activeFilterCount > 0 ? 'text-purple-400' : 'text-slate-400'} />
-                <span>Filters</span>
                 {activeFilterCount > 0 && (
-                  <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center select-none shadow-sm">
+                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center select-none shadow-md border border-[#070c18]">
                     {activeFilterCount}
                   </span>
                 )}
@@ -2229,173 +2810,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 <button 
                   type="button"
                   onClick={handleClearAllFilters}
-                  className="text-slate-400 hover:text-slate-200 text-xs px-2.5 py-2 rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer"
+                  className="h-[38px] sm:h-[40px] text-slate-400 hover:text-slate-200 text-xs px-2.5 rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer whitespace-nowrap flex items-center"
                   title="Reset all active search and filter criteria"
                 >
                   Reset Filters
                 </button>
               )}
-              {/* Clear All Button (permanently disabled as requested) */}
-              <button 
-                type="button"
-                disabled
-                aria-disabled="true"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                className="border border-slate-700/80 bg-slate-900 text-slate-400 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap opacity-40 cursor-not-allowed select-none"
-                title="Clear All is disabled"
-              >
-                <Trash2 size={15} className="text-rose-400/60" />
-                <span>Clear All</span>
-              </button>
-            </div>
-          </div>
-
-          {/* 2.1 ACTIVE FILTER CHIPS BAR */}
-          {(activeFilterCount > 0 || searchQuery.trim()) && (
-            <div className="px-3.5 py-2 bg-[#0b1329]/90 border border-slate-800/80 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-slate-400 font-medium mr-1 text-[11px]">Active Filters:</span>
-                {searchQuery.trim() && (
-                  <span className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
-                    Search: "{searchQuery.trim()}"
-                    <button onClick={() => setSearchQuery('')} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
-                  </span>
-                )}
-                {activeFilters.videos.map(vNum => (
-                  <span key={`chip-v-${vNum}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
-                    Video {vNum}
-                    <button onClick={() => removeFilterVideo(vNum)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
-                  </span>
-                ))}
-                {activeFilters.languages.map(lang => (
-                  <span key={`chip-lang-${lang}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
-                    {lang}
-                    <button onClick={() => removeFilterLanguage(lang)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
-                  </span>
-                ))}
-                {activeFilters.priceRanges.map(rangeId => {
-                  const rObj = STATUS_TRACKING_PRICE_RANGES.find(r => r.id === rangeId);
-                  return (
-                    <span key={`chip-price-${rangeId}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
-                      {rObj?.label || rangeId}
-                      <button onClick={() => removeFilterPriceRange(rangeId)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
-                    </span>
-                  );
-                })}
-                {activeFilters.categories.map(cat => (
-                  <span key={`chip-cat-${cat}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
-                    Category: {cat}
-                    <button onClick={() => removeFilterCategory(cat)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
-                  </span>
-                ))}
-                {activeFilters.workflowStatuses.map(status => (
-                  <span key={`chip-status-${status}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
-                    Status: {status}
-                    <button onClick={() => removeFilterWorkflowStatus(status)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
-                  </span>
-                ))}
-                {activeFilters.platforms.map(plat => (
-                  <span key={`chip-plat-${plat}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
-                    Platform: {plat}
-                    <button onClick={() => removeFilterPlatform(plat)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
-                  </span>
-                ))}
-                {activeFilters.deliveryStatuses.map(delStatus => (
-                  <span key={`chip-del-${delStatus}`} className="bg-purple-950/60 text-purple-300 border border-purple-800/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium text-[11px]">
-                    Delivery: {delStatus}
-                    <button onClick={() => removeFilterDeliveryStatus(delStatus)} className="hover:text-white text-purple-400 cursor-pointer">&times;</button>
-                  </span>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={handleClearAllFilters}
-                className="text-purple-400 hover:text-purple-300 font-semibold text-xs ml-auto transition-colors cursor-pointer"
-              >
-                Clear All
-              </button>
-            </div>
-          )}
-
-          {/* 3. SUMMARY CARDS (6 Cards) */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2.5 shrink-0">
-            {/* Total Influencers */}
-            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-2 sm:p-2.5 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center justify-center shrink-0">
-                <Users size={16} />
-              </div>
-              <div>
-                <span className="text-[10px] font-medium text-slate-400 block">Total Influencers</span>
-                <span className="text-sm sm:text-base font-black text-white">{kpiCounts.total}</span>
-              </div>
-            </div>
-
-            {/* Completed */}
-            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-2 sm:p-2.5 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                <Check size={16} strokeWidth={3} />
-              </div>
-              <div>
-                <span className="text-[10px] font-medium text-slate-400 block">Completed</span>
-                <span className="text-sm sm:text-base font-black text-white">
-                  {kpiCounts.completed} <span className="text-[11px] font-semibold text-emerald-400/80">({kpiCounts.completedPct}%)</span>
-                </span>
-              </div>
-            </div>
-
-            {/* In Progress */}
-            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-2 sm:p-2.5 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center shrink-0">
-                <Target size={16} />
-              </div>
-              <div>
-                <span className="text-[10px] font-medium text-slate-400 block">In Progress</span>
-                <span className="text-sm sm:text-base font-black text-white">
-                  {kpiCounts.inProgress} <span className="text-[11px] font-semibold text-blue-400/80">({kpiCounts.inProgressPct}%)</span>
-                </span>
-              </div>
-            </div>
-
-            {/* Pending */}
-            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-2 sm:p-2.5 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
-                <Clock size={16} />
-              </div>
-              <div>
-                <span className="text-[10px] font-medium text-slate-400 block">Pending</span>
-                <span className="text-sm sm:text-base font-black text-white">
-                  {kpiCounts.pending} <span className="text-[11px] font-semibold text-amber-400/80">({kpiCounts.pendingPct}%)</span>
-                </span>
-              </div>
-            </div>
-
-            {/* On Hold */}
-            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-2 sm:p-2.5 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-slate-700/30 text-slate-400 border border-slate-600/30 flex items-center justify-center shrink-0">
-                <PauseCircle size={16} />
-              </div>
-              <div>
-                <span className="text-[10px] font-medium text-slate-400 block">On Hold</span>
-                <span className="text-sm sm:text-base font-black text-white">
-                  {kpiCounts.onHold} <span className="text-[11px] font-semibold text-slate-400">({kpiCounts.onHoldPct}%)</span>
-                </span>
-              </div>
-            </div>
-
-            {/* Not Started */}
-            <div className="bg-[#0b1329] border border-slate-800/80 rounded-xl p-2 sm:p-2.5 flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-rose-600/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
-                <XCircle size={16} />
-              </div>
-              <div>
-                <span className="text-[10px] font-medium text-slate-400 block">Not Started</span>
-                <span className="text-sm sm:text-base font-black text-white">
-                  {kpiCounts.notStarted} <span className="text-[11px] font-semibold text-rose-400/80">({kpiCounts.notStartedPct}%)</span>
-                </span>
-              </div>
             </div>
           </div>
 
@@ -2577,7 +2997,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                     setActiveModal({ recordId: record.id, stageId: 'delivered' });
                                     return;
                                   }
-                                  handleOpenVideo(record, selectedVideoNumber);
+                                  handleOpenVideo(record, selectedVideoNumber, cfg.id);
                                 }}
                                 title={
                                   !isDelivered
@@ -2938,7 +3358,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           languages: availableFilterLanguages,
           categories: availableFilterCategories,
           platforms: availableFilterPlatforms,
-          deliveryStatuses: availableFilterDeliveryStatuses
+          deliveryStatuses: availableFilterDeliveryStatuses,
+          workflowSteps: workflowStepOptions,
+          deliveryStatusCounts: {
+            'Not Delivered': activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Not Delivered').length,
+            'Delivered': activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivered').length,
+            'Delivery Confirmed': activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivery Confirmed').length,
+          },
+          totalCount: activeTrackingRecords.length
         }}
       />
 
@@ -2952,6 +3379,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 interface VideoDetailViewProps {
   record: StatusTrackingRecord;
   videoNumber: number;
+  initialStepId?: string | null;
   onBack: () => void;
   onSwitchVideo: (num: number) => void;
   onSaveStep: (stepId: string, data: any, completed: boolean) => Promise<{ success: boolean; error?: any } | void>;
@@ -2960,6 +3388,7 @@ interface VideoDetailViewProps {
 const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   record,
   videoNumber,
+  initialStepId,
   onBack,
   onSwitchVideo,
   onSaveStep
@@ -2974,19 +3403,33 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
   // Derive workflow data for this specific video
   const videoData = useMemo(() => getVideoWorkflow(record, videoNumber), [record, videoNumber]);
-  const [activeStepId, setActiveStepId] = useState<string>(videoData.activeStepId);
+
+  // Determine initial selected step based on stepHint or fallback to active/current step
+  const resolveInitialStep = useCallback((stepHint?: string | null): string => {
+    if (stepHint && videoData.configs.some(c => c.id === stepHint)) {
+      return stepHint;
+    }
+    if (videoData.activeStepId && videoData.configs.some(c => c.id === videoData.activeStepId)) {
+      return videoData.activeStepId;
+    }
+    const firstIncomplete = videoData.configs.find(c => !videoData.steps[c.id]?.completed);
+    if (firstIncomplete) return firstIncomplete.id;
+    return videoData.configs[videoData.configs.length - 1]?.id || videoData.configs[0]?.id || 'share_script';
+  }, [videoData]);
+
+  const [selectedVideoStep, setSelectedVideoStep] = useState<string>(() => resolveInitialStep(initialStepId));
 
   // Derive resolved product & per-video price for this specific video from Campaign Influencer data
   const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
   const currentVideoPrice = useMemo(() => getInfluencerVideoPrice(record.influencer, videoNumber), [record.influencer, videoNumber]);
 
-  // Sync active step when video changes
+  // Sync selected step if videoNumber or initialStepId changes
   useEffect(() => {
-    setActiveStepId(videoData.activeStepId);
-  }, [videoNumber, videoData.activeStepId]);
+    setSelectedVideoStep(resolveInitialStep(initialStepId));
+  }, [videoNumber, initialStepId, resolveInitialStep]);
 
-  const activeStepConfig = videoData.configs.find(c => c.id === activeStepId) || videoData.configs[0];
-  const activeStepState = videoData.steps[activeStepId] || { completed: false, data: {} };
+  const activeStepConfig = videoData.configs.find(c => c.id === selectedVideoStep) || videoData.configs[0];
+  const activeStepState = videoData.steps[selectedVideoStep] || { completed: false, data: {} };
 
   // Status badge style for Video Title
   let videoStatusBadge = (
@@ -3125,17 +3568,13 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
         </div>
 
         {/* Horizontal Step Stepper */}
-        <div className="flex items-center justify-between w-full max-w-4xl mx-auto py-2">
+        <div className="flex items-center justify-between w-full max-w-4xl mx-auto py-2 overflow-x-auto no-scrollbar">
           {videoData.configs.map((cfg, idx) => {
             const stepInfo = videoData.steps[cfg.id];
             const isCompleted = !!stepInfo?.completed;
-            const isSelected = cfg.id === activeStepId;
+            const isSelected = cfg.id === selectedVideoStep;
             const StepIcon = cfg.icon;
 
-            // Step locking rules: Post Date locked until Draft is Approved; Payment locked until Post Date completed
-            const isDraftApproved = !!videoData.steps['draft']?.completed;
-            const isPostDateCompleted = !!videoData.steps['post_date']?.completed;
-            const isLocked = (cfg.id === 'post_date' && !isDraftApproved) || (cfg.id === 'payment' && !isPostDateCompleted);
             const isStepReDraftReq = cfg.id === 'draft' && videoData.isReDraftRequired;
 
             const nextStepCompleted = idx < videoData.configs.length - 1 && !!videoData.steps[videoData.configs[idx + 1].id]?.completed;
@@ -3144,34 +3583,19 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             let circleStyle = "bg-[#070c18] text-slate-400 border border-slate-700 hover:border-slate-500 hover:text-white";
             let labelStyle = "text-slate-400";
 
-            if (isCompleted) {
+            if (isSelected) {
+              circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400";
+              labelStyle = "text-blue-400 font-bold";
+            } else if (isCompleted) {
               circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400";
               labelStyle = "text-emerald-400 font-bold";
             } else if (isStepReDraftReq) {
               circleStyle = "bg-amber-950/80 text-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.6)] border border-amber-500 ring-2 ring-amber-500/40 animate-pulse";
               labelStyle = "text-amber-400 font-bold";
-            } else if (isSelected) {
-              circleStyle = "bg-blue-600 text-white shadow-[0_0_16px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400";
-              labelStyle = "text-blue-400 font-bold";
-            } else if (isLocked) {
-              circleStyle = "bg-[#050811] text-slate-600 border border-slate-800/80 opacity-60";
-              labelStyle = "text-slate-600";
             }
 
             const handleNodeClick = () => {
-              if (cfg.id === 'post_date' && !isDraftApproved) {
-                if (videoData.isReDraftRequired) {
-                  toast.error('Post Date is locked. Re-Draft is required and must be Approved first.');
-                } else {
-                  toast.error('Post Date is locked until Draft is Approved.');
-                }
-                return;
-              }
-              if (cfg.id === 'payment' && !isPostDateCompleted) {
-                toast.error('Payment is locked until Post Date is completed.');
-                return;
-              }
-              setActiveStepId(cfg.id);
+              setSelectedVideoStep(cfg.id);
             };
 
             return (
@@ -3179,14 +3603,12 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
                 {/* Step Node */}
                 <div 
                   onClick={handleNodeClick}
-                  className={`flex flex-col items-center group select-none relative ${isLocked ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}`}
-                  title={isLocked ? `${cfg.label} is locked` : `Click to open: ${cfg.label}`}
+                  className="flex flex-col items-center group select-none relative cursor-pointer"
+                  title={`Click to open: ${cfg.label}${isCompleted ? ' (Completed)' : ''}`}
                 >
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
-                    {isCompleted ? (
+                    {isCompleted && !isSelected ? (
                       <Check size={18} strokeWidth={3} className="text-white" />
-                    ) : isLocked ? (
-                      <Lock size={15} className="text-slate-500" />
                     ) : (
                       <StepIcon size={17} />
                     )}
@@ -3227,8 +3649,8 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             </div>
             <div>
               <h4 className="text-base font-bold text-white leading-none">
-                Step {videoData.configs.findIndex(c => c.id === activeStepId) + 1}: {
-                  activeStepId === 'timeline' && (activeStepState.data?.is_re_upload_timeline === true || !!activeStepState.data?.re_draft_submit_date)
+                Step {videoData.configs.findIndex(c => c.id === selectedVideoStep) + 1}: {
+                  selectedVideoStep === 'timeline' && (activeStepState.data?.is_re_upload_timeline === true || !!activeStepState.data?.re_draft_submit_date)
                     ? 'Re-Upload Timeline'
                     : activeStepConfig.label
                 }
@@ -3250,7 +3672,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
         {/* Step Component Form */}
         <div>
-          {activeStepId === 'call_explain' && (
+          {selectedVideoStep === 'call_explain' && (
             <CallExplainForm 
               record={record} 
               existingData={activeStepState.data}
@@ -3258,7 +3680,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {activeStepId === 'share_script' && (
+          {selectedVideoStep === 'share_script' && (
             <ShareScriptForm 
               key={`v-${videoNumber}-share-script-${record.id}`}
               record={record} 
@@ -3268,7 +3690,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {activeStepId === 'pay_advance' && (
+          {selectedVideoStep === 'pay_advance' && (
             <PayAdvanceForm 
               key={`v1-pay-advance-${record.id}`}
               videoNumber={1}
@@ -3278,7 +3700,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {activeStepId === 'timeline' && (
+          {selectedVideoStep === 'timeline' && (
             <ExpectedTimelineForm 
               record={record} 
               videoNumber={videoNumber}
@@ -3288,17 +3710,17 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {activeStepId === 'draft' && (
+          {selectedVideoStep === 'draft' && (
             <DraftForm 
               record={record} 
               videoNumber={videoNumber}
               existingData={activeStepState.data}
               onSave={async (formData: any, completed: boolean) => { await onSaveStep('draft', formData, completed); }} 
-              onNavigateToPostDate={() => setActiveStepId('post_date')}
+              onNavigateToPostDate={() => setSelectedVideoStep('post_date')}
             />
           )}
 
-          {activeStepId === 'post_date' && (
+          {selectedVideoStep === 'post_date' && (
             <VideoPostForm 
               key={`v-${videoNumber}-post-form-${record.id}`}
               videoNumber={videoNumber}
@@ -3308,7 +3730,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {activeStepId === 'payment' && (
+          {selectedVideoStep === 'payment' && (
             <VideoPaymentForm 
               key={`v-${videoNumber}-payment-${record.id}`}
               videoNumber={videoNumber}

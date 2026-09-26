@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   SlidersHorizontal, X, RotateCcw, Check, Video, Globe, 
-  IndianRupee, Tag, Activity, Share2, Truck 
+  IndianRupee, Tag, Activity, Share2, Truck, GitBranch 
 } from 'lucide-react';
-import { areFilterValuesEqual } from '../../utils/filterUtils';
+import { areFilterValuesEqual, normalizeWorkflowStepId } from '../../utils/filterUtils';
 
 export interface StatusTrackingFilterState {
   videos: number[];
@@ -47,6 +47,16 @@ export const STATUS_TRACKING_WORKFLOW_STATUSES = [
   'Completed'
 ];
 
+export const STATUS_TRACKING_WORKFLOW_STEPS: { id: string; label: string; count?: number }[] = [
+  { id: 'share_script', label: 'Share Script' },
+  { id: 'call_explain', label: 'Call & Explain' },
+  { id: 'timeline', label: 'Timeline' },
+  { id: 'draft', label: 'Draft' },
+  { id: 'pay_advance', label: 'Advance Payment' },
+  { id: 'payment', label: 'Payment' },
+  { id: 'post_date', label: 'Post Date' }
+];
+
 export const STATUS_TRACKING_DELIVERY_STATUSES = [
   'Not Delivered',
   'Delivered',
@@ -59,6 +69,9 @@ export interface StatusTrackingFilterAvailableOptions {
   categories: string[];
   platforms: string[];
   deliveryStatuses?: string[];
+  workflowSteps?: { id: string; label: string; count?: number }[];
+  deliveryStatusCounts?: Record<string, number>;
+  totalCount?: number;
 }
 
 interface StatusTrackingFilterDrawerProps {
@@ -164,11 +177,17 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
   // Toggle Workflow Status
   const toggleWorkflowStatus = (status: string) => {
     setDraft(prev => {
-      const exists = prev.workflowStatuses.some(s => areFilterValuesEqual(s, status));
+      const exists = prev.workflowStatuses.some(s => 
+        areFilterValuesEqual(s, status) || 
+        areFilterValuesEqual(normalizeWorkflowStepId(s), normalizeWorkflowStepId(status))
+      );
       return {
         ...prev,
         workflowStatuses: exists
-          ? prev.workflowStatuses.filter(s => !areFilterValuesEqual(s, status))
+          ? prev.workflowStatuses.filter(s => 
+              !areFilterValuesEqual(s, status) && 
+              !areFilterValuesEqual(normalizeWorkflowStepId(s), normalizeWorkflowStepId(status))
+            )
           : [...prev.workflowStatuses, status]
       };
     });
@@ -249,40 +268,64 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6 scrollbar-thin scrollbar-thumb-slate-700">
 
-          {/* 1. WORKFLOW STATUS */}
+          {/* 1. WORKFLOW STEP */}
           <div className="space-y-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
-              <Activity size={14} />
-              <span>WORKFLOW STATUS</span>
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <GitBranch size={14} />
+                <span>WORKFLOW STEP</span>
+              </div>
+              {draft.workflowStatuses.length > 0 && (
+                <span className="text-[10px] text-purple-300 font-semibold bg-purple-900/40 px-2 py-0.5 rounded-full border border-purple-800/40">
+                  {draft.workflowStatuses.length} selected
+                </span>
+              )}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => setDraft(prev => ({ ...prev, workflowStatuses: [] }))}
-                className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-between gap-1.5 cursor-pointer ${
                   draft.workflowStatuses.length === 0
                     ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
                 }`}
               >
-                {draft.workflowStatuses.length === 0 && <Check size={12} />}
-                All Workflow Status
+                <div className="flex items-center gap-1.5">
+                  {draft.workflowStatuses.length === 0 && <Check size={12} />}
+                  <span>All Steps</span>
+                </div>
+                {availableOptions.totalCount !== undefined && (
+                  <span className="text-[10px] text-slate-400">({availableOptions.totalCount})</span>
+                )}
               </button>
-              {STATUS_TRACKING_WORKFLOW_STATUSES.map(status => {
-                const active = draft.workflowStatuses.some(s => areFilterValuesEqual(s, status));
+              {(availableOptions.workflowSteps && availableOptions.workflowSteps.length > 0 
+                ? availableOptions.workflowSteps.filter(s => s.id !== 'all') 
+                : STATUS_TRACKING_WORKFLOW_STEPS
+              ).map(step => {
+                const active = draft.workflowStatuses.some(s => 
+                  areFilterValuesEqual(s, step.id) || 
+                  areFilterValuesEqual(s, step.label) ||
+                  areFilterValuesEqual(normalizeWorkflowStepId(s), normalizeWorkflowStepId(step.id))
+                );
                 return (
                   <button
                     type="button"
-                    key={status}
-                    onClick={() => toggleWorkflowStatus(status)}
-                    className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
+                    key={step.id}
+                    onClick={() => toggleWorkflowStatus(step.id)}
+                    className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-between gap-1.5 cursor-pointer ${
                       active
                         ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
                     }`}
                   >
-                    {active && <Check size={12} />}
-                    {status}
+                    <div className="flex items-center gap-1.5 truncate">
+                      {active && <Check size={12} className="shrink-0" />}
+                      <span className="truncate">{step.label}</span>
+                    </div>
+                    {step.count !== undefined && (
+                      <span className="text-[10px] text-slate-400 shrink-0 ml-1">({step.count})</span>
+                    )}
                   </button>
                 );
               })}
@@ -293,38 +336,56 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
 
           {/* 2. DELIVERY STATUS */}
           <div className="space-y-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center gap-2">
-              <Truck size={14} />
-              <span>DELIVERY STATUS</span>
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Truck size={14} />
+                <span>DELIVERY STATUS</span>
+              </div>
+              {draft.deliveryStatuses.length > 0 && (
+                <span className="text-[10px] text-purple-300 font-semibold bg-purple-900/40 px-2 py-0.5 rounded-full border border-purple-800/40">
+                  {draft.deliveryStatuses.length} selected
+                </span>
+              )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setDraft(prev => ({ ...prev, deliveryStatuses: [] }))}
-                className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-between gap-1.5 cursor-pointer ${
                   draft.deliveryStatuses.length === 0
                     ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
                 }`}
               >
-                {draft.deliveryStatuses.length === 0 && <Check size={12} />}
-                All Delivery Status
+                <div className="flex items-center gap-1.5">
+                  {draft.deliveryStatuses.length === 0 && <Check size={12} />}
+                  <span>All Delivery Status</span>
+                </div>
+                {availableOptions.totalCount !== undefined && (
+                  <span className="text-[10px] text-slate-400">({availableOptions.totalCount})</span>
+                )}
               </button>
               {deliveryOptions.map(delStatus => {
                 const active = draft.deliveryStatuses.some(d => areFilterValuesEqual(d, delStatus));
+                const count = availableOptions.deliveryStatusCounts?.[delStatus];
                 return (
                   <button
                     type="button"
                     key={delStatus}
                     onClick={() => toggleDeliveryStatus(delStatus)}
-                    className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-center gap-1.5 cursor-pointer ${
+                    className={`p-2.5 text-xs rounded-lg border text-center transition-colors font-medium flex items-center justify-between gap-1.5 cursor-pointer ${
                       active
                         ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
                     }`}
                   >
-                    {active && <Check size={12} />}
-                    {delStatus}
+                    <div className="flex items-center gap-1.5">
+                      {active && <Check size={12} />}
+                      <span>{delStatus}</span>
+                    </div>
+                    {count !== undefined && (
+                      <span className="text-[10px] text-slate-400">({count})</span>
+                    )}
                   </button>
                 );
               })}

@@ -109,3 +109,22 @@ export const getUniqueFilterOptions = (values: (string | null | undefined)[]): s
     .map(entry => entry.display)
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 };
+
+/**
+ * Normalizes workflow step IDs and labels for reliable matching.
+ */
+export const normalizeWorkflowStepId = (val: string): string => {
+  if (!val) return '';
+  const s = val.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.includes('sharescript') || s === 'script') return 'share_script';
+  if (s.includes('callexplain') || s.includes('call') || s.includes('explain')) return 'call_explain';
+  if (s.includes('advance') || s.includes('payadvance')) return 'pay_advance';
+  if (s.includes('timeline')) return 'timeline';
+  if (s.includes('draft')) return 'draft';
+  if (s.includes('postdate') || s.includes('post')) return 'post_date';
+  if (s.includes('payment') || s.includes('finalpayment')) return 'payment';
+  if (s.includes('deliveryconfirmed')) return 'Delivery Confirmed';
+  if (s.includes('notdelivered')) return 'Not Delivered';
+  if (s.includes('delivered')) return 'Delivered';
+  return val;
+};

@@ -139,43 +139,60 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         const dispatchIds = Array.from(new Set(records.map(r => r.dispatch_id).filter(Boolean)));
         const influencerIds = Array.from(new Set(records.map(r => r.influencer_id).filter(Boolean)));
         const [
-          { data: dispatchData, error: dispatchError },
-          { data: infoData, error: infoError },
-          { data: pricingData, error: pricingError },
-          { data: productsData },
+          dispatchData,
+          infoData,
+          pricingData,
+          productsData,
           postDatesData,
-          { data: videoPaymentsData },
-          videoScriptsData
+          videoPaymentsData,
+          videoScriptsData,
+          platformData
         ] = await Promise.all([
-          supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('id', dispatchIds),
-          supabase.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name').in('id', influencerIds),
-          supabase.from(SUPABASE_TABLES.influencerPricing).select('id, influencer_id, final_price, total_videos, product_pricing, video1_price, video2_price, video1_count, video2_count').in('influencer_id', influencerIds),
-          supabase.from(SUPABASE_TABLES.influencerProduct).select('id, influencer_id, product_name, name, video_number, qty, selected').in('influencer_id', influencerIds),
           fetchAllInChunks(
-            chunk => supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk),
+            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerDispatch).select('*').in('id', chunk),
+            dispatchIds,
+            50
+          ),
+          fetchAllInChunks(
+            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name').in('id', chunk),
             influencerIds,
             50
           ),
-          supabaseAdmin.from(SUPABASE_TABLES.influencerVideoPayment).select('*').in('influencer_id', influencerIds),
-          fetchCampaignVideoScripts(cleanCampaignId, influencerIds)
+          fetchAllInChunks(
+            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPricing).select('id, influencer_id, final_price, total_videos, product_pricing, video1_price, video2_price, video1_count, video2_count').in('influencer_id', chunk),
+            influencerIds,
+            50
+          ),
+          fetchAllInChunks(
+            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerProduct).select('id, influencer_id, product_name, name, video_number, qty, selected').in('influencer_id', chunk),
+            influencerIds,
+            50
+          ),
+          fetchAllInChunks(
+            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk),
+            influencerIds,
+            50
+          ),
+          fetchAllInChunks(
+            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerVideoPayment).select('*').in('influencer_id', chunk),
+            influencerIds,
+            50
+          ),
+          fetchCampaignVideoScripts(cleanCampaignId, influencerIds),
+          fetchAllInChunks(
+            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPlatform).select('influencer_id, username, platform').in('influencer_id', chunk),
+            influencerIds,
+            50
+          )
         ]);
 
         let platformMap: Record<string, string> = {};
-        let rawPlatformsData: any[] = [];
-        try {
-          const { data: platformData } = await supabase
-            .from(SUPABASE_TABLES.influencerPlatform)
-            .select('influencer_id, username, platform')
-            .in('influencer_id', influencerIds);
-          rawPlatformsData = platformData || [];
-          rawPlatformsData.forEach(pl => {
-            if (pl.username && !platformMap[pl.influencer_id]) {
-              platformMap[pl.influencer_id] = pl.username;
-            }
-          });
-        } catch (e) {
-          // Ignore platform query error if table unavailable
-        }
+        const rawPlatformsData: any[] = platformData || [];
+        rawPlatformsData.forEach(pl => {
+          if (pl.username && !platformMap[pl.influencer_id]) {
+            platformMap[pl.influencer_id] = pl.username;
+          }
+        });
 
         // Map dictionaries
         const dispatchMap = (dispatchData || []).reduce((acc: any, d: any) => {
