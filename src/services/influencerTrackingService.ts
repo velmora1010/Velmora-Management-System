@@ -170,10 +170,16 @@ export function normalizeTrackingStatus(statusText?: string, error?: string): Tr
  * Normalizes courier names case-insensitively and handles whitespace differences.
  * Resolves variations of "Delhivery" and "ST Courier", classifying others as "Other" or null if empty.
  */
-export function normalizeCourierName(courierRaw?: string | null): 'Delhivery' | 'ST Courier' | 'Other' | null {
+export function normalizeCourierName(courierRaw?: string | null): 'Delhivery' | 'ST Courier' | 'Amazon' | 'India Post' | 'Other' | null {
   if (!courierRaw) return null;
   const cleaned = courierRaw.trim().replace(/\s+/g, ' ').toLowerCase();
   if (!cleaned) return null;
+  if (cleaned.includes('india post') || cleaned.includes('indiapost') || cleaned === 'ip') {
+    return 'India Post';
+  }
+  if (cleaned.includes('ithink') || cleaned === 'ithink logistics' || cleaned.includes('amazon')) {
+    return 'Amazon';
+  }
   if (cleaned.includes('delhivery')) {
     return 'Delhivery';
   }
@@ -524,6 +530,15 @@ export function getCourierTrackingUrl(courier: string, awb: string): string | nu
   }
   if (c.includes('delhivery')) {
     return `https://www.delhivery.com/track/package/${cleanAwb}`;
+  }
+  if (c.includes('ithink')) {
+    return `https://www.ithinklogistics.com/track-order?awb=${cleanAwb}`;
+  }
+  if (c.includes('amazon')) {
+    return `https://track.amazon.in/tracking/${cleanAwb}`;
+  }
+  if (c.includes('india post') || c.includes('indiapost')) {
+    return `https://www.indiapost.gov.in/_layouts/15/dpt.cpt.tracking/tracking.aspx`;
   }
   if (c.includes('dtdc')) {
     return `https://www.dtdc.in/tracking/tracking_results.asp?Ttype=awb_no&strCnno=${cleanAwb}`;

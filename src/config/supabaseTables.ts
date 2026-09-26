@@ -27,6 +27,8 @@ export const SUPABASE_TABLES = {
   influencerVideoPaymentTransactions: "influencer_video_payment_transactions",
   influencersInfo: "influencers_info_rows",
   influencerTrackingShipments: "influencer_tracking_shipments",
+  ithinkLogistics: "ithink_logistics",
+  indiaPostTracking: "india_post_tracking",
   offerAgreements: "offer_agreements",
   afterDispatchMessages: "after_dispatch_messages",
   mainTasks: "main_tasks_rows",

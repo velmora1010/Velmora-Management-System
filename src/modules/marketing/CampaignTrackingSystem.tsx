@@ -75,10 +75,28 @@ import {
   ChevronDown,
   Eye,
   ArrowRight,
-  RotateCcw
+  RotateCcw,
+  Plus,
+  UserPlus,
+  Send
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { UploadCourierShipmentModal } from '../../components/marketing/UploadCourierShipmentModal';
+import { UploadIThinkModal } from '../../components/marketing/UploadIThinkModal';
+import { AddIndiaPostModal } from '../../components/marketing/AddIndiaPostModal';
+import { AfterDispatchSection } from './AfterDispatchSection';
+import { ReDispatchSection } from './ReDispatchSection';
+import {
+  fetchIThinkLogisticsRecords,
+  mapIThinkRecordToShipment,
+  IThinkLogisticsRecord
+} from '../../services/ithinkLogisticsService';
+import {
+  fetchIndiaPostRecords,
+  mapIndiaPostRecordToShipment,
+  deleteIndiaPostRecord,
+  IndiaPostTrackingRecord
+} from '../../services/indiaPostTrackingService';
 import {
   handoffDeliveredShipmentToStatusTracking,
   bulkHandoffDeliveredShipments,
@@ -113,6 +131,9 @@ const STATUS_PILLS: TrackingStatusCategory[] = [
   'Re-Dispatch'
 ];
 
+export const safeLower = (val: any): string => (val === undefined || val === null ? '' : String(val).toLowerCase());
+export const safeTrimLower = (val: any): string => (val === undefined || val === null ? '' : String(val).trim().toLowerCase());
+
 export function isShipmentReDispatch(
   s: InfluencerDispatchedShipment,
   dispatchRecords?: DispatchDetails[]
@@ -126,7 +147,7 @@ export function isShipmentReDispatch(
   if (dispatchRecords && s.influencerId) {
     const disp = dispatchRecords.find(d => String(d.influencer_id) === String(s.influencerId));
     if (disp) {
-      const st = (disp.dispatch_status || '').trim().toLowerCase();
+      const st = safeTrimLower(disp.dispatch_status);
       if (st === 're_dispatch' || st === 're-dispatch' || st === 'redispatch') return true;
     }
   }
@@ -256,12 +277,19 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const uploadDropdownRef = useRef<HTMLDivElement>(null);
   const stFileInputRef = useRef<HTMLInputElement>(null);
   const delhiveryFileInputRef = useRef<HTMLInputElement>(null);
+  const ithinkFileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false);
   const [selectedUploadCourier, setSelectedUploadCourier] = useState<'ST Courier' | 'Delhivery'>('ST Courier');
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isIThinkUploadModalOpen, setIsIThinkUploadModalOpen] = useState(false);
+  const [selectedIThinkFile, setSelectedIThinkFile] = useState<File | null>(null);
+  const [ithinkRecords, setIthinkRecords] = useState<IThinkLogisticsRecord[]>([]);
+  const [isAddIpModalOpen, setIsAddIpModalOpen] = useState(false);
+  const [indiaPostRecords, setIndiaPostRecords] = useState<IndiaPostTrackingRecord[]>([]);
+  const [activeFormatView, setActiveFormatView] = useState<'tracking' | 'after_dispatch' | 'redispatch_format'>('tracking');
 
-  const handleTriggerCourierUpload = (courier: 'ST Courier' | 'Delhivery') => {
+  const handleTriggerCourierUpload = (courier: 'ST Courier' | 'Delhivery' | 'Amazon' | 'IThink Logistics') => {
     console.log(`[Tracking System] Opening file picker for ${courier}...`);
     setIsUploadDropdownOpen(false);
     if (courier === 'ST Courier') {
@@ -269,10 +297,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         stFileInputRef.current.value = '';
         stFileInputRef.current.click();
       }
-    } else {
+    } else if (courier === 'Delhivery') {
       if (delhiveryFileInputRef.current) {
         delhiveryFileInputRef.current.value = '';
         delhiveryFileInputRef.current.click();
+      }
+    } else if (courier === 'Amazon' || courier === 'IThink Logistics') {
+      if (ithinkFileInputRef.current) {
+        ithinkFileInputRef.current.value = '';
+        ithinkFileInputRef.current.click();
       }
     }
   };
@@ -284,6 +317,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     setSelectedUploadCourier(courier);
     setSelectedUploadFile(chosen);
     setIsUploadModalOpen(true);
+    e.target.value = '';
+  };
+
+  const handleIThinkFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const chosen = e.target.files?.[0];
+    console.log(`[Tracking System] File selected for IThink Logistics:`, chosen?.name, 'Size:', chosen?.size);
+    if (!chosen) return;
+    setSelectedIThinkFile(chosen);
+    setIsIThinkUploadModalOpen(true);
     e.target.value = '';
   };
 
@@ -440,8 +482,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const attachedAwbs = useMemo(() => {
     const set = new Set<string>();
     campaignAttempts.forEach(a => {
-      if (a.awb_number) {
-        set.add(a.awb_number.trim().toLowerCase());
+      const clean = safeTrimLower(a.awb_number);
+      if (clean) {
+        set.add(clean);
       }
     });
     return set;
@@ -513,9 +556,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         await pruneUnmatchedCampaignTrackingShipments(campaign.id, activeInfs);
       }
 
-      // 3. Fetch clean shipments from DB
-      const dbShipments = await fetchCampaignShipmentsFromDb(campaign.id);
+      // 3. Fetch clean shipments, IThink Logistics, and India Post records from DB
+      const [dbShipments, ithinkData, indiaPostData] = await Promise.all([
+        fetchCampaignShipmentsFromDb(campaign.id),
+        fetchIThinkLogisticsRecords(),
+        fetchIndiaPostRecords(campaign.id)
+      ]);
       setCampaignShipments(dbShipments);
+      setIthinkRecords(ithinkData);
+      setIndiaPostRecords(indiaPostData);
       setTrackingCache(getTrackingCache(campaign.id));
       await loadStatusTrackingInfluencerIds();
     } catch (err) {
@@ -586,9 +635,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         || '—';
       const cleanUsername = username.startsWith('@') ? username : `@${username}`;
 
-      const awbKey = (cs.awbNumber || '').toLowerCase().trim();
-      const courierLower = (cs.courier || '').toLowerCase().trim();
-      const uniqueKey = `${courierLower}__${awbKey || (cs.id ? cs.id.toLowerCase().trim() : '')}`;
+      const awbKey = safeTrimLower(cs.awbNumber);
+      const courierLower = safeTrimLower(cs.courier);
+      const uniqueKey = `${courierLower}__${awbKey || safeTrimLower(cs.id)}`;
       if (!uniqueKey || uniqueKey === '__') continue;
 
       const cached = cs.awbNumber ? trackingCache[cs.awbNumber] : null;
@@ -661,9 +710,35 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       });
     }
 
+    // 2. Index IThink Logistics shipments
+    for (const ir of ithinkRecords) {
+      const isForThisCampaign = !ir.campaign_id || String(ir.campaign_id) === String(campaign.id);
+      const mapped = mapIThinkRecordToShipment(ir, candidateInfluencers);
+      if (mapped.influencerId || isForThisCampaign) {
+        const awbKey = safeTrimLower(mapped.awbNumber);
+        const uniqueKey = `ithink__${awbKey || safeTrimLower(mapped.id)}`;
+        if (!shipmentMap.has(uniqueKey)) {
+          shipmentMap.set(uniqueKey, mapped);
+        }
+      }
+    }
+
+    // 3. Index India Post shipments
+    for (const ip of indiaPostRecords) {
+      const isForThisCampaign = !ip.campaign_id || String(ip.campaign_id) === String(campaign.id);
+      const mapped = mapIndiaPostRecordToShipment(ip, candidateInfluencers);
+      if (mapped.influencerId || isForThisCampaign) {
+        // Use record id in uniqueKey so multiple entries with duplicate AWBs/Order IDs can coexist
+        const uniqueKey = `indiapost__${mapped.id}__${safeTrimLower(mapped.awbNumber)}`;
+        if (!shipmentMap.has(uniqueKey)) {
+          shipmentMap.set(uniqueKey, mapped);
+        }
+      }
+    }
+
     const unsorted = Array.from(shipmentMap.values());
     return sortInfluencerShipmentsNaturally(unsorted);
-  }, [candidateInfluencers, dispatchRecords, savedBatches, campaignShipments, trackingCache]);
+  }, [candidateInfluencers, dispatchRecords, savedBatches, campaignShipments, ithinkRecords, indiaPostRecords, campaign.id, trackingCache]);
 
   // True if valid campaign tracking shipments exist in the database
   const hasTrackingData = allShipments.length > 0;
@@ -672,15 +747,20 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const availableCouriers = useMemo(() => {
     const map = new Map<string, string>();
     allShipments.forEach(s => {
-      if (s.courier && s.courier.trim()) {
+      if ((s as any).isIndiaPost || (s as any).courierSource === 'india_post' || normalizeCourierName(s.courier) === 'India Post') {
+        map.set('india post', 'India Post');
+      } else if ((s as any).isIThink || (s as any).courierSource === 'ithink_logistics' || normalizeCourierName(s.courier) === 'Amazon') {
+        map.set('amazon', 'Amazon');
+      } else if (s.courier && s.courier.trim()) {
         const norm = normalizeCourierName(s.courier);
         if (norm && norm !== 'Other') {
-          if (!map.has(norm.toLowerCase())) {
-            map.set(norm.toLowerCase(), norm);
+          const normKey = safeLower(norm);
+          if (!map.has(normKey)) {
+            map.set(normKey, norm);
           }
         } else {
           const clean = s.courier.trim();
-          const lower = clean.toLowerCase();
+          const lower = safeLower(clean);
           if (!map.has(lower)) {
             map.set(lower, clean);
           }
@@ -1002,31 +1082,32 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
       // 1. Search filter
       if (searchTerm.trim()) {
-        const query = searchTerm.toLowerCase().trim();
+        const query = safeTrimLower(searchTerm);
         const cleanQuery = query.replace(/^#+/, '');
         const normSearch = normalizeOrderId(searchTerm);
-        const searchBase = normSearch.baseCode.toLowerCase();
+        const searchBase = safeLower(normSearch?.baseCode);
 
-        const matchesName = s.creatorName.toLowerCase().includes(query);
-        const matchesUser = s.username.toLowerCase().includes(query);
-        const matchesPhone = s.phoneNumber.toLowerCase().includes(query) || s.altPhoneNumber.toLowerCase().includes(query);
-        const matchesAwb = s.awbNumber.toLowerCase().includes(query);
-        const matchesBatch = s.batchCode.toLowerCase().includes(query);
-        const matchesCourier = s.courier.toLowerCase().includes(query);
+        const matchesName = safeLower(s.creatorName).includes(query);
+        const matchesUser = safeLower(s.username).includes(query);
+        const matchesPhone = safeLower(s.phoneNumber).includes(query) || safeLower(s.altPhoneNumber).includes(query);
+        const matchesAwb = safeLower(s.awbNumber).includes(query);
+        const matchesBatch = safeLower(s.batchCode).includes(query);
+        const matchesCourier = safeLower(s.courier).includes(query);
 
         // Normalize code matching: covers #MHS114, MHS114, R MHS114, RMHS114
-        const matchesCode = s.influencerCode.toLowerCase().includes(query) || 
-                            s.influencerCode.toLowerCase().includes(cleanQuery) ||
-                            (Boolean(searchBase) && s.influencerCode.toLowerCase().includes(searchBase)) ||
+        const sInfCode = safeLower(s.influencerCode);
+        const matchesCode = sInfCode.includes(query) || 
+                            sInfCode.includes(cleanQuery) ||
+                            (Boolean(searchBase) && sInfCode.includes(searchBase)) ||
                             isSameUnderlyingOrder(searchTerm, s.influencerCode);
 
-        const rawOrd = ((s as any).rawOrderId || s.orderId || '').toLowerCase();
-        const baseOrd = ((s as any).baseOrderId || '').toLowerCase();
+        const rawOrd = safeLower((s as any).rawOrderId || s.orderId);
+        const baseOrd = safeLower((s as any).baseOrderId);
         const matchesOrderId = rawOrd.includes(query) || 
                               rawOrd.includes(cleanQuery) || 
                               (Boolean(searchBase) && rawOrd.includes(searchBase)) ||
                               (Boolean(baseOrd) && (baseOrd.includes(query) || baseOrd.includes(cleanQuery) || (Boolean(searchBase) && baseOrd.includes(searchBase)))) ||
-                              (s.id || '').toLowerCase().includes(query) ||
+                              safeLower(s.id).includes(query) ||
                               isSameUnderlyingOrder(searchTerm, s.orderId) ||
                               isSameUnderlyingOrder(searchTerm, (s as any).rawOrderId);
 
@@ -1060,24 +1141,36 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     });
   }, [allShipments, selectedDeliveryDate, selectedDeliveryDateEnd, searchTerm, selectedStatusTab, startDate, endDate, dispatchRecords]);
 
-  // Real-time Courier Counts (Delhivery, ST Courier, Other) strictly scoped to campaign and active filters
+  // Real-time Courier Counts (Delhivery, ST Courier, Amazon, India Post, Other) strictly scoped to campaign and active filters
   const courierCounts = useMemo(() => {
     let delhivery = 0;
     let stCourier = 0;
+    let amazon = 0;
+    let indiaPost = 0;
     let other = 0;
 
     for (const s of courierBaseShipments) {
-      const norm = normalizeCourierName(s.courier);
-      if (norm === 'Delhivery') {
-        delhivery++;
-      } else if (norm === 'ST Courier') {
-        stCourier++;
-      } else if (norm === 'Other') {
-        other++;
+      if ((s as any).isIndiaPost || (s as any).courierSource === 'india_post' || normalizeCourierName(s.courier) === 'India Post') {
+        indiaPost++;
+      } else if ((s as any).isIThink || (s as any).courierSource === 'ithink_logistics') {
+        amazon++;
+      } else {
+        const norm = normalizeCourierName(s.courier);
+        if (norm === 'Delhivery') {
+          delhivery++;
+        } else if (norm === 'ST Courier') {
+          stCourier++;
+        } else if (norm === 'Amazon') {
+          amazon++;
+        } else if (norm === 'India Post') {
+          indiaPost++;
+        } else if (norm === 'Other') {
+          other++;
+        }
       }
     }
 
-    return { delhivery, stCourier, other };
+    return { delhivery, stCourier, amazon, ithink: amazon, indiaPost, other };
   }, [courierBaseShipments]);
 
   // Filtered Shipments (applies selected courier filter onto the base shipments)
@@ -1086,13 +1179,45 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       return sortInfluencerShipmentsNaturally(courierBaseShipments);
     }
 
+    if (
+      selectedCourier === 'India Post' ||
+      normalizeCourierName(selectedCourier) === 'India Post'
+    ) {
+      const filtered = courierBaseShipments.filter(s =>
+        (s as any).isIndiaPost ||
+        (s as any).courierSource === 'india_post' ||
+        normalizeCourierName(s.courier) === 'India Post'
+      );
+      return sortInfluencerShipmentsNaturally(filtered);
+    }
+
+    if (
+      selectedCourier === 'Amazon' || 
+      selectedCourier === 'IThink Logistics' || 
+      normalizeCourierName(selectedCourier) === 'Amazon'
+    ) {
+      const filtered = courierBaseShipments.filter(s =>
+        !((s as any).isIndiaPost || (s as any).courierSource === 'india_post' || normalizeCourierName(s.courier) === 'India Post') &&
+        ((s as any).isIThink ||
+        (s as any).courierSource === 'ithink_logistics' ||
+        normalizeCourierName(s.courier) === 'Amazon')
+      );
+      return sortInfluencerShipmentsNaturally(filtered);
+    }
+
     const normSelected = normalizeCourierName(selectedCourier);
     const filtered = courierBaseShipments.filter(s => {
+      if ((s as any).isIndiaPost || (s as any).courierSource === 'india_post' || normalizeCourierName(s.courier) === 'India Post') {
+        return false;
+      }
+      if ((s as any).isIThink || (s as any).courierSource === 'ithink_logistics') {
+        return false;
+      }
       const normShipment = normalizeCourierName(s.courier);
       if (normSelected && normShipment) {
         return normShipment === normSelected;
       }
-      return s.courier.trim().toLowerCase() === selectedCourier.trim().toLowerCase();
+      return safeTrimLower(s.courier) === safeTrimLower(selectedCourier);
     });
 
     return sortInfluencerShipmentsNaturally(filtered);
@@ -1107,21 +1232,43 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     selectedCourier !== 'All' && 
     normalizeCourierName(selectedCourier) === 'ST Courier';
 
+  const isAmazonActive = 
+    selectedCourier !== 'All' && 
+    (selectedCourier === 'Amazon' || selectedCourier === 'IThink Logistics' || normalizeCourierName(selectedCourier) === 'Amazon');
+
+  const isIThinkActive = isAmazonActive;
+
+  const isIndiaPostActive = 
+    selectedCourier !== 'All' && 
+    (selectedCourier === 'India Post' || normalizeCourierName(selectedCourier) === 'India Post');
+
   const isOtherActive = 
     selectedCourier !== 'All' && 
     normalizeCourierName(selectedCourier) === 'Other';
 
   // Toggle or select courier filter via badge click
-  const handleCourierBadgeClick = useCallback((targetCourier: 'Delhivery' | 'ST Courier' | 'Other') => {
+  const handleCourierBadgeClick = useCallback((targetCourier: 'Delhivery' | 'ST Courier' | 'Amazon' | 'India Post' | 'IThink Logistics' | 'Other') => {
+    const isTargetAmazon = targetCourier === 'Amazon' || targetCourier === 'IThink Logistics';
+    const isTargetIndiaPost = targetCourier === 'India Post';
     const isCurrentlyActive = 
       selectedCourier !== 'All' && 
-      normalizeCourierName(selectedCourier) === targetCourier;
+      (isTargetAmazon
+        ? (selectedCourier === 'Amazon' || selectedCourier === 'IThink Logistics' || normalizeCourierName(selectedCourier) === 'Amazon')
+        : isTargetIndiaPost
+        ? (selectedCourier === 'India Post' || normalizeCourierName(selectedCourier) === 'India Post')
+        : normalizeCourierName(selectedCourier) === targetCourier);
 
     if (isCurrentlyActive) {
       setSelectedCourier('All');
     } else {
-      const matched = availableCouriers.find(c => normalizeCourierName(c) === targetCourier);
-      setSelectedCourier(matched || targetCourier);
+      const matched = availableCouriers.find(c => 
+        isTargetAmazon
+          ? (c === 'Amazon' || c === 'IThink Logistics' || normalizeCourierName(c) === 'Amazon')
+          : isTargetIndiaPost
+          ? (c === 'India Post' || normalizeCourierName(c) === 'India Post')
+          : normalizeCourierName(c) === targetCourier
+      );
+      setSelectedCourier(matched || (isTargetAmazon ? 'Amazon' : isTargetIndiaPost ? 'India Post' : targetCourier));
     }
   }, [selectedCourier, availableCouriers]);
 
@@ -1329,6 +1476,26 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     const toastId = toast.loading('Deleting tracking shipment...');
 
     try {
+      if ((shipmentToDelete as any)?.isIndiaPost) {
+        await deleteIndiaPostRecord(shipmentToDelete.id);
+        toast.success('India Post shipment deleted successfully.', { id: toastId });
+        await loadShipments();
+        if (onRefreshData) {
+          await onRefreshData();
+        }
+        return;
+      }
+
+      if ((shipmentToDelete as any)?.isIThink) {
+        await supabaseAdmin.from(SUPABASE_TABLES.ithinkLogistics).delete().eq('id', shipmentToDelete.id);
+        toast.success('Amazon shipment deleted successfully.', { id: toastId });
+        await loadShipments();
+        if (onRefreshData) {
+          await onRefreshData();
+        }
+        return;
+      }
+
       const res = await deleteShipmentWithStatusTrackingSync(
         campaign.id,
         shipmentToDelete,
@@ -1383,7 +1550,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           (s as any).isResend || 
           (Number((s as any).attemptNumber) > 1)
         );
-        const cleanAwb = (s.awbNumber || '').trim().toLowerCase();
+        const cleanAwb = safeTrimLower(s.awbNumber);
 
         if (isRep) {
           if (cleanAwb && !attachedAwbs.has(cleanAwb) && !seenAwbs.has(cleanAwb)) {
@@ -1506,8 +1673,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
 
   // Single Shipment Sync (ST Courier only)
   const handleSyncShipment = async (shipment: InfluencerDispatchedShipment) => {
-    if ((shipment.courier || '').toLowerCase().includes('delhivery')) {
-      toast('Sync is only available for ST Courier shipments. Delhivery status is sourced from uploaded files.', { icon: 'ℹ️' });
+    if (
+      safeLower(shipment.courier).includes('delhivery') || 
+      safeLower(shipment.courier).includes('ithink') || 
+      safeLower(shipment.courier).includes('amazon') || 
+      safeLower(shipment.courier).includes('india post') ||
+      (shipment as any)?.isIThink ||
+      (shipment as any)?.isIndiaPost
+    ) {
+      toast('Sync is only available for ST Courier shipments. Delhivery, Amazon, and India Post statuses are managed via uploads/manual entry.', { icon: 'ℹ️' });
       return;
     }
 
@@ -1601,186 +1775,189 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   return (
     <div className="space-y-4 w-full max-w-full min-w-0">
       {/* SEARCH & CONTROLS TOOLBAR (Always visible) */}
-      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center gap-2.5 w-full max-w-full min-w-0">
-        {/* 1. Search Box (Adjusts size based on data presence) */}
-        <div className={`relative ${hasTrackingData ? 'w-full sm:w-72 lg:w-80' : 'w-full sm:w-80 lg:w-96'} shrink-0`}>
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search by Order ID, AWB, influencer name, phone, batch code..."
-            className="w-full h-10 bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
-          />
-        </div>
+      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 shadow-sm flex flex-wrap items-center justify-between gap-2.5 w-full max-w-full min-w-0">
+        {/* Left Side: Search + Upload + Sync */}
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
+          {/* 1. Search Box */}
+          <div className="relative w-full sm:w-72 lg:w-80 shrink-0">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by Order ID, AWB, influencer name, phone, batch code..."
+              className="w-full h-10 bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-3 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+            />
+          </div>
 
-        {/* 2. Upload Dropdown [Upload ▼] (Always available) */}
-        <div className="relative shrink-0" ref={uploadDropdownRef}>
-          {/* Hidden File Inputs for ST Courier and Delhivery */}
-          <input
-            type="file"
-            ref={stFileInputRef}
-            accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            className="hidden"
-            onChange={(e) => handleCourierFileChange(e, 'ST Courier')}
-          />
-          <input
-            type="file"
-            ref={delhiveryFileInputRef}
-            accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            className="hidden"
-            onChange={(e) => handleCourierFileChange(e, 'Delhivery')}
-          />
+          {/* 2. Upload Dropdown [Upload ▼] (Always available) */}
+          <div className="relative shrink-0" ref={uploadDropdownRef}>
+            {/* Hidden File Inputs for ST Courier and Delhivery */}
+            <input
+              type="file"
+              ref={stFileInputRef}
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => handleCourierFileChange(e, 'ST Courier')}
+            />
+            <input
+              type="file"
+              ref={delhiveryFileInputRef}
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => handleCourierFileChange(e, 'Delhivery')}
+            />
+            <input
+              type="file"
+              ref={ithinkFileInputRef}
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleIThinkFileChange}
+            />
 
-          <button
-            type="button"
-            onClick={() => setIsUploadDropdownOpen(prev => !prev)}
-            className="h-10 px-3.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer border-0 outline-none focus:outline-none shrink-0"
-            title="Upload Shipments"
-          >
-            <Upload size={13} />
-            <span>Upload</span>
-            <ChevronDown size={12} className={`transition-transform duration-200 ${isUploadDropdownOpen ? 'rotate-180' : ''}`} />
-          </button>
-
-          {isUploadDropdownOpen && (
-            <div className="absolute left-0 mt-1.5 w-64 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-              <button
-                type="button"
-                onClick={() => handleTriggerCourierUpload('ST Courier')}
-                className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer"
-              >
-                <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
-                  <Upload size={14} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for ST Courier</div>
-                  <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for ST Courier</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleTriggerCourierUpload('Delhivery')}
-                className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer mt-1"
-              >
-                <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
-                  <Upload size={14} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for Delhivery</div>
-                  <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for Delhivery</div>
-                </div>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Controls displayed ONLY when tracking data exists */}
-        {hasTrackingData && (
-          <>
-            {/* 3. Sync (ST Courier only) */}
             <button
               type="button"
-              onClick={handleAutoSyncAll}
-              disabled={isBulkSyncing}
-              className="h-10 px-3.5 bg-[#141b2d] hover:bg-[#1c263f] text-slate-200 border border-slate-700/80 hover:border-purple-500/50 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Sync ST Courier shipments with live tracking"
+              onClick={() => setIsUploadDropdownOpen(prev => !prev)}
+              className="h-10 px-3.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer border-0 outline-none focus:outline-none shrink-0"
+              title="Upload Shipments"
             >
-              <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : 'text-purple-400'} />
-              <span>{isBulkSyncing ? (bulkSyncProgressText || 'Syncing...') : 'Sync'}</span>
+              <Upload size={13} />
+              <span>Upload</span>
+              <ChevronDown size={12} className={`transition-transform duration-200 ${isUploadDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
 
-            {/* 4. All Couriers */}
-            <select
-              value={selectedCourier}
-              onChange={(e) => setSelectedCourier(e.target.value)}
-              className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
-            >
-              <option value="All">All Couriers</option>
-              {availableCouriers.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-
-            {/* 5. All Status */}
-            <select
-              value={selectedStatusTab}
-              onChange={(e) => setSelectedStatusTab(e.target.value as TrackingStatusCategory)}
-              className="h-10 bg-slate-900 border border-slate-700/80 rounded-xl px-3 text-xs text-slate-200 focus:outline-none focus:border-purple-500 transition-colors cursor-pointer shrink-0"
-            >
-              <option value="All">All Status</option>
-              <option value="Delivered">Delivered</option>
-              <option value="In Transit">In Transit</option>
-              <option value="Out for Delivery">Out for Delivery</option>
-              <option value="Exception">Exception</option>
-              <option value="Failed Attempt">Failed Attempt</option>
-              <option value="Pending">Pending</option>
-              <option value="Info Received">Info Received</option>
-              <option value="Expired">Expired</option>
-              <option value="Re-Dispatch">Re-Dispatch</option>
-            </select>
-
-            {/* 6. Date Range Inputs (From - To for Estimated Delivery Date) */}
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 h-10 shrink-0">
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                title="From Estimated Delivery Date"
-                className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
-              />
-              <span className="text-slate-500 text-xs">-</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                title="To Estimated Delivery Date"
-                className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer w-28"
-              />
-              {(startDate || endDate) && (
+            {isUploadDropdownOpen && (
+              <div className="absolute left-0 mt-1.5 w-64 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
                 <button
                   type="button"
-                  onClick={() => { setStartDate(''); setEndDate(''); }}
-                  className="p-1 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                  title="Clear dates"
+                  onClick={() => handleTriggerCourierUpload('ST Courier')}
+                  className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer"
                 >
-                  <X size={12} />
+                  <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
+                    <Upload size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for ST Courier</div>
+                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for ST Courier</div>
+                  </div>
                 </button>
-              )}
-            </div>
 
-            {/* 7. Clear All Button (UI-only, permanently disabled as requested) */}
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              className="h-10 px-3.5 bg-slate-900 text-slate-400 text-xs font-semibold rounded-xl border border-slate-700/80 flex items-center gap-1.5 shrink-0 opacity-40 cursor-not-allowed select-none"
-              title="Clear All is disabled"
-            >
-              <Trash2 size={13} className="text-rose-400/60" />
-              <span>Clear All</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={() => handleTriggerCourierUpload('Delhivery')}
+                  className="w-full text-left p-2.5 rounded-lg hover:bg-purple-600/20 hover:border-purple-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer mt-1"
+                >
+                  <div className="p-2 rounded-lg bg-purple-950/80 border border-purple-800/60 text-purple-400 group-hover:text-purple-300 group-hover:bg-purple-900/60 shrink-0 mt-0.5">
+                    <Upload size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for Delhivery</div>
+                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for Delhivery</div>
+                  </div>
+                </button>
 
-            {/* 8. DB Refresh */}
-            <button
-              type="button"
-              onClick={() => loadShipments()}
-              disabled={isLoadingDb || isBulkSyncing}
-              className="w-10 h-10 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto"
-              title="Refresh shipments from Supabase database"
-            >
-              <RefreshCw size={13} className={isLoadingDb || isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
-            </button>
-          </>
-        )}
+                <button
+                  type="button"
+                  onClick={() => handleTriggerCourierUpload('Amazon')}
+                  className="w-full text-left p-2.5 rounded-lg hover:bg-amber-600/20 hover:border-amber-500/40 border border-transparent transition-all group flex items-start gap-3 cursor-pointer mt-1"
+                >
+                  <div className="p-2 rounded-lg bg-amber-950/80 border border-amber-800/60 text-amber-400 group-hover:text-amber-300 group-hover:bg-amber-900/60 shrink-0 mt-0.5">
+                    <Upload size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-100 group-hover:text-white">Upload for Amazon</div>
+                    <div className="text-[11px] text-slate-400 group-hover:text-slate-300 mt-0.5">Upload shipments for Amazon</div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Sync (ST Courier only) */}
+          <button
+            type="button"
+            onClick={handleAutoSyncAll}
+            disabled={isBulkSyncing}
+            className="h-10 px-3.5 bg-[#141b2d] hover:bg-[#1c263f] text-slate-200 border border-slate-700/80 hover:border-purple-500/50 text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Sync ST Courier shipments with live tracking"
+          >
+            <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : 'text-purple-400'} />
+            <span>{isBulkSyncing ? (bulkSyncProgressText || 'Syncing...') : 'Sync'}</span>
+          </button>
+        </div>
+
+        {/* Center: Intentionally Empty Space for upcoming feature */}
+        <div className="flex-1 min-w-[20px]" />
+
+        {/* Right Side: [ After Dispatch Format ] [ Re-Dispatch Format ] [ ADD IP ] [ Refresh ] */}
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 ml-auto flex-nowrap">
+          {/* 1. After Dispatch Format Button */}
+          <button
+            type="button"
+            onClick={() => setActiveFormatView(prev => prev === 'after_dispatch' ? 'tracking' : 'after_dispatch')}
+            className={`h-10 px-3.5 sm:px-4 rounded-xl transition-colors text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none ${
+              activeFormatView === 'after_dispatch'
+                ? 'bg-purple-700 text-white shadow-purple-600/40 ring-2 ring-purple-400'
+                : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
+            }`}
+            title="After Dispatch Format"
+          >
+            <Send size={14} className="text-white" />
+            <span>After Dispatch Format</span>
+          </button>
+
+          {/* 2. Re-Dispatch Format Button */}
+          <button
+            type="button"
+            onClick={() => setActiveFormatView(prev => prev === 'redispatch_format' ? 'tracking' : 'redispatch_format')}
+            className={`h-10 px-3.5 sm:px-4 rounded-xl transition-colors text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none ${
+              activeFormatView === 'redispatch_format'
+                ? 'bg-purple-700 text-white shadow-purple-600/40 ring-2 ring-purple-400'
+                : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
+            }`}
+            title="Re-Dispatch Format"
+          >
+            <RotateCcw size={14} className="text-white" />
+            <span>Re-Dispatch Format</span>
+          </button>
+
+          {/* 3. ADD IP Button */}
+          <button
+            type="button"
+            onClick={() => setIsAddIpModalOpen(true)}
+            className="h-10 px-3.5 sm:px-4 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-2 shadow-md shadow-purple-600/30 cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none"
+            title="Add new India Post tracking entry"
+          >
+            <UserPlus size={15} className="text-white" />
+            <span>ADD IP</span>
+          </button>
+
+          {/* 4. DB Refresh */}
+          <button
+            type="button"
+            onClick={() => loadShipments()}
+            disabled={isLoadingDb || isBulkSyncing}
+            className="w-10 h-10 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Refresh shipments from Supabase database"
+          >
+            <RefreshCw size={13} className={isLoadingDb || isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
+          </button>
+        </div>
       </div>
 
-      {allShipments.length === 0 ? (
+      {activeFormatView === 'after_dispatch' ? (
+        <AfterDispatchSection
+          campaign={campaign}
+          influencers={allActiveInfluencers || dispatchedInfluencers}
+          onBackToList={() => setActiveFormatView('tracking')}
+        />
+      ) : activeFormatView === 'redispatch_format' ? (
+        <ReDispatchSection
+          campaign={campaign}
+          influencers={allActiveInfluencers || dispatchedInfluencers}
+          onBackToList={() => setActiveFormatView('tracking')}
+        />
+      ) : allShipments.length === 0 ? (
         <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-12 text-center text-slate-400 animate-fade-in">
           <div className="w-16 h-16 rounded-2xl bg-purple-950/40 border border-purple-800/50 flex items-center justify-center text-purple-400 mx-auto mb-4 shadow-sm">
             <Truck size={32} />
@@ -1877,6 +2054,26 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
         <div className="flex items-center gap-2 sm:gap-2.5 ml-auto shrink-0 flex-shrink-0">
           {/* Courier Counts */}
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Amazon */}
+            <button
+              type="button"
+              onClick={() => handleCourierBadgeClick('Amazon')}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${
+                isAmazonActive
+                  ? 'bg-amber-600 text-white border-amber-400 shadow-md shadow-amber-600/30'
+                  : 'border-amber-800/50 text-amber-300 hover:border-amber-500 hover:text-amber-200'
+              }`}
+              title={isAmazonActive ? 'Amazon filter active (click to show all couriers)' : 'Filter by Amazon'}
+            >
+              <Truck size={12} className={isAmazonActive ? 'text-white' : 'text-amber-400'} />
+              <span>Amazon</span>
+              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                isAmazonActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-amber-200'
+              }`}>
+                {courierCounts.amazon}
+              </span>
+            </button>
+
             {/* Delhivery */}
             <button
               type="button"
@@ -1914,6 +2111,26 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                 isSTCourierActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-purple-200'
               }`}>
                 {courierCounts.stCourier}
+              </span>
+            </button>
+
+            {/* India Post */}
+            <button
+              type="button"
+              onClick={() => handleCourierBadgeClick('India Post')}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${
+                isIndiaPostActive
+                  ? 'bg-rose-600 text-white border-rose-400 shadow-md shadow-rose-600/30'
+                  : 'border-rose-800/50 text-rose-300 hover:border-rose-500 hover:text-rose-200'
+              }`}
+              title={isIndiaPostActive ? 'India Post filter active (click to show all couriers)' : 'Filter by India Post'}
+            >
+              <Truck size={12} className={isIndiaPostActive ? 'text-white' : 'text-rose-400'} />
+              <span>India Post</span>
+              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                isIndiaPostActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-rose-200'
+              }`}>
+                {courierCounts.indiaPost}
               </span>
             </button>
 
@@ -2081,13 +2298,21 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                         {/* 3. COURIER */}
                         <td className="px-2.5 sm:px-3 py-3">
                           <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap border ${
-                            normalizeCourierName(s.courier) === 'Delhivery'
+                            (s as any).isIndiaPost || normalizeCourierName(s.courier) === 'India Post'
+                              ? 'bg-rose-950/60 border-rose-800/60 text-rose-300'
+                              : normalizeCourierName(s.courier) === 'Delhivery'
                               ? 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300'
                               : (normalizeCourierName(s.courier) === 'ST Courier'
                                 ? 'bg-purple-950/60 border-purple-800/60 text-purple-300'
-                                : 'bg-slate-900 border-slate-800 text-slate-300')
+                                : ((s as any).isIThink || normalizeCourierName(s.courier) === 'Amazon'
+                                  ? 'bg-amber-950/60 border-amber-800/60 text-amber-300'
+                                  : 'bg-slate-900 border-slate-800 text-slate-300'))
                           }`}>
-                            {s.courier}
+                            {(s as any).isIndiaPost || normalizeCourierName(s.courier) === 'India Post'
+                              ? 'India Post'
+                              : ((s as any).isIThink || normalizeCourierName(s.courier) === 'Amazon') 
+                              ? 'Amazon' 
+                              : s.courier}
                           </span>
                         </td>
 
@@ -2193,7 +2418,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                                 (Number((s as any).attemptNumber) > 1)
                               );
                               const { matchedInfluencer } = matchShipmentToInfluencer(s, candidateInfluencers, dispatchRecords);
-                              const cleanAwb = (s.awbNumber || '').trim().toLowerCase();
+                              const cleanAwb = safeTrimLower(s.awbNumber);
 
                               const isAwbAttached = Boolean(cleanAwb && attachedAwbs.has(cleanAwb));
                               const isInfluencerInStatus = Boolean(matchedInfluencer && existingStatusInfluencerIds.has(String(matchedInfluencer.id)));
@@ -2472,10 +2697,20 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Status Source:</span>
-                  {activeTrackingModalShipment.courier.toLowerCase().includes('delhivery') ? (
+                  {((activeTrackingModalShipment as any)?.isIndiaPost || safeLower(activeTrackingModalShipment.courier).includes('india post')) ? (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-950/70 border border-rose-800/60 text-rose-300">
+                      <span>Manual India Post Entry</span>
+                      <span className="text-[9px] font-bold px-1 bg-rose-900/60 rounded text-rose-200">MANUAL ENTRY</span>
+                    </span>
+                  ) : safeLower(activeTrackingModalShipment.courier).includes('delhivery') ? (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-cyan-950/70 border border-cyan-800/60 text-cyan-300">
                       <span>Uploaded Delhivery File</span>
                       <span className="text-[9px] font-bold px-1 bg-cyan-900/60 rounded text-cyan-200">UPLOADED FILE</span>
+                    </span>
+                  ) : (safeLower(activeTrackingModalShipment.courier).includes('ithink') || safeLower(activeTrackingModalShipment.courier).includes('amazon') || (activeTrackingModalShipment as any)?.isIThink) ? (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-950/70 border border-amber-800/60 text-amber-300">
+                      <span>Uploaded Amazon File</span>
+                      <span className="text-[9px] font-bold px-1 bg-amber-900/60 rounded text-amber-200">UPLOADED FILE</span>
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-950/70 border border-purple-800/60 text-purple-300">
@@ -2486,7 +2721,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">
-                    {activeTrackingModalShipment.courier.toLowerCase().includes('delhivery') ? 'Imported:' : 'Last Synced:'}
+                    {((activeTrackingModalShipment as any)?.isIndiaPost || safeLower(activeTrackingModalShipment.courier).includes('india post')) ? 'Created/Updated:' : (safeLower(activeTrackingModalShipment.courier).includes('delhivery') || safeLower(activeTrackingModalShipment.courier).includes('ithink') || safeLower(activeTrackingModalShipment.courier).includes('amazon') || (activeTrackingModalShipment as any)?.isIThink) ? 'Imported:' : 'Last Synced:'}
                   </span>
                   <span className="font-mono text-slate-300 text-[11px]">
                     {activeTrackingModalShipment.lastSyncedAt || activeTrackingModalShipment.trackingDateTime || activeTrackingModalShipment.dispatchDate || '—'}
@@ -2615,9 +2850,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
               )}
 
               <div className="flex items-center gap-2">
-                {activeTrackingModalShipment.courier.toLowerCase().includes('delhivery') ? (
+                {((activeTrackingModalShipment as any)?.isIndiaPost || safeLower(activeTrackingModalShipment.courier).includes('india post')) ? (
                   <div className="px-3.5 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-xs font-semibold text-slate-400 flex items-center gap-1.5">
-                    <FileSpreadsheet size={13} className="text-cyan-400" />
+                    <FileSpreadsheet size={13} className="text-rose-400" />
+                    <span>Manual India Post Entry</span>
+                  </div>
+                ) : (safeLower(activeTrackingModalShipment.courier).includes('delhivery') || safeLower(activeTrackingModalShipment.courier).includes('ithink') || safeLower(activeTrackingModalShipment.courier).includes('amazon') || (activeTrackingModalShipment as any)?.isIThink) ? (
+                  <div className="px-3.5 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                    <FileSpreadsheet size={13} className={safeLower(activeTrackingModalShipment.courier).includes('delhivery') ? 'text-cyan-400' : 'text-amber-400'} />
                     <span>Status Sourced from Uploaded File</span>
                   </div>
                 ) : (
@@ -2659,6 +2899,40 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           onSuccess={async () => {
             setIsUploadModalOpen(false);
             setSelectedUploadFile(null);
+            await loadShipments();
+            if (onRefreshData) {
+              await onRefreshData();
+            }
+          }}
+        />
+      )}
+
+      {/* Upload for IThink Logistics Modal */}
+      {isIThinkUploadModalOpen && (
+        <UploadIThinkModal
+          campaign={campaign}
+          initialFile={selectedIThinkFile}
+          onClose={() => {
+            setIsIThinkUploadModalOpen(false);
+            setSelectedIThinkFile(null);
+          }}
+          onSuccess={async () => {
+            setIsIThinkUploadModalOpen(false);
+            setSelectedIThinkFile(null);
+            await loadShipments();
+            if (onRefreshData) {
+              await onRefreshData();
+            }
+          }}
+        />
+      )}
+
+      {/* Add India Post Tracking Modal */}
+      {isAddIpModalOpen && (
+        <AddIndiaPostModal
+          campaign={campaign}
+          onClose={() => setIsAddIpModalOpen(false)}
+          onSuccess={async () => {
             await loadShipments();
             if (onRefreshData) {
               await onRefreshData();

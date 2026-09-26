@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus, FileText, Sparkles, Send } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus, FileText, Sparkles, Send, RotateCcw } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -24,6 +24,7 @@ import { SingleInfluencerPickListModal } from '../../components/marketing/Single
 import { ImportMailAcceptanceModal } from '../../components/marketing/ImportMailAcceptanceModal';
 import { OfferAgreementSection, buildAgreementText, StoredAgreement } from './OfferAgreementSection';
 import { AfterDispatchSection } from './AfterDispatchSection';
+import { ReDispatchSection } from './ReDispatchSection';
 import { 
   afterDispatchService, 
   StoredAfterDispatchMessage, 
@@ -792,7 +793,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     });
   };
 
-  const [mainViewMode, setMainViewMode] = useState<'list' | 'analytics' | 'offer_agreement' | 'after_dispatch'>('list');
+  const [mainViewMode, setMainViewMode] = useState<'list' | 'analytics' | 'offer_agreement' | 'after_dispatch' | 'redispatch_format'>('list');
   const [isSelectionModeActive, setIsSelectionModeActive] = useState(false);
   const [selectedPickListInfluencer, setSelectedPickListInfluencer] = useState<CampaignInfluencer | null>(null);
   const [analyticsFilterState, setAnalyticsFilterState] = useState<CampaignAnalyticsFilterState>(initialAnalyticsFilterState);
@@ -1451,6 +1452,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </button>
 
           <button 
+            type="button"
             onClick={() => setMainViewMode(prev => prev === 'offer_agreement' ? 'list' : 'offer_agreement')}
             className={`px-3.5 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer shrink-0 border-0 ${
               mainViewMode === 'offer_agreement'
@@ -1461,19 +1463,6 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           >
             <FileText size={15} className={mainViewMode === 'offer_agreement' ? 'text-white' : 'text-purple-300'} />
             <span>Offer Agreement</span>
-          </button>
-
-          <button 
-            onClick={() => setMainViewMode(prev => prev === 'after_dispatch' ? 'list' : 'after_dispatch')}
-            className={`px-3.5 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer shrink-0 border-0 ${
-              mainViewMode === 'after_dispatch'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50'
-                : 'bg-indigo-900/40 hover:bg-indigo-800/60 text-indigo-200 border border-indigo-700/50'
-            }`}
-            title="After Dispatch"
-          >
-            <Send size={15} className={mainViewMode === 'after_dispatch' ? 'text-white' : 'text-indigo-300'} />
-            <span>After Dispatch</span>
           </button>
 
           <div className="relative shrink-0" ref={uploadDropdownRef}>
@@ -1559,6 +1548,13 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           onBackToList={() => setMainViewMode('list')}
           refreshTrigger={afterDispatchRefreshTrigger}
         />
+      ) : mainViewMode === 'redispatch_format' ? (
+        <ReDispatchSection
+          campaign={campaign}
+          influencers={influencers.filter(inf => isActiveStatus(inf.is_archived))}
+          onBackToList={() => setMainViewMode('list')}
+          refreshTrigger={afterDispatchRefreshTrigger}
+        />
       ) : mainViewMode === 'offer_agreement' ? (
         <OfferAgreementSection
           campaign={campaign}
@@ -1627,7 +1623,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
           <div className="relative w-full sm:w-64">
             <input 
               type="text" 
@@ -1640,7 +1636,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           </div>
           <button
             onClick={handleOpenFilter}
-            className={`p-2 bg-slate-900 border ${isFilterApplied ? 'border-purple-500 text-purple-400 font-medium' : 'border-slate-700 text-slate-300'} hover:bg-slate-800 rounded-lg transition-colors focus:outline-none cursor-pointer relative shrink-0 flex items-center justify-center`}
+            className={`p-2 h-9 w-9 bg-slate-900 border ${isFilterApplied ? 'border-purple-500 text-purple-400 font-medium' : 'border-slate-700 text-slate-300'} hover:bg-slate-800 rounded-lg transition-colors focus:outline-none cursor-pointer relative shrink-0 flex items-center justify-center`}
             title="Filter Influencers"
           >
             <SlidersHorizontal size={16} />
@@ -1650,10 +1646,11 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               </span>
             )}
           </button>
+
           {onAddInfluencer && (
             <button
               onClick={onAddInfluencer}
-              className="p-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-sm cursor-pointer shrink-0 border-0 outline-none flex items-center justify-center"
+              className="p-2 h-9 w-9 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition-colors shadow-sm cursor-pointer shrink-0 border-0 outline-none flex items-center justify-center"
               title="Add Influencer"
             >
               <UserPlus size={16} />

@@ -30,7 +30,8 @@ import {
   MoreVertical,
   Tag,
   User,
-  Hash
+  Hash,
+  Send
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
