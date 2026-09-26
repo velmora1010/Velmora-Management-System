@@ -1103,7 +1103,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     return null;
   });
 
-  const [selectedVideoStep, setSelectedVideoStep] = useState<string | null>(() => {
+  const [selectedVideoStepId, setSelectedVideoStepId] = useState<string | null>(() => {
     return searchParams.get('stStep') || null;
   });
 
@@ -1118,10 +1118,10 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (prev?.recordId === stInf && prev?.videoNumber === vNum && prev?.stepId === (stStep || null)) return prev;
         return { recordId: stInf, videoNumber: vNum, stepId: stStep || null };
       });
-      setSelectedVideoStep(stStep || null);
+      setSelectedVideoStepId(stStep || null);
     } else {
       setSelectedVideo(null);
-      setSelectedVideoStep(null);
+      setSelectedVideoStepId(null);
     }
   }, [searchParams]);
 
@@ -1148,7 +1148,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       }
       return next;
     });
-    setSelectedVideoStep(stepId || null);
+    setSelectedVideoStepId(stepId || null);
     setSelectedVideo({ recordId: record.id, videoNumber, stepId: stepId || null });
   }, [campaign.id, setSearchParams]);
 
@@ -1161,7 +1161,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       return next;
     });
     setSelectedVideo(null);
-    setSelectedVideoStep(null);
+    setSelectedVideoStepId(null);
   }, [setSearchParams]);
 
   const handleSwitchVideo = useCallback((recordId: string, videoNumber: number, stepId?: string) => {
@@ -1174,8 +1174,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         next.delete('stStep');
       }
       return next;
-    });
-    setSelectedVideoStep(stepId || null);
+    }, { replace: true });
+    setSelectedVideoStepId(stepId || null);
     setSelectedVideo(prev => prev ? { ...prev, videoNumber, stepId: stepId || null } : { recordId, videoNumber, stepId: stepId || null });
   }, [setSearchParams]);
 
@@ -2264,12 +2264,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           <VideoDetailView 
             record={selectedRecord}
             videoNumber={selectedVideo.videoNumber}
-            initialStepId={selectedVideoStep || selectedVideo.stepId}
+            initialStepId={selectedVideoStepId || selectedVideo.stepId}
             onBack={handleBackFromDetail}
             onSwitchVideo={(num) => handleSwitchVideo(selectedRecord.id, num)}
             onSaveStep={(stepId, data, completed) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed)}
             onStepChange={(stepId) => {
-              setSelectedVideoStep(stepId);
+              setSelectedVideoStepId(stepId);
               setSelectedVideo(prev => prev ? { ...prev, stepId } : null);
               setSearchParams(prev => {
                 const next = new URLSearchParams(prev);
@@ -3428,7 +3428,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
     return videoData.configs[videoData.configs.length - 1]?.id || videoData.configs[0]?.id || 'share_script';
   }, [videoData]);
 
-  const [selectedVideoStep, setSelectedVideoStep] = useState<string>(() => resolveInitialStep(initialStepId));
+  const [selectedVideoStepId, setSelectedVideoStepId] = useState<string>(() => resolveInitialStep(initialStepId));
 
   // Derive resolved product & per-video price for this specific video from Campaign Influencer data
   const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
@@ -3442,19 +3442,19 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
     if (prevVideoNumRef.current !== videoNumber || prevInitialStepRef.current !== initialStepId) {
       prevVideoNumRef.current = videoNumber;
       prevInitialStepRef.current = initialStepId;
-      setSelectedVideoStep(resolveInitialStep(initialStepId));
+      setSelectedVideoStepId(resolveInitialStep(initialStepId));
     }
   }, [videoNumber, initialStepId, resolveInitialStep]);
 
   // Fallback if current step is invalid for current video configuration
   useEffect(() => {
-    if (!videoData.configs.some(c => c.id === selectedVideoStep)) {
-      setSelectedVideoStep(resolveInitialStep(initialStepId));
+    if (!videoData.configs.some(c => c.id === selectedVideoStepId)) {
+      setSelectedVideoStepId(resolveInitialStep(initialStepId));
     }
-  }, [videoData.configs, selectedVideoStep, initialStepId, resolveInitialStep]);
+  }, [videoData.configs, selectedVideoStepId, initialStepId, resolveInitialStep]);
 
-  const activeStepConfig = videoData.configs.find(c => c.id === selectedVideoStep) || videoData.configs[0];
-  const activeStepState = videoData.steps[selectedVideoStep] || { completed: false, data: {} };
+  const activeStepConfig = videoData.configs.find(c => c.id === selectedVideoStepId) || videoData.configs[0];
+  const activeStepState = videoData.steps[selectedVideoStepId] || { completed: false, data: {} };
 
   // Status badge style for Video Title
   let videoStatusBadge = (
@@ -3487,7 +3487,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   }
 
   return (
-    <div className="flex flex-col h-full space-y-4 overflow-hidden">
+    <div className="flex flex-col h-full space-y-3.5 overflow-hidden">
       
       {/* 1. TOP NAVIGATION & INFLUENCER HEADER */}
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0 shadow-md">
@@ -3552,7 +3552,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-white uppercase tracking-wider">STEP {videoNumber + 1}: VIDEO {videoNumber}</span>
+            <span className="text-xs font-bold text-white uppercase tracking-wider">Video {videoNumber}</span>
             <div className="flex items-center gap-1.5 bg-[#070c18] px-2.5 py-1 rounded-lg border border-slate-800" title={resolvedProductInfo.productName}>
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Product:</span>
               <span className={`text-xs font-bold truncate max-w-[170px] sm:max-w-[220px] ${
@@ -3578,26 +3578,14 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
         </div>
       </div>
 
-      {/* 2. COMPACT 6-STEP PROGRESS STEPPER CARD */}
-      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-5 shrink-0 shadow-md">
-        <div className="flex justify-between items-center mb-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-black text-white uppercase tracking-wider">STEP {videoNumber + 1}: VIDEO {videoNumber} WORKFLOW</span>
-            <span className="text-xs text-slate-400">
-              ({videoNumber === 1 ? '6 Steps: with Advance Payment' : '6 Steps: with Final Payment'})
-            </span>
-          </div>
-          <span className="text-xs font-bold text-blue-400 bg-blue-950/60 border border-blue-800/60 px-3 py-1 rounded-full">
-            {videoData.completedCount} of {videoData.totalSteps} completed
-          </span>
-        </div>
-
+      {/* 2. LEVEL 2 WORKFLOW SUB-STEP NAVIGATION BAR */}
+      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl px-5 py-3 shrink-0 shadow-md">
         {/* Horizontal Step Stepper */}
-        <div className="flex items-center justify-between w-full max-w-4xl mx-auto py-2 overflow-x-auto no-scrollbar">
+        <div className="flex items-center justify-between w-full max-w-4xl mx-auto py-1 overflow-x-auto no-scrollbar">
           {videoData.configs.map((cfg, idx) => {
             const stepInfo = videoData.steps[cfg.id];
             const isCompleted = !!stepInfo?.completed;
-            const isSelected = cfg.id === selectedVideoStep;
+            const isSelected = cfg.id === selectedVideoStepId;
             const StepIcon = cfg.icon;
 
             const isStepReDraftReq = cfg.id === 'draft' && videoData.isReDraftRequired;
@@ -3620,7 +3608,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             }
 
             const handleNodeClick = () => {
-              setSelectedVideoStep(cfg.id);
+              setSelectedVideoStepId(cfg.id);
               onStepChange?.(cfg.id);
             };
 
@@ -3675,8 +3663,8 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             </div>
             <div>
               <h4 className="text-base font-bold text-white leading-none">
-                Step {videoData.configs.findIndex(c => c.id === selectedVideoStep) + 1}: {
-                  selectedVideoStep === 'timeline' && (activeStepState.data?.is_re_upload_timeline === true || !!activeStepState.data?.re_draft_submit_date)
+                Step {videoData.configs.findIndex(c => c.id === selectedVideoStepId) + 1}: {
+                  selectedVideoStepId === 'timeline' && (activeStepState.data?.is_re_upload_timeline === true || !!activeStepState.data?.re_draft_submit_date)
                     ? 'Re-Upload Timeline'
                     : activeStepConfig.label
                 }
@@ -3744,7 +3732,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               existingData={activeStepState.data}
               onSave={async (formData: any, completed: boolean) => { await onSaveStep('draft', formData, completed); }} 
               onNavigateToPostDate={() => {
-                setSelectedVideoStep('post_date');
+                setSelectedVideoStepId('post_date');
                 onStepChange?.('post_date');
               }}
             />
