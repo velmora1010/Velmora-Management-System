@@ -2268,6 +2268,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             onBack={handleBackFromDetail}
             onSwitchVideo={(num) => handleSwitchVideo(selectedRecord.id, num)}
             onSaveStep={(stepId, data, completed) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed)}
+            onStepChange={(stepId) => {
+              setSelectedVideoStep(stepId);
+              setSelectedVideo(prev => prev ? { ...prev, stepId } : null);
+              setSearchParams(prev => {
+                const next = new URLSearchParams(prev);
+                next.set('stStep', stepId);
+                return next;
+              }, { replace: true });
+            }}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center min-h-[400px] text-slate-400">
@@ -3383,6 +3392,7 @@ interface VideoDetailViewProps {
   onBack: () => void;
   onSwitchVideo: (num: number) => void;
   onSaveStep: (stepId: string, data: any, completed: boolean) => Promise<{ success: boolean; error?: any } | void>;
+  onStepChange?: (stepId: string) => void;
 }
 
 const VideoDetailView: React.FC<VideoDetailViewProps> = ({
@@ -3391,7 +3401,8 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   initialStepId,
   onBack,
   onSwitchVideo,
-  onSaveStep
+  onSaveStep,
+  onStepChange
 }) => {
   const dispatch = record.dispatch || ({} as any);
   const rawCode = dispatch.influencer_code || record.influencer_id;
@@ -3423,10 +3434,24 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
   const currentVideoPrice = useMemo(() => getInfluencerVideoPrice(record.influencer, videoNumber), [record.influencer, videoNumber]);
 
-  // Sync selected step if videoNumber or initialStepId changes
+  // Track parent videoNumber and initialStepId to avoid resetting on record updates/saves
+  const prevVideoNumRef = useRef(videoNumber);
+  const prevInitialStepRef = useRef(initialStepId);
+
   useEffect(() => {
-    setSelectedVideoStep(resolveInitialStep(initialStepId));
+    if (prevVideoNumRef.current !== videoNumber || prevInitialStepRef.current !== initialStepId) {
+      prevVideoNumRef.current = videoNumber;
+      prevInitialStepRef.current = initialStepId;
+      setSelectedVideoStep(resolveInitialStep(initialStepId));
+    }
   }, [videoNumber, initialStepId, resolveInitialStep]);
+
+  // Fallback if current step is invalid for current video configuration
+  useEffect(() => {
+    if (!videoData.configs.some(c => c.id === selectedVideoStep)) {
+      setSelectedVideoStep(resolveInitialStep(initialStepId));
+    }
+  }, [videoData.configs, selectedVideoStep, initialStepId, resolveInitialStep]);
 
   const activeStepConfig = videoData.configs.find(c => c.id === selectedVideoStep) || videoData.configs[0];
   const activeStepState = videoData.steps[selectedVideoStep] || { completed: false, data: {} };
@@ -3596,6 +3621,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
             const handleNodeClick = () => {
               setSelectedVideoStep(cfg.id);
+              onStepChange?.(cfg.id);
             };
 
             return (
@@ -3640,7 +3666,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
         </div>
       </div>
 
-      {/* 3. ACTIVE STEP INTERACTIVE WORKFLOW PANEL */}
+      {/* 3. ACTIVE STEP INTERACTIVE WORKFLOW PANEL - ONLY activeStepConfig is rendered */}
       <div className="flex-1 min-h-0 bg-[#0b1329] border border-slate-800 border-t-2 border-t-blue-500/80 rounded-2xl p-5 overflow-y-auto shadow-md [scrollbar-color:#334155_transparent] [scrollbar-width:thin]">
         <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
           <div className="flex items-center gap-3">
@@ -3671,9 +3697,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
           </span>
         </div>
 
-        {/* Step Component Form */}
+        {/* Step Component Form - Exclusively renders the active step */}
         <div>
-          {selectedVideoStep === 'call_explain' && (
+          {activeStepConfig?.id === 'call_explain' && (
             <CallExplainForm 
               record={record} 
               existingData={activeStepState.data}
@@ -3681,7 +3707,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {selectedVideoStep === 'share_script' && (
+          {activeStepConfig?.id === 'share_script' && (
             <ShareScriptForm 
               key={`v-${videoNumber}-share-script-${record.id}`}
               record={record} 
@@ -3691,7 +3717,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {selectedVideoStep === 'pay_advance' && (
+          {activeStepConfig?.id === 'pay_advance' && (
             <PayAdvanceForm 
               key={`v1-pay-advance-${record.id}`}
               videoNumber={1}
@@ -3701,7 +3727,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {selectedVideoStep === 'timeline' && (
+          {activeStepConfig?.id === 'timeline' && (
             <ExpectedTimelineForm 
               record={record} 
               videoNumber={videoNumber}
@@ -3711,27 +3737,30 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {selectedVideoStep === 'draft' && (
+          {activeStepConfig?.id === 'draft' && (
             <DraftForm 
               record={record} 
               videoNumber={videoNumber}
               existingData={activeStepState.data}
               onSave={async (formData: any, completed: boolean) => { await onSaveStep('draft', formData, completed); }} 
-              onNavigateToPostDate={() => setSelectedVideoStep('post_date')}
+              onNavigateToPostDate={() => {
+                setSelectedVideoStep('post_date');
+                onStepChange?.('post_date');
+              }}
             />
           )}
 
-          {selectedVideoStep === 'post_date' && (
+          {activeStepConfig?.id === 'post_date' && (
             <VideoPostForm 
               key={`v-${videoNumber}-post-form-${record.id}`}
               videoNumber={videoNumber}
-              record={record}
+              record={record} 
               existingData={activeStepState.data}
               onSave={(formData: any, completed?: boolean) => onSaveStep('post_date', formData, completed !== undefined ? completed : formData.confirmed_live)}
             />
           )}
 
-          {selectedVideoStep === 'payment' && (
+          {activeStepConfig?.id === 'payment' && (
             <VideoPaymentForm 
               key={`v-${videoNumber}-payment-${record.id}`}
               videoNumber={videoNumber}
