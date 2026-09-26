@@ -3578,83 +3578,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
         </div>
       </div>
 
-      {/* 2. LEVEL 2 WORKFLOW SUB-STEP NAVIGATION BAR */}
-      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl px-5 py-3 shrink-0 shadow-md">
-        {/* Horizontal Step Stepper */}
-        <div className="flex items-center justify-between w-full max-w-4xl mx-auto py-1 overflow-x-auto no-scrollbar">
-          {videoData.configs.map((cfg, idx) => {
-            const stepInfo = videoData.steps[cfg.id];
-            const isCompleted = !!stepInfo?.completed;
-            const isSelected = cfg.id === selectedVideoStepId;
-            const StepIcon = cfg.icon;
-
-            const isStepReDraftReq = cfg.id === 'draft' && videoData.isReDraftRequired;
-
-            const nextStepCompleted = idx < videoData.configs.length - 1 && !!videoData.steps[videoData.configs[idx + 1].id]?.completed;
-            const isLineActive = isCompleted && nextStepCompleted;
-
-            let circleStyle = "bg-[#070c18] text-slate-400 border border-slate-700/80 group-hover:border-slate-500 group-hover:text-slate-200 group-hover:scale-105";
-            let labelStyle = "text-slate-400 group-hover:text-slate-200";
-
-            if (isSelected) {
-              circleStyle = "bg-blue-600 text-white shadow-[0_0_18px_rgba(37,99,235,0.7)] ring-4 ring-blue-500/30 border border-blue-400 scale-105";
-              labelStyle = "text-blue-400 font-bold";
-            } else if (isCompleted) {
-              circleStyle = "bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 group-hover:scale-105";
-              labelStyle = "text-emerald-400 font-bold";
-            } else if (isStepReDraftReq) {
-              circleStyle = "bg-amber-950/80 text-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.6)] border border-amber-500 ring-2 ring-amber-500/40 animate-pulse group-hover:scale-105";
-              labelStyle = "text-amber-400 font-bold";
-            }
-
-            const handleNodeClick = () => {
-              setSelectedVideoStepId(cfg.id);
-              onStepChange?.(cfg.id);
-            };
-
-            return (
-              <React.Fragment key={cfg.id}>
-                {/* Step Node */}
-                <div 
-                  onClick={handleNodeClick}
-                  className="flex flex-col items-center group select-none relative cursor-pointer"
-                  title={`Click to open: ${cfg.label}${isCompleted ? ' (Completed)' : ''}`}
-                >
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 z-10 ${circleStyle}`}>
-                    {isCompleted && !isSelected ? (
-                      <Check size={18} strokeWidth={3} className="text-white" />
-                    ) : (
-                      <StepIcon size={17} />
-                    )}
-                  </div>
-                  <span className={`text-[11px] text-center w-20 leading-tight mt-2 transition-colors ${labelStyle}`}>
-                    {cfg.id === 'timeline' && (stepInfo?.data?.is_re_upload_timeline === true || !!stepInfo?.data?.re_draft_submit_date)
-                      ? 'Re-Upload Timeline'
-                      : cfg.shortLabel}
-                  </span>
-                  {isStepReDraftReq && (
-                    <span className="text-[8px] font-bold text-amber-400 bg-amber-950/80 px-1 rounded -mt-0.5">
-                      Re-Draft
-                    </span>
-                  )}
-                  {isSelected && (
-                    <div className="absolute -bottom-2 w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_#60a5fa]"></div>
-                  )}
-                </div>
-
-                {/* Connecting Line */}
-                {idx !== videoData.configs.length - 1 && (
-                  <div className="flex-1 h-[2px] mx-2 -mt-6 transition-colors duration-300">
-                    <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : isCompleted ? 'bg-blue-500/60' : 'bg-slate-800'}`} />
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 3. ACTIVE STEP INTERACTIVE WORKFLOW PANEL - ONLY activeStepConfig is rendered */}
+      {/* 2. ACTIVE STEP FOCUSED WORKFLOW PANEL - Exclusively renders ONLY the selected step */}
       <div className="flex-1 min-h-0 bg-[#0b1329] border border-slate-800 border-t-2 border-t-blue-500/80 rounded-2xl p-5 overflow-y-auto shadow-md [scrollbar-color:#334155_transparent] [scrollbar-width:thin]">
         <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
           <div className="flex items-center gap-3">
@@ -4342,12 +4266,14 @@ const CallExplainForm = ({ record, existingData = {}, onSave }: any) => {
   );
 
   const handleSave = async () => {
+    setCallExplained(true);
     await onSave({
-      call_explained: callExplained,
+      call_explained: true,
       call_notes: callNotes,
       call_datetime: callDatetime ? new Date(callDatetime).toISOString() : new Date().toISOString(),
       phone_called: phoneCalled
     });
+    toast.success('Call & Explain confirmed successfully');
   };
 
   return (
@@ -4399,9 +4325,10 @@ const CallExplainForm = ({ record, existingData = {}, onSave }: any) => {
       <div className="flex justify-end pt-2 border-t border-slate-800">
         <button 
           onClick={handleSave} 
-          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer"
         >
-          Save Call Details
+          <Check size={16} strokeWidth={2.5} />
+          <span>CONFIRM CALL & EXPLAIN</span>
         </button>
       </div>
     </div>
@@ -4616,9 +4543,10 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
     setIsSaving(true);
     try {
       const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
+      setScriptShared(true);
       await onSave({ 
-        reference_video_received: scriptShared,
-        script_shared: scriptShared,
+        reference_video_received: true,
+        script_shared: true,
         concept: finalConcept, 
         product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
         hooks: hooks || '',
@@ -4628,7 +4556,7 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
         link: existingData.link || '', 
         reference_videos_list: existingData.reference_videos_list || []
       });
-      toast.success('Script details saved successfully');
+      toast.success('Share Script confirmed successfully');
     } catch (err: any) {
       console.error('Error saving script details:', err);
       toast.error('Failed to save script details: ' + (err?.message || err));
@@ -4895,10 +4823,13 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
           {isSaving ? (
             <>
               <Loader2 size={16} className="animate-spin" />
-              <span>Saving...</span>
+              <span>Confirming...</span>
             </>
           ) : (
-            <span>Save Script Details</span>
+            <>
+              <Check size={16} strokeWidth={2.5} />
+              <span>CONFIRM SHARE SCRIPT</span>
+            </>
           )}
         </button>
       </div>
@@ -5019,6 +4950,7 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
     });
     setIsUploading(false);
     await loadTransactions();
+    toast.success('Pay Advance confirmed successfully');
   };
 
   return (
@@ -5128,9 +5060,19 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
         <button 
           onClick={handleSave} 
           disabled={isUploading}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer"
         >
-          {isUploading ? 'Saving...' : 'Save Advance Details'}
+          {isUploading ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>Confirming...</span>
+            </>
+          ) : (
+            <>
+              <Check size={16} strokeWidth={2.5} />
+              <span>CONFIRM PAY ADVANCE</span>
+            </>
+          )}
         </button>
       </div>
     </div>
@@ -5581,9 +5523,10 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
       <div className="flex justify-end pt-2 border-t border-slate-800">
         <button 
           onClick={handleSaveTimeline} 
-          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20"
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer"
         >
-          {isReUploadTimeline ? 'Save Re-Upload Timeline' : 'Save Timeline'}
+          <Check size={16} strokeWidth={2.5} />
+          <span>{isReUploadTimeline ? 'CONFIRM RE-UPLOAD TIME LINE' : 'CONFIRM TIME LINE'}</span>
         </button>
       </div>
     </div>
@@ -6304,9 +6247,19 @@ const DraftForm: React.FC<DraftFormProps> = ({
             <button 
               onClick={handleSaveApproval} 
               disabled={isUploading}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20"
+              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer"
             >
-              {isUploading ? 'Saving...' : 'Save Draft Details'}
+              {isUploading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Confirming...</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} strokeWidth={2.5} />
+                  <span>CONFIRM DRAFT</span>
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -6930,14 +6883,19 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
             type="button"
             onClick={handleSaveLiveDetails} 
             disabled={isSavingLiveDetails}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2"
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer"
           >
-            {isSavingLiveDetails && <Loader2 size={16} className="animate-spin text-white" />}
-            <span>
-              {isSavingLiveDetails 
-                ? `Saving Video ${videoNumber} Post Date...` 
-                : `Save Video ${videoNumber} Post Date`}
-            </span>
+            {isSavingLiveDetails ? (
+              <>
+                <Loader2 size={16} className="animate-spin text-white" />
+                <span>Confirming Video {videoNumber} Post Date...</span>
+              </>
+            ) : (
+              <>
+                <Check size={16} strokeWidth={2.5} />
+                <span>CONFIRM POST DATE</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -7061,6 +7019,7 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
     });
     setIsUploading(false);
     await loadTransactions();
+    toast.success(`Video ${videoNumber} Payment confirmed successfully!`);
   };
 
   return (
@@ -7139,9 +7098,19 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
         <button 
           onClick={handleSave} 
           disabled={isUploading}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-emerald-500/20"
+          className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer"
         >
-          {isUploading ? 'Saving...' : `Save Video ${videoNumber} Payment`}
+          {isUploading ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>Confirming...</span>
+            </>
+          ) : (
+            <>
+              <Check size={16} strokeWidth={2.5} />
+              <span>CONFIRM PAYMENT</span>
+            </>
+          )}
         </button>
       </div>
     </div>
