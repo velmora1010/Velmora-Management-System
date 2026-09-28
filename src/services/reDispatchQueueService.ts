@@ -24,6 +24,7 @@ export interface ReDispatchQueueItem {
   status_display: string;
   tracking_url?: string | null;
   profile_photo_url?: string;
+  current_logistics_stage?: 'active' | 'prepare_dispatch' | 'dispatched';
 }
 
 export function formatQueueDate(rawDate?: string | null): string {
@@ -49,7 +50,8 @@ export function cleanCode(code?: string | null): string {
 export const reDispatchQueueService = {
   /**
    * Fetches all Re-Dispatch queue records dynamically from the database
-   * using the exact same workflow criteria as Status Tracking.
+   * using the exact same workflow criteria as Status Tracking and automatically
+   * reconciles records based on current logistics location and workflow history.
    */
   async fetchQueueItems(campaignId: string | number): Promise<ReDispatchQueueItem[]> {
     const cId = String(campaignId).trim();
@@ -59,8 +61,8 @@ export const reDispatchQueueService = {
       const numCampId = Number(cId);
       const campQuery = !isNaN(numCampId) ? numCampId : cId;
 
-      // 1. Fetch Status Tracking rows, Dispatch Details, Influencer Info & Shipment Attempts in parallel
-      const [stRes, dispRes, infoRes, attemptsRes] = await Promise.all([
+      // 1. Fetch Status Tracking rows, Dispatch Details, Influencer Info, Shipment Attempts & Dispatch Batches in parallel
+      const [stRes, dispRes, infoRes, attemptsRes, batchesRes] = await Promise.all([
         supabaseAdmin
           .from(SUPABASE_TABLES.influencerStatus)
           .select('id, influencer_id, dispatch_id, status, notes, updated_at, created_at')
@@ -76,13 +78,19 @@ export const reDispatchQueueService = {
         supabaseAdmin
           .from(SUPABASE_TABLES.shipmentAttempts)
           .select('*')
-          .eq('campaign_id', cId)
+          .eq('campaign_id', cId),
+        supabaseAdmin
+          .from('system_settings')
+          .select('setting_value')
+          .eq('setting_key', `influencer_dispatch_batches_${cId}`)
+          .maybeSingle()
       ]);
 
       const stRecords = (stRes.data || []) as any[];
       const dispatches = (dispRes.data || []) as any[];
       const infos = (infoRes.data || []) as any[];
       const attempts = (attemptsRes.data || []) as any[];
+      const batches = (batchesRes.data?.setting_value || []) as any[];
 
       // Index info and dispatch by influencer_id
       const infoMap = new Map<string, any>();
@@ -102,10 +110,20 @@ export const reDispatchQueueService = {
         attemptsByInf.get(k)!.push(a);
       });
 
+      // Index batches by influencer_id
+      const batchMap = new Map<string, any[]>();
+      batches.forEach(b => {
+        (b.members || []).forEach((m: any) => {
+          const k = String(m.influencer_id);
+          if (!batchMap.has(k)) batchMap.set(k, []);
+          batchMap.get(k)!.push(b);
+        });
+      });
+
       const items: ReDispatchQueueItem[] = [];
       const seenInfluencerIds = new Set<string>();
 
-      // 2. Identify Re-Dispatch records from Status Tracking (primary source of truth for the 39 records)
+      // 2. Identify and reconcile Re-Dispatch records
       stRecords.forEach(st => {
         let meta: any = {};
         try {
@@ -122,37 +140,35 @@ export const reDispatchQueueService = {
         const rawStatus = (st.status || '').toLowerCase();
         const disp = dispMap.get(String(st.influencer_id));
         const dispStatus = (disp?.dispatch_status || '').toLowerCase();
+        const dispRemarks = (disp?.remarks || '').toLowerCase();
         const infAttempts = attemptsByInf.get(String(st.influencer_id)) || [];
         const hasIssueAttempt = infAttempts.some(a => a.issue_reported === true);
 
-        // Persistent Re-Dispatch lifecycle state determination:
-        // MOVED_TO_ACTIVE: Influencer was approved/moved to Active for replacement
-        const isMovedToActive = Boolean(
-          meta.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
-          meta.re_dispatch_moved_to_active === true ||
-          meta.moved_to_active === true ||
-          rawStatus.includes('re-dispatch (active)')
-        );
+        const infIdStr = String(st.influencer_id);
+        const memberBatches = batchMap.get(infIdStr) || [];
+        const isInPrepareBatch = memberBatches.some((b: any) => b.status === 'Preparing' || b.status === 'Pending');
 
-        // PENDING_REDISPATCH: Awaiting review/move to Active
-        const isPendingReDispatch = Boolean(
+        // Check if item has ever entered the Re-Dispatch lifecycle
+        const isCandidate = Boolean(
+          meta.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
           meta.redispatch_lifecycle_status === 'PENDING_REDISPATCH' ||
+          meta.re_dispatch_moved_to_active === true ||
           meta.re_dispatch_required === true ||
-          rawStatus.includes('re-dispatch required') ||
-          rawStatus === 're-dispatch' ||
-          rawStatus === 'redispatch' ||
+          rawStatus.includes('re-dispatch') ||
+          rawStatus.includes('redispatch') ||
           dispStatus.includes('re_dispatch') ||
           dispStatus.includes('redispatch') ||
+          dispRemarks.includes('moved to active') ||
+          dispRemarks.includes('issue reported') ||
           meta.shipment_issue ||
           meta.issue_reported ||
           hasIssueAttempt
         );
 
-        if (!isMovedToActive && !isPendingReDispatch) {
+        if (!isCandidate) {
           return;
         }
 
-        const infIdStr = String(st.influencer_id);
         seenInfluencerIds.add(infIdStr);
 
         const inf = infoMap.get(infIdStr);
@@ -160,6 +176,46 @@ export const reDispatchQueueService = {
         if (inf && (inf.is_archived === true || inf.is_archived === 'true' || inf.is_archived === 1 || inf.is_archived === '1')) {
           return;
         }
+
+        // Core Workflow Reconciliation Rules:
+        // Case B & C:
+        // 1. Explicitly marked MOVED_TO_ACTIVE or re_dispatch_moved_to_active
+        // 2. Status is 'Re-Dispatch (Active)'
+        // 3. Dispatch status is 're_dispatch' or remarks says 'Moved to Active for Re-Dispatch'
+        // 4. Progressed beyond Active into Prepare Dispatch (e.g. KAS151)
+        const isMovedToActive = Boolean(
+          meta.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
+          meta.re_dispatch_moved_to_active === true ||
+          meta.moved_to_active === true ||
+          rawStatus.includes('re-dispatch (active)') ||
+          dispStatus === 're_dispatch' ||
+          dispRemarks.includes('moved to active') ||
+          (dispStatus === 'prepare_dispatch' && (meta.re_dispatch_required || meta.issue_reported)) ||
+          (isInPrepareBatch && (meta.re_dispatch_required || meta.issue_reported))
+        );
+
+        // Auto-reconcile and persist in database if status in DB was out-of-sync
+        if (isMovedToActive && (meta.redispatch_lifecycle_status !== 'MOVED_TO_ACTIVE' || !meta.re_dispatch_moved_to_active)) {
+          meta.redispatch_lifecycle_status = 'MOVED_TO_ACTIVE';
+          meta.re_dispatch_moved_to_active = true;
+          meta.re_dispatch_required = false;
+          meta.moved_to_active_at = meta.moved_to_active_at || new Date().toISOString();
+          meta.last_updated = new Date().toISOString();
+
+          supabaseAdmin
+            .from(SUPABASE_TABLES.influencerStatus)
+            .update({
+              status: 'Re-Dispatch (Active)',
+              notes: JSON.stringify(meta),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', st.id)
+            .then(() => {});
+        }
+
+        const currentStage: 'active' | 'prepare_dispatch' | 'dispatched' =
+          (dispStatus === 'prepare_dispatch' || isInPrepareBatch) ? 'prepare_dispatch' :
+          (dispStatus === 'dispatched' || dispStatus === 'tracking') ? 'dispatched' : 'active';
 
         const latestAttempt = infAttempts[infAttempts.length - 1];
 
@@ -220,7 +276,8 @@ export const reDispatchQueueService = {
           status: isMovedToActive ? 'moved_to_active' : 'pending',
           status_display: isMovedToActive ? 'Moved to Active' : 'Pending Re-Dispatch',
           tracking_url: trackingUrl,
-          profile_photo_url: avatarUrl
+          profile_photo_url: avatarUrl,
+          current_logistics_stage: currentStage
         });
       });
 
@@ -231,6 +288,37 @@ export const reDispatchQueueService = {
     } catch (err) {
       console.error('Error fetching Re-Dispatch queue items:', err);
       return [];
+    }
+  },
+
+  /**
+   * One-time or on-demand reconciliation of ALL Re-Dispatch records across the campaign.
+   * Examines current logistics location, identifies influencers who have progressed beyond Active,
+   * and persists their lifecycle status into the database.
+   */
+  async reconcileAllQueueRecords(campaignId: string | number): Promise<{
+    success: boolean;
+    total: number;
+    pendingCount: number;
+    movedCount: number;
+  }> {
+    const cId = String(campaignId).trim();
+    if (!cId) return { success: false, total: 0, pendingCount: 0, movedCount: 0 };
+
+    try {
+      const items = await this.fetchQueueItems(campaignId);
+      const pendingCount = items.filter(i => i.status === 'pending').length;
+      const movedCount = items.filter(i => i.status === 'moved_to_active').length;
+
+      return {
+        success: true,
+        total: items.length,
+        pendingCount,
+        movedCount
+      };
+    } catch (e: any) {
+      console.error('Error in reconcileAllQueueRecords:', e);
+      return { success: false, total: 0, pendingCount: 0, movedCount: 0 };
     }
   },
 

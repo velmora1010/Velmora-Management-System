@@ -69,6 +69,53 @@ export const logisticsWorkflowService = {
         }
       }
 
+      // 2b. Preserve and ensure Re-Dispatch lifecycle status is maintained when transitioning to Prepare Dispatch
+      try {
+        const infIds = selectedInfluencers.map(inf => isNaN(Number(inf.id)) ? inf.id : Number(inf.id));
+        const { data: stRows } = await supabase
+          .from(SUPABASE_TABLES.influencerStatus)
+          .select('id, influencer_id, notes, status')
+          .eq('campaign_id', numericCampaignId)
+          .in('influencer_id', infIds);
+
+        if (stRows && stRows.length > 0) {
+          for (const st of stRows) {
+            let meta: any = {};
+            try {
+              meta = typeof st.notes === 'string' ? JSON.parse(st.notes || '{}') : (st.notes || {});
+            } catch (e) {
+              meta = {};
+            }
+
+            const rawStatus = (st.status || '').toLowerCase();
+            const isReDispatch = Boolean(
+              meta.re_dispatch_moved_to_active ||
+              meta.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
+              rawStatus.includes('re-dispatch')
+            );
+
+            if (isReDispatch) {
+              meta.redispatch_lifecycle_status = 'MOVED_TO_ACTIVE';
+              meta.re_dispatch_moved_to_active = true;
+              meta.re_dispatch_required = false;
+              meta.current_logistics_stage = 'prepare_dispatch';
+              meta.last_updated = now.toISOString();
+
+              await supabase
+                .from(SUPABASE_TABLES.influencerStatus)
+                .update({
+                  status: 'Re-Dispatch (Active)',
+                  notes: JSON.stringify(meta),
+                  updated_at: now.toISOString()
+                })
+                .eq('id', st.id);
+            }
+          }
+        }
+      } catch (stErr) {
+        console.warn('Non-fatal: could not sync Re-Dispatch status in status tracking:', stErr);
+      }
+
       // 3. Influencers needing a new row in influencer_dispatch_details_rows
       const toInsertInfluencers = selectedInfluencers.filter(inf => !existingMap.has(String(inf.id)));
 
