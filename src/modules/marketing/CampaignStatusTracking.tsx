@@ -88,7 +88,7 @@ export interface VideoStepConfig {
   icon: any;
 }
 
-// Video 1 Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date
+// Video 1 Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date -> Payment
 export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
@@ -96,34 +96,39 @@ export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
+  { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
 
-// Videos 2 through N Steps: Share Script -> Call & Explain -> Time Line -> Draft -> Post Date -> Payment
+// Videos 2 through N Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date -> Payment
 export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
+  { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: IndianRupee },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
 
-// 7 Top Workflow Summary Box Step Definitions: Share Script, Call & Explain, Pay Advance, Time Line, Draft, Post Date, Payment
+// Top Workflow Summary Box Step Definitions (10 steps + All = 11 single-line summary boxes)
 export interface WorkflowSummaryBoxConfig {
   id: string;
   label: string;
+  shortLabel?: string;
   icon: any;
 }
 
 export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
-  { id: 'share_script', label: 'Share Script', icon: FileText },
-  { id: 'call_explain', label: 'Call & Explain', icon: PhoneCall },
-  { id: 'pay_advance', label: 'Pay Advance', icon: CreditCard },
-  { id: 'timeline', label: 'Time Line', icon: Clock },
-  { id: 'draft', label: 'Draft', icon: Video },
-  { id: 'post_date', label: 'Post Date', icon: Calendar },
-  { id: 'payment', label: 'Payment', icon: IndianRupee },
-  { id: 're_dispatch', label: 'Re-Dispatch', icon: RotateCcw },
+  { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
+  { id: 'not_started', label: 'Not Started', shortLabel: 'Not Started', icon: Clock },
+  { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
+  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: PhoneCall },
+  { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: CreditCard },
+  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
+  { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
+  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
+  { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
+  { id: 're_dispatch', label: 'Re-Dispatch', shortLabel: 'Re-Dispatch', icon: RotateCcw },
 ];
 
 const isFakeUrl = (url: string | undefined | null) => {
@@ -619,7 +624,7 @@ export interface VideoWorkflowData {
   draftStatus: 'Approved' | 'Not Approved' | 'Pending Approval' | 'Not Started';
 }
 
-export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number): VideoWorkflowData => {
+export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number, depth = 0): VideoWorkflowData => {
   const configs = videoNum === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
   let metadata: any = {};
   try {
@@ -1012,19 +1017,23 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
   const completedCount = configs.filter(c => steps[c.id]?.completed).length;
   const totalSteps = configs.length;
 
+  const isStarted = depth > 0 ? isDelivered : isInfluencerVideoStarted(record, videoNum);
+
   let status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' = 'NOT_STARTED';
-  if (!isDelivered || !isAssigned) {
+  if (!isDelivered || !isAssigned || !isStarted) {
     status = 'NOT_STARTED';
   } else if (completedCount === totalSteps) {
     status = 'COMPLETED';
   } else if (completedCount > 0 || isReDraftRequired) {
     status = 'IN_PROGRESS';
+  } else {
+    status = 'NOT_STARTED';
   }
 
   // Active step calculation:
-  // If delivery is not completed or influencer not assigned to this video, no step in this video is active yet
+  // If delivery is not completed, influencer not assigned, or video not started, no step in this video is active yet
   let activeStepId = '';
-  if (!isDelivered || !isAssigned) {
+  if (!isDelivered || !isAssigned || !isStarted) {
     activeStepId = '';
   } else if (isReDraftRequired) {
     activeStepId = 'draft';
@@ -1049,11 +1058,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
 };
 
 /**
- * Resolves the single active summary workflow step for an influencer in a given video number:
- * One of: 'share_script' | 'call_explain' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment' | 're_dispatch' | null
+ * Checks if influencer is currently marked for Re-Dispatch (reported issue / package return)
  */
-export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, videoNumber: number): string | null => {
-  // 1. Check if influencer has a reported issue or requires Re-Dispatch
+export const isInfluencerInReDispatch = (record: StatusTrackingRecord): boolean => {
   let metadata: any = {};
   try {
     metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
@@ -1062,7 +1069,7 @@ export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, vid
   }
   const rawStatus = (record.status || '').toLowerCase();
   const dispatchStatus = ((record.dispatch as any)?.dispatch_status || '').toLowerCase();
-  const isReDispatch = Boolean(
+  return Boolean(
     rawStatus.includes('re-dispatch') ||
     rawStatus.includes('redispatch') ||
     dispatchStatus.includes('re_dispatch') ||
@@ -1071,25 +1078,84 @@ export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, vid
     metadata.shipment_issue ||
     metadata.issue_reported
   );
+};
 
-  if (isReDispatch) {
+/**
+ * Determines whether a specific video workflow has been started for an influencer.
+ * Video 1 starts once delivery confirmation is completed.
+ * Videos 2-6 start once prior video is fully completed OR explicit progress exists in that video.
+ */
+export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum: number): boolean => {
+  if (videoNum === 1) {
+    return isDeliveryStepCompleted(record);
+  }
+
+  // 1. Explicit Video N script
+  const vScript = (record.videoScripts || []).find((vs: any) => Number(vs.video_number) === videoNum);
+  if (vScript && (vScript.script_shared_approved || vScript.proposed_script || vScript.custom_concept || vScript.voice_record_url)) {
+    return true;
+  }
+
+  // 2. Explicit Video N payment
+  const vPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === videoNum);
+  if (vPayment && (vPayment.payment_status === 'paid' || Number(vPayment.paid_amount || 0) > 0)) {
+    return true;
+  }
+
+  // 3. Explicit Video N post/draft dates
+  const vPostDate = (record.postDates || []).find((pd: any) => Number(pd.video_number) === videoNum);
+  if (vPostDate && (vPostDate.post_date || vPostDate.draft_date)) {
+    return true;
+  }
+
+  // 4. Notes metadata
+  let metadata: any = {};
+  try {
+    metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+  } catch (e) {}
+
+  const storedVideo = metadata.videos?.[String(videoNum)] || metadata.videos?.[videoNum];
+  if (storedVideo?.steps) {
+    const hasAnyStep = Object.values(storedVideo.steps).some((st: any) => st?.completed || st?.data?.script || st?.data?.concept || st?.data?.date || st?.data?.vid);
+    if (hasAnyStep) return true;
+  }
+
+  // 5. Prior video (videoNum - 1) is fully completed
+  const prevWorkflow = getVideoWorkflow(record, videoNum - 1, 1);
+  if (prevWorkflow.completedCount === prevWorkflow.totalSteps && prevWorkflow.totalSteps > 0) {
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * Resolves the single active summary workflow step for an influencer in a given video number:
+ * One of: 'delivered' | 'not_started' | 'share_script' | 'call_explain' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment' | 're_dispatch' | null
+ */
+export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, videoNumber: number): string | null => {
+  // 1. Check if influencer has a reported issue or requires Re-Dispatch
+  if (isInfluencerInReDispatch(record)) {
     return 're_dispatch';
   }
 
-  // 2. Normal video workflow steps
-  if (!isDeliveryStepCompleted(record)) return null;
+  // 2. If delivery is not completed for Video 1, it's not started
+  if (videoNumber === 1 && !isDeliveryStepCompleted(record)) {
+    return 'not_started';
+  }
+
+  // 3. For Video 2-6, if workflow has not started, it's not started
+  if (videoNumber > 1 && !isInfluencerVideoStarted(record, videoNumber)) {
+    return 'not_started';
+  }
+
+  // 4. Normal video workflow steps
   const vData = getVideoWorkflow(record, videoNumber);
   if (vData.isReDraftRequired) return 'draft';
   if (vData.activeStepId) {
     return vData.activeStepId;
   }
-  if (videoNumber === 1 && vData.completedCount === vData.totalSteps) {
-    const v1FinalPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'final');
-    const isV1FinalPaid = v1FinalPayment ? (v1FinalPayment.payment_status === 'paid' || Number(v1FinalPayment.paid_amount || 0) > 0) : false;
-    if (!isV1FinalPaid) {
-      return 'payment';
-    }
-  }
+
   return null;
 };
 
@@ -1442,9 +1508,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     return activeTrackingRecords.filter(record => {
       const dispatch = record.dispatch || ({} as any);
 
+      // Restrict to influencers participating in the currently selected video
+      const assignedVideos = getInfluencerAssignedVideos(record);
+      if (!assignedVideos.includes(selectedVideoNumber)) return false;
+
       // 1. Video filter (OR within section)
       if (activeFilters.videos.length > 0) {
-        const assignedVideos = getInfluencerAssignedVideos(record);
         const matchesVideo = activeFilters.videos.some(v => assignedVideos.includes(v));
         if (!matchesVideo) return false;
       }
@@ -1538,20 +1607,50 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matches) return false;
       }
 
-      // 9. Top summary step box filter (Share Script, Call & Explain, Pay Advance, Time Line, Draft, Post Date, Payment)
+      // 9. Top summary step box filter (All, Delivered, Not Started, Share Script, Call & Explain, Pay Advance, Time Line, Draft, Post Date, Payment, Re-Dispatch)
       if (selectedSummaryStep) {
-        const step = getInfluencerActiveSummaryStep(record, selectedVideoNumber);
-        if (step !== selectedSummaryStep) return false;
+        if (selectedSummaryStep === 'delivered') {
+          if (selectedVideoNumber === 1) {
+            if (!isDeliveryStepCompleted(record)) return false;
+          } else {
+            return false;
+          }
+        } else if (selectedSummaryStep === 'not_started') {
+          if (isInfluencerInReDispatch(record)) return false;
+          if (selectedVideoNumber === 1) {
+            if (isDeliveryStepCompleted(record)) return false;
+          } else {
+            if (isInfluencerVideoStarted(record, selectedVideoNumber)) return false;
+          }
+        } else if (selectedSummaryStep === 're_dispatch') {
+          if (!isInfluencerInReDispatch(record)) return false;
+        } else {
+          const step = getInfluencerActiveSummaryStep(record, selectedVideoNumber);
+          if (step !== selectedSummaryStep) return false;
+        }
       }
 
       return true;
     });
   }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber, selectedSummaryStep]);
 
-  // Dynamic workflow step counts for horizontal summary boxes (Share Script, Call & Explain, Pay Advance, Time Line, Draft, Post Date, Payment)
+  // Reset Delivered filter automatically if user switches away from Video 1
+  useEffect(() => {
+    if (selectedVideoNumber > 1 && selectedSummaryStep === 'delivered') {
+      setSelectedSummaryStep(null);
+    }
+  }, [selectedVideoNumber, selectedSummaryStep]);
+
+  // Dynamic workflow step counts for horizontal summary boxes based on CURRENTLY SELECTED VIDEO
   const workflowStepCounts = useMemo(() => {
+    const assigned = activeTrackingRecords.filter(r => 
+      getInfluencerAssignedVideos(r).includes(selectedVideoNumber)
+    );
+
     const counts: Record<string, number> = {
-      all: activeTrackingRecords.length,
+      all: assigned.length,
+      delivered: 0,
+      not_started: 0,
       share_script: 0,
       call_explain: 0,
       pay_advance: 0,
@@ -1562,10 +1661,42 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       re_dispatch: 0
     };
 
-    activeTrackingRecords.forEach(r => {
-      const step = getInfluencerActiveSummaryStep(r, selectedVideoNumber);
-      if (step && counts[step] !== undefined) {
-        counts[step]++;
+    assigned.forEach(r => {
+      // 1. Re-Dispatch
+      const isReDispatch = isInfluencerInReDispatch(r);
+      if (isReDispatch) {
+        counts.re_dispatch++;
+        return;
+      }
+
+      // 2. Video 1 specific counts
+      if (selectedVideoNumber === 1) {
+        const isDelivered = isDeliveryStepCompleted(r);
+        if (isDelivered) {
+          counts.delivered++;
+        } else {
+          counts.not_started++;
+          return;
+        }
+
+        const step = getInfluencerActiveSummaryStep(r, 1);
+        if (step && counts[step] !== undefined) {
+          counts[step]++;
+        }
+      } else {
+        // Video 2 to 6
+        counts.delivered = 0;
+
+        const isStarted = isInfluencerVideoStarted(r, selectedVideoNumber);
+        if (!isStarted) {
+          counts.not_started++;
+          return;
+        }
+
+        const step = getInfluencerActiveSummaryStep(r, selectedVideoNumber);
+        if (step && counts[step] !== undefined) {
+          counts[step]++;
+        }
       }
     });
 
@@ -2480,35 +2611,35 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
           {/* 2. HORIZONTAL WORKFLOW STEP SUMMARY COUNT BOXES */}
           <div className="flex flex-col gap-2.5 shrink-0">
-            {/* Top: 9 Horizontal Workflow Step Summary Boxes in ONE Single Line */}
+            {/* Top: 11 Horizontal Workflow Step Summary Boxes in ONE Single Line */}
             <div className="w-full overflow-x-auto no-scrollbar pb-1">
-              <div className="grid grid-flow-col auto-cols-[minmax(112px,1fr)] xl:auto-cols-auto xl:grid-cols-9 gap-2 sm:gap-2.5 w-full min-w-[1020px] xl:min-w-0">
-                {/* All Box */}
+              <div className="grid grid-flow-col auto-cols-[minmax(105px,1fr)] xl:auto-cols-auto xl:grid-cols-11 gap-1.5 sm:gap-2 w-full min-w-[1100px] xl:min-w-0">
+                {/* 1. All Box */}
                 <button
                   type="button"
                   onClick={() => setSelectedSummaryStep(null)}
-                  className={`group relative flex flex-col justify-between p-2.5 sm:p-3 h-[74px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 ${
+                  className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 ${
                     selectedSummaryStep === null
                       ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                       : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                   }`}
                   title="View All Influencers"
                 >
-                  <div className="flex items-center justify-between gap-1.5 mb-1 w-full">
-                    <span className={`text-[11px] sm:text-xs font-semibold truncate ${
+                  <div className="flex items-center justify-between gap-1 mb-1 w-full">
+                    <span className={`text-[10.5px] sm:text-[11px] font-semibold truncate ${
                       selectedSummaryStep === null ? 'text-purple-200' : 'text-slate-300 group-hover:text-white'
                     }`}>
                       All
                     </span>
                     <Users 
-                      size={14} 
+                      size={13} 
                       className={`shrink-0 transition-colors ${
                         selectedSummaryStep === null ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-300'
                       }`} 
                     />
                   </div>
                   <div className="flex items-baseline justify-between w-full">
-                    <span className="text-lg sm:text-xl font-black text-white tracking-tight">
+                    <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
                       {workflowStepCounts.all}
                     </span>
                     {selectedSummaryStep === null && (
@@ -2517,40 +2648,59 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   </div>
                 </button>
 
-                {/* 8 Workflow Step Boxes */}
+                {/* 10 Workflow Step Boxes */}
                 {WORKFLOW_SUMMARY_BOX_CONFIGS.map(step => {
                   const isSelected = selectedSummaryStep === step.id;
-                  const count = workflowStepCounts[step.id] || 0;
+                  const isDeliveredOnVideoN = step.id === 'delivered' && selectedVideoNumber > 1;
+                  const count = isDeliveredOnVideoN ? 0 : (workflowStepCounts[step.id] || 0);
                   const StepIcon = step.icon;
 
                   return (
                     <button
                       key={step.id}
                       type="button"
-                      onClick={() => setSelectedSummaryStep(prev => prev === step.id ? null : step.id)}
-                      className={`group relative flex flex-col justify-between p-2.5 sm:p-3 h-[74px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 ${
-                        isSelected
-                          ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
-                          : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
+                      disabled={isDeliveredOnVideoN}
+                      onClick={() => {
+                        if (isDeliveredOnVideoN) return;
+                        setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
+                      }}
+                      className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 ${
+                        isDeliveredOnVideoN
+                          ? 'bg-[#090e1c]/50 border-slate-800/40 text-slate-600 cursor-not-allowed opacity-40'
+                          : isSelected
+                          ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50 cursor-pointer'
+                          : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300 cursor-pointer'
                       }`}
-                      title={`Filter by ${step.label} (${count})`}
+                      title={
+                        isDeliveredOnVideoN 
+                          ? 'Delivered is only a workflow step for Video 1' 
+                          : `Filter by ${step.label} (${count})`
+                      }
                     >
-                      <div className="flex items-center justify-between gap-1.5 mb-1 w-full">
-                        <span className={`text-[11px] sm:text-xs font-semibold truncate ${
-                          isSelected ? 'text-purple-200' : 'text-slate-300 group-hover:text-white'
+                      <div className="flex items-center justify-between gap-1 mb-1 w-full">
+                        <span className={`text-[10.5px] sm:text-[11px] font-semibold truncate ${
+                          isDeliveredOnVideoN 
+                            ? 'text-slate-600' 
+                            : isSelected 
+                            ? 'text-purple-200' 
+                            : 'text-slate-300 group-hover:text-white'
                         }`}>
-                          {step.label}
+                          {step.shortLabel || step.label}
                         </span>
                         <StepIcon 
-                          size={14} 
+                          size={13} 
                           className={`shrink-0 transition-colors ${
-                            isSelected ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-300'
+                            isDeliveredOnVideoN
+                              ? 'text-slate-700'
+                              : isSelected 
+                              ? 'text-purple-400' 
+                              : 'text-slate-500 group-hover:text-slate-300'
                           }`} 
                         />
                       </div>
                       <div className="flex items-baseline justify-between w-full">
-                        <span className="text-lg sm:text-xl font-black text-white tracking-tight">
-                          {count}
+                        <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
+                          {isDeliveredOnVideoN ? '—' : count}
                         </span>
                         {isSelected && (
                           <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
@@ -2719,57 +2869,61 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     <div className="flex-1 px-2 sm:px-3 py-1 min-w-0 w-full overflow-x-auto no-scrollbar">
                       <div className="flex items-center w-full min-w-[500px] sm:min-w-[560px]">
                         
-                        {/* 1. PREREQUISITE: DELIVERY CONFIRMATION STAGE */}
-                        {(() => {
-                          const isReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED';
-                          return (
-                            <div 
-                              className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
-                              onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
-                              title={
-                                isDelivered 
-                                  ? 'Delivery Confirmed (Click to view/edit)' 
-                                  : isReDispatch
-                                  ? 'Re-Dispatch Required (Click to review issue & attempts)'
-                                  : 'Delivery Confirmation: Not Started (Click to confirm)'
-                              }
-                            >
-                              <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${
-                                isDelivered 
-                                  ? 'bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105'
-                                  : isReDispatch
-                                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] hover:scale-105 animate-pulse'
-                                  : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
-                              }`}>
-                                {isDelivered ? (
-                                  <Check size={16} strokeWidth={2.5} className="text-white" />
-                                ) : isReDispatch ? (
-                                  <AlertTriangle size={15} className="text-amber-400" />
-                                ) : (
-                                  <Package size={15} className="text-slate-400 group-hover:text-white" />
-                                )}
-                              </div>
-                              <div className="flex flex-col items-center text-center min-w-0 mt-1.5">
-                                <span className={`text-[10.5px] sm:text-[11px] text-center leading-tight transition-colors whitespace-nowrap block ${
-                                  isDelivered 
-                                    ? 'text-emerald-400 font-semibold' 
-                                    : isReDispatch
-                                    ? 'text-amber-400 font-semibold'
-                                    : 'text-slate-400'
-                                }`}>
-                                  {isReDispatch ? 'Re-Dispatch' : 'Delivery'} {isDelivered ? '✓' : ''}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        {/* 1. PREREQUISITE: DELIVERY CONFIRMATION STAGE (Only shown for Video 1) */}
+                        {selectedVideoNumber === 1 && (
+                          <>
+                            {(() => {
+                              const isReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED';
+                              return (
+                                <div 
+                                  className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
+                                  onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
+                                  title={
+                                    isDelivered 
+                                      ? 'Delivery Confirmed (Click to view/edit)' 
+                                      : isReDispatch
+                                      ? 'Re-Dispatch Required (Click to review issue & attempts)'
+                                      : 'Delivery Confirmation: Not Started (Click to confirm)'
+                                  }
+                                >
+                                  <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${
+                                    isDelivered 
+                                      ? 'bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105'
+                                      : isReDispatch
+                                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] hover:scale-105 animate-pulse'
+                                      : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
+                                  }`}>
+                                    {isDelivered ? (
+                                      <Check size={16} strokeWidth={2.5} className="text-white" />
+                                    ) : isReDispatch ? (
+                                      <AlertTriangle size={15} className="text-amber-400" />
+                                    ) : (
+                                      <Package size={15} className="text-slate-400 group-hover:text-white" />
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col items-center text-center min-w-0 mt-1.5">
+                                    <span className={`text-[10.5px] sm:text-[11px] text-center leading-tight transition-colors whitespace-nowrap block ${
+                                      isDelivered 
+                                        ? 'text-emerald-400 font-semibold' 
+                                        : isReDispatch
+                                        ? 'text-amber-400 font-semibold'
+                                        : 'text-slate-400'
+                                    }`}>
+                                      {isReDispatch ? 'Re-Dispatch' : 'Delivered'} {isDelivered ? '✓' : ''}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })()}
 
-                        {/* Connecting Line from Delivery to First Video Sub-Step */}
-                        <div className="flex-1 min-w-[10px] sm:min-w-[16px] h-[2px] mx-1 sm:mx-1.5 -mt-5 transition-colors duration-300">
-                          <div className={`h-full w-full rounded-full ${
-                            isDelivered ? 'bg-emerald-500/80' : 'bg-slate-700/60'
-                          }`} />
-                        </div>
+                            {/* Connecting Line from Delivery to First Video Sub-Step */}
+                            <div className="flex-1 min-w-[10px] sm:min-w-[16px] h-[2px] mx-1 sm:mx-1.5 -mt-5 transition-colors duration-300">
+                              <div className={`h-full w-full rounded-full ${
+                                isDelivered ? 'bg-emerald-500/80' : 'bg-slate-700/60'
+                              }`} />
+                            </div>
+                          </>
+                        )}
 
                         {/* 2. SUB-STEPS FOR THE SELECTED VIDEO (Dynamically using currentVideoData.configs) */}
                         {currentVideoData.configs.map((cfg, idx) => {
@@ -2782,7 +2936,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-blue-500 hover:text-blue-300";
                           let labelStyle = "text-slate-400";
 
-                          if (!isDelivered) {
+                          if (!isDelivered || (currentVideoData.status === 'NOT_STARTED' && !isCurrentActive && !isCompleted)) {
                             circleStyle = "bg-[#090e1c] text-slate-600 border border-slate-800/80 opacity-60";
                             labelStyle = "text-slate-600";
                           } else if (isCompleted) {
