@@ -2042,16 +2042,16 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           <button
             type="button"
             onClick={() => setActiveFormatView(prev => prev === 'redispatch' ? 'tracking' : 'redispatch')}
-            className={`h-10 px-3.5 sm:px-4 rounded-xl transition-all text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none ${
+            className={`h-10 px-3 sm:px-3.5 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 shadow-md cursor-pointer border border-slate-700/80 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white shrink-0 select-none ${
               activeFormatView === 'redispatch'
-                ? 'bg-amber-600 text-white shadow-amber-600/40 ring-2 ring-amber-400'
-                : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
+                ? 'bg-purple-800 text-white ring-2 ring-purple-400'
+                : ''
             }`}
             title="Re-Dispatch Queue"
           >
-            <RotateCcw size={14} className="text-white" />
+            <RotateCcw size={13} className="text-purple-300" />
             <span>Re-Dispatch</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black bg-white/20 text-white border border-white/30">
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-purple-950/80 text-purple-300 border border-purple-800/60">
               {reDispatchCount}
             </span>
           </button>
@@ -2066,14 +2066,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           <button
             type="button"
             onClick={() => setActiveFormatView(prev => prev === 'after_dispatch' ? 'tracking' : 'after_dispatch')}
-            className={`h-10 px-3.5 sm:px-4 rounded-xl transition-colors text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none ${
+            className={`h-10 px-3 sm:px-3.5 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 shadow-md cursor-pointer border border-slate-700/80 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white shrink-0 select-none ${
               activeFormatView === 'after_dispatch'
-                ? 'bg-purple-700 text-white shadow-purple-600/40 ring-2 ring-purple-400'
-                : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
+                ? 'bg-purple-800 text-white ring-2 ring-purple-400'
+                : ''
             }`}
             title="After Dispatch Format"
           >
-            <Send size={14} className="text-white" />
+            <Send size={13} className="text-purple-300" />
             <span>After Dispatch Format</span>
           </button>
 
