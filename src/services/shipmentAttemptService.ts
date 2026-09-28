@@ -568,8 +568,24 @@ export const shipmentAttemptService = {
       const numCampaignId = isNaN(Number(cId)) ? cId : Number(cId);
       const infCode = cleanCodeRef(params.influencer_code || shipment.influencerCode || String(infId));
 
-      // 1. Check or create shipment attempt (Attempt 1 or current attempt)
+      // Guard: Check whether this influencer/shipment is already in Re-Dispatch
       const existingAttempts = await this.getShipmentAttempts(cId, infId);
+      const { data: currentDisp } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerDispatch)
+        .select('dispatch_status')
+        .eq('campaign_id', numCampaignId)
+        .eq('influencer_id', infId)
+        .maybeSingle();
+
+      const isDispReDispatch = (currentDisp?.dispatch_status || '').toLowerCase().trim() === 're_dispatch';
+      const hasIssueOrReAttempt = existingAttempts.some(a => a.issue_reported === true || a.shipment_type === 'RE_DISPATCH' || a.attempt_number > 1);
+
+      if (isDispReDispatch || hasIssueOrReAttempt) {
+        // Already moved to Re-Dispatch, do not perform duplicate transition or duplicate attempts
+        this.notifyUpdates(cId);
+        return { success: true };
+      }
+
       const exceptionStatusText = shipment.status || shipment.rawStatus || 'Exception / Return to Origin';
       const issueRemarks = `Exception: ${exceptionStatusText}${shipment.remarks ? ' - ' + shipment.remarks : ''}`;
 

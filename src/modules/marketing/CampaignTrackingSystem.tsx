@@ -155,6 +155,73 @@ export function isShipmentReDispatch(
   return false;
 }
 
+export function isShipmentAlreadyInReDispatch(
+  s: InfluencerDispatchedShipment,
+  candidateInfluencers?: CampaignInfluencer[],
+  dispatchRecords?: DispatchDetails[],
+  campaignAttempts?: ShipmentAttempt[]
+): boolean {
+  // 1. Direct shipment markers
+  if (s.isResend === true || (s as any).is_resend === true) return true;
+  if ((s.attemptNumber && s.attemptNumber > 1) || ((s as any).attempt_number && (s as any).attempt_number > 1)) return true;
+
+  const currentStatus = safeTrimLower(s.currentStatus);
+  const rawStatus = safeTrimLower(s.rawStatus);
+  const remarks = safeTrimLower(s.remarks);
+
+  if (
+    currentStatus === 're-dispatch' || 
+    currentStatus === 're_dispatch' || 
+    currentStatus === 'redispatch' ||
+    rawStatus === 're-dispatch' ||
+    remarks.includes('pending re-dispatch') ||
+    remarks.includes('moved to re-dispatch')
+  ) {
+    return true;
+  }
+
+  if (s.syncError && typeof s.syncError === 'string' && s.syncError.startsWith('{')) {
+    try {
+      const meta = JSON.parse(s.syncError);
+      if (meta.workflow_state === 're_dispatch' || meta.is_resend === true) {
+        return true;
+      }
+    } catch (e) {}
+  }
+
+  // 2. Matched Influencer & Dispatch status
+  const { matchedInfluencer, matchedDispatch } = matchShipmentToInfluencer(s, candidateInfluencers || [], dispatchRecords || []);
+  const infId = matchedInfluencer?.id || s.influencerId;
+
+  if (matchedInfluencer && isInfluencerReDispatch(matchedInfluencer, dispatchRecords)) {
+    return true;
+  }
+
+  const disp = matchedDispatch || (infId && dispatchRecords ? dispatchRecords.find(d => String(d.influencer_id) === String(infId)) : null);
+  if (disp) {
+    const st = safeTrimLower(disp.dispatch_status);
+    if (st === 're_dispatch' || st === 're-dispatch' || st === 'redispatch') return true;
+    const rem = safeTrimLower(disp.remarks);
+    if (rem.includes('re-dispatch') || rem.includes('issue reported')) return true;
+  }
+
+  // 3. Historical shipment attempts
+  const cleanAwb = safeTrimLower(s.awbNumber);
+  if (campaignAttempts && campaignAttempts.length > 0) {
+    const matchingAttempts = campaignAttempts.filter(a => {
+      if (infId && String(a.influencer_id) === String(infId)) return true;
+      if (cleanAwb && a.awb_number && safeTrimLower(a.awb_number) === cleanAwb) return true;
+      return false;
+    });
+
+    if (matchingAttempts.some(a => a.issue_reported === true || a.shipment_type === 'RE_DISPATCH' || (a.attempt_number && a.attempt_number > 1))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export const getShipmentCategory = (s: InfluencerDispatchedShipment): TrackingStatusCategory => {
   const displayStatus = getTrackingDisplayStatus(s);
   return resolveDelhiveryCategory(displayStatus, s.rawStatus, s.currentStatus);
@@ -572,12 +639,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       setIndiaPostRecords(indiaPostData);
       setTrackingCache(getTrackingCache(campaign.id));
       await loadStatusTrackingInfluencerIds();
+      await loadCampaignAttempts();
     } catch (err) {
       console.error('Failed to load campaign shipments from Supabase:', err);
     } finally {
       setIsLoadingDb(false);
     }
-  }, [campaign.id, candidateInfluencers, loadStatusTrackingInfluencerIds]);
+  }, [campaign.id, candidateInfluencers, loadStatusTrackingInfluencerIds, loadCampaignAttempts]);
 
   // Reload cache and shipments when campaign changes
   const prevCampaignIdRef = useRef(campaign.id);
@@ -1633,6 +1701,14 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   // Move single Exception shipment back to Active for Re-Dispatch
   const handleConfirmMoveToReDispatch = async (shipment: InfluencerDispatchedShipment) => {
     if (isProcessingReDispatch) return;
+
+    // Guard: Check whether this shipment/influencer has already been moved to Re-Dispatch
+    if (isShipmentAlreadyInReDispatch(shipment, candidateInfluencers, dispatchRecords, campaignAttempts)) {
+      toast.error('This shipment has already been moved to Re-Dispatch.');
+      setShipmentToReDispatch(null);
+      return;
+    }
+
     setIsProcessingReDispatch(true);
     const toastId = toast.loading('Moving shipment to Re-Dispatch...');
 
@@ -2516,6 +2592,23 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                               const isException = cat === 'Exception';
 
                               if (isException) {
+                                const isAlreadyMoved = isShipmentAlreadyInReDispatch(s, candidateInfluencers, dispatchRecords, campaignAttempts);
+
+                                if (isAlreadyMoved) {
+                                  return (
+                                    <button
+                                      type="button"
+                                      disabled
+                                      name="Re-Dispatch"
+                                      className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-lg bg-slate-900/60 border border-slate-800 text-slate-500 transition-all flex items-center justify-center cursor-not-allowed shadow-sm shrink-0"
+                                      title="Already moved to Re-Dispatch"
+                                      aria-label="Already moved to Re-Dispatch"
+                                    >
+                                      <RotateCcw size={12} className="opacity-40 text-slate-500" />
+                                    </button>
+                                  );
+                                }
+
                                 return (
                                   <button
                                     type="button"
