@@ -2064,6 +2064,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         metadata.issue_proof_url = data.issue_proof_url || '';
         metadata.re_dispatch_required = true;
         metadata.delivered_confirmed = false;
+        metadata.redispatch_lifecycle_status = 'PENDING_REDISPATCH';
+        delete metadata.re_dispatch_moved_to_active;
+        delete metadata.moved_to_active;
 
         const updates: Partial<StatusTrackingRecord> = {
           delivered_confirmed: false,
@@ -2094,7 +2097,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         metadata.last_updated = new Date().toISOString();
         metadata.delivered_confirmed = true;
         metadata.delivery_photo_url = data.delivery_photo_url;
+        if (metadata.redispatch_lifecycle_status || metadata.re_dispatch_moved_to_active || metadata.re_dispatch_required) {
+          metadata.redispatch_lifecycle_status = 'COMPLETED';
+        }
         delete metadata.re_dispatch_required;
+        delete metadata.re_dispatch_moved_to_active;
+        delete metadata.moved_to_active;
         delete metadata.issue_reported;
         delete metadata.issue_type;
         delete metadata.issue_remarks;

@@ -182,8 +182,12 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
       const res = await reDispatchQueueService.moveInfluencerToActive(campaign.id, item);
       if (res.success) {
         toast.success(`Shipment for ${item.code || 'influencer'} moved to Active for Re-Dispatch.`);
-        // Immediately remove moved record from pending queue
-        setItems(prev => prev.filter(i => i.id !== item.id));
+        // Immediately transition moved record to 'moved_to_active' so it remains in All and moves to Moved tab
+        setItems(prev => prev.map(i => i.id === item.id ? {
+          ...i,
+          status: 'moved_to_active',
+          status_display: 'Moved to Active'
+        } : i));
         // Remove from selection
         setSelectedIds(prev => {
           const next = new Set(prev);
@@ -221,8 +225,12 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
       if (res.success) {
         toast.success(`Successfully moved ${res.movedCount} shipments to Active for Re-Dispatch.`, { id: toastId });
         const movedIdSet = new Set(itemsToMove.map(i => i.id));
-        // Immediately remove all moved records from pending queue
-        setItems(prev => prev.filter(i => !movedIdSet.has(i.id)));
+        // Immediately transition all moved records to 'moved_to_active' so they remain in All and move to Moved tab
+        setItems(prev => prev.map(i => movedIdSet.has(i.id) ? {
+          ...i,
+          status: 'moved_to_active',
+          status_display: 'Moved to Active'
+        } : i));
         setSelectedIds(new Set());
         if (onRefreshCounts) onRefreshCounts();
       } else {

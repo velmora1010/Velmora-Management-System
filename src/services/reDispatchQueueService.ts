@@ -114,24 +114,43 @@ export const reDispatchQueueService = {
           meta = {};
         }
 
+        // Completed check: if replacement has been completed/resolved, exclude from active queue
+        if (meta.redispatch_lifecycle_status === 'COMPLETED' || meta.redispatch_completed === true) {
+          return;
+        }
+
         const rawStatus = (st.status || '').toLowerCase();
         const disp = dispMap.get(String(st.influencer_id));
         const dispStatus = (disp?.dispatch_status || '').toLowerCase();
         const infAttempts = attemptsByInf.get(String(st.influencer_id)) || [];
         const hasIssueAttempt = infAttempts.some(a => a.issue_reported === true);
 
-        const isReDispatchCandidate = Boolean(
-          rawStatus.includes('re-dispatch') ||
-          rawStatus.includes('redispatch') ||
+        // Persistent Re-Dispatch lifecycle state determination:
+        // MOVED_TO_ACTIVE: Influencer was approved/moved to Active for replacement
+        const isMovedToActive = Boolean(
+          meta.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
+          meta.re_dispatch_moved_to_active === true ||
+          meta.moved_to_active === true ||
+          rawStatus.includes('re-dispatch (active)')
+        );
+
+        // PENDING_REDISPATCH: Awaiting review/move to Active
+        const isPendingReDispatch = Boolean(
+          meta.redispatch_lifecycle_status === 'PENDING_REDISPATCH' ||
+          meta.re_dispatch_required === true ||
+          rawStatus.includes('re-dispatch required') ||
+          rawStatus === 're-dispatch' ||
+          rawStatus === 'redispatch' ||
           dispStatus.includes('re_dispatch') ||
           dispStatus.includes('redispatch') ||
-          meta.re_dispatch_required ||
           meta.shipment_issue ||
           meta.issue_reported ||
           hasIssueAttempt
         );
 
-        if (!isReDispatchCandidate) return;
+        if (!isMovedToActive && !isPendingReDispatch) {
+          return;
+        }
 
         const infIdStr = String(st.influencer_id);
         seenInfluencerIds.add(infIdStr);
@@ -143,7 +162,6 @@ export const reDispatchQueueService = {
         }
 
         const latestAttempt = infAttempts[infAttempts.length - 1];
-        const isMovedToActive = Boolean(meta.re_dispatch_moved_to_active || meta.moved_to_active);
 
         const codeVal = cleanCode(inf?.code || (inf as any)?.influencer_code || latestAttempt?.order_id || '');
         const creatorName = (inf?.influencer_name || disp?.creator_name || '').trim();
@@ -219,7 +237,7 @@ export const reDispatchQueueService = {
   /**
    * Moves a single influencer from the Re-Dispatch queue to Active for Re-Dispatch.
    * - Sets influencer_dispatch_details_rows.dispatch_status = 're_dispatch'
-   * - Updates status tracking metadata to re_dispatch_moved_to_active = true
+   * - Updates status tracking metadata to redispatch_lifecycle_status = 'MOVED_TO_ACTIVE' & re_dispatch_moved_to_active = true
    * - Preserves previous shipment attempt history
    * - Broadcasts cross-module synchronization events
    */
@@ -236,9 +254,20 @@ export const reDispatchQueueService = {
     try {
       const numCampId = Number(cId);
       const campQuery = !isNaN(numCampId) ? numCampId : cId;
+      const numInfId = Number(infId);
       const nowIso = new Date().toISOString();
 
       // 1. Update influencer_dispatch_details_rows: dispatch_status = 're_dispatch'
+      if (item.dispatch_id) {
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerDispatch)
+          .update({
+            dispatch_status: 're_dispatch',
+            remarks: `Moved to Active for Re-Dispatch (${item.issue_type || 'Issue'})`
+          })
+          .eq('id', item.dispatch_id);
+      }
+
       const { error: dispError } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerDispatch)
         .update({
@@ -246,7 +275,7 @@ export const reDispatchQueueService = {
           remarks: `Moved to Active for Re-Dispatch (${item.issue_type || 'Issue'})`
         })
         .eq('campaign_id', campQuery)
-        .eq('influencer_id', infId);
+        .eq('influencer_id', !isNaN(numInfId) ? numInfId : infId);
 
       if (dispError) {
         console.error('Error updating dispatch status:', dispError);
@@ -255,13 +284,37 @@ export const reDispatchQueueService = {
       // 2. Remove influencer from existing dispatch batches if any
       await dispatchBatchService.removeInfluencerFromBatches(cId, infId);
 
-      // 3. Update influencer_status_tracking_rows notes: set re_dispatch_moved_to_active = true
-      const { data: stRow } = await supabaseAdmin
-        .from(SUPABASE_TABLES.influencerStatus)
-        .select('id, notes, status')
-        .eq('campaign_id', campQuery)
-        .eq('influencer_id', String(infId))
-        .maybeSingle();
+      // 3. Update influencer_status_tracking_rows notes: set redispatch_lifecycle_status = 'MOVED_TO_ACTIVE'
+      let stRow: any = null;
+
+      if (item.status_tracking_id) {
+        const { data } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerStatus)
+          .select('id, notes, status')
+          .eq('id', item.status_tracking_id)
+          .maybeSingle();
+        stRow = data;
+      }
+
+      if (!stRow && !isNaN(numInfId)) {
+        const { data } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerStatus)
+          .select('id, notes, status')
+          .eq('campaign_id', campQuery)
+          .eq('influencer_id', numInfId)
+          .maybeSingle();
+        stRow = data;
+      }
+
+      if (!stRow) {
+        const { data } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerStatus)
+          .select('id, notes, status')
+          .eq('campaign_id', campQuery)
+          .eq('influencer_id', String(infId))
+          .maybeSingle();
+        stRow = data;
+      }
 
       if (stRow?.id) {
         let meta: any = {};
@@ -271,6 +324,7 @@ export const reDispatchQueueService = {
           meta = {};
         }
 
+        meta.redispatch_lifecycle_status = 'MOVED_TO_ACTIVE';
         meta.re_dispatch_moved_to_active = true;
         meta.re_dispatch_required = false;
         meta.moved_to_active_at = nowIso;
