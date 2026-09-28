@@ -522,6 +522,226 @@ export const shipmentAttemptService = {
   },
 
   /**
+   * Moves an Exception shipment back into the Active workflow for Re-Dispatch.
+   * - Preserves the original attempt/shipment history with Exception issue reported.
+   * - Sets influencer dispatch_status to 're_dispatch'.
+   * - Updates status tracking if exists to reset delivery and set status to 'Re-Dispatch Required'.
+   * - Updates tracking shipment record so it transitions to 'Re-Dispatch'.
+   * - Emits application-wide synchronization events.
+   */
+  async moveExceptionShipmentToActiveReDispatch(params: {
+    campaign_id: string | number;
+    influencer_id: string | number;
+    influencer_code?: string;
+    shipment: any;
+  }): Promise<{ success: boolean; error?: any }> {
+    const cId = String(params.campaign_id).trim();
+    let infId = Number(params.influencer_id);
+    if (!cId) {
+      return { success: false, error: 'Campaign ID required' };
+    }
+
+    try {
+      const nowIso = new Date().toISOString();
+      const shipment = params.shipment || {};
+
+      // If infId is invalid or not found, attempt fallback lookup by code
+      if (isNaN(infId) || infId <= 0) {
+        const lookupCode = cleanCodeRef(params.influencer_code || shipment.influencerCode || shipment.orderId);
+        if (lookupCode) {
+          const { data: foundInf } = await supabaseAdmin
+            .from(SUPABASE_TABLES.influencersInfo)
+            .select('id, code')
+            .eq('campaign_id', cId)
+            .ilike('code', `%${lookupCode}%`)
+            .maybeSingle();
+          if (foundInf?.id) {
+            infId = Number(foundInf.id);
+          }
+        }
+      }
+
+      if (isNaN(infId) || infId <= 0) {
+        return { success: false, error: 'Valid influencer ID could not be resolved for this shipment' };
+      }
+
+      const numCampaignId = isNaN(Number(cId)) ? cId : Number(cId);
+      const infCode = cleanCodeRef(params.influencer_code || shipment.influencerCode || String(infId));
+
+      // 1. Check or create shipment attempt (Attempt 1 or current attempt)
+      const existingAttempts = await this.getShipmentAttempts(cId, infId);
+      const exceptionStatusText = shipment.status || shipment.rawStatus || 'Exception / Return to Origin';
+      const issueRemarks = `Exception: ${exceptionStatusText}${shipment.remarks ? ' - ' + shipment.remarks : ''}`;
+
+      if (existingAttempts.length === 0) {
+        // Create initial Attempt 1 preserving original AWB, courier, dispatch dates
+        const orderId = shipment.orderId || shipment.rawOrderId || generateReDispatchOrderId(infCode, shipment.courier, 1);
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.shipmentAttempts)
+          .insert([{
+            campaign_id: cId,
+            influencer_id: infId,
+            attempt_number: 1,
+            shipment_type: 'ORIGINAL',
+            courier: shipment.courier || null,
+            order_id: orderId,
+            awb_number: shipment.awbNumber || null,
+            shipment_status: exceptionStatusText,
+            dispatch_date: shipment.dispatchDate || shipment.dispatchedDate || nowIso.split('T')[0],
+            estimated_delivery_date: shipment.estimatedDeliveryDate || shipment.expectedDeliveryDate || null,
+            remarks: shipment.remarks || null,
+            issue_reported: true,
+            issue_type: 'OTHER',
+            issue_remarks: issueRemarks,
+            issue_reported_at: nowIso,
+            delivery_confirmed: false,
+            status_tracking_started: false,
+            created_at: nowIso,
+            updated_at: nowIso
+          }]);
+      } else {
+        // Update the active attempt to record the Exception issue
+        const latest = existingAttempts[existingAttempts.length - 1];
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.shipmentAttempts)
+          .update({
+            issue_reported: true,
+            issue_type: latest.issue_type || 'OTHER',
+            issue_remarks: issueRemarks,
+            issue_reported_at: nowIso,
+            shipment_status: exceptionStatusText,
+            delivery_confirmed: false,
+            updated_at: nowIso
+          })
+          .eq('id', latest.id);
+      }
+
+      // 2. Update influencer_dispatch_details_rows -> dispatch_status = 're_dispatch'
+      await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerDispatch)
+        .update({
+          dispatch_status: 're_dispatch',
+          remarks: `Moved to Re-Dispatch from Exception (${exceptionStatusText})`
+        })
+        .eq('campaign_id', numCampaignId)
+        .eq('influencer_id', infId);
+
+      // 3. Update influencers_info_rows -> dispatch_status = 're_dispatch'
+      await supabaseAdmin
+        .from(SUPABASE_TABLES.influencersInfo)
+        .update({
+          dispatch_status: 're_dispatch'
+        })
+        .eq('id', infId);
+
+      // 4. Update influencer_status_tracking_rows if exists
+      const { data: existingStatus } = await supabaseAdmin
+        .from(SUPABASE_TABLES.influencerStatus)
+        .select('id, notes')
+        .eq('campaign_id', cId)
+        .eq('influencer_id', String(infId))
+        .maybeSingle();
+
+      if (existingStatus?.id) {
+        let notesObj: any = {};
+        try {
+          notesObj = typeof existingStatus.notes === 'string' ? JSON.parse(existingStatus.notes) : existingStatus.notes;
+        } catch (e) {
+          notesObj = {};
+        }
+        notesObj.issue_reported = true;
+        notesObj.issue_type = 'OTHER';
+        notesObj.issue_remarks = issueRemarks;
+        notesObj.issue_reported_at = nowIso;
+        notesObj.re_dispatch_required = true;
+        notesObj.delivered_confirmed = false;
+        notesObj.last_updated = nowIso;
+
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerStatus)
+          .update({
+            delivered_confirmed: false,
+            current_step: 0,
+            status: 'Re-Dispatch Required',
+            notes: JSON.stringify(notesObj),
+            updated_at: nowIso
+          })
+          .eq('id', existingStatus.id);
+      }
+
+      // 5. Update tracking shipment in influencer_tracking_shipments and localStorage
+      if (shipment.awbNumber) {
+        const cleanAwb = String(shipment.awbNumber).trim();
+        const { data: dbRows } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencerTrackingShipments)
+          .select('id, sync_error')
+          .eq('campaign_id', cId)
+          .ilike('awb_number', cleanAwb);
+
+        if (dbRows && dbRows.length > 0) {
+          for (const row of dbRows) {
+            let meta: any = {};
+            if (row.sync_error && typeof row.sync_error === 'string' && row.sync_error.startsWith('{')) {
+              try { meta = JSON.parse(row.sync_error); } catch (e) {}
+            }
+            meta.is_resend = true;
+            meta.workflow_state = 're_dispatch';
+            meta.original_exception_status = exceptionStatusText;
+
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.influencerTrackingShipments)
+              .update({
+                status: 'Re-Dispatch',
+                current_status: 'Re-Dispatch',
+                raw_status: 'Re-Dispatch',
+                remarks: `Pending Re-Dispatch (Original: ${exceptionStatusText})`,
+                sync_error: JSON.stringify(meta),
+                updated_at: nowIso
+              })
+              .eq('id', row.id);
+          }
+        }
+      }
+
+      // Also update localStorage cache if in browser
+      if (typeof window !== 'undefined') {
+        try {
+          const cacheKey = `velmora_campaign_shipments_${cId}`;
+          const raw = localStorage.getItem(cacheKey);
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              const updated = list.map((item: any) => {
+                const itemAwb = (item.awbNumber || item.id || '').toLowerCase().trim();
+                const shipAwb = (shipment.awbNumber || shipment.id || '').toLowerCase().trim();
+                if (itemAwb && shipAwb && itemAwb === shipAwb) {
+                  return {
+                    ...item,
+                    status: 'Re-Dispatch',
+                    currentStatus: 'Re-Dispatch',
+                    rawStatus: 'Re-Dispatch',
+                    statusCategory: 'Re-Dispatch',
+                    isResend: true,
+                    remarks: `Pending Re-Dispatch (Original: ${exceptionStatusText})`
+                  };
+                }
+                return item;
+              });
+              localStorage.setItem(cacheKey, JSON.stringify(updated));
+            }
+          }
+        } catch (e) {}
+      }
+
+      this.notifyUpdates(cId);
+      return { success: true };
+    } catch (e: any) {
+      console.error('Exception in moveExceptionShipmentToActiveReDispatch:', e);
+      return { success: false, error: e?.message || 'Failed to move shipment to Re-Dispatch' };
+    }
+  },
+
+  /**
    * Emits application-wide synchronization events across tabs and modules.
    */
   notifyUpdates(campaignId: string | number) {

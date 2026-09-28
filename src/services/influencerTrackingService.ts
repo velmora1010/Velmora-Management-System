@@ -225,6 +225,7 @@ export function formatStatusLabel(str?: string | null): string {
   if (upper === 'UNDELIVERED') return 'Undelivered';
   if (upper === 'SHIPPED') return 'In Transit';
   if (upper === 'PENDING') return 'Pending';
+  if (upper === 'RE_DISPATCH' || upper === 'RE-DISPATCH' || upper === 'REDISPATCH') return 'Re-Dispatch';
   if (upper.includes('DELIVERED_TO_CONSIGNEE') || upper.startsWith('DELIVERED')) return 'Delivered';
 
   // If all uppercase with underscores, convert to Title Case words
@@ -381,6 +382,15 @@ export function resolveDelhiveryCategory(
   if (!combined) return 'Pending';
 
   const isUndelivered = combined.includes('undelivered');
+
+  // 0. Re-Dispatch (Takes priority over prior Exception/RTO status once moved to Re-Dispatch)
+  if (
+    combined.includes('re_dispatch') ||
+    combined.includes('re-dispatch') ||
+    combined.includes('redispatch')
+  ) {
+    return 'Re-Dispatch';
+  }
 
   // 1. Exception / RTO / Returned / Cancelled / Lost / Damaged / Held / Rejected
   if (

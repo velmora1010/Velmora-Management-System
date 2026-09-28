@@ -30,7 +30,17 @@ export const isInfluencerReDispatch = (
   if (!inf) return false;
   const dispatch = inf.dispatchDetails || (dispatchRecords && dispatchRecords.find(d => String(d.influencer_id) === String(inf.id)));
   const status = (dispatch?.dispatch_status || (inf as any).dispatch_status || '').trim().toLowerCase();
-  return status === 're_dispatch' || status === 're-dispatch' || status === 'redispatch';
+  if (status === 're_dispatch' || status === 're-dispatch' || status === 'redispatch' || status.includes('re_dispatch') || status.includes('re-dispatch')) {
+    return true;
+  }
+  if ((inf as any).is_redispatched === true || (inf as any).re_dispatch_required === true) {
+    return true;
+  }
+  const remarks = (dispatch?.remarks || '').trim().toLowerCase();
+  if (remarks.startsWith('issue reported') || remarks.includes('re-dispatch') || remarks.includes('re_dispatch')) {
+    return true;
+  }
+  return false;
 };
 
 /**

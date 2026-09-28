@@ -455,6 +455,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [campaignAttempts, setCampaignAttempts] = useState<ShipmentAttempt[]>([]);
   const [replacementShipmentToConfirm, setReplacementShipmentToConfirm] = useState<InfluencerDispatchedShipment | null>(null);
 
+  // Exception to Re-Dispatch state
+  const [shipmentToReDispatch, setShipmentToReDispatch] = useState<InfluencerDispatchedShipment | null>(null);
+  const [isProcessingReDispatch, setIsProcessingReDispatch] = useState(false);
+
   const loadCampaignAttempts = useCallback(async () => {
     if (!campaign?.id) return;
     try {
@@ -1625,6 +1629,46 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
   };
 
+  // Move single Exception shipment back to Active for Re-Dispatch
+  const handleConfirmMoveToReDispatch = async (shipment: InfluencerDispatchedShipment) => {
+    if (isProcessingReDispatch) return;
+    setIsProcessingReDispatch(true);
+    const toastId = toast.loading('Moving shipment to Re-Dispatch...');
+
+    try {
+      const { matchedInfluencer } = matchShipmentToInfluencer(shipment, candidateInfluencers, dispatchRecords);
+      const targetInfluencerId = matchedInfluencer?.id || shipment.influencerId || 0;
+      const targetCode = matchedInfluencer?.code || shipment.influencerCode || shipment.orderId;
+
+      const res = await shipmentAttemptService.moveExceptionShipmentToActiveReDispatch({
+        campaign_id: campaign.id,
+        influencer_id: targetInfluencerId,
+        influencer_code: targetCode,
+        shipment
+      });
+
+      if (res.success) {
+        toast.success(`Shipment for ${targetCode || 'influencer'} moved to Active for Re-Dispatch!`, { id: toastId });
+        setShipmentToReDispatch(null);
+        await Promise.all([
+          loadShipments(),
+          loadCampaignAttempts(),
+          loadStatusTrackingInfluencerIds()
+        ]);
+        if (onRefreshData) {
+          await onRefreshData();
+        }
+      } else {
+        toast.error(res.error || 'Failed to move shipment to Re-Dispatch', { id: toastId });
+      }
+    } catch (err: any) {
+      console.error('Error moving shipment to Re-Dispatch:', err);
+      toast.error(err?.message || 'Error occurred while moving shipment', { id: toastId });
+    } finally {
+      setIsProcessingReDispatch(false);
+    }
+  };
+
   // Bulk move all eligible delivered shipments to Status Tracking
   const handleBulkMoveToStatusTracking = async () => {
     const delivered = allShipments.filter(s => isShipmentDelivered(s));
@@ -2463,6 +2507,24 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
                                     ) : (
                                       <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform text-white" />
                                     )}
+                                  </button>
+                                );
+                              }
+
+                              const cat = getShipmentCategory(s);
+                              const isException = cat === 'Exception';
+
+                              if (isException) {
+                                return (
+                                  <button
+                                    type="button"
+                                    name="Re-Dispatch"
+                                    onClick={() => setShipmentToReDispatch(s)}
+                                    className="w-6.5 h-6.5 sm:w-7 sm:h-7 rounded-lg bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 hover:border-purple-500 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                                    title="Re-Dispatch"
+                                    aria-label="Re-Dispatch"
+                                  >
+                                    <RotateCcw size={12} className="group-hover:-rotate-45 transition-transform text-purple-300 group-hover:text-white" />
                                   </button>
                                 );
                               }
@@ -3390,6 +3452,113 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           </div>
         );
       })()}
+
+      {/* 8. EXCEPTION TO RE-DISPATCH CONFIRMATION MODAL */}
+      {shipmentToReDispatch && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => !isProcessingReDispatch && setShipmentToReDispatch(null)}
+        >
+          <div 
+            className="bg-[#0e1626] border border-purple-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-purple-950/50 flex flex-col gap-5 text-slate-100 animate-in zoom-in-95 duration-200"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="redispatch-modal-title"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                  <RotateCcw size={20} />
+                </div>
+                <div>
+                  <h3 id="redispatch-modal-title" className="text-base font-bold text-white">
+                    Move this shipment to Re-Dispatch?
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Return to Active workflow for re-dispatch
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isProcessingReDispatch}
+                onClick={() => setShipmentToReDispatch(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Explanation & Details */}
+            <div className="space-y-3.5 text-xs sm:text-sm text-slate-300 leading-relaxed">
+              <p className="text-slate-300">
+                The original shipment history will be preserved and this influencer will be moved back to Active for a new dispatch.
+              </p>
+
+              {/* Shipment Info Badge */}
+              <div className="p-3.5 bg-slate-900/90 border border-slate-800 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Influencer:</span>
+                  <span className="font-bold text-white">
+                    {shipmentToReDispatch.creatorName} {shipmentToReDispatch.username !== '—' ? `(${shipmentToReDispatch.username})` : ''}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Order ID / Code:</span>
+                  <span className="font-mono text-purple-300 font-semibold">
+                    {shipmentToReDispatch.orderId || shipmentToReDispatch.rawOrderId || `#${shipmentToReDispatch.influencerCode}`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Courier & AWB:</span>
+                  <span className="font-mono text-slate-300">
+                    {shipmentToReDispatch.courier || 'Courier'} &bull; {shipmentToReDispatch.awbNumber || '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Current Status:</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                    {shipmentToReDispatch.status || 'Exception'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isProcessingReDispatch}
+                onClick={() => setShipmentToReDispatch(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingReDispatch}
+                onClick={() => handleConfirmMoveToReDispatch(shipmentToReDispatch)}
+                className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingReDispatch ? (
+                  <>
+                    <RefreshCcw size={14} className="animate-spin" />
+                    <span>Moving to Re-Dispatch...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw size={14} />
+                    <span>Move to Re-Dispatch</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
