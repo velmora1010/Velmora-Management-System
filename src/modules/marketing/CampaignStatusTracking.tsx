@@ -1878,7 +1878,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (latest) {
           attemptId = latest.id;
         } else {
-          const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || record.code || record.influencer_id);
+          const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || record.influencer_id);
           const initial = await shipmentAttemptService.createInitialShipmentAttempt({
             campaign_id: record.campaign_id,
             influencer_id: record.influencer_id,

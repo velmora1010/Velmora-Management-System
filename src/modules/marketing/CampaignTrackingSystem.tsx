@@ -41,7 +41,7 @@ import {
 } from '../../services/shipmentAttemptService';
 import { supabase } from '../../lib/supabase';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
-import { isActiveStatus } from '../../utils/marketingUtils';
+import { isActiveStatus, isInfluencerReDispatch } from '../../utils/marketingUtils';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import {
@@ -201,7 +201,7 @@ export function isShipmentAlreadyInReDispatch(
   if (disp) {
     const st = safeTrimLower(disp.dispatch_status);
     if (st === 're_dispatch' || st === 're-dispatch' || st === 'redispatch') return true;
-    const rem = safeTrimLower(disp.remarks);
+    const rem = safeTrimLower((disp as any).remarks);
     if (rem.includes('re-dispatch') || rem.includes('issue reported')) return true;
   }
 
