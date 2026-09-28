@@ -2050,7 +2050,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             title="Re-Dispatch Queue"
           >
             <RotateCcw size={14} className="text-white" />
-            <span>Re-Dispatch</span>
+            <span>Re-Dispatch Format</span>
             <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black bg-white/20 text-white border border-white/30">
               {reDispatchCount}
             </span>

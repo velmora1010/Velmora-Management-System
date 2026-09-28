@@ -1161,9 +1161,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   return (
     <div className="space-y-6 text-slate-200 w-full max-w-full min-w-0 box-border">
       {/* Header Container - Single Horizontal Status & Action Toolbar (Strictly 1 Row) */}
-      <div className="bg-[#0c1424] px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-700/80 shadow-lg shadow-purple-950/20 flex items-center justify-between gap-1.5 sm:gap-2 w-full min-w-0">
+      <div className="bg-[#0c1424] px-2.5 py-2 sm:px-3 sm:py-2.5 rounded-2xl border border-slate-700/80 shadow-lg shadow-purple-950/20 flex items-center justify-between gap-1 sm:gap-1.5 w-full max-w-full min-w-0 box-border">
         {/* GROUP 1: [Back] [Active] [Pending] [Dispatched] */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 flex-nowrap">
           {/* 1. Back Button */}
           <button 
             type="button"
@@ -1195,7 +1195,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               setCurrentTab('logistics');
               setIsBulkSelectMode(false);
             }}
-            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+            className={`h-9 px-2 sm:px-2.5 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
               currentTab === 'logistics' && !isBulkSelectMode
                 ? 'bg-blue-950/70 text-blue-300 border border-blue-600/70 shadow-sm'
                 : 'bg-blue-950/40 text-blue-300 border border-blue-800/60 hover:bg-blue-950/60'
@@ -1208,7 +1208,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           </button>
 
           {/* 3. Pending */}
-          <div className="h-9 px-2.5 sm:px-3 bg-purple-950/40 text-purple-300 border border-purple-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
+          <div className="h-9 px-2 sm:px-2.5 bg-purple-950/40 text-purple-300 border border-purple-800/60 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 select-none">
             <Clock size={13} className="text-purple-400 shrink-0" />
             <span>Pending:</span>
             <strong className="text-white font-bold">{pendingCount}</strong>
@@ -1225,7 +1225,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setDispatchedSubView('batches');
               }
             }}
-            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer select-none ${
+            className={`h-9 px-2 sm:px-2.5 rounded-xl text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer select-none ${
               currentTab === 'dispatched' && dispatchedSubView === 'batches'
                 ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-600/70 shadow-sm'
                 : 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/60 hover:bg-emerald-950/60'
@@ -1241,7 +1241,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0 hidden md:block" />
 
         {/* GROUP 2: [Bulk Select] [Prepare Dispatch] [Dispatched] [Tracking System] */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 flex-nowrap">
           {/* 5. Bulk Select */}
           <button
             type="button"
@@ -1253,7 +1253,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setIsBulkSelectMode(prev => !prev);
               }
             }}
-            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`h-9 px-2 sm:px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               isBulkSelectMode && currentTab === 'logistics'
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
                 : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200'
@@ -1274,7 +1274,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             type="button"
             onClick={handlePrepareDispatchClick}
             disabled={isMovingToPrepare}
-            className={`h-9 px-2.5 sm:px-3.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`h-9 px-2 sm:px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               currentTab === 'prepare_dispatch'
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/40'
                 : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
@@ -1313,7 +1313,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setDispatchedSubView('batches');
               }
             }}
-            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`h-9 px-2 sm:px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               currentTab === 'dispatched' && dispatchedSubView === 'batches'
                 ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30'
                 : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
@@ -1344,7 +1344,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 setDispatchedSubView('tracking');
               }
             }}
-            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+            className={`h-9 px-2 sm:px-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
               currentTab === 'dispatched' && dispatchedSubView === 'tracking'
                 ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
                 : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
@@ -1360,9 +1360,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0 hidden md:block" />
 
         {/* GROUP 3: [Search] [Filter] [Refresh] */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 flex-nowrap ml-auto">
           {/* 10. Search Box */}
-          <div className="relative w-28 sm:w-32 md:w-36 lg:w-44 shrink-0">
+          <div className="relative min-w-[85px] w-24 sm:w-28 md:w-32 lg:w-36 max-w-[150px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
             <input 
               type="text"
