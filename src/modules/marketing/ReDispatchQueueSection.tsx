@@ -40,7 +40,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [movingItemIds, setMovingItemIds] = useState<Set<string>>(new Set());
   const [isBulkMoving, setIsBulkMoving] = useState<boolean>(false);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'moved'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'moved' | 'completed'>('all');
   const [copiedAwb, setCopiedAwb] = useState<string | null>(null);
 
   // Load items from database
@@ -77,11 +77,15 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
 
   // Counts
   const pendingCount = useMemo(() => {
-    return items.filter(i => i.status === 'pending').length;
+    return items.filter(i => i.status === 'pending' || i.redispatch_status === 'PENDING_REDISPATCH').length;
   }, [items]);
 
   const movedCount = useMemo(() => {
-    return items.filter(i => i.status === 'moved_to_active').length;
+    return items.filter(i => i.status === 'moved_to_active' || i.redispatch_status === 'MOVED_TO_ACTIVE').length;
+  }, [items]);
+
+  const completedCount = useMemo(() => {
+    return items.filter(i => i.status === 'completed' || i.redispatch_status === 'COMPLETED').length;
   }, [items]);
 
   // Filtering based on search query and status filter
@@ -89,9 +93,11 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
     let result = items;
 
     if (statusFilter === 'pending') {
-      result = result.filter(i => i.status === 'pending');
+      result = result.filter(i => i.status === 'pending' || i.redispatch_status === 'PENDING_REDISPATCH');
     } else if (statusFilter === 'moved') {
-      result = result.filter(i => i.status === 'moved_to_active');
+      result = result.filter(i => i.status === 'moved_to_active' || i.redispatch_status === 'MOVED_TO_ACTIVE');
+    } else if (statusFilter === 'completed') {
+      result = result.filter(i => i.status === 'completed' || i.redispatch_status === 'COMPLETED');
     }
 
     const q = searchQuery.trim().toLowerCase();
@@ -186,6 +192,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
         setItems(prev => prev.map(i => i.id === item.id ? {
           ...i,
           status: 'moved_to_active',
+          redispatch_status: 'MOVED_TO_ACTIVE',
           status_display: 'Moved to Active'
         } : i));
         // Remove from selection
@@ -214,7 +221,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
   const handleBulkMoveToActive = async () => {
     if (selectedIds.size === 0 || isBulkMoving) return;
 
-    const itemsToMove = items.filter(i => selectedIds.has(i.id) && i.status === 'pending');
+    const itemsToMove = items.filter(i => selectedIds.has(i.id) && (i.status === 'pending' || i.redispatch_status === 'PENDING_REDISPATCH'));
     if (itemsToMove.length === 0) return;
 
     setIsBulkMoving(true);
@@ -229,6 +236,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
         setItems(prev => prev.map(i => movedIdSet.has(i.id) ? {
           ...i,
           status: 'moved_to_active',
+          redispatch_status: 'MOVED_TO_ACTIVE',
           status_display: 'Moved to Active'
         } : i));
         setSelectedIds(new Set());
@@ -275,6 +283,11 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                     {movedCount} Moved
                   </span>
                 )}
+                {completedCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    {completedCount} Completed
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">
                 Exception & return shipments awaiting re-dispatch back into the active logistics workflow
@@ -314,6 +327,17 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
             >
               Moved ({movedCount})
             </button>
+            {completedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setStatusFilter('completed')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
+                  statusFilter === 'completed' ? 'bg-blue-600 text-white font-semibold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Completed ({completedCount})
+              </button>
+            )}
           </div>
 
           <button
@@ -467,9 +491,10 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
               <tbody className="divide-y divide-slate-800/60 text-xs">
                 {filteredItems.map(item => {
                   const isSelected = selectedIds.has(item.id);
-                  const isPending = item.status === 'pending';
+                  const isPending = item.status === 'pending' || item.redispatch_status === 'PENDING_REDISPATCH';
                   const isMoving = movingItemIds.has(item.id);
-                  const isMoved = item.status === 'moved_to_active';
+                  const isMoved = item.status === 'moved_to_active' || item.redispatch_status === 'MOVED_TO_ACTIVE';
+                  const isCompleted = item.status === 'completed' || item.redispatch_status === 'COMPLETED';
 
                   return (
                     <tr
@@ -477,6 +502,8 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                       className={`transition-colors ${
                         isSelected
                           ? 'bg-purple-950/20 hover:bg-purple-950/30'
+                          : isCompleted
+                          ? 'bg-slate-950/40 opacity-70 hover:bg-slate-900/40'
                           : isMoved
                           ? 'bg-slate-950/30 opacity-75 hover:bg-slate-900/40'
                           : 'hover:bg-slate-900/50'
@@ -496,6 +523,8 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                               <Square size={16} />
                             )}
                           </button>
+                        ) : isCompleted ? (
+                          <CheckCircle2 size={16} className="text-blue-500/60 mx-auto" />
                         ) : (
                           <CheckCircle2 size={16} className="text-emerald-500/60 mx-auto" />
                         )}
@@ -599,6 +628,11 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
                             Pending Re-Dispatch
                           </span>
+                        ) : isCompleted ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium bg-blue-950/60 text-blue-300 border border-blue-800/60">
+                            <Check size={11} className="text-blue-400 shrink-0" />
+                            Completed
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">
                             <Check size={11} className="text-emerald-400 shrink-0" />
@@ -625,6 +659,14 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                           >
                             <RotateCcw size={14} className={isMoving ? 'animate-spin' : ''} />
                           </button>
+                        ) : isCompleted ? (
+                          <div
+                            className="w-8 h-8 rounded-xl bg-blue-950/40 border border-blue-800/50 text-blue-400 flex items-center justify-center mx-auto select-none"
+                            title="Completed"
+                            aria-label="Completed"
+                          >
+                            <CheckCircle2 size={14} />
+                          </div>
                         ) : (
                           <div
                             className="w-8 h-8 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 flex items-center justify-center mx-auto select-none"

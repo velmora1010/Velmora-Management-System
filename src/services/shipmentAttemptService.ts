@@ -420,6 +420,35 @@ export const shipmentAttemptService = {
           .eq('id', existingStatus.id);
       }
 
+      // 5. Persist to authoritative redispatch_records table
+      try {
+        const infCode = cleanCodeRef(attempt.influencer_code || (updatedAttempt as any)?.influencer_code);
+        if (infCode) {
+          await supabaseAdmin
+            .from(SUPABASE_TABLES.redispatchRecords)
+            .upsert(
+              {
+                campaign_id: String(campaignId),
+                influencer_id: numInfId && !isNaN(numInfId) ? numInfId : null,
+                influencer_code: infCode,
+                order_id: attempt.order_id || `#${infCode}`,
+                previous_awb: attempt.awb_number || null,
+                courier: attempt.courier || 'Delhivery',
+                issue_type: issueData.issue_type || 'Damaged Product',
+                issue_remark: issueData.issue_remarks || '',
+                redispatch_status: 'PENDING_REDISPATCH',
+                moved_to_active_at: null,
+                completed_at: null,
+                created_at: nowIso,
+                updated_at: nowIso
+              },
+              { onConflict: 'campaign_id,influencer_code' }
+            );
+        }
+      } catch (rdErr) {
+        console.error('Error persisting redispatch_records in reportShipmentIssue:', rdErr);
+      }
+
       this.notifyUpdates(campaignId);
       return { success: true, attempt: updatedAttempt as ShipmentAttempt };
     } catch (e: any) {
@@ -458,6 +487,24 @@ export const shipmentAttemptService = {
       }
 
       if (updatedAttempt) {
+        // Also complete redispatch_records if present
+        try {
+          const infCode = cleanCodeRef((updatedAttempt as any)?.influencer_code);
+          if (infCode) {
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.redispatchRecords)
+              .update({
+                redispatch_status: 'COMPLETED',
+                completed_at: nowIso,
+                updated_at: nowIso
+              })
+              .eq('campaign_id', String(updatedAttempt.campaign_id))
+              .eq('influencer_code', infCode);
+          }
+        } catch (rdErr) {
+          console.error('Error completing redispatch_records in confirmShipmentDelivery:', rdErr);
+        }
+
         this.notifyUpdates(updatedAttempt.campaign_id);
       }
 

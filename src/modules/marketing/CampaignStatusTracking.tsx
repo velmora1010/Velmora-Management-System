@@ -40,6 +40,7 @@ import {
   cleanCodeRef,
   extractInfluencerCodeFromOrderId
 } from '../../services/shipmentAttemptService';
+import { reDispatchQueueService } from '../../services/reDispatchQueueService';
 
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
@@ -2068,6 +2069,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         delete metadata.re_dispatch_moved_to_active;
         delete metadata.moved_to_active;
 
+        // Persist to authoritative redispatch_records table
+        const targetCampId = record.campaign_id || campaign.id;
+        const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || record.influencer_id);
+        await reDispatchQueueService.recordReDispatchIssue(targetCampId, {
+          influencer_id: record.influencer_id,
+          influencer_code: cleanInfCode,
+          order_id: record.dispatch?.order_id || `#${cleanInfCode}`,
+          previous_awb: record.dispatch?.tracking_id,
+          courier: record.dispatch?.courier_partner,
+          issue_type: data.issue_type,
+          issue_remark: data.issue_remarks
+        });
+
         const updates: Partial<StatusTrackingRecord> = {
           delivered_confirmed: false,
           current_step: 0,
@@ -2099,6 +2113,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         metadata.delivery_photo_url = data.delivery_photo_url;
         if (metadata.redispatch_lifecycle_status || metadata.re_dispatch_moved_to_active || metadata.re_dispatch_required) {
           metadata.redispatch_lifecycle_status = 'COMPLETED';
+          const targetCampId = record.campaign_id || campaign.id;
+          const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || record.influencer_id);
+          await reDispatchQueueService.completeReDispatch(targetCampId, {
+            influencer_id: record.influencer_id,
+            influencer_code: cleanInfCode
+          });
         }
         delete metadata.re_dispatch_required;
         delete metadata.re_dispatch_moved_to_active;
