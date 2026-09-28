@@ -60,7 +60,6 @@ import { DispatchInfluencerModal } from './DispatchInfluencerModal';
 import { InfluencerQuickViewModal } from './InfluencerQuickViewModal';
 import { CampaignTrackingSystem } from './CampaignTrackingSystem';
 import { ReDispatchQueueSection } from './ReDispatchQueueSection';
-import { reDispatchQueueService } from '../../services/reDispatchQueueService';
 
 export type LogisticsTab = 'logistics' | 'prepare_dispatch' | 'dispatched' | 'redispatch';
 
@@ -178,37 +177,6 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
   const currentTab: LogisticsTab = (tabParam && validLogisticsTabs.includes(tabParam as LogisticsTab))
     ? (tabParam as LogisticsTab)
     : 'logistics';
-
-  // Dynamic Re-Dispatch Queue Count
-  const [reDispatchQueueCount, setReDispatchQueueCount] = useState<number>(0);
-
-  const loadReDispatchQueueCount = useCallback(async () => {
-    try {
-      const items = await reDispatchQueueService.fetchQueueItems(campaign.id);
-      const pending = items.filter(i => i.status === 'pending').length;
-      setReDispatchQueueCount(pending);
-    } catch (e) {
-      console.error('Error fetching Re-Dispatch queue count:', e);
-    }
-  }, [campaign.id]);
-
-  useEffect(() => {
-    loadReDispatchQueueCount();
-
-    const handleSync = () => {
-      loadReDispatchQueueCount();
-    };
-
-    window.addEventListener('influencer_tracking_updated', handleSync);
-    window.addEventListener('influencer_status_updated', handleSync);
-    window.addEventListener('velmora:influencer-updated', handleSync);
-
-    return () => {
-      window.removeEventListener('influencer_tracking_updated', handleSync);
-      window.removeEventListener('influencer_status_updated', handleSync);
-      window.removeEventListener('velmora:influencer-updated', handleSync);
-    };
-  }, [loadReDispatchQueueCount]);
 
   // Dispatched subview ('batches' | 'tracking') - default is 'batches'
   const subviewParam = searchParams.get('dispatchedView');
@@ -1386,37 +1354,9 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
             <Truck size={14} className={currentTab === 'dispatched' && dispatchedSubView === 'tracking' ? 'text-white' : 'text-purple-400'} />
             <span>Tracking</span>
           </button>
-
-          {/* 9. Re-Dispatch (Dynamic Count) */}
-          <button
-            type="button"
-            onClick={() => {
-              if (currentTab === 'redispatch') {
-                setCurrentTab('logistics');
-              } else {
-                setCurrentTab('redispatch');
-              }
-            }}
-            className={`h-9 px-2.5 sm:px-3 rounded-xl text-xs sm:text-sm font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer select-none ${
-              currentTab === 'redispatch'
-                ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-600/30'
-                : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
-            }`}
-            title="Re-Dispatch Queue"
-          >
-            <RotateCcw size={14} className={currentTab === 'redispatch' ? 'text-white' : 'text-amber-400'} />
-            <span>Re-Dispatch</span>
-            {reDispatchQueueCount > 0 && (
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                currentTab === 'redispatch' ? 'bg-white/20 text-white' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-              }`}>
-                {reDispatchQueueCount}
-              </span>
-            )}
-          </button>
         </div>
 
-        {/* 9. Divider between Group 2 and Group 3 */}
+        {/* Divider between Group 2 and Group 3 */}
         <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0 hidden md:block" />
 
         {/* GROUP 3: [Search] [Filter] [Refresh] */}
@@ -2243,7 +2183,6 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           onBackToList={() => setCurrentTab('logistics')}
           onRefreshCounts={() => {
             handleRefresh();
-            loadReDispatchQueueCount();
           }}
         />
       ) : currentTab === 'dispatched' ? (
