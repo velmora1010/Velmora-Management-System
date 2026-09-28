@@ -79,7 +79,8 @@ import {
   RotateCcw,
   Plus,
   UserPlus,
-  Send
+  Send,
+  MessageSquare
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { UploadCourierShipmentModal } from '../../components/marketing/UploadCourierShipmentModal';
@@ -87,6 +88,8 @@ import { UploadIThinkModal } from '../../components/marketing/UploadIThinkModal'
 import { AddIndiaPostModal } from '../../components/marketing/AddIndiaPostModal';
 import { AfterDispatchSection } from './AfterDispatchSection';
 import { ReDispatchSection } from './ReDispatchSection';
+import { ReDispatchQueueSection } from './ReDispatchQueueSection';
+import { reDispatchQueueService } from '../../services/reDispatchQueueService';
 import {
   fetchIThinkLogisticsRecords,
   mapIThinkRecordToShipment,
@@ -355,7 +358,36 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const [ithinkRecords, setIthinkRecords] = useState<IThinkLogisticsRecord[]>([]);
   const [isAddIpModalOpen, setIsAddIpModalOpen] = useState(false);
   const [indiaPostRecords, setIndiaPostRecords] = useState<IndiaPostTrackingRecord[]>([]);
-  const [activeFormatView, setActiveFormatView] = useState<'tracking' | 'after_dispatch' | 'redispatch_format'>('tracking');
+  const [activeFormatView, setActiveFormatView] = useState<'tracking' | 'after_dispatch' | 'redispatch' | 'redispatch_format'>('tracking');
+  const [reDispatchCount, setReDispatchCount] = useState<number>(0);
+
+  const loadReDispatchCount = useCallback(async () => {
+    try {
+      const items = await reDispatchQueueService.fetchQueueItems(campaign.id);
+      const pending = items.filter(i => i.status === 'pending').length;
+      setReDispatchCount(pending);
+    } catch (e) {
+      console.error('Error fetching Re-Dispatch count:', e);
+    }
+  }, [campaign.id]);
+
+  useEffect(() => {
+    loadReDispatchCount();
+
+    const handleSync = () => {
+      loadReDispatchCount();
+    };
+
+    window.addEventListener('influencer_tracking_updated', handleSync);
+    window.addEventListener('influencer_status_updated', handleSync);
+    window.addEventListener('velmora:influencer-updated', handleSync);
+
+    return () => {
+      window.removeEventListener('influencer_tracking_updated', handleSync);
+      window.removeEventListener('influencer_status_updated', handleSync);
+      window.removeEventListener('velmora:influencer-updated', handleSync);
+    };
+  }, [loadReDispatchCount]);
 
   const handleTriggerCourierUpload = (courier: 'ST Courier' | 'Delhivery' | 'Amazon' | 'IThink Logistics') => {
     console.log(`[Tracking System] Opening file picker for ${courier}...`);
@@ -2027,22 +2059,40 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             <span>After Dispatch Format</span>
           </button>
 
-          {/* 2. Re-Dispatch Format Button */}
+          {/* 2. Re-Dispatch Section Button with Dynamic Count */}
+          <button
+            type="button"
+            onClick={() => setActiveFormatView(prev => prev === 'redispatch' ? 'tracking' : 'redispatch')}
+            className={`h-10 px-3.5 sm:px-4 rounded-xl transition-colors text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none ${
+              activeFormatView === 'redispatch'
+                ? 'bg-amber-600 text-white shadow-amber-600/40 ring-2 ring-amber-400'
+                : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
+            }`}
+            title="Re-Dispatch Queue"
+          >
+            <RotateCcw size={14} className="text-white" />
+            <span>Re-Dispatch</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black bg-white/20 text-white border border-white/30">
+              {reDispatchCount}
+            </span>
+          </button>
+
+          {/* 3. Re-Dispatch Format Text Generator */}
           <button
             type="button"
             onClick={() => setActiveFormatView(prev => prev === 'redispatch_format' ? 'tracking' : 'redispatch_format')}
-            className={`h-10 px-3.5 sm:px-4 rounded-xl transition-colors text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none ${
+            className={`h-10 px-3 sm:px-3.5 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 shadow-md cursor-pointer border border-slate-700/80 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white shrink-0 select-none ${
               activeFormatView === 'redispatch_format'
-                ? 'bg-purple-700 text-white shadow-purple-600/40 ring-2 ring-purple-400'
-                : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
+                ? 'bg-purple-800 text-white ring-2 ring-purple-400'
+                : ''
             }`}
-            title="Re-Dispatch Format"
+            title="Re-Dispatch WhatsApp Format Generator"
           >
-            <RotateCcw size={14} className="text-white" />
-            <span>Re-Dispatch Format</span>
+            <MessageSquare size={13} className="text-purple-300" />
+            <span>Format</span>
           </button>
 
-          {/* 3. ADD IP Button */}
+          {/* 4. ADD IP Button */}
           <button
             type="button"
             onClick={() => setIsAddIpModalOpen(true)}
@@ -2053,10 +2103,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             <span>ADD IP</span>
           </button>
 
-          {/* 4. DB Refresh */}
+          {/* 5. DB Refresh */}
           <button
             type="button"
-            onClick={() => loadShipments()}
+            onClick={() => {
+              loadShipments();
+              loadReDispatchCount();
+            }}
             disabled={isLoadingDb || isBulkSyncing}
             className="w-10 h-10 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center shrink-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             title="Refresh shipments from Supabase database"
@@ -2071,6 +2124,15 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           campaign={campaign}
           influencers={allActiveInfluencers || dispatchedInfluencers}
           onBackToList={() => setActiveFormatView('tracking')}
+        />
+      ) : activeFormatView === 'redispatch' ? (
+        <ReDispatchQueueSection
+          campaign={campaign}
+          onBackToList={() => setActiveFormatView('tracking')}
+          onRefreshCounts={() => {
+            loadReDispatchCount();
+            loadShipments();
+          }}
         />
       ) : activeFormatView === 'redispatch_format' ? (
         <ReDispatchSection

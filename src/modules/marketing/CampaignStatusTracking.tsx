@@ -1067,6 +1067,10 @@ export const isInfluencerInReDispatch = (record: StatusTrackingRecord): boolean 
   } catch (e) {
     metadata = {};
   }
+  // Once an influencer has been moved to Active for Re-Dispatch, they are no longer in the pending queue
+  if (metadata.re_dispatch_moved_to_active || metadata.moved_to_active) {
+    return false;
+  }
   const rawStatus = (record.status || '').toLowerCase();
   const dispatchStatus = ((record.dispatch as any)?.dispatch_status || '').toLowerCase();
   return Boolean(
@@ -1380,6 +1384,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }
 
     const rawStatus = (record.status || '').toLowerCase();
+
+    // Active - Re-Dispatch: already moved to active queue for re-dispatch
+    if (metadata.re_dispatch_moved_to_active || metadata.moved_to_active) {
+      return {
+        key: 'RE_DISPATCH_ACTIVE',
+        label: 'Active — Re-Dispatch',
+        badgeClass: 'bg-blue-950/80 text-blue-300 border-blue-600/60',
+        dotClass: 'bg-blue-400'
+      };
+    }
 
     // Re-Dispatch Required: if shipment issue reported or re-dispatch required
     if (
