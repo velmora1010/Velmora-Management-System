@@ -8,7 +8,8 @@ import {
   XCircle, PauseCircle, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2,
-  Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, Activity, Truck, Share2, Globe, GitBranch
+  Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, Activity, Truck, Share2, Globe, GitBranch,
+  Calendar, CreditCard, PhoneCall, Users, CheckSquare
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -36,7 +37,8 @@ import {
   shipmentAttemptService, 
   type ShipmentAttempt, 
   type ShipmentIssueType,
-  cleanCodeRef
+  cleanCodeRef,
+  extractInfluencerCodeFromOrderId
 } from '../../services/shipmentAttemptService';
 
 interface CampaignStatusTrackingProps {
@@ -104,6 +106,24 @@ export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
+];
+
+// 7 Top Workflow Summary Box Step Definitions: Share Script, Call & Explain, Pay Advance, Time Line, Draft, Post Date, Payment
+export interface WorkflowSummaryBoxConfig {
+  id: string;
+  label: string;
+  icon: any;
+}
+
+export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
+  { id: 'share_script', label: 'Share Script', icon: FileText },
+  { id: 'call_explain', label: 'Call & Explain', icon: PhoneCall },
+  { id: 'pay_advance', label: 'Pay Advance', icon: CreditCard },
+  { id: 'timeline', label: 'Time Line', icon: Clock },
+  { id: 'draft', label: 'Draft', icon: Video },
+  { id: 'post_date', label: 'Post Date', icon: Calendar },
+  { id: 'payment', label: 'Payment', icon: IndianRupee },
+  { id: 're_dispatch', label: 'Re-Dispatch', icon: RotateCcw },
 ];
 
 const isFakeUrl = (url: string | undefined | null) => {
@@ -1028,6 +1048,51 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number)
   };
 };
 
+/**
+ * Resolves the single active summary workflow step for an influencer in a given video number:
+ * One of: 'share_script' | 'call_explain' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment' | 're_dispatch' | null
+ */
+export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, videoNumber: number): string | null => {
+  // 1. Check if influencer has a reported issue or requires Re-Dispatch
+  let metadata: any = {};
+  try {
+    metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+  } catch (e) {
+    metadata = {};
+  }
+  const rawStatus = (record.status || '').toLowerCase();
+  const dispatchStatus = ((record.dispatch as any)?.dispatch_status || '').toLowerCase();
+  const isReDispatch = Boolean(
+    rawStatus.includes('re-dispatch') ||
+    rawStatus.includes('redispatch') ||
+    dispatchStatus.includes('re_dispatch') ||
+    dispatchStatus.includes('redispatch') ||
+    metadata.re_dispatch_required ||
+    metadata.shipment_issue ||
+    metadata.issue_reported
+  );
+
+  if (isReDispatch) {
+    return 're_dispatch';
+  }
+
+  // 2. Normal video workflow steps
+  if (!isDeliveryStepCompleted(record)) return null;
+  const vData = getVideoWorkflow(record, videoNumber);
+  if (vData.isReDraftRequired) return 'draft';
+  if (vData.activeStepId) {
+    return vData.activeStepId;
+  }
+  if (videoNumber === 1 && vData.completedCount === vData.totalSteps) {
+    const v1FinalPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'final');
+    const isV1FinalPaid = v1FinalPayment ? (v1FinalPayment.payment_status === 'paid' || Number(v1FinalPayment.paid_amount || 0) > 0) : false;
+    if (!isV1FinalPaid) {
+      return 'payment';
+    }
+  }
+  return null;
+};
+
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
   const { 
     trackingRecords, 
@@ -1058,6 +1123,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   // Search input state
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  // Top Workflow Summary Step filter: null = All, or one of 'share_script' | 'call_explain' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment'
+  const [selectedSummaryStep, setSelectedSummaryStep] = useState<string | null>(null);
+
   // Active filter count calculation (total individual criteria selected)
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -1068,8 +1136,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     count += activeFilters.workflowStatuses.length;
     count += activeFilters.platforms.length;
     count += activeFilters.deliveryStatuses.length;
+    if (selectedSummaryStep) count += 1;
     return count;
-  }, [activeFilters]);
+  }, [activeFilters, selectedSummaryStep]);
 
   // Modals & Menu State
   const [activeModal, setActiveModal] = useState<{ recordId: string; stageId: string } | null>(null);
@@ -1469,9 +1538,39 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matches) return false;
       }
 
+      // 9. Top summary step box filter (Share Script, Call & Explain, Pay Advance, Time Line, Draft, Post Date, Payment)
+      if (selectedSummaryStep) {
+        const step = getInfluencerActiveSummaryStep(record, selectedVideoNumber);
+        if (step !== selectedSummaryStep) return false;
+      }
+
       return true;
     });
-  }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber]);
+  }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber, selectedSummaryStep]);
+
+  // Dynamic workflow step counts for horizontal summary boxes (Share Script, Call & Explain, Pay Advance, Time Line, Draft, Post Date, Payment)
+  const workflowStepCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: activeTrackingRecords.length,
+      share_script: 0,
+      call_explain: 0,
+      pay_advance: 0,
+      timeline: 0,
+      draft: 0,
+      post_date: 0,
+      payment: 0,
+      re_dispatch: 0
+    };
+
+    activeTrackingRecords.forEach(r => {
+      const step = getInfluencerActiveSummaryStep(r, selectedVideoNumber);
+      if (step && counts[step] !== undefined) {
+        counts[step]++;
+      }
+    });
+
+    return counts;
+  }, [activeTrackingRecords, selectedVideoNumber]);
 
   // Overall KPI Counts based on unique filtered influencers
   const kpiCounts = useMemo(() => {
@@ -1714,6 +1813,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const handleClearAllFilters = () => {
     setActiveFilters(initialStatusTrackingFilterState);
     setSearchQuery('');
+    setSelectedSummaryStep(null);
   };
 
   // Clear All Status Tracking Records for Current Campaign
@@ -1778,13 +1878,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (latest) {
           attemptId = latest.id;
         } else {
+          const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || record.code || record.influencer_id);
           const initial = await shipmentAttemptService.createInitialShipmentAttempt({
             campaign_id: record.campaign_id,
             influencer_id: record.influencer_id,
-            influencer_code: record.dispatch?.influencer_code || record.influencer_id,
+            influencer_code: cleanInfCode,
             courier: record.dispatch?.courier_partner,
             awb_number: record.dispatch?.tracking_id,
-            order_id: (record.dispatch as any)?.order_id
+            dispatch_date: record.dispatch?.dispatch_date || null
           });
           if (initial) attemptId = initial.id;
         }
@@ -2295,41 +2396,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             LEVEL 1: MAIN STATUS TRACKING LIST VIEW
         ========================================================================= */
         <>
-          {/* 1. FUTURISTIC UNIFIED STATUS TRACKING HEADER */}
-          <div className="w-full bg-[#080e1e] border border-blue-900/30 rounded-[20px] px-4 sm:px-6 py-3.5 sm:py-4 min-h-[105px] flex flex-col md:flex-row items-center justify-between gap-3 lg:gap-4 shrink-0 shadow-lg">
-            {/* Left: Status Tracking Title */}
-            <div className="w-full md:w-auto lg:w-[260px] flex items-center gap-3 sm:gap-3.5 shrink-0 justify-between md:justify-start">
-              <div className="flex items-center gap-3 sm:gap-3.5">
-                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-br from-purple-700/40 via-purple-800/30 to-purple-950/60 border border-purple-500/50 flex items-center justify-center text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.25)] shrink-0">
-                  <Target size={24} className="text-purple-400" />
-                </div>
-                <div className="min-w-0">
-                  <h2 className="text-lg sm:text-xl lg:text-2xl font-black text-white tracking-wide whitespace-nowrap">Status Tracking</h2>
-                </div>
-              </div>
-
-              {/* Mobile Only: Action buttons */}
-              <div className="flex md:hidden items-center gap-2 shrink-0">
-                <button 
-                  onClick={refresh}
-                  className="w-9 h-9 rounded-xl bg-[#091024] hover:bg-slate-800 border border-slate-800/90 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer shadow-sm"
-                  title="Refresh Data"
-                >
-                  <RefreshCcw size={15} />
-                </button>
-                <button 
-                  onClick={onBack}
-                  className="px-3 py-1.5 rounded-xl bg-[#091024] hover:bg-slate-800 border border-slate-800/90 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
-                >
-                  <ArrowLeft size={14} />
-                  <span>Back</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Center: Video 1 - Video 6 Workflow Navigation */}
-            <div className="flex-1 flex items-center justify-center overflow-x-auto no-scrollbar min-w-0 px-1 py-1 w-full md:w-auto">
-              <div className="bg-[#050a17]/90 border border-blue-950/70 rounded-2xl px-4 sm:px-7 py-2.5 sm:py-3 shadow-inner flex items-center min-w-[460px] max-w-3xl w-full justify-between">
+          {/* 1. STATUS TRACKING VIDEO NAVIGATION HEADER */}
+          <div className="w-full bg-[#080e1e] border border-blue-900/30 rounded-[20px] px-4 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between gap-4 shrink-0 shadow-lg">
+            {/* Center / Video Navigation (Clean line, no outer subcard) */}
+            <div className="flex-1 flex items-center justify-center sm:justify-start md:justify-center overflow-x-auto no-scrollbar min-w-0 py-1">
+              <div className="flex items-center min-w-[420px] max-w-2xl w-full justify-between px-2">
                 {[1, 2, 3, 4, 5, 6].map((vNum, idx) => {
                   const stepKey = `video${vNum}` as WorkflowStepKey;
                   const isSelected = selectedWorkflowStep === stepKey;
@@ -2388,11 +2459,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               </div>
             </div>
 
-            {/* Subtle Divider */}
-            <div className="hidden lg:block h-10 w-[1px] bg-slate-800/80 mx-1 shrink-0" />
-
-            {/* Right: Actions on Desktop */}
-            <div className="hidden md:flex w-auto lg:w-[230px] items-center justify-end gap-2.5 sm:gap-3 shrink-0">
+            {/* Right: Actions (Refresh & Back Icon-only Buttons) */}
+            <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
               <button 
                 onClick={refresh}
                 className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-[#091024] hover:bg-slate-800 border border-slate-800/90 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer shadow-sm"
@@ -2402,429 +2470,164 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               </button>
               <button 
                 onClick={onBack}
-                className="px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-[#091024] hover:bg-slate-800 border border-slate-800/90 text-slate-300 hover:text-white text-xs sm:text-sm font-semibold flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-[#091024] hover:bg-slate-800 border border-slate-800/90 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer shadow-sm"
+                title="Back to Overview"
               >
-                <ArrowLeft size={16} />
-                <span>Back to Overview</span>
+                <ArrowLeft size={17} />
               </button>
             </div>
           </div>
 
-          {/* 2. COMPACT INLINE FILTER & SEARCH TOOLBAR */}
-          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 shrink-0 relative z-30">
-            {/* LEFT: 5 FILTER DROPDOWNS: 1. WORKFLOW STEP, 2. DELIVERY STATUS, 3. PLATFORM, 4. LANGUAGE, 5. PRICE */}
-            <div className="flex items-center gap-2 flex-wrap shrink-0">
-              {/* 1. WORKFLOW STEP */}
-              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'workflow' ? 'z-50' : 'z-20'}`}>
+          {/* 2. HORIZONTAL WORKFLOW STEP SUMMARY COUNT BOXES */}
+          <div className="flex flex-col gap-2.5 shrink-0">
+            {/* Top: 9 Horizontal Workflow Step Summary Boxes in ONE Single Line */}
+            <div className="w-full overflow-x-auto no-scrollbar pb-1">
+              <div className="grid grid-flow-col auto-cols-[minmax(112px,1fr)] xl:auto-cols-auto xl:grid-cols-9 gap-2 sm:gap-2.5 w-full min-w-[1020px] xl:min-w-0">
+                {/* All Box */}
                 <button
                   type="button"
-                  onClick={() => setOpenFilterDropdown(prev => prev === 'workflow' ? null : 'workflow')}
-                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
-                    activeFilters.workflowStatuses.length > 0
-                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
-                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                  onClick={() => setSelectedSummaryStep(null)}
+                  className={`group relative flex flex-col justify-between p-2.5 sm:p-3 h-[74px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 ${
+                    selectedSummaryStep === null
+                      ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
+                      : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                   }`}
+                  title="View All Influencers"
                 >
-                  <GitBranch size={13} className={activeFilters.workflowStatuses.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
-                  <span>
-                    {activeFilters.workflowStatuses.length === 1
-                      ? (workflowStepOptions.find(o => 
-                          areFilterValuesEqual(o.id, activeFilters.workflowStatuses[0]) || 
-                          areFilterValuesEqual(o.label, activeFilters.workflowStatuses[0]) || 
-                          areFilterValuesEqual(normalizeWorkflowStepId(o.id), normalizeWorkflowStepId(activeFilters.workflowStatuses[0]))
-                        )?.label || 'Workflow Step')
-                      : 'Workflow Step'}
-                  </span>
-                  {activeFilters.workflowStatuses.length > 0 ? (
-                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1.5 flex items-center justify-center">
-                      {matchingWorkflowCount}
+                  <div className="flex items-center justify-between gap-1.5 mb-1 w-full">
+                    <span className={`text-[11px] sm:text-xs font-semibold truncate ${
+                      selectedSummaryStep === null ? 'text-purple-200' : 'text-slate-300 group-hover:text-white'
+                    }`}>
+                      All
                     </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-500 font-normal">All</span>
-                  )}
-                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'workflow' ? 'rotate-180' : ''}`} />
+                    <Users 
+                      size={14} 
+                      className={`shrink-0 transition-colors ${
+                        selectedSummaryStep === null ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-300'
+                      }`} 
+                    />
+                  </div>
+                  <div className="flex items-baseline justify-between w-full">
+                    <span className="text-lg sm:text-xl font-black text-white tracking-tight">
+                      {workflowStepCounts.all}
+                    </span>
+                    {selectedSummaryStep === null && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
+                    )}
+                  </div>
                 </button>
 
-                {openFilterDropdown === 'workflow' && (
-                  <div className="absolute top-full left-0 mt-1.5 w-60 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                {/* 8 Workflow Step Boxes */}
+                {WORKFLOW_SUMMARY_BOX_CONFIGS.map(step => {
+                  const isSelected = selectedSummaryStep === step.id;
+                  const count = workflowStepCounts[step.id] || 0;
+                  const StepIcon = step.icon;
+
+                  return (
                     <button
+                      key={step.id}
                       type="button"
-                      onClick={() => {
-                        setActiveFilters(prev => ({ ...prev, workflowStatuses: [] }));
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        activeFilters.workflowStatuses.length === 0
-                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                      onClick={() => setSelectedSummaryStep(prev => prev === step.id ? null : step.id)}
+                      className={`group relative flex flex-col justify-between p-2.5 sm:p-3 h-[74px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 ${
+                        isSelected
+                          ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
+                          : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                       }`}
+                      title={`Filter by ${step.label} (${count})`}
                     >
-                      <span>All Steps</span>
-                      <span className="text-[10px] text-slate-400 font-normal">({activeTrackingRecords.length})</span>
+                      <div className="flex items-center justify-between gap-1.5 mb-1 w-full">
+                        <span className={`text-[11px] sm:text-xs font-semibold truncate ${
+                          isSelected ? 'text-purple-200' : 'text-slate-300 group-hover:text-white'
+                        }`}>
+                          {step.label}
+                        </span>
+                        <StepIcon 
+                          size={14} 
+                          className={`shrink-0 transition-colors ${
+                            isSelected ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-300'
+                          }`} 
+                        />
+                      </div>
+                      <div className="flex items-baseline justify-between w-full">
+                        <span className="text-lg sm:text-xl font-black text-white tracking-tight">
+                          {count}
+                        </span>
+                        {isSelected && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
+                        )}
+                      </div>
                     </button>
-                    <div className="h-px bg-slate-800 my-1" />
-                    {workflowStepOptions.filter(opt => opt.id !== 'all').map(step => {
-                      const isSelected = activeFilters.workflowStatuses.some(s => 
-                        areFilterValuesEqual(s, step.id) || areFilterValuesEqual(s, step.label) || areFilterValuesEqual(normalizeWorkflowStepId(s), step.id)
-                      );
-                      const stepCount = (selectedWorkflowStep as any) === 'delivery'
-                        ? activeTrackingRecords.filter(r => {
-                            const ds = getInfluencerDeliveryStatus(r);
-                            return areFilterValuesEqual(ds, step.id) || areFilterValuesEqual(normalizeWorkflowStepId(ds), step.id);
-                          }).length
-                        : activeTrackingRecords.filter(r => {
-                            const vd = getVideoWorkflow(r, selectedVideoNumber);
-                            const norm = normalizeWorkflowStepId(step.id);
-                            if (norm === 'payment') return vd.activeStepId === 'payment' || vd.activeStepId === 'pay_advance';
-                            if (norm === 'pay_advance') return vd.activeStepId === 'pay_advance' || vd.activeStepId === 'payment';
-                            return vd.activeStepId === norm;
-                          }).length;
-
-                      return (
-                        <button
-                          key={step.id}
-                          type="button"
-                          onClick={() => toggleFilterWorkflowStatus(step.id)}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
-                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
-                            }`}>
-                              {isSelected && <Check size={10} strokeWidth={3} />}
-                            </span>
-                            <span>{step.label}</span>
-                          </div>
-                          <span className="text-[10px] text-slate-400 font-normal">({stepCount})</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 2. DELIVERY STATUS */}
-              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'delivery' ? 'z-50' : 'z-20'}`}>
-                <button
-                  type="button"
-                  onClick={() => setOpenFilterDropdown(prev => prev === 'delivery' ? null : 'delivery')}
-                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
-                    activeFilters.deliveryStatuses.length > 0
-                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
-                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
-                  }`}
-                >
-                  <Truck size={13} className={activeFilters.deliveryStatuses.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
-                  <span>
-                    {activeFilters.deliveryStatuses.length === 1
-                      ? activeFilters.deliveryStatuses[0]
-                      : 'Delivery Status'}
-                  </span>
-                  {activeFilters.deliveryStatuses.length > 0 ? (
-                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1.5 flex items-center justify-center">
-                      {matchingDeliveryCount}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-500 font-normal">All</span>
-                  )}
-                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'delivery' ? 'rotate-180' : ''}`} />
-                </button>
-
-                {openFilterDropdown === 'delivery' && (
-                  <div className="absolute top-full left-0 mt-1.5 w-52 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveFilters(prev => ({ ...prev, deliveryStatuses: [] }));
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        activeFilters.deliveryStatuses.length === 0
-                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                      }`}
-                    >
-                      <span>All Delivery Statuses</span>
-                      <span className="text-[10px] text-slate-400 font-normal">({activeTrackingRecords.length})</span>
-                    </button>
-                    <div className="h-px bg-slate-800 my-1" />
-                    {STATUS_TRACKING_DELIVERY_STATUSES.map(st => {
-                      const isSelected = activeFilters.deliveryStatuses.some(s => areFilterValuesEqual(s, st));
-                      const countForDelivery = activeTrackingRecords.filter(r => areFilterValuesEqual(getInfluencerDeliveryStatus(r), st)).length;
-                      return (
-                        <button
-                          key={st}
-                          type="button"
-                          onClick={() => toggleFilterDeliveryStatus(st)}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                            : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
-                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
-                            }`}>
-                              {isSelected && <Check size={10} strokeWidth={3} />}
-                            </span>
-                            <span>{st}</span>
-                          </div>
-                          <span className="text-[10px] text-slate-400 font-normal">({countForDelivery})</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 3. PLATFORM */}
-              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'platform' ? 'z-50' : 'z-20'}`}>
-                <button
-                  type="button"
-                  onClick={() => setOpenFilterDropdown(prev => prev === 'platform' ? null : 'platform')}
-                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
-                    activeFilters.platforms.length > 0
-                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
-                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
-                  }`}
-                >
-                  <Share2 size={13} className={activeFilters.platforms.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
-                  <span>Platform</span>
-                  {activeFilters.platforms.length > 0 ? (
-                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center">
-                      {activeFilters.platforms.length}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-500 font-normal">All</span>
-                  )}
-                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'platform' ? 'rotate-180' : ''}`} />
-                </button>
-
-                {openFilterDropdown === 'platform' && (
-                  <div className="absolute top-full left-0 mt-1.5 w-52 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveFilters(prev => ({ ...prev, platforms: [] }));
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        activeFilters.platforms.length === 0
-                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                      }`}
-                    >
-                      <span>All Platforms</span>
-                    </button>
-                    <div className="h-px bg-slate-800 my-1" />
-                    {(availableFilterPlatforms.length > 0 ? availableFilterPlatforms : ['Instagram', 'YouTube']).map(plat => {
-                      const isSelected = activeFilters.platforms.some(p => areFilterValuesEqual(p, plat));
-                      return (
-                        <button
-                          key={plat}
-                          type="button"
-                          onClick={() => toggleFilterPlatform(plat)}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
-                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
-                            }`}>
-                              {isSelected && <Check size={10} strokeWidth={3} />}
-                            </span>
-                            <span>{plat}</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 4. LANGUAGE */}
-              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'language' ? 'z-50' : 'z-20'}`}>
-                <button
-                  type="button"
-                  onClick={() => setOpenFilterDropdown(prev => prev === 'language' ? null : 'language')}
-                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
-                    activeFilters.languages.length > 0
-                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
-                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
-                  }`}
-                >
-                  <Globe size={13} className={activeFilters.languages.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
-                  <span>Language</span>
-                  {activeFilters.languages.length > 0 ? (
-                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center">
-                      {activeFilters.languages.length}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-500 font-normal">All</span>
-                  )}
-                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'language' ? 'rotate-180' : ''}`} />
-                </button>
-
-                {openFilterDropdown === 'language' && (
-                  <div className="absolute top-full left-0 mt-1.5 w-52 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveFilters(prev => ({ ...prev, languages: [] }));
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        activeFilters.languages.length === 0
-                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                      }`}
-                    >
-                      <span>All Languages</span>
-                    </button>
-                    <div className="h-px bg-slate-800 my-1" />
-                    {(availableFilterLanguages.length > 0 ? availableFilterLanguages : ['Malayalam', 'Tamil', 'Kannada', 'Telugu', 'Hindi', 'English']).map(lang => {
-                      const isSelected = activeFilters.languages.some(l => areFilterValuesEqual(l, lang));
-                      return (
-                        <button
-                          key={lang}
-                          type="button"
-                          onClick={() => toggleFilterLanguage(lang)}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
-                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
-                            }`}>
-                              {isSelected && <Check size={10} strokeWidth={3} />}
-                            </span>
-                            <span>{lang}</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 5. PRICE */}
-              <div className={`relative status-tracking-filter-dropdown-container ${openFilterDropdown === 'price' ? 'z-50' : 'z-20'}`}>
-                <button
-                  type="button"
-                  onClick={() => setOpenFilterDropdown(prev => prev === 'price' ? null : 'price')}
-                  className={`h-[38px] sm:h-[40px] px-3 rounded-xl text-xs font-medium flex items-center gap-2 transition-all cursor-pointer border ${
-                    activeFilters.priceRanges.length > 0
-                      ? 'bg-purple-600/15 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-950/40'
-                      : 'bg-[#0b1329] border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
-                  }`}
-                >
-                  <IndianRupee size={13} className={activeFilters.priceRanges.length > 0 ? 'text-purple-400' : 'text-slate-400'} />
-                  <span>Price</span>
-                  {activeFilters.priceRanges.length > 0 ? (
-                    <span className="bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center">
-                      {activeFilters.priceRanges.length}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-500 font-normal">All</span>
-                  )}
-                  <ChevronDown size={13} className={`text-slate-400 transition-transform ${openFilterDropdown === 'price' ? 'rotate-180' : ''}`} />
-                </button>
-
-                {openFilterDropdown === 'price' && (
-                  <div className="absolute top-full left-0 sm:left-auto sm:right-0 mt-1.5 w-56 bg-[#0b1329] border border-slate-700/90 rounded-xl shadow-2xl p-1.5 z-50 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveFilters(prev => ({ ...prev, priceRanges: [] }));
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                        activeFilters.priceRanges.length === 0
-                          ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                      }`}
-                    >
-                      <span>All Price Ranges</span>
-                    </button>
-                    <div className="h-px bg-slate-800 my-1" />
-                    {STATUS_TRACKING_PRICE_RANGES.map(range => {
-                      const isSelected = activeFilters.priceRanges.includes(range.id);
-                      return (
-                        <button
-                          key={range.id}
-                          type="button"
-                          onClick={() => toggleFilterPriceRange(range.id)}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-purple-600/20 text-purple-300 font-semibold'
-                              : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
-                              isSelected ? 'bg-purple-600 border-purple-500 text-white' : 'border-slate-700 bg-slate-900/60'
-                            }`}>
-                              {isSelected && <Check size={10} strokeWidth={3} />}
-                            </span>
-                            <span>{range.label}</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                  );
+                })}
               </div>
             </div>
 
-            {/* RIGHT: SEARCH BAR + ICON-ONLY FILTERS BUTTON + RESET FILTERS */}
-            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
-              <span className="text-xs text-slate-400 font-medium px-1 whitespace-nowrap hidden sm:inline-block">
-                {filteredRecords.length} {filteredRecords.length === 1 ? 'Influencer' : 'Influencers'}
-              </span>
-              <div className="relative w-full sm:w-[300px] md:w-[320px] lg:w-[340px] shrink-0">
-                <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-                <input 
-                  type="text" 
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search influencer, phone, code..."
-                  className="w-full h-[38px] sm:h-[40px] bg-[#0b1329] border border-slate-800/80 rounded-xl pl-9 pr-4 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
-                />
-              </div>
-              {/* Filter drawer button: Icon alone */}
-              <button
-                type="button"
-                onClick={() => setIsFilterDrawerOpen(true)}
-                className={`w-[38px] h-[38px] sm:w-[40px] sm:h-[40px] bg-[#0b1329] border ${
-                  activeFilterCount > 0 
-                    ? 'border-purple-500 text-purple-300 font-semibold bg-purple-600/10' 
-                    : 'border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
-                } rounded-xl flex items-center justify-center transition-colors relative cursor-pointer shadow-sm shrink-0`}
-                title="Filter Options"
-              >
-                <SlidersHorizontal size={16} className={activeFilterCount > 0 ? 'text-purple-400' : 'text-slate-400'} />
-                {activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center select-none shadow-md border border-[#070c18]">
-                    {activeFilterCount}
+            {/* Bottom Toolbar: Filter Status + Search Bar + Advanced Filters */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 pt-0.5">
+              <div className="flex items-center gap-2 text-xs">
+                {selectedSummaryStep ? (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-slate-400">Filtered by:</span>
+                    <span className="px-2.5 py-1 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 font-semibold flex items-center gap-1.5 text-xs">
+                      <span>{WORKFLOW_SUMMARY_BOX_CONFIGS.find(b => b.id === selectedSummaryStep)?.label}</span>
+                      <button 
+                        type="button" 
+                        onClick={() => setSelectedSummaryStep(null)}
+                        className="hover:text-white text-purple-400 cursor-pointer ml-0.5"
+                        title="Clear filter"
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                    <span className="text-slate-500 text-xs">({filteredRecords.length} matching)</span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-400 font-medium">
+                    Showing {filteredRecords.length} {filteredRecords.length === 1 ? 'Influencer' : 'Influencers'}
                   </span>
                 )}
-              </button>
-              {(activeFilterCount > 0 || searchQuery.trim()) && (
-                <button 
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="relative w-full sm:w-[280px] md:w-[320px]">
+                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                  <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Search influencer, phone, code..."
+                    className="w-full h-[38px] bg-[#0b1329] border border-slate-800/80 rounded-xl pl-9 pr-4 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+                  />
+                </div>
+                {/* Advanced Filter drawer button */}
+                <button
                   type="button"
-                  onClick={handleClearAllFilters}
-                  className="h-[38px] sm:h-[40px] text-slate-400 hover:text-slate-200 text-xs px-2.5 rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer whitespace-nowrap flex items-center"
-                  title="Reset all active search and filter criteria"
+                  onClick={() => setIsFilterDrawerOpen(true)}
+                  className={`w-[38px] h-[38px] bg-[#0b1329] border ${
+                    activeFilterCount > 0 
+                      ? 'border-purple-500 text-purple-300 font-semibold bg-purple-600/10' 
+                      : 'border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                  } rounded-xl flex items-center justify-center transition-colors relative cursor-pointer shadow-sm shrink-0`}
+                  title="Advanced Filter Options"
                 >
-                  Reset Filters
+                  <SlidersHorizontal size={16} className={activeFilterCount > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                  {activeFilterCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center select-none shadow-md border border-[#070c18]">
+                      {activeFilterCount}
+                    </span>
+                  )}
                 </button>
-              )}
+                {(activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep) && (
+                  <button 
+                    type="button" 
+                    onClick={handleClearAllFilters}
+                    className="h-[38px] text-slate-400 hover:text-slate-200 text-xs px-2.5 rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer whitespace-nowrap flex items-center"
+                    title="Reset all active search and filter criteria"
+                  >
+                    Reset Filters
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -4100,13 +3903,20 @@ const DeliveredForm = ({ record, onSave }: any) => {
           <div className="bg-[#0b1329] rounded-lg p-3 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono font-bold text-[10px]">
-                Attempt 1
+                Attempt 1 (Original)
               </span>
-              <span>{record.dispatch?.courier_partner || 'Courier'} &bull; Order: #{record.dispatch?.influencer_code || record.influencer_id}</span>
+              <span>{record.dispatch?.courier_partner || 'Courier'} &bull; Order: #{cleanCodeRef(record.dispatch?.influencer_code || record.influencer_id)}</span>
             </div>
-            <span className="text-slate-500 font-mono text-[11px]">
-              AWB: {record.dispatch?.tracking_id || '—'}
-            </span>
+            <div className="flex items-center gap-2">
+              {record.dispatch?.dispatch_date && (
+                <span className="text-slate-400 font-medium text-[11px]">
+                  {formatDisplayDateLocal(record.dispatch.dispatch_date)}
+                </span>
+              )}
+              <span className="text-slate-500 font-mono text-[11px]">
+                AWB: {record.dispatch?.tracking_id || '—'}
+              </span>
+            </div>
           </div>
         ) : (
           <div className="space-y-2">
@@ -4114,6 +3924,21 @@ const DeliveredForm = ({ record, onSave }: any) => {
               const isReplacement = att.shipment_type === 'RE_DISPATCH' || att.attempt_number > 1;
               const hasIssue = Boolean(att.issue_reported || att.issue_type);
               const isDelivered = Boolean(att.delivery_confirmed);
+
+              const infCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || record.code || String(record.influencer_id));
+              const courierName = att.courier || record.dispatch?.courier_partner || 'Courier';
+              const isDelhivery = courierName.toLowerCase().includes('delhivery');
+              
+              // Ensure the attempt order ID strictly derives from this influencer's code
+              let displayOrderId = att.order_id;
+              const extractedCode = extractInfluencerCodeFromOrderId(displayOrderId);
+              if (!displayOrderId || (extractedCode && extractedCode.toUpperCase() !== infCode.toUpperCase())) {
+                displayOrderId = isDelhivery 
+                  ? (att.attempt_number > 1 ? `#${'R'.repeat(att.attempt_number - 1)}${infCode}` : `#${infCode}`)
+                  : (att.attempt_number > 1 ? `R${'R'.repeat(Math.max(0, att.attempt_number - 2))}${infCode}` : infCode);
+              }
+
+              const attemptDate = att.dispatch_date || (att.created_at ? att.created_at.split('T')[0] : null);
 
               return (
                 <div 
@@ -4136,10 +3961,10 @@ const DeliveredForm = ({ record, onSave }: any) => {
                         Attempt {att.attempt_number} {isReplacement ? '(Re-Dispatch)' : '(Original)'}
                       </span>
                       <span className="font-mono text-white font-semibold">
-                        {att.order_id || `#${record.dispatch?.influencer_code || record.influencer_id}`}
+                        {displayOrderId}
                       </span>
                       <span className="text-slate-400">
-                        {att.courier || record.dispatch?.courier_partner || 'Courier'}
+                        {courierName}
                       </span>
                       {att.awb_number && (
                         <span className="text-slate-400 font-mono text-[11px]">
@@ -4149,9 +3974,9 @@ const DeliveredForm = ({ record, onSave }: any) => {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {att.dispatch_date && (
-                        <span className="text-slate-500 text-[11px]">
-                          {att.dispatch_date}
+                      {attemptDate && (
+                        <span className="text-slate-400 font-medium text-[11px]">
+                          {formatDisplayDateLocal(attemptDate)}
                         </span>
                       )}
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
