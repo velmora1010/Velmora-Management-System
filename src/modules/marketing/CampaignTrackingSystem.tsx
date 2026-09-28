@@ -2089,7 +2089,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             title="Re-Dispatch WhatsApp Format Generator"
           >
             <MessageSquare size={13} className="text-purple-300" />
-            <span>Format</span>
+            <span>Re-Dispatch Format</span>
           </button>
 
           {/* 4. ADD IP Button */}
