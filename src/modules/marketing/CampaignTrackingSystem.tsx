@@ -2037,12 +2037,30 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
             <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : 'text-purple-400'} />
             <span>{isBulkSyncing ? (bulkSyncProgressText || 'Syncing...') : 'Sync'}</span>
           </button>
+
+          {/* Re-Dispatch Tab - Positioned directly BETWEEN Sync and After Dispatch Format */}
+          <button
+            type="button"
+            onClick={() => setActiveFormatView(prev => prev === 'redispatch' ? 'tracking' : 'redispatch')}
+            className={`h-10 px-3.5 sm:px-4 rounded-xl transition-all text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none ${
+              activeFormatView === 'redispatch'
+                ? 'bg-amber-600 text-white shadow-amber-600/40 ring-2 ring-amber-400'
+                : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
+            }`}
+            title="Re-Dispatch Queue"
+          >
+            <RotateCcw size={14} className="text-white" />
+            <span>Re-Dispatch</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black bg-white/20 text-white border border-white/30">
+              {reDispatchCount}
+            </span>
+          </button>
         </div>
 
-        {/* Center: Intentionally Empty Space for upcoming feature */}
+        {/* Center: Spacer */}
         <div className="flex-1 min-w-[20px]" />
 
-        {/* Right Side: [ After Dispatch Format ] [ Re-Dispatch Format ] [ ADD IP ] [ Refresh ] */}
+        {/* Right Side: [ After Dispatch Format ] [ Format ] [ ADD IP ] [ Refresh ] */}
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 ml-auto flex-nowrap">
           {/* 1. After Dispatch Format Button */}
           <button
@@ -2057,24 +2075,6 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
           >
             <Send size={14} className="text-white" />
             <span>After Dispatch Format</span>
-          </button>
-
-          {/* 2. Re-Dispatch Section Button with Dynamic Count */}
-          <button
-            type="button"
-            onClick={() => setActiveFormatView(prev => prev === 'redispatch' ? 'tracking' : 'redispatch')}
-            className={`h-10 px-3.5 sm:px-4 rounded-xl transition-colors text-xs font-bold flex items-center gap-2 shadow-md cursor-pointer border-0 outline-none focus:outline-none shrink-0 select-none ${
-              activeFormatView === 'redispatch'
-                ? 'bg-amber-600 text-white shadow-amber-600/40 ring-2 ring-amber-400'
-                : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
-            }`}
-            title="Re-Dispatch Queue"
-          >
-            <RotateCcw size={14} className="text-white" />
-            <span>Re-Dispatch</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black bg-white/20 text-white border border-white/30">
-              {reDispatchCount}
-            </span>
           </button>
 
           {/* 3. Re-Dispatch Format Text Generator */}

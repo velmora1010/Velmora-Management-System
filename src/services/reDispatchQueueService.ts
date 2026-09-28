@@ -67,11 +67,11 @@ export const reDispatchQueueService = {
           .eq('campaign_id', campQuery),
         supabaseAdmin
           .from(SUPABASE_TABLES.influencerDispatch)
-          .select('id, influencer_id, dispatch_status, tracking_id, courier_partner, remarks, dispatch_date')
+          .select('id, influencer_id, creator_name, dispatch_status, tracking_id, courier_partner, remarks, dispatch_date')
           .eq('campaign_id', campQuery),
         supabaseAdmin
           .from(SUPABASE_TABLES.influencersInfo)
-          .select('id, code, influencer_name, name, username, phone_number, is_archived, profile_photo_url, profile_file_url')
+          .select('id, code, influencer_name, name, phone_number, is_archived, profile_file_url')
           .eq('campaign_id', campQuery),
         supabaseAdmin
           .from(SUPABASE_TABLES.shipmentAttempts)
@@ -146,9 +146,13 @@ export const reDispatchQueueService = {
         const isMovedToActive = Boolean(meta.re_dispatch_moved_to_active || meta.moved_to_active);
 
         const codeVal = cleanCode(inf?.code || (inf as any)?.influencer_code || latestAttempt?.order_id || '');
-        const rawName = (inf?.influencer_name || inf?.name || (inf as any)?.username || '').trim();
-        const cleanName = rawName.replace(/^@+/, '').trim() || 'Influencer';
-        const usernameVal = rawName.startsWith('@') ? rawName : `@${cleanName.toLowerCase().replace(/\s+/g, '_')}`;
+        const creatorName = (inf?.influencer_name || disp?.creator_name || '').trim();
+        const handleName = (inf?.name || disp?.creator_name || '').trim();
+        const cleanName = creatorName || handleName || 'Influencer';
+        const usernameVal = handleName
+          ? (handleName.startsWith('@') ? handleName : `@${handleName}`)
+          : `@${cleanName.toLowerCase().replace(/\s+/g, '_')}`;
+        const avatarUrl = inf?.profile_file_url || '';
 
         const awbVal = (
           disp?.tracking_id ||
@@ -198,7 +202,7 @@ export const reDispatchQueueService = {
           status: isMovedToActive ? 'moved_to_active' : 'pending',
           status_display: isMovedToActive ? 'Moved to Active' : 'Pending Re-Dispatch',
           tracking_url: trackingUrl,
-          profile_photo_url: inf?.profile_photo_url || inf?.profile_file_url || ''
+          profile_photo_url: avatarUrl
         });
       });
 

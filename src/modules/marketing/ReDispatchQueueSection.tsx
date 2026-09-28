@@ -182,10 +182,8 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
       const res = await reDispatchQueueService.moveInfluencerToActive(campaign.id, item);
       if (res.success) {
         toast.success(`Shipment for ${item.code || 'influencer'} moved to Active for Re-Dispatch.`);
-        // Optimistically update local state to moved_to_active
-        setItems(prev =>
-          prev.map(i => (i.id === item.id ? { ...i, status: 'moved_to_active', status_display: 'Moved to Active' } : i))
-        );
+        // Immediately remove moved record from pending queue
+        setItems(prev => prev.filter(i => i.id !== item.id));
         // Remove from selection
         setSelectedIds(prev => {
           const next = new Set(prev);
@@ -223,9 +221,8 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
       if (res.success) {
         toast.success(`Successfully moved ${res.movedCount} shipments to Active for Re-Dispatch.`, { id: toastId });
         const movedIdSet = new Set(itemsToMove.map(i => i.id));
-        setItems(prev =>
-          prev.map(i => (movedIdSet.has(i.id) ? { ...i, status: 'moved_to_active', status_display: 'Moved to Active' } : i))
-        );
+        // Immediately remove all moved records from pending queue
+        setItems(prev => prev.filter(i => !movedIdSet.has(i.id)));
         setSelectedIds(new Set());
         if (onRefreshCounts) onRefreshCounts();
       } else {
@@ -607,21 +604,21 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                         {item.date_display}
                       </td>
 
-                      {/* 9. Action Button */}
+                      {/* 9. Action Button (ICON ONLY) */}
                       <td className="py-3 px-3 text-right whitespace-nowrap">
                         {isPending ? (
                           <button
                             type="button"
                             onClick={() => handleMoveSingleToActive(item)}
                             disabled={isMoving || isBulkMoving}
-                            className="h-8 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs transition-all shadow-sm shadow-purple-600/30 flex items-center gap-1.5 ml-auto cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none"
-                            title="Move to Active for Re-Dispatch"
+                            className="w-8 h-8 rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-sm shadow-purple-600/30 flex items-center justify-center ml-auto cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none"
+                            title="Move to Active"
+                            aria-label="Move to Active"
                           >
-                            <RotateCcw size={12} className={isMoving ? 'animate-spin' : ''} />
-                            <span>Move to Active</span>
+                            <RotateCcw size={14} className={isMoving ? 'animate-spin' : ''} />
                           </button>
                         ) : (
-                          <div className="inline-flex items-center gap-1 text-xs text-emerald-400 font-semibold px-2.5 py-1 rounded-xl bg-emerald-950/30 border border-emerald-800/40 select-none">
+                          <div className="inline-flex items-center gap-1 text-xs text-emerald-400 font-semibold px-2.5 py-1 rounded-xl bg-emerald-950/30 border border-emerald-800/40 select-none ml-auto">
                             <CheckCircle2 size={12} />
                             <span>Active — Re-Dispatch</span>
                           </div>
