@@ -5,6 +5,7 @@ import {
   InfluencerDispatchedShipment, 
   getCourierTrackingUrl 
 } from './influencerTrackingService';
+import { normalizeOrderId } from '../utils/orderIdUtils';
 import type { CampaignInfluencer } from '../types';
 
 export interface IndiaPostTrackingRecord {
@@ -139,12 +140,15 @@ export function mapIndiaPostRecordToShipment(
   const estDate = (record.estimated_delivery_date || '').trim();
   const delDate = (record.delivered_date || '').trim();
 
+  // Try to match influencer code using canonical base code
+  const orderInfo = normalizeOrderId(rawOrd);
+  const baseCode = orderInfo.baseCode;
+
   let matchedInf: CampaignInfluencer | undefined;
-  if (candidateInfluencers.length > 0 && rawOrd) {
-    const cleanRef = rawOrd.replace(/^#+/, '').trim().toUpperCase();
+  if (candidateInfluencers.length > 0 && baseCode) {
     matchedInf = candidateInfluencers.find(inf => {
       const infCode = (inf.code || '').replace(/^#+/, '').trim().toUpperCase();
-      return infCode && infCode === cleanRef;
+      return infCode && infCode === baseCode;
     });
   }
 
@@ -155,10 +159,12 @@ export function mapIndiaPostRecordToShipment(
     influencerId: matchedInf?.id ? String(matchedInf.id) : undefined,
     creatorName: matchedInf?.influencer_name || matchedInf?.name || '—',
     username: matchedInf?.platforms?.find(p => p.username)?.username || '—',
-    influencerCode: matchedInf?.code || rawOrd || '—',
+    influencerCode: matchedInf?.code || baseCode || rawOrd || '—',
     orderId: rawOrd,
     rawOrderId: rawOrd,
-    baseOrderId: rawOrd,
+    baseOrderId: baseCode || rawOrd,
+    isResend: orderInfo.isResend,
+    attemptNumber: orderInfo.attemptNumber,
     awbNumber: rawAwb,
     batchCode: '—',
     courier: courierCompany,

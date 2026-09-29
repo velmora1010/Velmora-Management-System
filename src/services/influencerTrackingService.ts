@@ -764,7 +764,7 @@ export function upsertCampaignShipments(
   const shipmentMap = new Map<string, InfluencerDispatchedShipment>();
 
   existing.forEach(s => {
-    const code = (s.influencerCode || s.orderId || '').replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim();
+    const code = getOriginalOrderId(s.influencerCode || s.orderId || '');
     if (code && /^\d+$/.test(code)) return;
     const courier = (s.courier || '').toLowerCase().trim();
     const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
@@ -776,7 +776,7 @@ export function upsertCampaignShipments(
   });
 
   newShipments.forEach(s => {
-    const code = (s.influencerCode || s.orderId || '').replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim();
+    const code = getOriginalOrderId(s.influencerCode || s.orderId || '');
     if (code && /^\d+$/.test(code)) return;
     const courier = (s.courier || '').toLowerCase().trim();
     const awb = (s.awbNumber || s.id || '').toLowerCase().trim();
@@ -1107,7 +1107,7 @@ export async function fetchCampaignShipmentsFromDb(campaignId: string | number):
       // Sanitize: filter out any customer orders (purely numeric references like #10065, #00317)
       const validShipments = shipments.filter(s => {
         const ref = (s.influencerCode || s.orderId || '').trim();
-        const base = ref.replace(/^#?R[\s#_\-]+/i, '').replace(/^#+/, '').replace(/^R+/i, '').trim();
+        const base = getOriginalOrderId(ref);
         if (!base || /^\d+$/.test(base)) {
           return false;
         }
@@ -1344,9 +1344,20 @@ export async function upsertCampaignShipmentsToDb(
       };
     }
 
+    // 10. Defensive uniqueness check: base_code + shipment_type (NORMAL or RE_DISPATCH)
+    const baseTypeMap = new Map<string, InfluencerDispatchedShipment>();
+    strictlyValid.forEach(s => {
+      const rawOrd = s.orderId || s.rawOrderId || s.influencerCode || '';
+      const norm = normalizeOrderId(rawOrd, validCodesSet);
+      const baseCode = norm.baseCode || s.influencerCode || '';
+      const shipmentType = (s.isResend || norm.isResend) ? 'RE_DISPATCH' : 'NORMAL';
+      const key = `${baseCode.toUpperCase()}__${shipmentType}`;
+      baseTypeMap.set(key, s);
+    });
+
     // Deduplicate incoming batch by (campaign_id, courier, awb_number)
     const payloadMap = new Map<string, any>();
-    strictlyValid.forEach(s => {
+    baseTypeMap.forEach(s => {
       const p = mapShipmentToDbPayload(s, cleanCampaignId);
       const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
       payloadMap.set(key, p);

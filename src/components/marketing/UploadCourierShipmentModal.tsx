@@ -736,9 +736,19 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         let liveApiPendingCount = 0;
         let completedCount = 0;
 
+        // Defensive uniqueness check: base_code + shipment_type (NORMAL or RE_DISPATCH)
+        const dedupedRowsMap = new Map<string, ValidParsedShipmentRow>();
+        validRows.forEach(row => {
+          const baseCode = cleanUploadCode(row.baseOrderId || row.matchedInf?.code || '').toUpperCase();
+          const shipmentType = row.isResend ? 'RE_DISPATCH' : 'NORMAL';
+          const key = `${baseCode}__${shipmentType}`;
+          dedupedRowsMap.set(key, row);
+        });
+        const rowsToProcess = Array.from(dedupedRowsMap.values());
+
         const concurrency = 2;
-        for (let i = 0; i < validRows.length; i += concurrency) {
-          const chunk = validRows.slice(i, i + concurrency);
+        for (let i = 0; i < rowsToProcess.length; i += concurrency) {
+          const chunk = rowsToProcess.slice(i, i + concurrency);
 
           await Promise.all(
             chunk.map(async (row) => {
@@ -988,8 +998,18 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const delhiveryShipments: InfluencerDispatchedShipment[] = [];
         const dispatchUpdates: { id: string; courier_partner: string; tracking_id: string; dispatch_status: string; dispatch_date: string | null; expected_delivery_date: string | null; }[] = [];
 
-        for (let i = 0; i < validRows.length; i++) {
-          const row = validRows[i];
+        // Defensive uniqueness check: base_code + shipment_type (NORMAL or RE_DISPATCH)
+        const dedupedRowsMap = new Map<string, ValidParsedShipmentRow>();
+        validRows.forEach(row => {
+          const baseCode = cleanUploadCode(row.baseOrderId || row.matchedInf?.code || '').toUpperCase();
+          const shipmentType = row.isResend ? 'RE_DISPATCH' : 'NORMAL';
+          const key = `${baseCode}__${shipmentType}`;
+          dedupedRowsMap.set(key, row);
+        });
+        const rowsToProcess = Array.from(dedupedRowsMap.values());
+
+        for (let i = 0; i < rowsToProcess.length; i++) {
+          const row = rowsToProcess[i];
           const inf = row.matchedInf;
           const awb = String(row.rawAwb || '').trim();
 

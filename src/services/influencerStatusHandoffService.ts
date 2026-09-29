@@ -184,6 +184,28 @@ export function sortInfluencerShipmentsNaturally<T>(shipments: T[]): T[] {
 }
 
 /**
+ * Authoritative Canonical Base Influencer Code Extractor.
+ * Strictly resolves any order reference to its base influencer code:
+ * - #HIS9 -> HIS9
+ * - R HIS9 -> HIS9
+ * - #HIS24 -> HIS24
+ * - R HIS24 -> HIS24
+ * - #TGS105 -> TGS105
+ * - R TGS105 -> TGS105
+ * - #RJS136 -> RJS136
+ * - R RJS136 -> RJS136
+ */
+export function extractCanonicalBaseCode(
+  input?: string | null,
+  knownCodesSet?: Set<string>
+): string {
+  if (!input) return '';
+  const norm = normalizeOrderId(input, knownCodesSet);
+  if (norm.baseCode) return norm.baseCode.toUpperCase().replace(/^#+/, '').trim();
+  return String(input).toUpperCase().replace(/^#?R(\d*)[\s#_\-]+/i, '').replace(/^#+/, '').trim();
+}
+
+/**
  * Resolves the active / current shipments for Tracking display, KPIs, filters, and pagination.
  *
  * BUSINESS RULES:
@@ -226,12 +248,10 @@ export function resolveCurrentShipments<T extends {
 
   function getCanonicalGroupId(s: T): string {
     const infId = s.influencerId ? String(s.influencerId).trim() : '';
-    const rawOrd = s.orderId || s.rawOrderId || s.influencerCode || '';
-    const norm = normalizeOrderId(rawOrd, knownCodesSet);
-    const baseCode = (s.baseOrderId || norm.baseCode || s.influencerCode || '')
-      .toUpperCase()
-      .replace(/^#+/, '')
-      .trim();
+    const rawOrd = s.orderId || s.rawOrderId || s.influencerCode || s.baseOrderId || '';
+    let baseCode = extractCanonicalBaseCode(rawOrd, knownCodesSet);
+    if (!baseCode && s.baseOrderId) baseCode = extractCanonicalBaseCode(s.baseOrderId, knownCodesSet);
+    if (!baseCode && s.influencerCode) baseCode = extractCanonicalBaseCode(s.influencerCode, knownCodesSet);
 
     // Check if we already have an established group for this influencer ID or baseCode
     let groupId = (infId && infIdToGroup.get(infId)) || (baseCode && baseCodeToGroup.get(baseCode));
