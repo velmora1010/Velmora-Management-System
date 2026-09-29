@@ -73,7 +73,7 @@ export const normalizeWorkflowStepLabel = (val: string): string => {
   switch (id) {
     case 'share_script': return 'Share Script';
     case 'call_explain': return 'Call & Explain';
-    case 'pay_advance': return 'Advance Payment';
+    case 'pay_advance': return 'Pay Advance';
     case 'timeline': return 'Timeline';
     case 'draft': return 'Draft';
     case 'post_date': return 'Post Date';
@@ -89,7 +89,7 @@ export interface VideoStepConfig {
   icon: any;
 }
 
-// Video 1 Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date -> Payment
+// Video 1 Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date (NO Payment)
 export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
@@ -97,7 +97,6 @@ export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
-  { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
 
 // Videos 2 through N Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date -> Payment
@@ -1668,8 +1667,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber, selectedSummaryStep]);
 
   // Reset Delivered filter automatically if user switches away from Video 1
+  // Reset Payment filter automatically if user switches to Video 1 (which has no Payment step)
   useEffect(() => {
-    if (selectedVideoNumber > 1 && selectedSummaryStep === 'delivered') {
+    if (selectedVideoNumber === 1 && selectedSummaryStep === 'payment') {
       setSelectedSummaryStep(null);
     }
   }, [selectedVideoNumber, selectedSummaryStep]);
@@ -1718,7 +1718,10 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         }
       } else {
         // Video 2 to 6
-        counts.delivered = 0;
+        const isDelivered = isDeliveryStepCompleted(r);
+        if (isDelivered) {
+          counts.delivered++;
+        }
 
         const isStarted = isInfluencerVideoStarted(r, selectedVideoNumber);
         if (!isStarted) {
@@ -1837,7 +1840,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }
     const configs = selectedVideoNumber === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
     const base = configs.map(cfg => {
-      const label = cfg.id === 'pay_advance' ? 'Advance Payment' : (cfg.id === 'timeline' ? 'Timeline' : (cfg.id === 'call_explain' ? 'Call & Explain' : cfg.label));
+      const label = cfg.id === 'pay_advance' ? 'Pay Advance' : (cfg.id === 'timeline' ? 'Timeline' : (cfg.id === 'call_explain' ? 'Call & Explain' : cfg.label));
       const count = activeTrackingRecords.filter(r => {
         const vData = getVideoWorkflow(r, selectedVideoNumber);
         return vData.activeStepId === cfg.id;
@@ -1849,25 +1852,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         icon: cfg.icon
       };
     });
-
-    if (selectedVideoNumber === 1) {
-      const paymentCount = activeTrackingRecords.filter(r => {
-        const vData = getVideoWorkflow(r, 1);
-        return vData.activeStepId === 'payment' || vData.activeStepId === 'pay_advance';
-      }).length;
-      const advIdx = base.findIndex(b => b.id === 'pay_advance');
-      const paymentOpt = {
-        id: 'payment',
-        label: 'Payment',
-        count: paymentCount,
-        icon: IndianRupee
-      };
-      if (advIdx >= 0) {
-        base.splice(advIdx + 1, 0, paymentOpt);
-      } else {
-        base.push(paymentOpt);
-      }
-    }
 
     return [
       { id: 'all', label: 'All Steps', count: activeTrackingRecords.length },
@@ -2698,7 +2682,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           <div className="flex flex-col gap-2.5 shrink-0">
             {/* Top: 11 Horizontal Workflow Step Summary Boxes in ONE Single Line */}
             <div className="w-full overflow-x-auto no-scrollbar pb-1">
-              <div className="grid grid-flow-col auto-cols-[minmax(105px,1fr)] xl:auto-cols-auto xl:grid-cols-11 gap-1.5 sm:gap-2 w-full min-w-[1100px] xl:min-w-0">
+              <div className={`grid grid-flow-col auto-cols-[minmax(105px,1fr)] xl:auto-cols-auto ${selectedVideoNumber === 1 ? 'xl:grid-cols-10' : 'xl:grid-cols-11'} gap-1.5 sm:gap-2 w-full min-w-[1000px] xl:min-w-0`}>
                 {/* 1. All Box */}
                 <button
                   type="button"
@@ -2733,40 +2717,29 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   </div>
                 </button>
 
-                {/* 10 Workflow Step Boxes */}
-                {WORKFLOW_SUMMARY_BOX_CONFIGS.map(step => {
+                {/* Workflow Step Boxes (Payment omitted for Video 1) */}
+                {WORKFLOW_SUMMARY_BOX_CONFIGS.filter(s => selectedVideoNumber > 1 || s.id !== 'payment').map(step => {
                   const isSelected = selectedSummaryStep === step.id;
-                  const isDeliveredOnVideoN = step.id === 'delivered' && selectedVideoNumber > 1;
-                  const count = isDeliveredOnVideoN ? 0 : (workflowStepCounts[step.id] || 0);
+                  const count = workflowStepCounts[step.id] || 0;
                   const StepIcon = step.icon;
 
                   return (
                     <button
                       key={step.id}
                       type="button"
-                      disabled={isDeliveredOnVideoN}
                       onClick={() => {
-                        if (isDeliveredOnVideoN) return;
                         setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
                       }}
-                      className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 ${
-                        isDeliveredOnVideoN
-                          ? 'bg-[#090e1c]/50 border-slate-800/40 text-slate-600 cursor-not-allowed opacity-40'
-                          : isSelected
-                          ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50 cursor-pointer'
-                          : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300 cursor-pointer'
+                      className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 cursor-pointer ${
+                        isSelected
+                          ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
+                          : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                       }`}
-                      title={
-                        isDeliveredOnVideoN 
-                          ? 'Delivered is only a workflow step for Video 1' 
-                          : `Filter by ${step.label} (${count})`
-                      }
+                      title={`Filter by ${step.label} (${count})`}
                     >
                       <div className="flex items-center justify-between gap-1 mb-1 w-full">
                         <span className={`text-[10.5px] sm:text-[11px] font-semibold truncate ${
-                          isDeliveredOnVideoN 
-                            ? 'text-slate-600' 
-                            : isSelected 
+                          isSelected 
                             ? 'text-purple-200' 
                             : 'text-slate-300 group-hover:text-white'
                         }`}>
@@ -2775,9 +2748,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         <StepIcon 
                           size={13} 
                           className={`shrink-0 transition-colors ${
-                            isDeliveredOnVideoN
-                              ? 'text-slate-700'
-                              : isSelected 
+                            isSelected 
                               ? 'text-purple-400' 
                               : 'text-slate-500 group-hover:text-slate-300'
                           }`} 
@@ -2785,7 +2756,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       </div>
                       <div className="flex items-baseline justify-between w-full">
                         <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
-                          {isDeliveredOnVideoN ? '—' : count}
+                          {count}
                         </span>
                         {isSelected && (
                           <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
@@ -2932,84 +2903,75 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       </div>
 
                       {/* Profile Avatar */}
-                      <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
+                      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden shrink-0 border border-slate-700 bg-slate-900 flex items-center justify-center shadow">
                         {avatarUrl ? (
                           <img src={avatarUrl} alt={influencerName} className="w-full h-full object-cover" />
                         ) : (
-                          <span className="text-slate-400 font-extrabold text-sm sm:text-base">{influencerName.charAt(0) || '?'}</span>
+                          <span className="text-slate-400 font-extrabold text-xs sm:text-sm">{influencerName.charAt(0) || '?'}</span>
                         )}
                       </div>
 
                       {/* Influencer Name & Username */}
                       <div className="truncate min-w-0 flex-1">
-                        <h4 className="text-white font-bold text-sm sm:text-[15px] leading-tight truncate" title={influencerName}>
+                        <h4 className="text-white font-bold text-xs sm:text-[13.5px] leading-tight truncate" title={influencerName}>
                           {influencerName}
                         </h4>
-                        <p className="text-slate-400 text-[11px] sm:text-xs font-medium mt-0.5 truncate" title={username}>
+                        <p className="text-slate-400 text-[10px] sm:text-[11px] font-medium mt-0.5 truncate" title={username}>
                           {username}
                         </p>
                       </div>
                     </div>
 
                     {/* CENTER SECTION: Contextual Workflow (Delivery Prerequisite -> Selected Video's Existing Sub-Steps) */}
-                    <div className="flex-1 px-2 sm:px-3 py-1 min-w-0 w-full overflow-x-auto no-scrollbar">
-                      <div className="flex items-center w-full min-w-[500px] sm:min-w-[560px]">
+                    <div className="flex-1 px-1 sm:px-2 xl:px-3 py-1 min-w-0 w-full overflow-hidden">
+                      <div className="flex items-center w-full min-w-0 justify-between">
                         
-                        {/* 1. PREREQUISITE: DELIVERY CONFIRMATION STAGE (Only shown for Video 1) */}
-                        {selectedVideoNumber === 1 && (
-                          <>
-                            {(() => {
-                              const isReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED';
-                              return (
-                                <div 
-                                  className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
-                                  onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
-                                  title={
-                                    isDelivered 
-                                      ? 'Delivery Confirmed (Click to view/edit)' 
-                                      : isReDispatch
-                                      ? 'Re-Dispatch Required (Click to review issue & attempts)'
-                                      : 'Delivery Confirmation: Not Started (Click to confirm)'
-                                  }
-                                >
-                                  <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${
-                                    isDelivered 
-                                      ? 'bg-emerald-500 text-white shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105'
-                                      : isReDispatch
-                                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] hover:scale-105 animate-pulse'
-                                      : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
-                                  }`}>
-                                    {isDelivered ? (
-                                      <Check size={16} strokeWidth={2.5} className="text-white" />
-                                    ) : isReDispatch ? (
-                                      <AlertTriangle size={15} className="text-amber-400" />
-                                    ) : (
-                                      <Package size={15} className="text-slate-400 group-hover:text-white" />
-                                    )}
-                                  </div>
-                                  <div className="flex flex-col items-center text-center min-w-0 mt-1.5">
-                                    <span className={`text-[10.5px] sm:text-[11px] text-center leading-tight transition-colors whitespace-nowrap block ${
-                                      isDelivered 
-                                        ? 'text-emerald-400 font-semibold' 
-                                        : isReDispatch
-                                        ? 'text-amber-400 font-semibold'
-                                        : 'text-slate-400'
-                                    }`}>
-                                      {isReDispatch ? 'Re-Dispatch' : 'Delivered'} {isDelivered ? '✓' : ''}
-                                    </span>
-                                  </div>
-                                </div>
-                              );
-                            })()}
+                        {/* 1. PREREQUISITE: DELIVERY CONFIRMATION STAGE (Shown for all videos) */}
+                        <div 
+                          className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
+                          onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
+                          title={
+                            isDelivered 
+                              ? 'Delivery Confirmed (Click to view/edit)' 
+                              : isReDispatch
+                              ? 'Re-Dispatch Required (Click to review issue & attempts)'
+                              : 'Delivery Confirmation: Not Started (Click to confirm)'
+                          }
+                        >
+                          <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${
+                            isDelivered 
+                              ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105'
+                              : isReDispatch
+                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] hover:scale-105 animate-pulse'
+                              : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
+                          }`}>
+                            {isDelivered ? (
+                              <Check size={14} strokeWidth={2.5} className="text-white" />
+                            ) : isReDispatch ? (
+                              <AlertTriangle size={13} className="text-amber-400" />
+                            ) : (
+                              <Package size={13} className="text-slate-400 group-hover:text-white" />
+                            )}
+                          </div>
+                          <div className="flex flex-col items-center text-center min-w-0 mt-1">
+                            <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${
+                              isDelivered 
+                                ? 'text-emerald-400 font-semibold' 
+                                : isReDispatch
+                                ? 'text-amber-400 font-semibold'
+                                : 'text-slate-400'
+                            }`}>
+                              {isReDispatch ? 'Re-Dispatch' : 'Delivered'} {isDelivered ? '✓' : ''}
+                            </span>
+                          </div>
+                        </div>
 
-                            {/* Connecting Line from Delivery to First Video Sub-Step */}
-                            <div className="flex-1 min-w-[10px] sm:min-w-[16px] h-[2px] mx-1 sm:mx-1.5 -mt-5 transition-colors duration-300">
-                              <div className={`h-full w-full rounded-full ${
-                                isDelivered ? 'bg-emerald-500/80' : 'bg-slate-700/60'
-                              }`} />
-                            </div>
-                          </>
-                        )}
+                        {/* Connecting Line from Delivery to First Video Sub-Step */}
+                        <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
+                          <div className={`h-full w-full rounded-full ${
+                            isDelivered ? 'bg-emerald-500/80' : 'bg-slate-700/60'
+                          }`} />
+                        </div>
 
                         {/* 2. SUB-STEPS FOR THE SELECTED VIDEO (Dynamically using currentVideoData.configs) */}
                         {currentVideoData.configs.map((cfg, idx) => {
@@ -3040,7 +3002,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           const isLineActive = isCompleted && nextStepCompleted;
 
                           return (
-                            <React.Fragment key={cfg.id}>
+                            <React.Fragment key={`${selectedVideoNumber}-${cfg.id}`}>
                               <div
                                 className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
                                 onClick={() => {
@@ -3057,17 +3019,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                     : `${cfg.label}${isCompleted ? ' (Completed)' : isReDraftReq ? ' (Re-Draft Required)' : ''}`
                                 }
                               >
-                                <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${circleStyle}`}>
+                                <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${circleStyle}`}>
                                   {isCompleted ? (
-                                    <Check size={16} strokeWidth={2.5} className="text-white" />
+                                    <Check size={14} strokeWidth={2.5} className="text-white" />
                                   ) : isReDraftReq ? (
-                                    <span className="font-black text-[10px] text-amber-400 tracking-tight">RD</span>
+                                    <span className="font-black text-[9px] text-amber-400 tracking-tight">RD</span>
                                   ) : (
-                                    <StepIcon size={15} />
+                                    <StepIcon size={13} />
                                   )}
                                 </div>
-                                <div className="flex flex-col items-center text-center min-w-0 mt-1.5">
-                                  <span className={`text-[10.5px] sm:text-[11px] text-center leading-tight transition-colors whitespace-nowrap block ${labelStyle}`}>
+                                <div className="flex flex-col items-center text-center min-w-0 mt-1">
+                                  <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${labelStyle}`}>
                                     {cfg.shortLabel || cfg.label}
                                   </span>
                                 </div>
@@ -3075,7 +3037,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                               {/* Connecting Line between Sub-Steps */}
                               {idx !== currentVideoData.configs.length - 1 && (
-                                <div className="flex-1 min-w-[10px] sm:min-w-[16px] h-[2px] mx-1 sm:mx-1.5 -mt-5 transition-colors duration-300">
+                                <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
                                   <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500' : isCurrentActive ? 'bg-blue-500/50' : 'bg-slate-700/60'}`} />
                                 </div>
                               )}
