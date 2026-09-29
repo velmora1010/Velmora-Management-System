@@ -36,7 +36,7 @@ import {
 import toast from 'react-hot-toast';
 import { useCampaignDispatch } from '../../hooks/marketing/useCampaignDispatch';
 import { useCampaignInfluencers, compareInfluencerCodesAsc } from '../../hooks/marketing/useCampaignInfluencers';
-import { isActiveStatus, isInfluencerDispatched, isInfluencerInPrepareDispatch, isInfluencerReDispatch } from '../../utils/marketingUtils';
+import { isActiveStatus, isInfluencerDispatched, isInfluencerInPrepareDispatch, isInfluencerReDispatch, isInfluencerReDispatchReplacement } from '../../utils/marketingUtils';
 import { 
   getUniqueFilterOptions, 
   areFilterValuesEqual 
@@ -791,9 +791,14 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         }
       }
 
-      // Codes list for summary formatted with bullet separator
+      // Codes list for summary formatted with bullet separator (with R prefix for replacement shipments)
       const codes = allActiveMembersInBatch
-        .map(inf => inf.code)
+        .map(inf => {
+          if (!inf.code) return '';
+          const isReplacement = isInfluencerReDispatchReplacement(inf, dispatchRecords);
+          const raw = String(inf.code).trim().replace(/^#+/, '');
+          return isReplacement ? (raw.startsWith('R ') ? raw : `R ${raw}`) : raw;
+        })
         .filter(Boolean) as string[];
 
       let codesSummary = '';
@@ -3008,11 +3013,20 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               Re-Dispatch
             </span>
           )}
-          {inf.code && (
-            <span className="px-2.5 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shadow-sm">
-              {inf.code}
-            </span>
-          )}
+          {inf.code && (() => {
+            const isReplacement = isInfluencerReDispatchReplacement(inf, dispatchRecords);
+            const raw = String(inf.code).trim().replace(/^#+/, '');
+            const displayCode = isReplacement ? (raw.startsWith('R ') ? raw : `R ${raw}`) : raw;
+            return (
+              <span className={`px-2.5 py-1 border text-xs font-bold font-mono rounded shadow-sm ${
+                isReplacement
+                  ? 'bg-amber-950/60 border-amber-800/40 text-amber-300'
+                  : 'bg-purple-950/60 border-purple-800/40 text-purple-300'
+              }`}>
+                {displayCode}
+              </span>
+            );
+          })()}
           <button
             type="button"
             onClick={(e) => {
@@ -3035,12 +3049,13 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     const username = getInfluencerUsername(inf);
     const isDispatched = isInfluencerDispatched(inf, dispatchRecords);
     const isReDispatch = isInfluencerReDispatch(inf, dispatchRecords);
+    const isReplacement = isInfluencerReDispatchReplacement(inf, dispatchRecords);
 
     return (
       <div 
         key={inf.id}
         className={`bg-[#0b1220]/90 border rounded-2xl px-4 py-3.5 flex items-center justify-between gap-3 transition-colors shadow-sm ${
-          isReDispatch
+          isReDispatch || isReplacement
             ? 'border-amber-800/60 hover:border-amber-600/80 bg-amber-950/10'
             : isDispatched 
             ? 'border-emerald-900/60 hover:border-emerald-700/60' 
@@ -3050,7 +3065,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         {/* Left: Profile Photo + Username */}
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden flex items-center justify-center text-white font-bold text-sm sm:text-base border-2 shrink-0 shadow-sm ${
-            isReDispatch
+            isReDispatch || isReplacement
               ? 'bg-amber-600 border-amber-500/40 text-slate-950'
               : isDispatched 
               ? 'bg-emerald-600 border-emerald-500/30' 
@@ -3076,7 +3091,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
           <div className="min-w-0 flex-1">
             <h3 
               className={`font-bold text-sm sm:text-base truncate transition-colors ${
-                isReDispatch ? 'text-amber-100 hover:text-amber-300' : isDispatched ? 'text-emerald-100 hover:text-emerald-300' : 'text-slate-100 hover:text-purple-300'
+                (isReDispatch || isReplacement) ? 'text-amber-100 hover:text-amber-300' : isDispatched ? 'text-emerald-100 hover:text-emerald-300' : 'text-slate-100 hover:text-purple-300'
               }`}
               title={username}
             >
@@ -3087,6 +3102,16 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
                 <span className="text-[10px] text-amber-300 bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-500/40 flex items-center gap-1 font-bold">
                   <AlertTriangle size={10} /> Re-Dispatch Required
                 </span>
+              ) : isReplacement ? (
+                isDispatched ? (
+                  <span className="text-[10px] text-emerald-300 bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-800/40 flex items-center gap-1 font-medium">
+                    <Check size={10} /> Re-Dispatched
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-amber-300 bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-500/40 flex items-center gap-1 font-medium">
+                    <RotateCcw size={10} /> Re-Dispatch Ready
+                  </span>
+                )
               ) : isDispatched ? (
                 <span className="text-[10px] text-emerald-300 bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-800/40 flex items-center gap-1 font-medium">
                   <Check size={10} /> Dispatched
@@ -3103,11 +3128,19 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
         {/* Right: Code + View Info + Dispatch CTA + Return Button */}
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex items-center gap-1">
-            {inf.code && (
-              <span className="px-2 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold font-mono rounded shrink-0 shadow-sm">
-                {inf.code}
-              </span>
-            )}
+            {inf.code && (() => {
+              const raw = String(inf.code).trim().replace(/^#+/, '');
+              const displayCode = isReplacement ? (raw.startsWith('R ') ? raw : `R ${raw}`) : raw;
+              return (
+                <span className={`px-2 py-1 border text-xs font-bold font-mono rounded shrink-0 shadow-sm ${
+                  isReplacement
+                    ? 'bg-amber-950/60 border-amber-800/40 text-amber-300'
+                    : 'bg-purple-950/60 border-purple-800/40 text-purple-300'
+                }`}>
+                  {displayCode}
+                </span>
+              );
+            })()}
             <button
               type="button"
               onClick={(e) => {
@@ -3132,7 +3165,7 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
               <Eye size={14} />
               <span>View</span>
             </button>
-          ) : isReDispatch ? (
+          ) : (isReDispatch || isReplacement) ? (
             <button
               type="button"
               onClick={() => handleDispatchClick(inf)}

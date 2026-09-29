@@ -331,7 +331,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                 statusFilter === 'moved' ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400 hover:text-white'
               }`}
             >
-              Dispatched ({movedCount})
+              Moved to Active ({movedCount})
             </button>
             {completedCount > 0 && (
               <button
@@ -672,9 +672,19 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                             Completed
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">
-                            <Check size={11} className="text-emerald-400 shrink-0" />
-                            {item.redispatch_awb ? 'Dispatched' : 'Moved to Active'}
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium border ${
+                            item.current_logistics_stage === 'prepare_dispatch'
+                              ? 'bg-amber-950/60 text-amber-300 border-amber-800/60'
+                              : 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
+                          }`}>
+                            <Check size={11} className={item.current_logistics_stage === 'prepare_dispatch' ? 'text-amber-400 shrink-0' : 'text-emerald-400 shrink-0'} />
+                            {item.current_logistics_stage === 'prepare_dispatch'
+                              ? 'Prepare Dispatch'
+                              : item.current_logistics_stage === 'dispatched'
+                              ? 'Dispatched'
+                              : item.redispatch_awb
+                              ? 'Prepare Dispatch'
+                              : 'Moved to Active'}
                           </span>
                         )}
                       </td>

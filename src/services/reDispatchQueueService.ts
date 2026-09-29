@@ -112,29 +112,17 @@ export const reDispatchQueueService = {
         console.error('Error fetching tracking shipments in reconcileRedispatchShipments:', trErr);
       }
 
-      // 3. Index verified replacement shipments
+      // 3. Index verified replacement shipments strictly by R-prefixed Order ID
       const repShipmentByCode = new Map<string, any>();
-      const repShipmentByInfId = new Map<string, any>();
 
       (trackingRows || []).forEach((s: any) => {
         const oId = String(s.order_id || '').trim();
-        let isResend = false;
-        if (s.sync_error) {
-          try {
-            const p = typeof s.sync_error === 'string' ? JSON.parse(s.sync_error) : s.sync_error;
-            if (p.is_resend) isResend = true;
-          } catch (e) {}
-        }
-
-        const isRep = oId.startsWith('R ') || oId.startsWith('R') || isResend;
-        if (isRep && s.awb_number) {
-          const rawCode = oId.startsWith('R ') ? oId.slice(2).trim() : (s.influencer_code || oId.replace(/^R\s*/i, '')).trim();
-          const clean = cleanCode(rawCode).toUpperCase();
-          if (clean) {
-            repShipmentByCode.set(clean, s);
-          }
-          if (s.influencer_id) {
-            repShipmentByInfId.set(String(s.influencer_id), s);
+        // Match strictly R-prefixed order ID (e.g. "R HIS1", "#R HIS1", "R-HIS1", "R_HIS1", "RHIS1")
+        const rMatch = /^#?R[\s#_\-]+([A-Za-z0-9]+)$/i.exec(oId) || /^R([A-Za-z]+[0-9]+)$/i.exec(oId);
+        if (rMatch && s.awb_number) {
+          const rawCode = rMatch[1].trim().toUpperCase();
+          if (rawCode) {
+            repShipmentByCode.set(rawCode, s);
           }
         }
       });
@@ -148,10 +136,9 @@ export const reDispatchQueueService = {
       for (const row of rdRows) {
         const code = cleanCode(row.influencer_code);
         const codeUpper = code.toUpperCase();
-        const infIdStr = row.influencer_id ? String(row.influencer_id) : '';
 
-        // Check if verified replacement shipment exists in uploaded Delhivery file
-        const matchedRepShipment = repShipmentByCode.get(codeUpper) || (infIdStr ? repShipmentByInfId.get(infIdStr) : null);
+        // Check if verified replacement shipment exists in uploaded Delhivery file strictly by R-prefix
+        const matchedRepShipment = repShipmentByCode.get(codeUpper);
         const hasVerifiedCourierShipment = Boolean(
           matchedRepShipment &&
           matchedRepShipment.awb_number &&
@@ -179,12 +166,25 @@ export const reDispatchQueueService = {
           }
 
           // Ensure influencer_dispatch_details_rows is updated with replacement shipment logistics
+          // Automatically moves to 'prepare_dispatch' unless already confirmed dispatched by user
           if (row.influencer_id) {
             try {
               const repCourier = matchedRepShipment.courier || 'Delhivery';
               const repAwb = String(matchedRepShipment.awb_number).trim();
               const repDispDate = matchedRepShipment.dispatchDate || matchedRepShipment.dispatch_date || null;
               const repEdd = matchedRepShipment.expectedDeliveryDate || matchedRepShipment.expected_delivery_date || null;
+
+              const { data: currDisp } = await supabaseAdmin
+                .from(SUPABASE_TABLES.influencerDispatch)
+                .select('id, dispatch_status')
+                .eq('campaign_id', campQuery)
+                .eq('influencer_id', row.influencer_id)
+                .maybeSingle();
+
+              const isAlreadyDispatched = 
+                currDisp?.dispatch_status?.toLowerCase() === 'dispatched' && 
+                Boolean(currDisp?.remarks?.includes('Re-Dispatch sent via'));
+              const targetStatus = isAlreadyDispatched ? 'Dispatched' : 'prepare_dispatch';
 
               await supabaseAdmin
                 .from(SUPABASE_TABLES.influencerDispatch)
@@ -193,8 +193,10 @@ export const reDispatchQueueService = {
                   tracking_id: repAwb,
                   dispatch_date: repDispDate,
                   expected_delivery_date: repEdd,
-                  dispatch_status: 'Dispatched',
-                  remarks: `Re-Dispatch sent via ${repCourier} (AWB: ${repAwb})`
+                  dispatch_status: targetStatus,
+                  remarks: isAlreadyDispatched 
+                    ? currDisp?.remarks 
+                    : `Re-Dispatch replacement shipment (AWB: ${repAwb})`
                 })
                 .eq('campaign_id', campQuery)
                 .eq('influencer_id', row.influencer_id);
@@ -217,70 +219,71 @@ export const reDispatchQueueService = {
               })
               .eq('id', row.id);
 
-            // Also reset influencer_status_tracking_rows notes so it doesn't show as moved to active
-            if (row.influencer_id) {
-              try {
-                const { data: stRow } = await supabaseAdmin
-                  .from(SUPABASE_TABLES.influencerStatus)
-                  .select('id, notes')
-                  .eq('campaign_id', campQuery)
-                  .eq('influencer_id', row.influencer_id)
-                  .maybeSingle();
-
-                if (stRow?.id) {
-                  let meta: any = {};
-                  try {
-                    meta = typeof stRow.notes === 'string' ? JSON.parse(stRow.notes || '{}') : (stRow.notes || {});
-                  } catch (e) {
-                    meta = {};
-                  }
-
-                  meta.redispatch_lifecycle_status = 'PENDING_REDISPATCH';
-                  meta.re_dispatch_moved_to_active = false;
-                  meta.re_dispatch_required = true;
-                  meta.redispatch_awb = null;
-                  meta.moved_to_active_at = null;
-                  meta.last_updated = nowIso;
-
-                  await supabaseAdmin
-                    .from(SUPABASE_TABLES.influencerStatus)
-                    .update({
-                      status: 'Re-Dispatch Required',
-                      notes: JSON.stringify(meta),
-                      updated_at: nowIso
-                    })
-                    .eq('id', stRow.id);
-                }
-              } catch (stErr) {
-                console.warn(`Error resetting status tracking notes for ${code}:`, stErr);
-              }
-
-              // Also check influencer_dispatch_details_rows remarks
-              try {
-                const { data: dispRow } = await supabaseAdmin
-                  .from(SUPABASE_TABLES.influencerDispatch)
-                  .select('id, remarks')
-                  .eq('campaign_id', campQuery)
-                  .eq('influencer_id', row.influencer_id)
-                  .maybeSingle();
-
-                if (dispRow?.id && dispRow.remarks && dispRow.remarks.includes('Moved to Active for Re-Dispatch')) {
-                  await supabaseAdmin
-                    .from(SUPABASE_TABLES.influencerDispatch)
-                    .update({
-                      remarks: `Issue Reported: ${row.issue_type || 'DAMAGED_PRODUCT'}`
-                    })
-                    .eq('id', dispRow.id);
-                }
-              } catch (dispErr) {
-                console.warn(`Error resetting dispatch remarks for ${code}:`, dispErr);
-              }
-            }
-
             fixedCount++;
             fixedCodes.push(code);
           }
+
+          // Also reset influencer_status_tracking_rows notes so it doesn't show as moved to active
+          if (row.influencer_id) {
+            try {
+              const { data: stRow } = await supabaseAdmin
+                .from(SUPABASE_TABLES.influencerStatus)
+                .select('id, notes')
+                .eq('campaign_id', campQuery)
+                .eq('influencer_id', row.influencer_id)
+                .maybeSingle();
+
+              if (stRow?.id) {
+                let meta: any = {};
+                try {
+                  meta = typeof stRow.notes === 'string' ? JSON.parse(stRow.notes || '{}') : (stRow.notes || {});
+                } catch (e) {
+                  meta = {};
+                }
+
+                meta.redispatch_lifecycle_status = 'PENDING_REDISPATCH';
+                meta.re_dispatch_moved_to_active = false;
+                meta.re_dispatch_required = true;
+                meta.redispatch_awb = null;
+                meta.moved_to_active_at = null;
+                meta.last_updated = nowIso;
+
+                await supabaseAdmin
+                  .from(SUPABASE_TABLES.influencerStatus)
+                  .update({
+                    status: 'Re-Dispatch Required',
+                    notes: JSON.stringify(meta),
+                    updated_at: nowIso
+                  })
+                  .eq('id', stRow.id);
+              }
+            } catch (stErr) {
+              console.warn(`Error resetting status tracking notes for ${code}:`, stErr);
+            }
+
+            // Also check influencer_dispatch_details_rows remarks and reset status
+            try {
+              await supabaseAdmin
+                .from(SUPABASE_TABLES.influencerDispatch)
+                .update({
+                  dispatch_status: 're_dispatch',
+                  tracking_id: null,
+                  remarks: `Issue Reported: ${row.issue_type || 'DAMAGED_PRODUCT'}`
+                })
+                .eq('campaign_id', campQuery)
+                .eq('influencer_id', row.influencer_id);
+            } catch (dispErr) {
+              console.warn(`Error resetting dispatch details for ${code}:`, dispErr);
+            }
+          }
         }
+      }
+
+      // Reconcile batches with prepare_dispatch records so replacement influencers appear in batches
+      try {
+        await dispatchBatchService.reconcileBatchesWithDispatchRecords(cId);
+      } catch (bErr) {
+        console.warn('Batch reconciliation error in reconcileRedispatchShipments:', bErr);
       }
 
       console.log(`[reconcileRedispatchShipments] Campaign ${cId}: Total=${rdRows.length}, Dispatched=${dispatchedCount}, Pending=${pendingCount}, Fixed=${fixedCount} (${fixedCodes.join(', ')})`);
@@ -398,27 +401,14 @@ export const reDispatchQueueService = {
 
       // Index verified replacement shipments from uploaded courier files (SOURCE OF TRUTH)
       const repShipmentByCode = new Map<string, any>();
-      const repShipmentByInfId = new Map<string, any>();
 
       trackingShipments.forEach(s => {
         const oId = String(s.order_id || '').trim();
-        let isResend = false;
-        if (s.sync_error) {
-          try {
-            const p = typeof s.sync_error === 'string' ? JSON.parse(s.sync_error) : s.sync_error;
-            if (p.is_resend) isResend = true;
-          } catch (e) {}
-        }
-
-        const isRep = oId.startsWith('R ') || oId.startsWith('R') || isResend;
-        if (isRep && s.awb_number) {
-          const rawCode = oId.startsWith('R ') ? oId.slice(2).trim() : (s.influencer_code || oId.replace(/^R\s*/i, '')).trim();
-          const clean = cleanCode(rawCode).toUpperCase();
-          if (clean) {
-            repShipmentByCode.set(clean, s);
-          }
-          if (s.influencer_id) {
-            repShipmentByInfId.set(String(s.influencer_id), s);
+        const rMatch = /^#?R[\s#_\-]+([A-Za-z0-9]+)$/i.exec(oId) || /^R([A-Za-z]+[0-9]+)$/i.exec(oId);
+        if (rMatch && s.awb_number) {
+          const rawCode = rMatch[1].trim().toUpperCase();
+          if (rawCode) {
+            repShipmentByCode.set(rawCode, s);
           }
         }
       });
@@ -441,8 +431,8 @@ export const reDispatchQueueService = {
         const disp = dispById.get(infIdStr);
         const st = stById.get(infIdStr);
 
-        // SOURCE OF TRUTH: Match against uploaded courier replacement shipments
-        const matchedRepShipment = repShipmentByCode.get(codeUpper) || (infId ? repShipmentByInfId.get(infIdStr) : null);
+        // SOURCE OF TRUTH: Match against uploaded courier replacement shipments strictly by R-prefixed Order ID
+        const matchedRepShipment = repShipmentByCode.get(codeUpper);
         const prevAwbVal = (row.previous_awb || disp?.tracking_id || '').trim();
 
         // Valid replacement shipment must exist with a non-empty AWB
@@ -805,7 +795,216 @@ export const reDispatchQueueService = {
    * 1. Updates redispatch_records: redispatch_status = 'MOVED_TO_ACTIVE', moved_to_active_at = now, order_id = 'R ' + code
    * 2. Upserts shipment_attempts: records attempt with shipment_type = 'RE_DISPATCH', awb_number = new AWB, order_id = 'R ' + code
    * 3. Updates influencer_status_tracking_rows: updates redispatch_cycles with new AWB, status = 'Re-Dispatch (Active)'
-   * 4. Updates influencer_dispatch_details_rows: sets dispatch_status = 'Dispatched' without overwriting original tracking_id!
+   * 4. Updates influencer_dispatch_details_rows: populates replacement logistics details and automatically moves to 'prepare_dispatch'!
+   */
+  async transitionReDispatchToPrepareDispatch(
+    campaignId: string | number,
+    data: {
+      influencer_id?: number | string | null;
+      influencer_code: string;
+      order_id?: string;
+      redispatch_awb: string;
+      courier?: string;
+      displayStatus?: string;
+      dispatchDate?: string | null;
+      estimatedDeliveryDate?: string | null;
+      deliveredDate?: string | null;
+      remarks?: string;
+      attemptNumber?: number;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const cId = String(campaignId).trim();
+    const code = cleanCode(data.influencer_code);
+    const numInfId = data.influencer_id ? Number(data.influencer_id) : null;
+    const awb = (data.redispatch_awb || '').trim();
+    if (!cId || (!code && !numInfId) || !awb) {
+      return { success: false, error: 'Invalid parameters for transitionReDispatchToPrepareDispatch' };
+    }
+
+    try {
+      const nowIso = new Date().toISOString();
+      const courierName = data.courier || 'Delhivery';
+      const displayStatus = data.displayStatus || 'Pending';
+      const orderId = data.order_id || `R ${code}`;
+
+      // 1. Authoritative update in redispatch_records: redispatch_status = 'MOVED_TO_ACTIVE'
+      let rdQuery = supabaseAdmin
+        .from(SUPABASE_TABLES.redispatchRecords)
+        .update({
+          redispatch_status: 'MOVED_TO_ACTIVE',
+          moved_to_active_at: nowIso,
+          order_id: orderId,
+          updated_at: nowIso
+        })
+        .eq('campaign_id', cId);
+
+      if (code) {
+        rdQuery = rdQuery.eq('influencer_code', code);
+      } else if (numInfId && !isNaN(numInfId)) {
+        rdQuery = rdQuery.eq('influencer_id', numInfId);
+      }
+      await rdQuery;
+
+      // 2. Upsert shipment_attempts (Attempt #2, RE_DISPATCH)
+      if (numInfId && !isNaN(numInfId)) {
+        try {
+          const existingAttempts = await shipmentAttemptService.getShipmentAttempts(cId, numInfId);
+          const existingAttempt = existingAttempts.find(
+            a => a.awb_number === awb || (a.shipment_type === 'RE_DISPATCH' && !a.delivery_confirmed)
+          );
+
+          if (existingAttempt) {
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.shipmentAttempts)
+              .update({
+                order_id: orderId,
+                awb_number: awb,
+                courier: courierName,
+                shipment_status: displayStatus,
+                dispatch_date: data.dispatchDate || existingAttempt.dispatch_date || null,
+                estimated_delivery_date: data.estimatedDeliveryDate || existingAttempt.estimated_delivery_date || null,
+                delivered_date: data.deliveredDate || existingAttempt.delivered_date || null,
+                remarks: data.remarks || existingAttempt.remarks || `Re-Dispatch replacement shipment via ${courierName}`,
+                updated_at: nowIso
+              })
+              .eq('id', existingAttempt.id);
+          } else {
+            const nextAttemptNum = data.attemptNumber || (existingAttempts.length > 0 ? existingAttempts[existingAttempts.length - 1].attempt_number + 1 : 2);
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.shipmentAttempts)
+              .insert({
+                campaign_id: cId,
+                influencer_id: numInfId,
+                attempt_number: nextAttemptNum,
+                shipment_type: 'RE_DISPATCH',
+                courier: courierName,
+                order_id: orderId,
+                awb_number: awb,
+                shipment_status: displayStatus,
+                dispatch_date: data.dispatchDate || null,
+                estimated_delivery_date: data.estimatedDeliveryDate || null,
+                delivered_date: data.deliveredDate || null,
+                remarks: data.remarks || `Re-Dispatch replacement shipment via ${courierName}`,
+                delivery_confirmed: false,
+                status_tracking_started: false,
+                created_at: nowIso,
+                updated_at: nowIso
+              });
+          }
+        } catch (attErr) {
+          console.error('Error updating shipment_attempts in transitionReDispatchToPrepareDispatch:', attErr);
+        }
+      }
+
+      // 3. Update influencer_status_tracking_rows notes
+      if (numInfId && !isNaN(numInfId)) {
+        try {
+          const numCampId = Number(cId);
+          const campQuery = !isNaN(numCampId) ? numCampId : cId;
+          const { data: stRow } = await supabaseAdmin
+            .from(SUPABASE_TABLES.influencerStatus)
+            .select('id, notes, status')
+            .eq('campaign_id', campQuery)
+            .eq('influencer_id', numInfId)
+            .maybeSingle();
+
+          if (stRow?.id) {
+            let meta: any = {};
+            try {
+              meta = typeof stRow.notes === 'string' ? JSON.parse(stRow.notes || '{}') : (stRow.notes || {});
+            } catch (e) {
+              meta = {};
+            }
+
+            meta.redispatch_lifecycle_status = 'MOVED_TO_ACTIVE';
+            meta.re_dispatch_moved_to_active = true;
+            meta.re_dispatch_required = false;
+            meta.redispatch_awb = awb;
+            meta.last_updated = nowIso;
+
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.influencerStatus)
+              .update({
+                status: 'Re-Dispatch (Active)',
+                notes: JSON.stringify(meta),
+                updated_at: nowIso
+              })
+              .eq('id', stRow.id);
+          }
+        } catch (stErr) {
+          console.error('Error updating influencer_status in transitionReDispatchToPrepareDispatch:', stErr);
+        }
+      }
+
+      // 4. Update influencer_dispatch_details_rows:
+      // If already dispatched by the user, keep 'Dispatched'. Otherwise set dispatch_status = 'prepare_dispatch'!
+      if (numInfId && !isNaN(numInfId)) {
+        try {
+          const numCampId = Number(cId);
+          const campQuery = !isNaN(numCampId) ? numCampId : cId;
+
+          const { data: currDisp } = await supabaseAdmin
+            .from(SUPABASE_TABLES.influencerDispatch)
+            .select('id, dispatch_status')
+            .eq('campaign_id', campQuery)
+            .eq('influencer_id', numInfId)
+            .maybeSingle();
+
+          const isAlreadyDispatched = 
+            currDisp?.dispatch_status?.toLowerCase() === 'dispatched' && 
+            Boolean(currDisp?.remarks?.includes('Re-Dispatch sent via'));
+          const targetStatus = isAlreadyDispatched ? 'Dispatched' : 'prepare_dispatch';
+
+          await supabaseAdmin
+            .from(SUPABASE_TABLES.influencerDispatch)
+            .update({
+              courier_partner: courierName,
+              tracking_id: awb,
+              dispatch_date: data.dispatchDate || null,
+              expected_delivery_date: data.estimatedDeliveryDate || null,
+              dispatch_status: targetStatus,
+              remarks: isAlreadyDispatched
+                ? currDisp?.remarks
+                : (data.remarks || `Re-Dispatch replacement shipment (AWB: ${awb})`)
+            })
+            .eq('campaign_id', campQuery)
+            .eq('influencer_id', numInfId);
+        } catch (dispErr) {
+          console.error('Error updating influencer_dispatch in transitionReDispatchToPrepareDispatch:', dispErr);
+        }
+      }
+
+      // Reconcile batches with prepare_dispatch records so replacement influencers appear in batches
+      try {
+        await dispatchBatchService.reconcileBatchesWithDispatchRecords(cId);
+      } catch (bErr) {
+        console.warn('Batch reconciliation error in transitionReDispatchToPrepareDispatch:', bErr);
+      }
+
+      // 5. Broadcast real-time reactivity events
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('influencer_tracking_updated', {
+          detail: { campaignId: cId, influencerId: numInfId, code }
+        }));
+        window.dispatchEvent(new CustomEvent('influencer_status_updated', {
+          detail: { campaignId: cId, influencerId: numInfId, code }
+        }));
+        window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
+      }
+
+      return { success: true };
+    } catch (e: any) {
+      console.error('Exception in transitionReDispatchToPrepareDispatch:', e);
+      return { success: false, error: e?.message || 'Failed to transition re-dispatch' };
+    }
+  },
+
+  /**
+   * Automatically transitions a Re-Dispatch record when user completes dispatch:
+   * 1. Updates redispatch_records: redispatch_status = 'MOVED_TO_ACTIVE', moved_to_active_at = now, order_id = 'R ' + code
+   * 2. Upserts shipment_attempts: records attempt with shipment_type = 'RE_DISPATCH', awb_number = new AWB, order_id = 'R ' + code
+   * 3. Updates influencer_status_tracking_rows: updates redispatch_cycles with new AWB, status = 'Re-Dispatch (Active)'
+   * 4. Updates influencer_dispatch_details_rows: sets dispatch_status = 'Dispatched'
    */
   async transitionReDispatchToDispatched(
     campaignId: string | number,

@@ -30,6 +30,12 @@ export const isInfluencerReDispatch = (
   if (!inf) return false;
   const dispatch = inf.dispatchDetails || (dispatchRecords && dispatchRecords.find(d => String(d.influencer_id) === String(inf.id)));
   const status = (dispatch?.dispatch_status || (inf as any).dispatch_status || '').trim().toLowerCase();
+
+  // If explicitly dispatched, tracking, or in prepare_dispatch, they are not pending re-dispatch
+  if (status === 'dispatched' || status === 'tracking' || status === 'prepare_dispatch' || status === 'ready to dispatch') {
+    return false;
+  }
+
   if (status === 're_dispatch' || status === 're-dispatch' || status === 'redispatch' || status.includes('re_dispatch') || status.includes('re-dispatch')) {
     return true;
   }
@@ -37,10 +43,34 @@ export const isInfluencerReDispatch = (
     return true;
   }
   const remarks = (dispatch?.remarks || '').trim().toLowerCase();
-  if (remarks.startsWith('issue reported') || remarks.includes('re-dispatch') || remarks.includes('re_dispatch')) {
+  if (remarks.startsWith('issue reported') || remarks.includes('moved to active for re-dispatch')) {
     return true;
   }
   return false;
+};
+
+/**
+ * Returns true if an influencer is in re-dispatch lifecycle (pending, preparing, or replacement dispatched).
+ */
+export const isInfluencerReDispatchReplacement = (
+  inf: { dispatchDetails?: any; id?: string | number; dispatch_status?: string; code?: string } | null | undefined,
+  dispatchRecords?: any[]
+): boolean => {
+  if (!inf) return false;
+  const rawCode = (inf.code || (inf as any).influencer_code || (inf as any).influencerCode || '').trim();
+  if (/^#?R[\s#_\-]+/i.test(rawCode)) return true;
+
+  const dispatch = inf.dispatchDetails || (dispatchRecords && dispatchRecords.find(d => String(d.influencer_id) === String(inf.id)));
+  const remarks = (dispatch?.remarks || '').trim().toLowerCase();
+  const status = (dispatch?.dispatch_status || (inf as any).dispatch_status || '').trim().toLowerCase();
+  return (
+    remarks.includes('re-dispatch') || 
+    remarks.includes('redispatch') || 
+    status === 're_dispatch' || 
+    status === 're-dispatch' ||
+    (inf as any).is_redispatched === true ||
+    (inf as any).re_dispatch_required === true
+  );
 };
 
 /**

@@ -48,7 +48,13 @@ import {
   ParsedDelhiveryReference
 } from '../../utils/orderIdUtils';
 import { reDispatchQueueService } from '../../services/reDispatchQueueService';
+import { dispatchBatchService } from '../../services/dispatchBatchService';
 import toast from 'react-hot-toast';
+
+const cleanUploadCode = (c?: string | null): string => {
+  if (!c) return '';
+  return String(c).replace(/[\t\r\n]/g, ' ').replace(/^#+/, '').trim();
+};
 
 export interface UploadResultStats {
   title: string;
@@ -807,12 +813,31 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const duplicatesReported = dbResult.duplicatesUpdated;
         const failedReported = dbResult.failed + invalidCount;
 
+        // Pre-fetch re-dispatch records to protect Re-Dispatch influencers from being overwritten by original rows
+        const stRedispatchInfIdSet = new Set<string>();
+        const stRedispatchCodeSet = new Set<string>();
+        try {
+          const { data: rdRecords } = await supabaseAdmin
+            .from(SUPABASE_TABLES.redispatchRecords)
+            .select('influencer_id, influencer_code')
+            .eq('campaign_id', String(campaign.id));
+          if (rdRecords) {
+            rdRecords.forEach((r: any) => {
+              if (r.influencer_id) stRedispatchInfIdSet.add(String(r.influencer_id));
+              if (r.influencer_code) stRedispatchCodeSet.add(cleanUploadCode(r.influencer_code).toUpperCase());
+            });
+          }
+        } catch (e) {}
+
         // Persist matched influencers to Supabase influencer_dispatch and re-dispatch queue
         for (const s of trackedShipments) {
           if (s.influencerId) {
+            const cleanInfCode = cleanUploadCode(s.influencerCode || '').toUpperCase();
+            const isInfluencerInReDispatch = stRedispatchInfIdSet.has(String(s.influencerId)) || stRedispatchCodeSet.has(cleanInfCode);
+
             if (s.isResend) {
               try {
-                await reDispatchQueueService.transitionReDispatchToDispatched(campaign.id, {
+                await reDispatchQueueService.transitionReDispatchToPrepareDispatch(campaign.id, {
                   influencer_id: s.influencerId,
                   influencer_code: s.influencerCode || '',
                   order_id: s.orderId,
@@ -826,26 +851,29 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
                 });
               } catch (e) {}
             } else {
-              try {
-                const { data: existingRecords } = await supabase
-                  .from(SUPABASE_TABLES.influencerDispatch)
-                  .select('id')
-                  .eq('influencer_id', s.influencerId)
-                  .eq('campaign_id', String(campaign.id));
-
-                if (existingRecords && existingRecords.length > 0) {
-                  await supabase
+              // Only update influencer_dispatch if the influencer is NOT in a re-dispatch workflow
+              if (!isInfluencerInReDispatch) {
+                try {
+                  const { data: existingRecords } = await supabase
                     .from(SUPABASE_TABLES.influencerDispatch)
-                    .update({
-                      courier_partner: 'ST Courier',
-                      tracking_id: s.awbNumber,
-                      dispatch_status: 'Dispatched',
-                      dispatch_date: s.dispatchDate || null,
-                      expected_delivery_date: s.expectedDeliveryDate || null
-                    })
-                    .eq('id', existingRecords[0].id);
-                }
-              } catch (e) {}
+                    .select('id')
+                    .eq('influencer_id', s.influencerId)
+                    .eq('campaign_id', String(campaign.id));
+
+                  if (existingRecords && existingRecords.length > 0) {
+                    await supabase
+                      .from(SUPABASE_TABLES.influencerDispatch)
+                      .update({
+                        courier_partner: 'ST Courier',
+                        tracking_id: s.awbNumber,
+                        dispatch_status: 'Dispatched',
+                        dispatch_date: s.dispatchDate || null,
+                        expected_delivery_date: s.expectedDeliveryDate || null
+                      })
+                      .eq('id', existingRecords[0].id);
+                  }
+                } catch (e) {}
+              }
             }
           }
         }
@@ -877,6 +905,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
         } catch (recErr) {
           console.warn('Reconciliation error post ST Courier upload:', recErr);
+        }
+
+        // Reconcile batches with prepare_dispatch records so replacement influencers appear in batches
+        try {
+          await dispatchBatchService.reconcileBatchesWithDispatchRecords(campaign.id);
+        } catch (bErr) {
+          console.warn('Batch reconciliation error post ST Courier upload:', bErr);
         }
 
         try {
@@ -918,16 +953,33 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           phase: `Saving ${validRows.length} Delhivery shipments to database...`
         });
 
-        // Pre-fetch existing campaign dispatches
+        // Pre-fetch existing campaign dispatches & re-dispatch records to protect Re-Dispatch influencers
         const existingDispatchesMap = new Map<string, string>();
+        const delhiveryRedispatchInfIdSet = new Set<string>();
+        const delhiveryRedispatchCodeSet = new Set<string>();
+
         try {
-          const { data: dispatches } = await supabaseAdmin
-            .from(SUPABASE_TABLES.influencerDispatch)
-            .select('id, influencer_id')
-            .eq('campaign_id', String(campaign.id));
-          if (dispatches) {
-            dispatches.forEach((d: any) => {
+          const [dispRes, rdRes] = await Promise.all([
+            supabaseAdmin
+              .from(SUPABASE_TABLES.influencerDispatch)
+              .select('id, influencer_id')
+              .eq('campaign_id', String(campaign.id)),
+            supabaseAdmin
+              .from(SUPABASE_TABLES.redispatchRecords)
+              .select('influencer_id, influencer_code')
+              .eq('campaign_id', String(campaign.id))
+          ]);
+
+          if (dispRes.data) {
+            dispRes.data.forEach((d: any) => {
               if (d.influencer_id) existingDispatchesMap.set(String(d.influencer_id), d.id);
+            });
+          }
+
+          if (rdRes.data) {
+            rdRes.data.forEach((r: any) => {
+              if (r.influencer_id) delhiveryRedispatchInfIdSet.add(String(r.influencer_id));
+              if (r.influencer_code) delhiveryRedispatchCodeSet.add(cleanUploadCode(r.influencer_code).toUpperCase());
             });
           }
         } catch (e) {}
@@ -1012,11 +1064,14 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           } catch (dbErr) {}
 
           // Handle Re-Dispatch vs Original Dispatch
+          const cleanInfCode = cleanUploadCode(inf.code || row.baseOrderId).toUpperCase();
+          const isInfluencerInReDispatch = delhiveryRedispatchInfIdSet.has(String(inf.id)) || delhiveryRedispatchCodeSet.has(cleanInfCode);
+
           if (row.isResend) {
             // It's a Re-Dispatch shipment!
-            // Transition Re-Dispatch lifecycle, shipment attempts, and status tracking notes
+            // Transition Re-Dispatch lifecycle, shipment attempts, and move influencer to PREPARE DISPATCH
             try {
-              await reDispatchQueueService.transitionReDispatchToDispatched(campaign.id, {
+              await reDispatchQueueService.transitionReDispatchToPrepareDispatch(campaign.id, {
                 influencer_id: inf.id,
                 influencer_code: inf.code || row.baseOrderId,
                 order_id: row.orderId,
@@ -1033,17 +1088,19 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               console.warn('Error transitioning re-dispatch record during Delhivery upload:', rdErr);
             }
           } else {
-            // Queue influencerDispatch update strictly for ORIGINAL shipments (preserving original tracking_id)
-            const dispatchId = existingDispatchesMap.get(String(inf.id));
-            if (dispatchId) {
-              dispatchUpdates.push({
-                id: dispatchId,
-                courier_partner: 'Delhivery',
-                tracking_id: awb,
-                dispatch_status: 'Dispatched',
-                dispatch_date: normalizedDate || null,
-                expected_delivery_date: normalizedEdd || null
-              });
+            // Queue influencerDispatch update strictly for ORIGINAL shipments of influencers NOT in re-dispatch
+            if (!isInfluencerInReDispatch) {
+              const dispatchId = existingDispatchesMap.get(String(inf.id));
+              if (dispatchId) {
+                dispatchUpdates.push({
+                  id: dispatchId,
+                  courier_partner: 'Delhivery',
+                  tracking_id: awb,
+                  dispatch_status: 'Dispatched',
+                  dispatch_date: normalizedDate || null,
+                  expected_delivery_date: normalizedEdd || null
+                });
+              }
             }
           }
 
@@ -1123,6 +1180,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           console.warn('Reconciliation error post Delhivery upload:', recErr);
         }
 
+        // Reconcile batches with prepare_dispatch records so replacement influencers appear in batches
+        try {
+          await dispatchBatchService.reconcileBatchesWithDispatchRecords(campaign.id);
+        } catch (bErr) {
+          console.warn('Batch reconciliation error post Delhivery upload:', bErr);
+        }
+
         try {
           await onSuccess();
         } catch (refreshErr) {
@@ -1149,7 +1213,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const matchedRedispatch = validRows.filter(r => r.isResend).length;
         if (matchedRedispatch > 0 || recResult.dispatchedCount > 0) {
           const matched = matchedRedispatch || recResult.dispatchedCount;
-          toast.success(`${matched} Re-Dispatch shipment${matched === 1 ? '' : 's'} matched and dispatched successfully.`);
+          toast.success(`${matched} Re-Dispatch shipment${matched === 1 ? '' : 's'} matched and moved to Prepare Dispatch.`);
         }
         if (recResult.pendingCount > 0) {
           toast.info(`${recResult.pendingCount} Re-Dispatch shipment${recResult.pendingCount === 1 ? '' : 's'} are still pending courier upload.`);

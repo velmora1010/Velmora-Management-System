@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import { shipmentAttemptService } from '../../services/shipmentAttemptService';
+import { reDispatchQueueService } from '../../services/reDispatchQueueService';
 import { normalizeToLocalDateKey } from '../../utils/marketingUtils';
 
 export interface DispatchPayload {
@@ -285,6 +286,23 @@ export const useDispatch = () => {
           hint: attErr?.hint,
           raw: attErr
         });
+      }
+
+      // When confirming dispatch for a re-dispatch influencer, ensure reDispatchQueueService transitions to Dispatched
+      if (isDispatchConfirmed && (payload.is_re_dispatch || payload.influencer_code)) {
+        try {
+          await reDispatchQueueService.transitionReDispatchToDispatched(numericCampaignId, {
+            influencer_id: numericInfluencerId,
+            influencer_code: payload.influencer_code || '',
+            order_id: payload.order_id || undefined,
+            redispatch_awb: payload.tracking_id || '',
+            courier: payload.courier_partner || 'Delhivery',
+            dispatchDate: normalizedDispatchDate,
+            estimatedDeliveryDate: normalizedExpectedDate
+          });
+        } catch (rdErr) {
+          console.warn('Error transitioning re-dispatch to dispatched in useDispatch:', rdErr);
+        }
       }
 
       // Non-blocking activity logging
