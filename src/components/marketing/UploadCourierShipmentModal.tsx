@@ -886,6 +886,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+          window.dispatchEvent(new CustomEvent('influencer_status_updated', { detail: { campaignId: String(campaign.id) } }));
+          window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
         }
         onClose();
 
@@ -1114,8 +1116,9 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         clearTrackingCache(campaign.id);
 
         // Reconcile Re-Dispatch records with newly uploaded Delhivery shipments (Source of Truth)
+        let recResult = { total: 0, dispatchedCount: 0, pendingCount: 0, fixedCount: 0, fixedCodes: [] as string[] };
         try {
-          await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
+          recResult = await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
         } catch (recErr) {
           console.warn('Reconciliation error post Delhivery upload:', recErr);
         }
@@ -1127,6 +1130,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+          window.dispatchEvent(new CustomEvent('influencer_status_updated', { detail: { campaignId: String(campaign.id) } }));
+          window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
         }
         onClose();
 
@@ -1140,6 +1145,15 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           newShipmentsCount: importedReported,
           rowsWithRemarksCount: rowsWithRemarksCount
         });
+
+        const matchedRedispatch = validRows.filter(r => r.isResend).length;
+        if (matchedRedispatch > 0 || recResult.dispatchedCount > 0) {
+          const matched = matchedRedispatch || recResult.dispatchedCount;
+          toast.success(`${matched} Re-Dispatch shipment${matched === 1 ? '' : 's'} matched and dispatched successfully.`);
+        }
+        if (recResult.pendingCount > 0) {
+          toast.info(`${recResult.pendingCount} Re-Dispatch shipment${recResult.pendingCount === 1 ? '' : 's'} are still pending courier upload.`);
+        }
       }
     } catch (err: any) {
       console.error('[Execute Final Import Error]:', err);

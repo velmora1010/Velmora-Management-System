@@ -257,9 +257,41 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
 
   const rawDispStatus = (influencer.dispatchDetails?.dispatch_status || (influencer as any).dispatch_status || '').toLowerCase();
   const prevAttemptWithIssue = attempts.slice().reverse().find(a => a.issue_reported);
-  const isReDispatchMode = rawDispStatus.includes('re_dispatch') || rawDispStatus.includes('re-dispatch') || Boolean(prevAttemptWithIssue);
-  const nextAttemptNumber = attempts.length > 0 ? attempts[attempts.length - 1].attempt_number + (isReDispatchMode ? 1 : 0) : (isReDispatchMode ? 2 : 1);
-  const reDispatchOrderId = generateReDispatchOrderId(influencer.code, courierPartner, Math.max(nextAttemptNumber, 2));
+  const activeReDispatchAttempt = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH');
+  const isReDispatchMode = rawDispStatus.includes('re_dispatch') || rawDispStatus.includes('re-dispatch') || Boolean(prevAttemptWithIssue) || Boolean(activeReDispatchAttempt);
+
+  // If there's already an active replacement attempt (e.g. Attempt 2), use its attempt number.
+  // Otherwise, if in re-dispatch mode without a replacement attempt yet, this will be Attempt N+1.
+  const displayAttemptNumber = activeReDispatchAttempt
+    ? activeReDispatchAttempt.attempt_number
+    : (prevAttemptWithIssue ? prevAttemptWithIssue.attempt_number + 1 : (isReDispatchMode ? 2 : 1));
+
+  const reDispatchOrderId = activeReDispatchAttempt?.order_id || generateReDispatchOrderId(influencer.code, courierPartner, Math.max(displayAttemptNumber, 2));
+
+  // Synchronize form logistics details when attempts load or change in re-dispatch mode
+  useEffect(() => {
+    if (!attempts || attempts.length === 0) return;
+    const activeReDispatch = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH');
+    const hasIssue = attempts.some(a => a.issue_reported);
+
+    if (activeReDispatch) {
+      if (activeReDispatch.courier) setCourierPartner(activeReDispatch.courier);
+      if (activeReDispatch.awb_number) setTrackingId(activeReDispatch.awb_number);
+      if (activeReDispatch.dispatch_date) {
+        const normDate = normalizeToLocalDateKey(activeReDispatch.dispatch_date) || activeReDispatch.dispatch_date;
+        setDispatchDate(normDate);
+      }
+      if (activeReDispatch.estimated_delivery_date) {
+        const normEdd = normalizeToLocalDateKey(activeReDispatch.estimated_delivery_date) || activeReDispatch.estimated_delivery_date;
+        setExpectedDeliveryDate(normEdd);
+        setHasManuallyEditedDeliveryDate(true);
+      }
+    } else if (hasIssue || isReDispatchMode) {
+      // Pending Re-Dispatch without a replacement shipment yet (e.g. HIS1):
+      // Must NOT display the old damaged shipment AWB! Clear trackingId for fresh entry.
+      setTrackingId('');
+    }
+  }, [attempts, isReDispatchMode]);
 
   const [showConfirmStep, setShowConfirmStep] = useState(false);
 
@@ -396,7 +428,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-[11px] uppercase tracking-wider rounded">
-                    Re-Dispatch (Attempt #{nextAttemptNumber})
+                    Re-Dispatch (Attempt #{displayAttemptNumber})
                   </span>
                   <span className="text-white font-bold text-sm">
                     Replacement Shipment for {influencer.code || influencer.name}

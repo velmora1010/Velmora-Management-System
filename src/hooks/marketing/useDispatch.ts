@@ -232,12 +232,11 @@ export const useDispatch = () => {
         const existingAttempts = await shipmentAttemptService.getShipmentAttempts(numericCampaignId, numericInfluencerId);
         const prevAttempt = existingAttempts.length > 0 ? existingAttempts[existingAttempts.length - 1] : null;
 
-        const isReDispatch = Boolean(
-          payload.is_re_dispatch || 
-          (prevAttempt && prevAttempt.issue_reported)
-        );
+        // Only create a new attempt if the previous attempt had an issue reported.
+        // If the current latest attempt is already the replacement attempt (without an issue), update it.
+        const shouldCreateNewAttempt = Boolean(prevAttempt && prevAttempt.issue_reported);
 
-        if (prevAttempt && isReDispatch) {
+        if (prevAttempt && shouldCreateNewAttempt) {
           // A product issue was previously reported -> Create a replacement attempt (Attempt N+1, RE_DISPATCH)
           await shipmentAttemptService.createReDispatchAttempt({
             campaign_id: numericCampaignId,
@@ -271,7 +270,7 @@ export const useDispatch = () => {
               order_id: payload.order_id || prevAttempt.order_id,
               dispatch_date: normalizedDispatchDate || prevAttempt.dispatch_date,
               estimated_delivery_date: normalizedExpectedDate || prevAttempt.estimated_delivery_date,
-              shipment_status: payload.tracking_id ? 'In Transit' : 'Pending',
+              shipment_status: payload.tracking_id ? (prevAttempt.shipment_status || 'In Transit') : 'Pending',
               updated_at: new Date().toISOString()
             })
             .eq('id', prevAttempt.id);

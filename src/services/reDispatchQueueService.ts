@@ -177,6 +177,31 @@ export const reDispatchQueueService = {
             fixedCount++;
             fixedCodes.push(code);
           }
+
+          // Ensure influencer_dispatch_details_rows is updated with replacement shipment logistics
+          if (row.influencer_id) {
+            try {
+              const repCourier = matchedRepShipment.courier || 'Delhivery';
+              const repAwb = String(matchedRepShipment.awb_number).trim();
+              const repDispDate = matchedRepShipment.dispatchDate || matchedRepShipment.dispatch_date || null;
+              const repEdd = matchedRepShipment.expectedDeliveryDate || matchedRepShipment.expected_delivery_date || null;
+
+              await supabaseAdmin
+                .from(SUPABASE_TABLES.influencerDispatch)
+                .update({
+                  courier_partner: repCourier,
+                  tracking_id: repAwb,
+                  dispatch_date: repDispDate,
+                  expected_delivery_date: repEdd,
+                  dispatch_status: 'Dispatched',
+                  remarks: `Re-Dispatch sent via ${repCourier} (AWB: ${repAwb})`
+                })
+                .eq('campaign_id', campQuery)
+                .eq('influencer_id', row.influencer_id);
+            } catch (dErr) {
+              console.warn(`Error updating dispatch details for ${code}:`, dErr);
+            }
+          }
         } else {
           // NOT in uploaded Delhivery file -> MUST BE PENDING_REDISPATCH!
           pendingCount++;
@@ -944,7 +969,7 @@ export const reDispatchQueueService = {
         }
       }
 
-      // 4. Update influencer_dispatch_details_rows: set dispatch_status = 'Dispatched' without overwriting tracking_id!
+      // 4. Update influencer_dispatch_details_rows: auto-populate replacement dispatch details
       if (numInfId && !isNaN(numInfId)) {
         try {
           const numCampId = Number(cId);
@@ -952,8 +977,12 @@ export const reDispatchQueueService = {
           await supabaseAdmin
             .from(SUPABASE_TABLES.influencerDispatch)
             .update({
+              courier_partner: courierName,
+              tracking_id: awb,
+              dispatch_date: data.dispatchDate || null,
+              expected_delivery_date: data.estimatedDeliveryDate || null,
               dispatch_status: 'Dispatched',
-              remarks: `Re-Dispatch sent via ${courierName} (AWB: ${awb})`
+              remarks: data.remarks || `Re-Dispatch sent via ${courierName} (AWB: ${awb})`
             })
             .eq('campaign_id', campQuery)
             .eq('influencer_id', numInfId);

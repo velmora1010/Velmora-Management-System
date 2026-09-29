@@ -301,16 +301,22 @@ export const CampaignDispatchedList: React.FC<CampaignDispatchedListProps> = ({
     loadSavedBatches();
   }, [loadSavedBatches, dispatchRecords]);
 
-  // Reload batches on global influencer update or deletion
+  // Reload batches and refresh dispatch/influencers on global updates
   useEffect(() => {
     const handleGlobalUpdate = () => {
       loadSavedBatches();
+      refreshDispatch();
+      refreshInfluencers();
     };
     window.addEventListener('velmora:influencer-updated', handleGlobalUpdate);
+    window.addEventListener('influencer_tracking_updated', handleGlobalUpdate);
+    window.addEventListener('influencer_status_updated', handleGlobalUpdate);
     return () => {
       window.removeEventListener('velmora:influencer-updated', handleGlobalUpdate);
+      window.removeEventListener('influencer_tracking_updated', handleGlobalUpdate);
+      window.removeEventListener('influencer_status_updated', handleGlobalUpdate);
     };
-  }, [loadSavedBatches]);
+  }, [loadSavedBatches, refreshDispatch, refreshInfluencers]);
 
   // Sync draft filters when drawer opens
   useEffect(() => {
