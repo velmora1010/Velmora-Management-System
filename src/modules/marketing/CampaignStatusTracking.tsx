@@ -9,7 +9,7 @@ import {
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2,
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, Activity, Truck, Share2, Globe, GitBranch,
-  Calendar, CreditCard, PhoneCall, Users, CheckSquare, FastForward
+  Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -120,12 +120,13 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
   { id: 'not_started', label: 'Not Started', shortLabel: 'Not Started', icon: Clock },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
-  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: PhoneCall },
+  { id: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain', icon: PhoneCall },
+  { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
-  { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
   { id: 're_dispatch', label: 'Re-Dispatch', shortLabel: 'Re-Dispatch', icon: RotateCcw },
+  { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
 
 const isFakeUrl = (url: string | undefined | null) => {
@@ -1399,6 +1400,46 @@ export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum:
 };
 
 /**
+ * Checks if the Call & Explain step for an influencer in a given video number was explicitly marked as Call Skipped.
+ */
+export const isInfluencerCallSkipped = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+  if (videoNumber === 1 && !isInfluencerDeliveryConfirmed(record)) return false;
+  if (videoNumber > 1 && !isInfluencerVideoStarted(record, videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const callStep = vData.steps['call_explain'];
+  if (callStep?.skipped === true || callStep?.status === 'SKIPPED' || callStep?.data?.call_skipped === true || callStep?.data?.is_skipped === true) {
+    return true;
+  }
+
+  try {
+    const metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+    const storedStep = metadata.videos?.[String(videoNumber)]?.steps?.call_explain || metadata.videos?.[videoNumber]?.steps?.call_explain;
+    if (storedStep?.skipped === true || storedStep?.status === 'SKIPPED' || storedStep?.data?.call_skipped === true || storedStep?.data?.is_skipped === true) {
+      return true;
+    }
+    if (videoNumber === 1 && (metadata.call_skipped === true || metadata.is_skipped === true)) {
+      return true;
+    }
+  } catch (e) {}
+
+  return false;
+};
+
+/**
+ * Checks if the Call & Explain step was normally completed (not skipped) for an influencer.
+ */
+export const isInfluencerCallCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerCallSkipped(record, videoNumber)) return false;
+  const vData = getVideoWorkflow(record, videoNumber);
+  const callStep = vData.steps['call_explain'];
+  return Boolean(callStep?.completed || callStep?.data?.call_explained);
+};
+
+/**
  * Resolves the single active summary workflow step for an influencer in a given video number:
  * One of: 'delivered' | 'not_started' | 'share_script' | 'call_explain' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment' | 're_dispatch' | null
  */
@@ -1896,7 +1937,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matches) return false;
       }
 
-      // 9. Top summary step box filter (All, Delivered, Not Started, Share Script, Call & Explain, Pay Advance, Time Line, Draft, Post Date, Payment, Re-Dispatch)
+      // 9. Top summary step box filter (All, Delivered, Not Started, Share Script, Call Explain, Call Skipped, Time Line, Draft, Post Date, Re-Dispatch, Payment)
       if (selectedSummaryStep) {
         if (selectedSummaryStep === 'delivered') {
           if (selectedVideoNumber === 1) {
@@ -1913,6 +1954,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           }
         } else if (selectedSummaryStep === 're_dispatch') {
           if (!isInfluencerInReDispatch(record)) return false;
+        } else if (selectedSummaryStep === 'call_skipped') {
+          if (!isInfluencerCallSkipped(record, selectedVideoNumber)) return false;
+        } else if (selectedSummaryStep === 'call_explain') {
+          if (isInfluencerCallSkipped(record, selectedVideoNumber)) return false;
+          const step = getInfluencerActiveSummaryStep(record, selectedVideoNumber);
+          if (step !== 'call_explain') return false;
         } else {
           const step = getInfluencerActiveSummaryStep(record, selectedVideoNumber);
           if (step !== selectedSummaryStep) return false;
@@ -1947,11 +1994,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       not_started: 0,
       share_script: 0,
       call_explain: 0,
+      call_skipped: 0,
       timeline: 0,
       draft: 0,
       post_date: 0,
-      payment: 0,
-      re_dispatch: 0
+      re_dispatch: 0,
+      payment: 0
     };
 
     assigned.forEach(r => {
@@ -1960,6 +2008,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       if (isReDispatch) {
         counts.re_dispatch++;
         return;
+      }
+
+      // Check if call was skipped for this video
+      const isCallSkipped = isInfluencerCallSkipped(r, selectedVideoNumber);
+      if (isCallSkipped) {
+        counts.call_skipped++;
       }
 
       // 2. Video 1 specific counts
@@ -1974,7 +2028,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
         const step = getInfluencerActiveSummaryStep(r, 1);
         if (step && counts[step] !== undefined) {
-          counts[step]++;
+          if (step === 'call_explain' && isCallSkipped) {
+            // Already counted in call_skipped
+          } else {
+            counts[step]++;
+          }
         }
       } else {
         // Video 2 to 6
@@ -1991,7 +2049,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
         const step = getInfluencerActiveSummaryStep(r, selectedVideoNumber);
         if (step && counts[step] !== undefined) {
-          counts[step]++;
+          if (step === 'call_explain' && isCallSkipped) {
+            // Already counted in call_skipped
+          } else {
+            counts[step]++;
+          }
         }
       }
     });
@@ -3006,8 +3068,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           {/* 2. HORIZONTAL WORKFLOW STEP SUMMARY COUNT BOXES */}
           <div className="flex flex-col gap-2.5 shrink-0">
             {/* Top: Horizontal Workflow Step Summary Boxes in ONE Single Line */}
-            <div className="w-full overflow-x-auto no-scrollbar pb-1">
-              <div className={`grid grid-flow-col auto-cols-[minmax(105px,1fr)] xl:auto-cols-auto ${selectedVideoNumber === 1 ? 'xl:grid-cols-9' : 'xl:grid-cols-10'} gap-1.5 sm:gap-2 w-full min-w-[900px] xl:min-w-0`}>
+            <div className="w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-smooth pb-1">
+              <div className={`grid grid-flow-col auto-cols-[minmax(96px,1fr)] sm:auto-cols-[minmax(105px,1fr)] 2xl:auto-cols-auto ${selectedVideoNumber === 1 ? '2xl:grid-cols-10' : '2xl:grid-cols-11'} gap-1.5 sm:gap-2 w-full min-w-[1020px] 2xl:min-w-0`}>
                 {/* 1. All Box */}
                 <button
                   type="button"
@@ -3177,16 +3239,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               <div className="flex flex-col justify-center items-center h-64 text-slate-500 italic bg-[#0b1329]/50 rounded-2xl border border-slate-800/60 p-8">
                 <div className="text-4xl mb-3 opacity-60">🎯</div>
                 <h3 className="text-slate-300 text-base font-semibold mb-1">
-                  {activeFilterCount > 0 || searchQuery.trim()
+                  {activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep
                     ? 'No influencers match the selected filters.'
                     : 'No matching status tracking records'}
                 </h3>
                 <p className="text-xs text-slate-400 mb-3">
-                  {activeFilterCount > 0 || searchQuery.trim()
+                  {activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep
                     ? 'Try adjusting or clearing your filters to view influencers.'
                     : 'Dispatch an influencer with Delivered shipment status to begin status tracking.'}
                 </p>
-                {(activeFilterCount > 0 || searchQuery.trim()) && (
+                {(activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep) && (
                   <button
                     type="button"
                     onClick={handleClearAllFilters}
