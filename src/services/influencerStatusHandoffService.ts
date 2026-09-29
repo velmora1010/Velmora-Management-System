@@ -182,6 +182,151 @@ export function compareShipmentsByInfluencerCodeNaturally(
 export function sortInfluencerShipmentsNaturally<T>(shipments: T[]): T[] {
   return [...shipments].sort(compareShipmentsByInfluencerCodeNaturally);
 }
+
+/**
+ * Resolves the active / current shipments for Tracking display, KPIs, filters, and pagination.
+ *
+ * BUSINESS RULES:
+ * 1. For every influencer / base order code:
+ *    - If NO re-dispatch / replacement record exists:
+ *      Show the original shipment normally (e.g. #HIS25).
+ *    - If a re-dispatch / replacement record EXISTS:
+ *      Hide the original shipment completely from the Tracking list (e.g. hide #HIS24).
+ *      Show ONLY the replacement shipment (e.g. R HIS24).
+ *    - NEVER show both #HIS24 and R HIS24 simultaneously.
+ *    - The R-prefixed shipment becomes the current shipment for Tracking.
+ * 2. If multiple replacement attempts exist (e.g. R HIS24, R2 HIS24):
+ *    - Keep the latest replacement attempt (highest attempt number / latest dispatch date).
+ * 3. Does NOT mutate or delete original shipments from the database.
+ */
+export function resolveCurrentShipments<T extends {
+  id?: string;
+  orderId?: string | null;
+  rawOrderId?: string | null;
+  baseOrderId?: string | null;
+  influencerCode?: string | null;
+  influencerId?: string | number | null;
+  isResend?: boolean;
+  attemptNumber?: number;
+  dispatchDate?: string | null;
+  dispatchedDate?: string | null;
+  created_at?: string | null;
+  awbNumber?: string | null;
+  courier?: string | null;
+}>(
+  shipments: T[],
+  knownCodesSet?: Set<string>
+): T[] {
+  if (!shipments || shipments.length === 0) return [];
+
+  // 1. Establish canonical group IDs linking baseCodes and influencerIds
+  const infIdToGroup = new Map<string, string>();
+  const baseCodeToGroup = new Map<string, string>();
+  let groupCounter = 0;
+
+  function getCanonicalGroupId(s: T): string {
+    const infId = s.influencerId ? String(s.influencerId).trim() : '';
+    const rawOrd = s.orderId || s.rawOrderId || s.influencerCode || '';
+    const norm = normalizeOrderId(rawOrd, knownCodesSet);
+    const baseCode = (s.baseOrderId || norm.baseCode || s.influencerCode || '')
+      .toUpperCase()
+      .replace(/^#+/, '')
+      .trim();
+
+    // Check if we already have an established group for this influencer ID or baseCode
+    let groupId = (infId && infIdToGroup.get(infId)) || (baseCode && baseCodeToGroup.get(baseCode));
+    if (!groupId) {
+      groupId = baseCode ? `group_${baseCode}` : (infId ? `group_inf_${infId}` : `group_${++groupCounter}`);
+    }
+
+    if (infId) infIdToGroup.set(infId, groupId);
+    if (baseCode) baseCodeToGroup.set(baseCode, groupId);
+
+    return groupId;
+  }
+
+  // 2. Group shipments
+  const groups = new Map<string, T[]>();
+  for (const s of shipments) {
+    const groupId = getCanonicalGroupId(s);
+    const list = groups.get(groupId);
+    if (list) {
+      list.push(s);
+    } else {
+      groups.set(groupId, [s]);
+    }
+  }
+
+  // 3. Select the single current shipment for each group
+  const result: T[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      result.push(group[0]);
+      continue;
+    }
+
+    const replacements: T[] = [];
+    const originals: T[] = [];
+
+    for (const s of group) {
+      const rawOrd = s.orderId || s.rawOrderId || s.influencerCode || '';
+      const isRep = Boolean(
+        s.isResend ||
+        (s as any).is_resend ||
+        (s.attemptNumber && s.attemptNumber > 1) ||
+        ((s as any).attempt_number && (s as any).attempt_number > 1) ||
+        isReplacementOrderId(rawOrd, knownCodesSet) ||
+        isReplacementOrderId(s.influencerCode, knownCodesSet) ||
+        (typeof rawOrd === 'string' && /^#?R(\d*)[\s#_\-]+/i.test(rawOrd.trim()))
+      );
+
+      if (isRep) {
+        replacements.push(s);
+      } else {
+        originals.push(s);
+      }
+    }
+
+    // Rule 2: If a re-dispatch / replacement record EXISTS:
+    // Hide original shipment completely from Tracking list. Show ONLY the replacement shipment!
+    if (replacements.length > 0) {
+      if (replacements.length === 1) {
+        result.push(replacements[0]);
+      } else {
+        // Pick latest replacement attempt (highest attempt number, then latest date, then latest id)
+        replacements.sort((a, b) => {
+          const attA = Number(a.attemptNumber || (a as any).attempt_number || 2);
+          const attB = Number(b.attemptNumber || (b as any).attempt_number || 2);
+          if (attA !== attB) return attB - attA; // descending
+
+          const dateA = a.dispatchDate || a.dispatchedDate || a.created_at || '';
+          const dateB = b.dispatchDate || b.dispatchedDate || b.created_at || '';
+          if (dateA !== dateB) return String(dateB).localeCompare(String(dateA)); // descending
+
+          return String(b.id || '').localeCompare(String(a.id || ''));
+        });
+        result.push(replacements[0]);
+      }
+    } else {
+      // Rule 1: If NO re-dispatch record: Show original shipment normally
+      if (originals.length === 1) {
+        result.push(originals[0]);
+      } else {
+        // Multiple originals (e.g. duplicate uploads), pick most recent
+        originals.sort((a, b) => {
+          const dateA = a.dispatchDate || a.dispatchedDate || a.created_at || '';
+          const dateB = b.dispatchDate || b.dispatchedDate || b.created_at || '';
+          if (dateA !== dateB) return String(dateB).localeCompare(String(dateA));
+          return String(b.id || '').localeCompare(String(a.id || ''));
+        });
+        result.push(originals[0]);
+      }
+    }
+  }
+
+  return result;
+}
+
 /**
  * Normalizes an influencer code or shipment order reference for canonical comparison.
  * - converts to string

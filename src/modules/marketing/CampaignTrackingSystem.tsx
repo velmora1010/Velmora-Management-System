@@ -109,7 +109,8 @@ import {
   deleteShipmentWithStatusTrackingSync,
   clearAllCampaignTrackingWithStatusSync,
   sortInfluencerShipmentsNaturally,
-  naturalCompareInfluencerCodes
+  naturalCompareInfluencerCodes,
+  resolveCurrentShipments
 } from '../../services/influencerStatusHandoffService';
 
 interface CampaignTrackingSystemProps {
@@ -140,21 +141,14 @@ export const safeTrimLower = (val: any): string => (val === undefined || val ===
 
 export function isShipmentReDispatch(
   s: InfluencerDispatchedShipment,
-  dispatchRecords?: DispatchDetails[]
+  _dispatchRecords?: DispatchDetails[]
 ): boolean {
   if (s.isResend === true || (s as any).is_resend === true) return true;
   if ((s.attemptNumber && s.attemptNumber > 1) || ((s as any).attempt_number && (s as any).attempt_number > 1)) return true;
   const rawOrd = s.orderId || (s as any).rawOrderId || (s as any).raw_order_id;
   if (rawOrd && isReplacementOrderId(rawOrd)) return true;
   if (s.influencerCode && isReplacementOrderId(s.influencerCode)) return true;
-
-  if (dispatchRecords && s.influencerId) {
-    const disp = dispatchRecords.find(d => String(d.influencer_id) === String(s.influencerId));
-    if (disp) {
-      const st = safeTrimLower(disp.dispatch_status);
-      if (st === 're_dispatch' || st === 're-dispatch' || st === 'redispatch') return true;
-    }
-  }
+  if (typeof rawOrd === 'string' && /^#?R(\d*)[\s#_\-]+/i.test(rawOrd.trim())) return true;
   return false;
 }
 
@@ -633,6 +627,18 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return Array.from(map.values());
   }, [allActiveInfluencers, dbActiveInfluencers, dispatchedInfluencers]);
 
+  // Set of all canonical influencer codes in this campaign (e.g. "HIS1", "HIS24")
+  const validCampaignCodesSet = useMemo(() => {
+    const set = new Set<string>();
+    candidateInfluencers.forEach(inf => {
+      if (inf?.code) {
+        const clean = inf.code.replace(/^#+/, '').trim().toUpperCase();
+        if (clean) set.add(clean);
+      }
+    });
+    return set;
+  }, [candidateInfluencers]);
+
   // Campaign imported shipments (ST Courier + Delhivery) - loads from DB with local storage cache fallback
   const [campaignShipments, setCampaignShipments] = useState<InfluencerDispatchedShipment[]>(() => getCampaignShipments(campaign.id));
   const [isLoadingDb, setIsLoadingDb] = useState(false);
@@ -844,8 +850,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
 
     const unsorted = Array.from(shipmentMap.values());
-    return sortInfluencerShipmentsNaturally(unsorted);
-  }, [candidateInfluencers, dispatchRecords, savedBatches, campaignShipments, ithinkRecords, indiaPostRecords, campaign.id, trackingCache]);
+    const currentShipments = resolveCurrentShipments(unsorted, validCampaignCodesSet);
+    return sortInfluencerShipmentsNaturally(currentShipments);
+  }, [candidateInfluencers, dispatchRecords, savedBatches, campaignShipments, ithinkRecords, indiaPostRecords, campaign.id, trackingCache, validCampaignCodesSet]);
 
   // True if valid campaign tracking shipments exist in the database
   const hasTrackingData = allShipments.length > 0;
