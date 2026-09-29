@@ -11,6 +11,7 @@ interface ConfirmModalProps {
   onConfirm: () => void;
   onClose: () => void;
   isDestructive?: boolean;
+  variant?: 'destructive' | 'primary' | 'warning';
 }
 
 export const ConfirmModal: React.FC<ConfirmModalProps> = ({
@@ -21,8 +22,10 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   cancelText = 'Cancel',
   onConfirm,
   onClose,
-  isDestructive = true
+  isDestructive = true,
+  variant
 }) => {
+  const effectiveVariant = variant || (isDestructive ? 'destructive' : 'primary');
   return (
     <AnimatePresence>
       {isOpen && (
@@ -61,7 +64,12 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{ background: isDestructive ? 'rgba(239, 68, 68, 0.1)' : 'rgba(59, 130, 246, 0.1)', padding: '10px', borderRadius: '12px', color: isDestructive ? '#ef4444' : '#3b82f6' }}>
+                <div style={{ 
+                  background: effectiveVariant === 'warning' ? 'rgba(245, 158, 11, 0.12)' : (effectiveVariant === 'destructive' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(59, 130, 246, 0.1)'), 
+                  padding: '10px', 
+                  borderRadius: '12px', 
+                  color: effectiveVariant === 'warning' ? '#f59e0b' : (effectiveVariant === 'destructive' ? '#ef4444' : '#3b82f6') 
+                }}>
                   <AlertTriangle size={24} />
                 </div>
                 <h2 style={{ margin: 0, color: 'white', fontSize: '20px', fontWeight: 700 }}>{title}</h2>
@@ -101,14 +109,14 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
                 }}
                 style={{ 
                   padding: '12px 24px', 
-                  background: isDestructive ? '#ef4444' : '#3b82f6', 
+                  background: effectiveVariant === 'warning' ? '#f59e0b' : (effectiveVariant === 'destructive' ? '#ef4444' : '#3b82f6'), 
                   color: 'white', 
                   border: 'none', 
                   borderRadius: '12px', 
                   fontWeight: 600, 
                   cursor: 'pointer',
                   transition: 'all 0.2s',
-                  boxShadow: isDestructive ? '0 4px 14px rgba(239, 68, 68, 0.4)' : '0 4px 14px rgba(59, 130, 246, 0.4)'
+                  boxShadow: effectiveVariant === 'warning' ? '0 4px 14px rgba(245, 158, 11, 0.4)' : (effectiveVariant === 'destructive' ? '0 4px 14px rgba(239, 68, 68, 0.4)' : '0 4px 14px rgba(59, 130, 246, 0.4)')
                 }}
               >
                 {confirmText}

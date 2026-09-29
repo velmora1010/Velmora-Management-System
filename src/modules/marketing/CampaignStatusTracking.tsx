@@ -9,7 +9,7 @@ import {
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2,
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, Activity, Truck, Share2, Globe, GitBranch,
-  Calendar, CreditCard, PhoneCall, Users, CheckSquare
+  Calendar, CreditCard, PhoneCall, Users, CheckSquare, FastForward
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -853,6 +853,8 @@ export interface VideoWorkflowData {
   configs: VideoStepConfig[];
   steps: Record<string, {
     completed: boolean;
+    skipped?: boolean;
+    status?: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' | 'SKIPPED';
     data: any;
     updated_at?: string;
   }>;
@@ -907,20 +909,28 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   }
 
   // Initialize steps record
-  const steps: Record<string, { completed: boolean; data: any; updated_at?: string }> = {};
+  const steps: Record<string, { completed: boolean; skipped?: boolean; status?: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' | 'SKIPPED'; data: any; updated_at?: string }> = {};
 
   configs.forEach(cfg => {
-    // Dedicated Step 2: Share Script Resolution (Priority: 1. campaign_video_scripts, 2. notes JSON, 3. legacy columns)
+    // Dedicated Step: Share Script Resolution (Priority: 1. campaign_video_scripts, 2. notes JSON, 3. legacy columns)
     if (cfg.id === 'share_script') {
       const videoScript = (record.videoScripts || []).find((vs: any) => Number(vs.video_number) === Number(videoNum));
       const st = storedVideo?.steps?.['share_script'];
+
+      const isScriptSkipped = Boolean(
+        st?.skipped === true || 
+        st?.status === 'SKIPPED' || 
+        st?.data?.call_skipped === true || 
+        st?.data?.is_skipped === true ||
+        (videoNum === 1 && metadata.call_skipped === true)
+      );
 
       let isScriptCompleted = false;
       let scriptData: any = {};
 
       if (videoScript) {
         // Priority 1: campaign_video_scripts relational record
-        isScriptCompleted = Boolean(videoScript.script_shared_approved);
+        isScriptCompleted = !isScriptSkipped && Boolean(videoScript.script_shared_approved);
         scriptData = {
           concept: videoScript.custom_concept || '',
           hooks: videoScript.hooks || '',
@@ -932,32 +942,38 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
             storage_path: videoScript.voice_record_storage_path || ''
           } : null,
           script_shared: isScriptCompleted,
+          call_skipped: isScriptSkipped,
+          is_skipped: isScriptSkipped,
           keypoints: st?.data?.keypoints || (videoNum === 1 ? (record.ref_keypoints || metadata.keypoints || '') : ''),
           link: st?.data?.link || (videoNum === 1 ? (record.ref_link || metadata.link || '') : ''),
           reference_videos_list: st?.data?.reference_videos_list || (videoNum === 1 ? (record.reference_videos_list || []) : [])
         };
       } else if (st) {
         // Priority 2: existing notes JSON data
-        isScriptCompleted = Boolean(st.completed);
+        isScriptCompleted = !isScriptSkipped && Boolean(st.completed);
         scriptData = {
           concept: st.data?.concept || '',
           hooks: st.data?.hooks || '',
           script: st.data?.script || '',
           voice_record: st.data?.voice_record || null,
           script_shared: isScriptCompleted,
+          call_skipped: isScriptSkipped,
+          is_skipped: isScriptSkipped,
           keypoints: st.data?.keypoints || '',
           link: st.data?.link || '',
           reference_videos_list: st.data?.reference_videos_list || []
         };
       } else if (videoNum === 1) {
         // Priority 3: legacy ref_concept / ref_script fields
-        isScriptCompleted = Boolean(metadata.script_shared || record.reference_video_received || record.ref_script || ((record.current_step || 0) >= 3));
+        isScriptCompleted = !isScriptSkipped && Boolean(metadata.script_shared || record.reference_video_received || record.ref_script || ((record.current_step || 0) >= 3));
         scriptData = {
           concept: record.ref_concept || metadata.concept || '',
           hooks: metadata.videos?.[1]?.steps?.share_script?.data?.hooks || metadata.hooks || '',
           script: record.ref_script || metadata.script || '',
           voice_record: metadata.videos?.[1]?.steps?.share_script?.data?.voice_record || metadata.voice_record || null,
           script_shared: isScriptCompleted,
+          call_skipped: isScriptSkipped,
+          is_skipped: isScriptSkipped,
           keypoints: record.ref_keypoints || metadata.keypoints || '',
           link: record.ref_link || metadata.link || '',
           reference_videos_list: record.reference_videos_list || []
@@ -970,6 +986,8 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           script: '',
           voice_record: null,
           script_shared: false,
+          call_skipped: false,
+          is_skipped: false,
           keypoints: '',
           link: '',
           reference_videos_list: []
@@ -978,6 +996,8 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
 
       steps[cfg.id] = {
         completed: isScriptCompleted,
+        skipped: isScriptSkipped,
+        status: isScriptSkipped ? 'SKIPPED' : (isScriptCompleted ? 'COMPLETED' : 'NOT_STARTED'),
         data: scriptData
       };
       return;
@@ -1254,6 +1274,12 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     ? 'Not Approved' 
     : (draftStep?.completed ? 'Approved' : (draftStep?.data?.vid ? 'Pending Approval' : 'Not Started'));
 
+  const isStepDone = (cId: string) => {
+    const s = steps[cId];
+    return Boolean(s?.completed || s?.skipped || s?.status === 'SKIPPED');
+  };
+
+  const completedOrSkippedCount = configs.filter(c => isStepDone(c.id)).length;
   const completedCount = configs.filter(c => steps[c.id]?.completed).length;
   const totalSteps = configs.length;
 
@@ -1262,9 +1288,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   let status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' = 'NOT_STARTED';
   if (!isDelivered || !isAssigned || !isStarted) {
     status = 'NOT_STARTED';
-  } else if (completedCount === totalSteps) {
+  } else if (completedOrSkippedCount === totalSteps) {
     status = 'COMPLETED';
-  } else if (completedCount > 0 || isReDraftRequired) {
+  } else if (completedOrSkippedCount > 0 || isReDraftRequired) {
     status = 'IN_PROGRESS';
   } else {
     status = 'NOT_STARTED';
@@ -1277,10 +1303,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     activeStepId = '';
   } else if (isReDraftRequired) {
     activeStepId = 'draft';
-  } else if (completedCount === totalSteps) {
+  } else if (completedOrSkippedCount === totalSteps) {
     activeStepId = '';
   } else {
-    const firstIncomplete = configs.find(c => !steps[c.id]?.completed);
+    const firstIncomplete = configs.find(c => !isStepDone(c.id));
     activeStepId = firstIncomplete ? firstIncomplete.id : '';
   }
 
@@ -1334,7 +1360,17 @@ export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum:
 
   const storedVideo = metadata.videos?.[String(videoNum)] || metadata.videos?.[videoNum];
   if (storedVideo?.steps) {
-    const hasAnyStep = Object.values(storedVideo.steps).some((st: any) => st?.completed || st?.data?.script || st?.data?.concept || st?.data?.date || st?.data?.vid);
+    const hasAnyStep = Object.values(storedVideo.steps).some((st: any) => 
+      st?.completed || 
+      st?.skipped || 
+      st?.status === 'SKIPPED' || 
+      st?.data?.call_skipped || 
+      st?.data?.is_skipped || 
+      st?.data?.script || 
+      st?.data?.concept || 
+      st?.data?.date || 
+      st?.data?.vid
+    );
     if (hasAnyStep) return true;
   }
 
@@ -2438,7 +2474,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     videoNumber: number, 
     stepId: string, 
     stepData: any, 
-    isStepCompleted: boolean
+    isStepCompleted: boolean,
+    isStepSkipped?: boolean
   ) => {
     const record = activeTrackingRecords.find(r => String(r.id) === String(recordId)) || trackingRecords.find(r => String(r.id) === String(recordId));
     if (!record) {
@@ -2465,10 +2502,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     if (!videoObj.steps) videoObj.steps = {};
 
     const { suppressDefaultToast, ...cleanStepData } = stepData || {};
+    const isSkipped = isStepSkipped ?? Boolean(cleanStepData.call_skipped || cleanStepData.is_skipped);
 
     videoObj.steps[stepId] = {
-      completed: isStepCompleted,
-      data: cleanStepData,
+      completed: isSkipped ? false : isStepCompleted,
+      skipped: isSkipped,
+      status: isSkipped ? 'SKIPPED' : (isStepCompleted ? 'COMPLETED' : 'IN_PROGRESS'),
+      data: {
+        ...cleanStepData,
+        call_skipped: isSkipped,
+        is_skipped: isSkipped
+      },
       updated_at: new Date().toISOString()
     };
 
@@ -2622,14 +2666,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
     // Calculate video completion status
     const configs = videoNumber === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
-    const completedStepsCount = configs.filter(c => videoObj.steps[c.id]?.completed).length;
-    videoObj.completed_count = completedStepsCount;
-    videoObj.status = completedStepsCount === configs.length ? 'COMPLETED' : ((completedStepsCount > 0 || videoObj.is_re_draft_required) ? 'IN_PROGRESS' : 'NOT_STARTED');
+    const isStepDone = (cId: string) => {
+      const s = videoObj.steps[cId];
+      return Boolean(s?.completed || s?.skipped || s?.status === 'SKIPPED');
+    };
+    const completedOrSkippedCount = configs.filter(c => isStepDone(c.id)).length;
+    const actualCompletedCount = configs.filter(c => videoObj.steps[c.id]?.completed).length;
+    videoObj.completed_count = actualCompletedCount;
+    videoObj.status = completedOrSkippedCount === configs.length ? 'COMPLETED' : ((completedOrSkippedCount > 0 || videoObj.is_re_draft_required) ? 'IN_PROGRESS' : 'NOT_STARTED');
 
     metadata.last_updated = new Date().toISOString();
     updates.notes = JSON.stringify(metadata);
 
-    // Handle dedicated Step 2: Share Script relational persistence
+    // Handle dedicated Step: Share Script relational persistence
     if (stepId === 'share_script') {
       try {
         await upsertCampaignVideoScript({
@@ -2643,7 +2692,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           voice_record_file_name: stepData.voice_record?.file_name || null,
           voice_record_file_size: stepData.voice_record?.file_size_formatted || null,
           voice_record_storage_path: stepData.voice_record?.storage_path || null,
-          script_shared_approved: isStepCompleted
+          script_shared_approved: isSkipped ? false : isStepCompleted
         });
       } catch (err) {
         console.error(`Failed to persist video ${videoNumber} script record:`, err);
@@ -2656,10 +2705,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         updates.ref_call_explanation_required = isStepCompleted;
         metadata.call_explained = isStepCompleted;
       } else if (stepId === 'share_script') {
-        updates.reference_video_received = isStepCompleted;
-        if (stepData.concept) updates.ref_concept = stepData.concept;
-        if (stepData.script) updates.ref_script = stepData.script;
-        metadata.script_shared = isStepCompleted;
+        if (isSkipped) {
+          updates.reference_video_received = false;
+          metadata.script_shared = false;
+          metadata.call_skipped = true;
+        } else {
+          updates.reference_video_received = isStepCompleted;
+          if (stepData.concept) updates.ref_concept = stepData.concept;
+          if (stepData.script) updates.ref_script = stepData.script;
+          metadata.script_shared = isStepCompleted;
+          metadata.call_skipped = false;
+        }
       } else if (stepId === 'pay_advance') {
         updates.pay_advance_completed = isStepCompleted;
         if (stepData.gpay) updates.advance_gpay_number = stepData.gpay;
@@ -2822,7 +2878,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             initialStepId={selectedVideoStepId || selectedVideo.stepId}
             onBack={handleBackFromDetail}
             onSwitchVideo={(num) => handleSwitchVideo(selectedRecord.id, num)}
-            onSaveStep={(stepId, data, completed) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed)}
+            onSaveStep={(stepId, data, completed, isSkipped) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed, isSkipped)}
             onStepChange={(stepId) => {
               setSelectedVideoStepId(stepId);
               setSelectedVideo(prev => prev ? { ...prev, stepId } : null);
@@ -3240,6 +3296,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         {currentVideoData.configs.map((cfg, idx) => {
                           const stepInfo = currentVideoData.steps[cfg.id];
                           const isCompleted = !!stepInfo?.completed;
+                          const isSkipped = !!stepInfo?.skipped || stepInfo?.status === 'SKIPPED' || !!stepInfo?.data?.call_skipped || !!stepInfo?.data?.is_skipped;
                           const isReDraftReq = cfg.id === 'draft' && currentVideoData.isReDraftRequired;
                           const isCurrentActive = cfg.id === currentVideoData.activeStepId;
                           const StepIcon = cfg.icon;
@@ -3247,12 +3304,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-blue-500 hover:text-blue-300";
                           let labelStyle = "text-slate-400";
 
-                          if (!isDelivered || (currentVideoData.status === 'NOT_STARTED' && !isCurrentActive && !isCompleted)) {
+                          if (!isDelivered || (currentVideoData.status === 'NOT_STARTED' && !isCurrentActive && !isCompleted && !isSkipped)) {
                             circleStyle = "bg-[#090e1c] text-slate-600 border border-slate-800/80 opacity-60";
                             labelStyle = "text-slate-600";
                           } else if (isCompleted) {
                             circleStyle = "bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105";
                             labelStyle = "text-emerald-400 font-semibold";
+                          } else if (isSkipped) {
+                            circleStyle = "bg-amber-500/20 text-amber-400 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] hover:scale-105";
+                            labelStyle = "text-amber-400 font-semibold";
                           } else if (isReDraftReq) {
                             circleStyle = "bg-amber-950/80 text-amber-400 border border-amber-600/80 shadow-[0_0_12px_rgba(245,158,11,0.5)] hover:scale-105 animate-pulse";
                             labelStyle = "text-amber-400 font-semibold";
@@ -3261,8 +3321,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             labelStyle = "text-blue-400 font-semibold";
                           }
 
-                          const nextStepCompleted = idx < currentVideoData.configs.length - 1 && !!currentVideoData.steps[currentVideoData.configs[idx + 1].id]?.completed;
-                          const isLineActive = isCompleted && nextStepCompleted;
+                          const nextStep = idx < currentVideoData.configs.length - 1 ? currentVideoData.steps[currentVideoData.configs[idx + 1].id] : null;
+                          const nextStepCompletedOrSkipped = Boolean(nextStep?.completed || nextStep?.skipped || nextStep?.status === 'SKIPPED');
+                          const isLineActive = (isCompleted || isSkipped) && nextStepCompletedOrSkipped;
 
                           return (
                             <React.Fragment key={`${selectedVideoNumber}-${cfg.id}`}>
@@ -3283,12 +3344,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 title={
                                   !isDelivered
                                     ? 'Requires Delivery Confirmation first'
-                                    : `${cfg.label}${isCompleted ? ' (Completed)' : isReDraftReq ? ' (Re-Draft Required)' : ''}`
+                                    : `${cfg.label}${isCompleted ? ' (Completed)' : isSkipped ? ' (Skipped)' : isReDraftReq ? ' (Re-Draft Required)' : ''}`
                                 }
                               >
                                 <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${circleStyle}`}>
                                   {isCompleted ? (
                                     <Check size={14} strokeWidth={2.5} className="text-white" />
+                                  ) : isSkipped ? (
+                                    <FastForward size={13} className="text-amber-400" />
                                   ) : isReDraftReq ? (
                                     <span className="font-black text-[9px] text-amber-400 tracking-tight">RD</span>
                                   ) : (
@@ -3722,7 +3785,7 @@ interface VideoDetailViewProps {
   initialStepId?: string | null;
   onBack: () => void;
   onSwitchVideo: (num: number) => void;
-  onSaveStep: (stepId: string, data: any, completed: boolean) => Promise<{ success: boolean; error?: any } | void>;
+  onSaveStep: (stepId: string, data: any, completed: boolean, isSkipped?: boolean) => Promise<{ success: boolean; error?: any } | void>;
   onStepChange?: (stepId: string) => void;
 }
 
@@ -3754,12 +3817,26 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
     if (videoData.activeStepId && videoData.configs.some(c => c.id === videoData.activeStepId)) {
       return videoData.activeStepId;
     }
-    const firstIncomplete = videoData.configs.find(c => !videoData.steps[c.id]?.completed);
+    const firstIncomplete = videoData.configs.find(c => {
+      const s = videoData.steps[c.id];
+      return !s?.completed && !s?.skipped && s?.status !== 'SKIPPED';
+    });
     if (firstIncomplete) return firstIncomplete.id;
     return videoData.configs[videoData.configs.length - 1]?.id || videoData.configs[0]?.id || 'share_script';
   }, [videoData]);
 
   const [selectedVideoStepId, setSelectedVideoStepId] = useState<string>(() => resolveInitialStep(initialStepId));
+
+  const handleAdvanceToNextStep = useCallback(() => {
+    const currentIndex = videoData.configs.findIndex(c => c.id === selectedVideoStepId);
+    if (currentIndex >= 0 && currentIndex < videoData.configs.length - 1) {
+      const nextStep = videoData.configs[currentIndex + 1];
+      if (nextStep) {
+        setSelectedVideoStepId(nextStep.id);
+        onStepChange?.(nextStep.id);
+      }
+    }
+  }, [videoData.configs, selectedVideoStepId, onStepChange]);
 
   // Derive resolved product & per-video price for this specific video from Campaign Influencer data
   const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
@@ -3930,14 +4007,29 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             </div>
           </div>
 
-          <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
-            activeStepState.completed 
-              ? 'bg-emerald-950/80 text-emerald-400 border-emerald-700/60' 
-              : 'bg-slate-900 text-slate-400 border-slate-800'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${activeStepState.completed ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-            {activeStepState.completed ? 'Completed' : 'In Progress / Not Started'}
-          </span>
+          {(() => {
+            const isCompleted = activeStepState.completed;
+            const isSkipped = Boolean(activeStepState.skipped || activeStepState.status === 'SKIPPED' || activeStepState.data?.call_skipped || activeStepState.data?.is_skipped);
+
+            return (
+              <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
+                isCompleted 
+                  ? 'bg-emerald-950/80 text-emerald-400 border-emerald-700/60' 
+                  : isSkipped
+                    ? 'bg-amber-950/80 text-amber-400 border-amber-700/60'
+                    : 'bg-slate-900 text-slate-400 border-slate-800'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${
+                  isCompleted 
+                    ? 'bg-emerald-400' 
+                    : isSkipped
+                      ? 'bg-amber-400'
+                      : 'bg-slate-500'
+                }`} />
+                {isCompleted ? 'Completed' : isSkipped ? 'Skipped' : 'In Progress / Not Started'}
+              </span>
+            );
+          })()}
         </div>
 
         {/* Step Component Form - Exclusively renders the active step */}
@@ -3956,7 +4048,16 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               record={record} 
               videoNumber={videoNumber}
               existingData={activeStepState.data}
-              onSave={(formData: any) => onSaveStep('share_script', formData, formData.reference_video_received)} 
+              isStepSkipped={Boolean(activeStepState.skipped || activeStepState.status === 'SKIPPED' || activeStepState.data?.call_skipped || activeStepState.data?.is_skipped)}
+              onSave={(formData: any, completed?: boolean, isSkipped?: boolean) => 
+                onSaveStep(
+                  'share_script', 
+                  formData, 
+                  completed !== undefined ? completed : formData.reference_video_received,
+                  isSkipped !== undefined ? isSkipped : Boolean(formData.call_skipped || formData.is_skipped)
+                )
+              }
+              onAdvanceStep={handleAdvanceToNextStep}
             />
           )}
 
@@ -4754,7 +4855,14 @@ const normalizeVoiceRecord = (raw: any): VoiceRecordData | null => {
   return null;
 };
 
-const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }: any) => {
+const ShareScriptForm = ({ 
+  record, 
+  videoNumber = 1, 
+  existingData = {}, 
+  isStepSkipped = false,
+  onSave,
+  onAdvanceStep
+}: any) => {
   const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
   const resolvedProductName = resolvedProductInfo.productName;
 
@@ -4771,6 +4879,15 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [isCallSkipped, setIsCallSkipped] = useState<boolean>(() => {
+    return Boolean(isStepSkipped || existingData.call_skipped || existingData.is_skipped || existingData.status === 'SKIPPED');
+  });
+  const [showSkipModal, setShowSkipModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsCallSkipped(Boolean(isStepSkipped || existingData.call_skipped || existingData.is_skipped || existingData.status === 'SKIPPED'));
+  }, [isStepSkipped, existingData.call_skipped, existingData.is_skipped, existingData.status]);
 
   const [scriptShared, setScriptShared] = useState(
     existingData.script_shared !== undefined 
@@ -4918,14 +5035,76 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
     }
   };
 
+  const handleCallSkippedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      // Prompt confirmation dialog, do NOT immediately mutate or save
+      setShowSkipModal(true);
+    } else {
+      // User manually unchecks Call Skipped
+      setIsCallSkipped(false);
+      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
+      onSave({
+        reference_video_received: false,
+        script_shared: false,
+        call_skipped: false,
+        is_skipped: false,
+        concept: finalConcept,
+        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
+        hooks: hooks || '',
+        script: script || '',
+        voice_record: voiceRecord || null,
+        keypoints: existingData.keypoints || '',
+        link: existingData.link || '',
+        reference_videos_list: existingData.reference_videos_list || []
+      }, false, false);
+      toast.success('Call Skipped unmarked');
+    }
+  };
+
+  const handleConfirmSkip = async () => {
+    setShowSkipModal(false);
+    setIsSaving(true);
+    try {
+      setIsCallSkipped(true);
+      setScriptShared(false);
+      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
+      await onSave({
+        reference_video_received: false,
+        script_shared: false,
+        call_skipped: true,
+        is_skipped: true,
+        concept: finalConcept,
+        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
+        hooks: hooks || '',
+        script: script || '',
+        voice_record: voiceRecord || null,
+        keypoints: existingData.keypoints || '',
+        link: existingData.link || '',
+        reference_videos_list: existingData.reference_videos_list || []
+      }, false, true);
+
+      toast.success('Step skipped successfully');
+      onAdvanceStep?.();
+    } catch (err: any) {
+      console.error('Error confirming skip:', err);
+      toast.error('Failed to skip step: ' + (err?.message || err));
+      setIsCallSkipped(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
       const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
       setScriptShared(true);
+      setIsCallSkipped(false);
       await onSave({ 
         reference_video_received: true,
         script_shared: true,
+        call_skipped: false,
+        is_skipped: false,
         concept: finalConcept, 
         product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
         hooks: hooks || '',
@@ -4934,8 +5113,9 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
         keypoints: existingData.keypoints || '', 
         link: existingData.link || '', 
         reference_videos_list: existingData.reference_videos_list || []
-      });
+      }, true, false);
       toast.success('Share Script confirmed successfully');
+      onAdvanceStep?.();
     } catch (err: any) {
       console.error('Error saving script details:', err);
       toast.error('Failed to save script details: ' + (err?.message || err));
@@ -4946,18 +5126,46 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-5 animate-fade-in">
-      {/* 1. Checkbox: Script & Reference Materials Shared */}
-      <div className="flex items-center gap-3 bg-[#0b1329] p-3.5 sm:p-4 rounded-xl border border-slate-800/90">
-        <input 
-          type="checkbox" 
-          id="script-shared-checkbox"
-          checked={scriptShared}
-          onChange={(e) => setScriptShared(e.target.checked)}
-          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-        />
-        <label htmlFor="script-shared-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer select-none">
-          Script & reference materials shared and approved with the creator.
-        </label>
+      {/* 1. Checkbox Action Area: Script Shared + Call Skipped in same horizontal action row */}
+      <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 bg-[#0b1329] p-3.5 sm:p-4 rounded-xl border border-slate-800/90">
+        {/* Left: Original checkbox completely unchanged in text and position */}
+        <div className="flex items-center gap-3">
+          <input 
+            type="checkbox" 
+            id="script-shared-checkbox"
+            checked={scriptShared}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setScriptShared(checked);
+              if (checked && isCallSkipped) {
+                setIsCallSkipped(false);
+              }
+            }}
+            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
+          />
+          <label htmlFor="script-shared-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer select-none">
+            Script & reference materials shared and approved with the creator.
+          </label>
+        </div>
+
+        {/* Right / Beside: Call Skipped Checkbox */}
+        <div className="flex items-center gap-2.5 sm:pl-4 sm:border-l sm:border-slate-800 shrink-0">
+          <input 
+            type="checkbox" 
+            id="call-skipped-checkbox"
+            checked={isCallSkipped}
+            onChange={handleCallSkippedChange}
+            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500" 
+          />
+          <label htmlFor="call-skipped-checkbox" className="text-sm font-semibold text-amber-400 hover:text-amber-300 cursor-pointer select-none flex items-center gap-2">
+            <span>Call Skipped</span>
+            {isCallSkipped && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase font-bold tracking-wider">
+                Skipped
+              </span>
+            )}
+          </label>
+        </div>
       </div>
 
       {/* 2-Column Responsive Form Grid */}
@@ -5212,6 +5420,19 @@ const ShareScriptForm = ({ record, videoNumber = 1, existingData = {}, onSave }:
           )}
         </button>
       </div>
+
+      {/* Confirmation Dialog: Skip Call Step */}
+      <ConfirmModal
+        isOpen={showSkipModal}
+        title="Skip Call Step?"
+        message="Are you sure you want to skip this step? No call details or other information will be required."
+        confirmText="Confirm Skip"
+        cancelText="Cancel"
+        isDestructive={false}
+        variant="warning"
+        onClose={() => setShowSkipModal(false)}
+        onConfirm={handleConfirmSkip}
+      />
     </div>
   );
 };
