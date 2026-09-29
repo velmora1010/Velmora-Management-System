@@ -89,28 +89,26 @@ export interface VideoStepConfig {
   icon: any;
 }
 
-// Video 1 Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date (NO Payment)
+// Video 1 Steps: Share Script -> Call & Explain -> Time Line -> Draft -> Post Date (NO Payment, NO Pay Advance)
 export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
-  { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: IndianRupee },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
 ];
 
-// Videos 2 through N Steps: Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date -> Payment
+// Videos 2 through N Steps: Share Script -> Call & Explain -> Time Line -> Draft -> Post Date -> Payment (NO Pay Advance)
 export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
-  { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: IndianRupee },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
 
-// Top Workflow Summary Box Step Definitions (10 steps + All = 11 single-line summary boxes)
+// Top Workflow Summary Box Step Definitions (Payment dynamically rendered only for Videos 2–6)
 export interface WorkflowSummaryBoxConfig {
   id: string;
   label: string;
@@ -123,7 +121,6 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'not_started', label: 'Not Started', shortLabel: 'Not Started', icon: Clock },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: PhoneCall },
-  { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: CreditCard },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
@@ -361,7 +358,120 @@ export const getInfluencerCategories = (record: StatusTrackingRecord): string[] 
 /**
  * Checks if influencer is currently marked for Re-Dispatch (reported issue / package return)
  */
+export interface ReDispatchCycle {
+  cycle_number: number;
+  status: 'PENDING_REDISPATCH' | 'MOVED_TO_ACTIVE' | 'DELIVERED';
+  issue_type: string;
+  issue_remarks?: string;
+  issue_proof_url?: string;
+  reported_at: string;
+  previous_awb?: string;
+  previous_courier?: string;
+  new_awb?: string;
+  new_courier?: string;
+  re_dispatch_date?: string;
+  moved_to_active_at?: string | null;
+  delivered_confirmed: boolean;
+  delivery_photo_url?: string;
+  delivered_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Derives the complete list of Re-Dispatch cycles for an influencer.
+ * If redispatch_cycles array exists in notes metadata, returns it.
+ * Otherwise, backward-compatibly synthesizes Cycle 1 for legacy records that have reported an issue or re-dispatch.
+ */
+export const getInfluencerReDispatchCycles = (record: StatusTrackingRecord): ReDispatchCycle[] => {
+  let metadata: any = {};
+  try {
+    metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+  } catch (e) {
+    metadata = {};
+  }
+
+  // 1. Direct structured cycles in notes
+  if (Array.isArray(metadata.redispatch_cycles) && metadata.redispatch_cycles.length > 0) {
+    return metadata.redispatch_cycles;
+  }
+
+  // 2. Synthesize Cycle 1 for legacy / existing records with re-dispatch activity
+  const rawStatus = (record.status || '').toLowerCase();
+  const dispatchStatus = ((record.dispatch as any)?.dispatch_status || '').toLowerCase();
+  const hasRedispatchActivity = Boolean(
+    metadata.issue_reported ||
+    metadata.re_dispatch_required ||
+    metadata.re_dispatch_moved_to_active ||
+    metadata.moved_to_active ||
+    metadata.redispatch_lifecycle_status ||
+    rawStatus.includes('re-dispatch') ||
+    rawStatus.includes('redispatch') ||
+    dispatchStatus.includes('re_dispatch') ||
+    dispatchStatus.includes('redispatch')
+  );
+
+  if (hasRedispatchActivity) {
+    let status: 'PENDING_REDISPATCH' | 'MOVED_TO_ACTIVE' | 'DELIVERED' = 'PENDING_REDISPATCH';
+    if (metadata.redispatch_lifecycle_status === 'COMPLETED') {
+      status = 'DELIVERED';
+    } else if (
+      metadata.re_dispatch_moved_to_active || 
+      metadata.moved_to_active || 
+      metadata.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
+      rawStatus.includes('active')
+    ) {
+      status = 'MOVED_TO_ACTIVE';
+    } else {
+      status = 'PENDING_REDISPATCH';
+    }
+
+    const cycle1: ReDispatchCycle = {
+      cycle_number: 1,
+      status,
+      issue_type: metadata.issue_type || 'DAMAGED_PRODUCT',
+      issue_remarks: metadata.issue_remarks || '',
+      issue_proof_url: metadata.issue_proof_url || '',
+      reported_at: metadata.issue_reported_at || record.updated_at || record.created_at || new Date().toISOString(),
+      previous_awb: metadata.source_awb || (record.dispatch as any)?.tracking_id || '',
+      previous_courier: metadata.source_courier || (record.dispatch as any)?.courier_partner || '',
+      moved_to_active_at: metadata.moved_to_active_at || null,
+      delivered_confirmed: status === 'DELIVERED' || Boolean(record.delivered_confirmed && !metadata.re_dispatch_required && !metadata.re_dispatch_moved_to_active),
+      delivery_photo_url: record.delivery_photo_url || metadata.delivery_photo_url || '',
+      delivered_at: metadata.delivered_date || null,
+      created_at: record.created_at || new Date().toISOString(),
+      updated_at: metadata.last_updated || record.updated_at || new Date().toISOString()
+    };
+    return [cycle1];
+  }
+
+  return [];
+};
+
+/**
+ * Checks whether the influencer's current required shipment delivery has been confirmed.
+ * If re-dispatch cycles exist, delivery is confirmed ONLY when the latest re-dispatch shipment is confirmed delivered.
+ * Otherwise, falls back to canonical initial delivery confirmation.
+ */
+export const isInfluencerDeliveryConfirmed = (record: StatusTrackingRecord): boolean => {
+  const cycles = getInfluencerReDispatchCycles(record);
+  if (cycles.length > 0) {
+    const latest = cycles[cycles.length - 1];
+    return Boolean(latest.delivered_confirmed || latest.status === 'DELIVERED');
+  }
+  return isDeliveryStepCompleted(record);
+};
+
+/**
+ * Checks if influencer is currently in the pending Re-Dispatch queue (awaiting logistics action)
+ */
 export const isInfluencerInReDispatch = (record: StatusTrackingRecord): boolean => {
+  const cycles = getInfluencerReDispatchCycles(record);
+  if (cycles.length > 0) {
+    const latest = cycles[cycles.length - 1];
+    return latest.status === 'PENDING_REDISPATCH';
+  }
+
   let metadata: any = {};
   try {
     metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
@@ -393,12 +503,103 @@ export const isInfluencerInReDispatch = (record: StatusTrackingRecord): boolean 
   );
 };
 
+export interface PrerequisiteStep {
+  id: string;
+  type: 'initial_delivery' | 'redispatch' | 'replacement_delivery';
+  label: string;
+  isCompleted: boolean;
+  isPending: boolean;
+  cycleNumber?: number;
+  modalMode: 'confirm_delivery' | 'review_issue';
+  title: string;
+}
+
+/**
+ * Dynamically resolves the prerequisite stages (Delivery / Re-Dispatch cycles)
+ * shown before Video 1–6 sub-steps.
+ *
+ * Rules:
+ * 1. Normal influencer (0 cycles):
+ *    Delivered -> Share Script ...
+ * 2. 1st Re-Dispatch pending:
+ *    Re-Dispatch -> Share Script ...
+ * 3. 1st Re-Dispatch moved to active:
+ *    Re-Dispatch [✓] -> Delivered -> Share Script ...
+ * 4. 1st Re-Dispatch replacement delivered:
+ *    Re-Dispatch [✓] -> Delivered [✓] -> Share Script [Active] ...
+ * 5. Subsequent damage (e.g. Cycle 2):
+ *    Re-Dispatch #1 [✓] -> Delivered #1 [✓] -> Re-Dispatch #2 -> Delivered -> Share Script ...
+ */
+export const getInfluencerPrerequisiteSteps = (record: StatusTrackingRecord): PrerequisiteStep[] => {
+  const cycles = getInfluencerReDispatchCycles(record);
+  
+  if (cycles.length === 0) {
+    const isCompleted = isInfluencerDeliveryConfirmed(record);
+    return [
+      {
+        id: 'delivery-initial',
+        type: 'initial_delivery',
+        label: isCompleted ? 'Delivered ✓' : 'Delivered',
+        isCompleted,
+        isPending: false,
+        modalMode: 'confirm_delivery',
+        title: isCompleted 
+          ? 'Delivery Confirmed (Click to view/edit)' 
+          : 'Delivery Confirmation: Not Started (Click to confirm)'
+      }
+    ];
+  }
+
+  const steps: PrerequisiteStep[] = [];
+  const multipleCycles = cycles.length > 1;
+
+  cycles.forEach((cycle, idx) => {
+    const num = cycle.cycle_number || (idx + 1);
+    const numSuffix = multipleCycles ? ` #${num}` : '';
+    const isRedispatchCompleted = cycle.status === 'MOVED_TO_ACTIVE' || cycle.status === 'DELIVERED';
+    const isRedispatchPending = cycle.status === 'PENDING_REDISPATCH';
+
+    // 1. Re-Dispatch Step (Represents the requested / processed Re-Dispatch cycle)
+    steps.push({
+      id: `redispatch-${num}`,
+      type: 'redispatch',
+      label: `Re-Dispatch${numSuffix}${isRedispatchCompleted ? ' ✓' : ''}`,
+      isCompleted: isRedispatchCompleted,
+      isPending: isRedispatchPending,
+      cycleNumber: num,
+      modalMode: 'review_issue',
+      title: isRedispatchPending 
+        ? `Re-Dispatch${numSuffix}: Pending Logistics Action (Click to review issue)`
+        : `Re-Dispatch${numSuffix}: Completed / Moved to Active (Click to view details)`
+    });
+
+    // 2. Replacement Delivery Step (Appears after Re-Dispatch is moved to Active or Delivered)
+    if (isRedispatchCompleted) {
+      const isDeliveryCompleted = Boolean(cycle.delivered_confirmed || cycle.status === 'DELIVERED');
+      steps.push({
+        id: `replacement-delivery-${num}`,
+        type: 'replacement_delivery',
+        label: `Delivered${numSuffix}${isDeliveryCompleted ? ' ✓' : ''}`,
+        isCompleted: isDeliveryCompleted,
+        isPending: false,
+        cycleNumber: num,
+        modalMode: 'confirm_delivery',
+        title: isDeliveryCompleted
+          ? `Replacement Delivery${numSuffix}: Confirmed (Click to view/edit)`
+          : `Replacement Delivery${numSuffix}: Awaiting Delivery Confirmation (Click to confirm)`
+      });
+    }
+  });
+
+  return steps;
+};
+
 export const getInfluencerDeliveryStatus = (record: StatusTrackingRecord): 'Delivery Confirmed' | 'Delivered' | 'Not Delivered' => {
   if (isInfluencerInReDispatch(record)) {
     return 'Not Delivered';
   }
 
-  if (isDeliveryStepCompleted(record)) {
+  if (isInfluencerDeliveryConfirmed(record)) {
     return 'Delivery Confirmed';
   }
   
@@ -1042,7 +1243,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     steps[cfg.id] = { completed, data };
   });
 
-  const isDelivered = isDeliveryStepCompleted(record);
+  const isDelivered = isInfluencerDeliveryConfirmed(record);
   const assignedVideos = getInfluencerAssignedVideos(record);
   const isAssigned = assignedVideos.includes(videoNum);
 
@@ -1104,7 +1305,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
  */
 export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum: number): boolean => {
   if (videoNum === 1) {
-    return isDeliveryStepCompleted(record);
+    return isInfluencerDeliveryConfirmed(record);
   }
 
   // 1. Explicit Video N script
@@ -1157,7 +1358,7 @@ export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, vid
   }
 
   // 2. If delivery is not completed for Video 1, it's not started
-  if (videoNumber === 1 && !isDeliveryStepCompleted(record)) {
+  if (videoNumber === 1 && !isInfluencerDeliveryConfirmed(record)) {
     return 'not_started';
   }
 
@@ -1224,7 +1425,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   }, [activeFilters, selectedSummaryStep]);
 
   // Modals & Menu State
-  const [activeModal, setActiveModal] = useState<{ recordId: string; stageId: string } | null>(null);
+  const [activeModal, setActiveModal] = useState<{
+    recordId: string;
+    stageId: string;
+    mode?: 'confirm_delivery' | 'review_issue';
+    cycleNumber?: number;
+  } | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [detailsRecord, setDetailsRecord] = useState<StatusTrackingRecord | null>(null);
 
@@ -1440,7 +1646,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }
 
     // Not Started: if delivery is not confirmed yet
-    if (!isDeliveryStepCompleted(record)) {
+    if (!isInfluencerDeliveryConfirmed(record)) {
       return {
         key: 'NOT_STARTED',
         label: 'Not Started',
@@ -1643,14 +1849,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       if (selectedSummaryStep) {
         if (selectedSummaryStep === 'delivered') {
           if (selectedVideoNumber === 1) {
-            if (!isDeliveryStepCompleted(record)) return false;
+            if (!isInfluencerDeliveryConfirmed(record)) return false;
           } else {
             return false;
           }
         } else if (selectedSummaryStep === 'not_started') {
           if (isInfluencerInReDispatch(record)) return false;
           if (selectedVideoNumber === 1) {
-            if (isDeliveryStepCompleted(record)) return false;
+            if (isInfluencerDeliveryConfirmed(record)) return false;
           } else {
             if (isInfluencerVideoStarted(record, selectedVideoNumber)) return false;
           }
@@ -1668,8 +1874,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
   // Reset Delivered filter automatically if user switches away from Video 1
   // Reset Payment filter automatically if user switches to Video 1 (which has no Payment step)
+  // Reset Pay Advance filter if selected
   useEffect(() => {
     if (selectedVideoNumber === 1 && selectedSummaryStep === 'payment') {
+      setSelectedSummaryStep(null);
+    }
+    if (selectedSummaryStep === 'pay_advance') {
       setSelectedSummaryStep(null);
     }
   }, [selectedVideoNumber, selectedSummaryStep]);
@@ -1686,7 +1896,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       not_started: 0,
       share_script: 0,
       call_explain: 0,
-      pay_advance: 0,
       timeline: 0,
       draft: 0,
       post_date: 0,
@@ -1704,7 +1913,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
       // 2. Video 1 specific counts
       if (selectedVideoNumber === 1) {
-        const isDelivered = isDeliveryStepCompleted(r);
+        const isDelivered = isInfluencerDeliveryConfirmed(r);
         if (isDelivered) {
           counts.delivered++;
         } else {
@@ -1718,7 +1927,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         }
       } else {
         // Video 2 to 6
-        const isDelivered = isDeliveryStepCompleted(r);
+        const isDelivered = isInfluencerDeliveryConfirmed(r);
         if (isDelivered) {
           counts.delivered++;
         }
@@ -2064,7 +2273,36 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           });
         }
 
-        metadata.last_updated = new Date().toISOString();
+        const nowIso = new Date().toISOString();
+        const existingCycles = getInfluencerReDispatchCycles(record);
+        let updatedCycles = [...existingCycles];
+        const lastCycle = updatedCycles.length > 0 ? updatedCycles[updatedCycles.length - 1] : null;
+
+        if (lastCycle && lastCycle.status === 'PENDING_REDISPATCH') {
+          lastCycle.issue_type = data.issue_type;
+          lastCycle.issue_remarks = data.issue_remarks || '';
+          lastCycle.issue_proof_url = data.issue_proof_url || '';
+          lastCycle.updated_at = nowIso;
+        } else {
+          const nextCycleNumber = (lastCycle ? lastCycle.cycle_number : 0) + 1;
+          const newCycle: ReDispatchCycle = {
+            cycle_number: nextCycleNumber,
+            status: 'PENDING_REDISPATCH',
+            issue_type: data.issue_type,
+            issue_remarks: data.issue_remarks || '',
+            issue_proof_url: data.issue_proof_url || '',
+            reported_at: nowIso,
+            previous_awb: record.dispatch?.tracking_id || '',
+            previous_courier: record.dispatch?.courier_partner || '',
+            delivered_confirmed: false,
+            created_at: nowIso,
+            updated_at: nowIso
+          };
+          updatedCycles.push(newCycle);
+        }
+
+        metadata.last_updated = nowIso;
+        metadata.redispatch_cycles = updatedCycles;
         metadata.issue_reported = true;
         metadata.issue_type = data.issue_type;
         metadata.issue_remarks = data.issue_remarks || '';
@@ -2125,8 +2363,23 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
         const targetCampId = record.campaign_id || campaign.id;
         const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || record.influencer_id);
+        const nowIso = new Date().toISOString();
 
-        metadata.last_updated = new Date().toISOString();
+        const existingCycles = getInfluencerReDispatchCycles(record);
+        let updatedCycles = [...existingCycles];
+        const lastCycle = updatedCycles.length > 0 ? updatedCycles[updatedCycles.length - 1] : null;
+
+        if (lastCycle) {
+          lastCycle.status = 'DELIVERED';
+          lastCycle.delivered_confirmed = true;
+          lastCycle.delivery_photo_url = data.delivery_photo_url;
+          lastCycle.delivered_at = nowIso;
+          lastCycle.updated_at = nowIso;
+          metadata.redispatch_cycles = updatedCycles;
+          metadata.redispatch_lifecycle_status = 'COMPLETED';
+        }
+
+        metadata.last_updated = nowIso;
         metadata.delivered_confirmed = true;
         metadata.delivery_photo_url = data.delivery_photo_url;
         if (metadata.redispatch_lifecycle_status || metadata.re_dispatch_moved_to_active || metadata.re_dispatch_required) {
@@ -2680,9 +2933,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
           {/* 2. HORIZONTAL WORKFLOW STEP SUMMARY COUNT BOXES */}
           <div className="flex flex-col gap-2.5 shrink-0">
-            {/* Top: 11 Horizontal Workflow Step Summary Boxes in ONE Single Line */}
+            {/* Top: Horizontal Workflow Step Summary Boxes in ONE Single Line */}
             <div className="w-full overflow-x-auto no-scrollbar pb-1">
-              <div className={`grid grid-flow-col auto-cols-[minmax(105px,1fr)] xl:auto-cols-auto ${selectedVideoNumber === 1 ? 'xl:grid-cols-10' : 'xl:grid-cols-11'} gap-1.5 sm:gap-2 w-full min-w-[1000px] xl:min-w-0`}>
+              <div className={`grid grid-flow-col auto-cols-[minmax(105px,1fr)] xl:auto-cols-auto ${selectedVideoNumber === 1 ? 'xl:grid-cols-9' : 'xl:grid-cols-10'} gap-1.5 sm:gap-2 w-full min-w-[900px] xl:min-w-0`}>
                 {/* 1. All Box */}
                 <button
                   type="button"
@@ -2881,13 +3134,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 const influencerName = dispatch.influencer_name || 'Unknown Influencer';
                 const username = dispatch.username || '—';
 
-                const isDelivered = isDeliveryStepCompleted(record);
+                const isDelivered = isInfluencerDeliveryConfirmed(record);
                 const overallStatus = getOverallStatus(record);
                 const isReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED' || isInfluencerInReDispatch(record);
                 const isMenuOpen = openMenuId === record.id;
 
                 // Derive status for the selected video workflow
                 const currentVideoData = getVideoWorkflow(record, selectedVideoNumber);
+                const prerequisiteSteps = getInfluencerPrerequisiteSteps(record);
 
                 return (
                   <div 
@@ -2922,56 +3176,64 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       </div>
                     </div>
 
-                    {/* CENTER SECTION: Contextual Workflow (Delivery Prerequisite -> Selected Video's Existing Sub-Steps) */}
+                    {/* CENTER SECTION: Contextual Workflow (Delivery Prerequisites -> Selected Video's Sub-Steps) */}
                     <div className="flex-1 px-1 sm:px-2 xl:px-3 py-1 min-w-0 w-full overflow-hidden">
                       <div className="flex items-center w-full min-w-0 justify-between">
                         
-                        {/* 1. PREREQUISITE: DELIVERY CONFIRMATION STAGE (Shown for all videos) */}
-                        <div 
-                          className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
-                          onClick={() => setActiveModal({ recordId: record.id, stageId: 'delivered' })}
-                          title={
-                            isDelivered 
-                              ? 'Delivery Confirmed (Click to view/edit)' 
-                              : isReDispatch
-                              ? 'Re-Dispatch Required (Click to review issue & attempts)'
-                              : 'Delivery Confirmation: Not Started (Click to confirm)'
-                          }
-                        >
-                          <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${
-                            isDelivered 
-                              ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105'
-                              : isReDispatch
-                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] hover:scale-105 animate-pulse'
-                              : 'bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200'
-                          }`}>
-                            {isDelivered ? (
-                              <Check size={14} strokeWidth={2.5} className="text-white" />
-                            ) : isReDispatch ? (
-                              <AlertTriangle size={13} className="text-amber-400" />
-                            ) : (
-                              <Package size={13} className="text-slate-400 group-hover:text-white" />
-                            )}
-                          </div>
-                          <div className="flex flex-col items-center text-center min-w-0 mt-1">
-                            <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${
-                              isDelivered 
-                                ? 'text-emerald-400 font-semibold' 
-                                : isReDispatch
-                                ? 'text-amber-400 font-semibold'
-                                : 'text-slate-400'
-                            }`}>
-                              {isReDispatch ? 'Re-Dispatch' : 'Delivered'} {isDelivered ? '✓' : ''}
-                            </span>
-                          </div>
-                        </div>
+                        {/* 1. PREREQUISITES: DYNAMIC DELIVERY & RE-DISPATCH CYCLES */}
+                        {prerequisiteSteps.map((pStep, pIdx) => {
+                          const isLastPrereq = pIdx === prerequisiteSteps.length - 1;
+                          const nextPrereq = !isLastPrereq ? prerequisiteSteps[pIdx + 1] : null;
+                          const isLineActive = pStep.isCompleted && (nextPrereq ? nextPrereq.isCompleted : isDelivered);
 
-                        {/* Connecting Line from Delivery to First Video Sub-Step */}
-                        <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
-                          <div className={`h-full w-full rounded-full ${
-                            isDelivered ? 'bg-emerald-500/80' : 'bg-slate-700/60'
-                          }`} />
-                        </div>
+                          let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200";
+                          let labelStyle = "text-slate-400";
+
+                          if (pStep.isCompleted) {
+                            circleStyle = "bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105";
+                            labelStyle = "text-emerald-400 font-semibold";
+                          } else if (pStep.isPending) {
+                            circleStyle = "bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.25)] hover:scale-105 animate-pulse";
+                            labelStyle = "text-amber-400 font-semibold";
+                          }
+
+                          return (
+                            <React.Fragment key={pStep.id}>
+                              <div 
+                                className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
+                                onClick={() => setActiveModal({
+                                  recordId: record.id,
+                                  stageId: 'delivered',
+                                  mode: pStep.modalMode,
+                                  cycleNumber: pStep.cycleNumber
+                                })}
+                                title={pStep.title}
+                              >
+                                <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${circleStyle}`}>
+                                  {pStep.isCompleted ? (
+                                    <Check size={14} strokeWidth={2.5} className="text-white" />
+                                  ) : pStep.isPending ? (
+                                    <AlertTriangle size={13} className="text-amber-400" />
+                                  ) : (
+                                    <Package size={13} className="text-slate-400 group-hover:text-white" />
+                                  )}
+                                </div>
+                                <div className="flex flex-col items-center text-center min-w-0 mt-1">
+                                  <span className={`text-[9px] sm:text-[9.5px] xl:text-[10px] text-center leading-tight transition-colors whitespace-nowrap block ${labelStyle}`}>
+                                    {pStep.label}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Connecting Line after this prerequisite step */}
+                              <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
+                                <div className={`h-full w-full rounded-full ${
+                                  isLineActive ? 'bg-emerald-500/80' : 'bg-slate-700/60'
+                                }`} />
+                              </div>
+                            </React.Fragment>
+                          );
+                        })}
 
                         {/* 2. SUB-STEPS FOR THE SELECTED VIDEO (Dynamically using currentVideoData.configs) */}
                         {currentVideoData.configs.map((cfg, idx) => {
@@ -3008,7 +3270,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 onClick={() => {
                                   if (!isDelivered) {
                                     toast.error('Please complete Delivery Confirmation first.');
-                                    setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                                    setActiveModal({
+                                      recordId: record.id,
+                                      stageId: 'delivered',
+                                      mode: isReDispatch ? 'review_issue' : 'confirm_delivery'
+                                    });
                                     return;
                                   }
                                   handleOpenVideo(record, selectedVideoNumber, cfg.id);
@@ -3109,7 +3375,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         isReDispatch ? (
                           <button
                             onClick={() => {
-                              setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                              setActiveModal({ recordId: record.id, stageId: 'delivered', mode: 'review_issue' });
                             }}
                             className="px-2.5 sm:px-3 py-1.5 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 hover:text-amber-200 border border-amber-600/50 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
                             title="Review Reported Issue / Delivery Details"
@@ -3121,7 +3387,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           <button
                             onClick={() => {
                               toast.error('Please complete Delivery Confirmation first.');
-                              setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                              setActiveModal({ recordId: record.id, stageId: 'delivered', mode: 'confirm_delivery' });
                             }}
                             className="px-2.5 sm:px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/80 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
                             title="Delivery confirmation is required before managing video"
@@ -3175,20 +3441,28 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             </button>
                             <button 
                               onClick={() => {
-                                setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                                setActiveModal({
+                                  recordId: record.id,
+                                  stageId: 'delivered',
+                                  mode: isReDispatch ? 'review_issue' : 'confirm_delivery'
+                                });
                                 setOpenMenuId(null);
                               }}
                               className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
                             >
                               <Package size={14} className="text-emerald-400" />
-                              <span>Confirm Delivery</span>
+                              <span>{isDelivered ? 'View Delivery Confirmation' : isReDispatch ? 'Review Issue & Re-Dispatch' : 'Confirm Delivery'}</span>
                             </button>
                             <button 
                               onClick={() => {
                                 setOpenMenuId(null);
                                 if (!isDelivered) {
                                   toast.error('Please complete Delivery Confirmation first.');
-                                  setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                                  setActiveModal({
+                                    recordId: record.id,
+                                    stageId: 'delivered',
+                                    mode: isReDispatch ? 'review_issue' : 'confirm_delivery'
+                                  });
                                   return;
                                 }
                                 handleOpenVideo(record, selectedVideoNumber);
@@ -3242,11 +3516,23 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-fade-in relative">
               <div className="flex justify-between items-center p-5 border-b border-slate-800 bg-[#070c18]">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
-                    <Package size={18} />
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    activeModal.mode === 'review_issue' || isInfluencerInReDispatch(targetRecord)
+                      ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30'
+                      : 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                  }`}>
+                    {activeModal.mode === 'review_issue' || isInfluencerInReDispatch(targetRecord) ? (
+                      <AlertTriangle size={18} />
+                    ) : (
+                      <Package size={18} />
+                    )}
                   </div>
                   <div>
-                    <h5 className="text-base sm:text-lg font-bold text-white leading-none">Step 1: Delivery Confirmation</h5>
+                    <h5 className="text-base sm:text-lg font-bold text-white leading-none">
+                      {activeModal.mode === 'review_issue' || isInfluencerInReDispatch(targetRecord)
+                        ? `Re-Dispatch Issue & Shipment History${activeModal.cycleNumber ? ` (Cycle #${activeModal.cycleNumber})` : ''}`
+                        : `Delivery Confirmation${activeModal.cycleNumber ? ` (Replacement #${activeModal.cycleNumber})` : ''}`}
+                    </h5>
                     <p className="text-[11px] text-slate-400 mt-1">
                       {targetRecord.dispatch?.influencer_name} ({targetRecord.dispatch?.influencer_code || targetRecord.influencer_id})
                     </p>
@@ -3261,7 +3547,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               </div>
 
               <div className="p-6 max-h-[calc(85vh-120px)] overflow-y-auto">
-                <DeliveredForm record={targetRecord} onSave={(data: any) => handleDeliverySave(targetRecord.id, data)} />
+                <DeliveredForm 
+                  record={targetRecord} 
+                  initialMode={activeModal.mode}
+                  cycleNumber={activeModal.cycleNumber}
+                  onSave={(data: any) => handleDeliverySave(targetRecord.id, data)} 
+                />
               </div>
             </div>
           </div>
@@ -3732,8 +4023,13 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 // =========================================================================
 
 // --- STEP: Delivery Confirmation (Option A: No Issue vs Option B: Re-Dispatch Required + Shipment History) ---
-const DeliveredForm = ({ record, onSave }: any) => {
-  const isInitiallyCompleted = isDeliveryStepCompleted(record);
+const DeliveredForm: React.FC<{
+  record: StatusTrackingRecord;
+  initialMode?: 'confirm_delivery' | 'review_issue';
+  cycleNumber?: number;
+  onSave: (data: any) => Promise<void> | void;
+}> = ({ record, initialMode, cycleNumber, onSave }) => {
+  const isInitiallyCompleted = isInfluencerDeliveryConfirmed(record);
   
   let metadata: any = {};
   try {
@@ -3743,18 +4039,29 @@ const DeliveredForm = ({ record, onSave }: any) => {
   }
 
   const rawStatus = (record.status || '').toLowerCase();
-  const hasExistingIssue = Boolean(
-    rawStatus.includes('re-dispatch') || 
-    rawStatus.includes('redispatch') || 
-    metadata.re_dispatch_required || 
-    metadata.issue_reported ||
-    metadata.redispatch_lifecycle_status === 'PENDING_REDISPATCH'
+  const isPendingRedispatch = isInfluencerInReDispatch(record);
+  const isMovedToActive = Boolean(
+    metadata.re_dispatch_moved_to_active || 
+    metadata.moved_to_active || 
+    metadata.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE'
   );
 
   // Segmented Selection: 'NO_ISSUE' | 'PRODUCT_ISSUE'
-  const [selectedOption, setSelectedOption] = useState<'NO_ISSUE' | 'PRODUCT_ISSUE'>(
-    hasExistingIssue ? 'PRODUCT_ISSUE' : 'NO_ISSUE'
-  );
+  const [selectedOption, setSelectedOption] = useState<'NO_ISSUE' | 'PRODUCT_ISSUE'>(() => {
+    if (initialMode === 'confirm_delivery') return 'NO_ISSUE';
+    if (initialMode === 'review_issue') return 'PRODUCT_ISSUE';
+    if (isPendingRedispatch) return 'PRODUCT_ISSUE';
+    if (isMovedToActive) return 'NO_ISSUE';
+    return isInitiallyCompleted ? 'NO_ISSUE' : 'NO_ISSUE';
+  });
+
+  useEffect(() => {
+    if (initialMode === 'confirm_delivery') {
+      setSelectedOption('NO_ISSUE');
+    } else if (initialMode === 'review_issue') {
+      setSelectedOption('PRODUCT_ISSUE');
+    }
+  }, [initialMode]);
 
   // Option A State: Normal Delivery Confirmation
   const [confirmed, setConfirmed] = useState(isInitiallyCompleted);

@@ -4,6 +4,7 @@ import { SUPABASE_TABLES } from '../config/supabaseTables';
 import { naturalSortCompare } from '../config/skuMapping';
 import { dispatchBatchService } from './dispatchBatchService';
 import { getCourierTrackingUrl } from './influencerTrackingService';
+import { shipmentAttemptService } from './shipmentAttemptService';
 
 export interface ReDispatchRecord {
   id: string;
@@ -591,6 +592,30 @@ export const reDispatchQueueService = {
         meta.moved_to_active_at = nowIso;
         meta.last_updated = nowIso;
 
+        // Maintain structured redispatch_cycles array
+        if (Array.isArray(meta.redispatch_cycles) && meta.redispatch_cycles.length > 0) {
+          const lastCycle = meta.redispatch_cycles[meta.redispatch_cycles.length - 1];
+          lastCycle.status = 'MOVED_TO_ACTIVE';
+          lastCycle.moved_to_active_at = nowIso;
+          lastCycle.delivered_confirmed = false;
+          lastCycle.updated_at = nowIso;
+        } else {
+          meta.redispatch_cycles = [{
+            cycle_number: 1,
+            status: 'MOVED_TO_ACTIVE',
+            issue_type: meta.issue_type || item.issue_type || 'DAMAGED_PRODUCT',
+            issue_remarks: meta.issue_remarks || item.issue_remarks || '',
+            issue_proof_url: meta.issue_proof_url || '',
+            reported_at: meta.issue_reported_at || nowIso,
+            previous_awb: item.previous_awb || '',
+            previous_courier: item.courier || '',
+            moved_to_active_at: nowIso,
+            delivered_confirmed: false,
+            created_at: nowIso,
+            updated_at: nowIso
+          }];
+        }
+
         await supabaseAdmin
           .from(SUPABASE_TABLES.influencerStatus)
           .update({
@@ -599,6 +624,27 @@ export const reDispatchQueueService = {
             updated_at: nowIso
           })
           .eq('id', stRow.id);
+
+        // Ensure replacement shipment attempt exists in shipment_attempts
+        try {
+          const targetInfId = numInfId || Number(infId);
+          if (targetInfId) {
+            const cleanInfCode = cleanCode(item.code);
+            const existingAttempts = await shipmentAttemptService.getShipmentAttempts(cId, targetInfId);
+            const lastAtt = existingAttempts.length > 0 ? existingAttempts[existingAttempts.length - 1] : null;
+            if (!lastAtt || lastAtt.issue_reported || lastAtt.shipment_status === 'Issue Reported') {
+              await shipmentAttemptService.createReDispatchAttempt({
+                campaign_id: cId,
+                influencer_id: targetInfId,
+                influencer_code: cleanInfCode,
+                courier: item.courier,
+                remarks: `Re-Dispatch cycle for issue: ${item.issue_type || 'Defective/Damaged product'}`
+              });
+            }
+          }
+        } catch (attErr) {
+          console.error('Error creating re-dispatch shipment attempt:', attErr);
+        }
       }
 
       // 5. Update localStorage shipment cache if present
