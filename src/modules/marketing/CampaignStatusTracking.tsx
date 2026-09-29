@@ -359,7 +359,46 @@ export const getInfluencerCategories = (record: StatusTrackingRecord): string[] 
   return getUniqueFilterOptions(categories);
 };
 
+/**
+ * Checks if influencer is currently marked for Re-Dispatch (reported issue / package return)
+ */
+export const isInfluencerInReDispatch = (record: StatusTrackingRecord): boolean => {
+  let metadata: any = {};
+  try {
+    metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+  } catch (e) {
+    metadata = {};
+  }
+  // Once an influencer has been moved to Active for Re-Dispatch or completed, they are no longer in the pending queue
+  if (
+    metadata.re_dispatch_moved_to_active || 
+    metadata.moved_to_active || 
+    metadata.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' || 
+    metadata.redispatch_lifecycle_status === 'COMPLETED'
+  ) {
+    return false;
+  }
+  if (metadata.redispatch_lifecycle_status === 'PENDING_REDISPATCH') {
+    return true;
+  }
+  const rawStatus = (record.status || '').toLowerCase();
+  const dispatchStatus = ((record.dispatch as any)?.dispatch_status || '').toLowerCase();
+  return Boolean(
+    rawStatus.includes('re-dispatch') ||
+    rawStatus.includes('redispatch') ||
+    dispatchStatus.includes('re_dispatch') ||
+    dispatchStatus.includes('redispatch') ||
+    metadata.re_dispatch_required ||
+    metadata.shipment_issue ||
+    metadata.issue_reported
+  );
+};
+
 export const getInfluencerDeliveryStatus = (record: StatusTrackingRecord): 'Delivery Confirmed' | 'Delivered' | 'Not Delivered' => {
+  if (isInfluencerInReDispatch(record)) {
+    return 'Not Delivered';
+  }
+
   if (isDeliveryStepCompleted(record)) {
     return 'Delivery Confirmed';
   }
@@ -1058,32 +1097,6 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   };
 };
 
-/**
- * Checks if influencer is currently marked for Re-Dispatch (reported issue / package return)
- */
-export const isInfluencerInReDispatch = (record: StatusTrackingRecord): boolean => {
-  let metadata: any = {};
-  try {
-    metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
-  } catch (e) {
-    metadata = {};
-  }
-  // Once an influencer has been moved to Active for Re-Dispatch, they are no longer in the pending queue
-  if (metadata.re_dispatch_moved_to_active || metadata.moved_to_active) {
-    return false;
-  }
-  const rawStatus = (record.status || '').toLowerCase();
-  const dispatchStatus = ((record.dispatch as any)?.dispatch_status || '').toLowerCase();
-  return Boolean(
-    rawStatus.includes('re-dispatch') ||
-    rawStatus.includes('redispatch') ||
-    dispatchStatus.includes('re_dispatch') ||
-    dispatchStatus.includes('redispatch') ||
-    metadata.re_dispatch_required ||
-    metadata.shipment_issue ||
-    metadata.issue_reported
-  );
-};
 
 /**
  * Determines whether a specific video workflow has been started for an influencer.
@@ -1387,7 +1400,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     const rawStatus = (record.status || '').toLowerCase();
 
     // Active - Re-Dispatch: already moved to active queue for re-dispatch
-    if (metadata.re_dispatch_moved_to_active || metadata.moved_to_active) {
+    if (
+      metadata.re_dispatch_moved_to_active || 
+      metadata.moved_to_active || 
+      metadata.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE'
+    ) {
       return {
         key: 'RE_DISPATCH_ACTIVE',
         label: 'Active — Re-Dispatch',
@@ -1400,6 +1417,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     if (
       rawStatus.includes('re-dispatch') ||
       rawStatus.includes('redispatch') ||
+      metadata.redispatch_lifecycle_status === 'PENDING_REDISPATCH' ||
       metadata.re_dispatch_required ||
       metadata.shipment_issue ||
       metadata.issue_reported
@@ -2050,11 +2068,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           return;
         }
 
+        const targetCampId = record.campaign_id || campaign.id;
+        const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || record.influencer_id);
+
         if (attemptId) {
           await shipmentAttemptService.reportShipmentIssue(attemptId, {
             issue_type: data.issue_type,
             issue_remarks: data.issue_remarks,
-            issue_proof_url: data.issue_proof_url
+            issue_proof_url: data.issue_proof_url,
+            influencer_code: cleanInfCode
           });
         }
 
@@ -2070,8 +2092,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         delete metadata.moved_to_active;
 
         // Persist to authoritative redispatch_records table
-        const targetCampId = record.campaign_id || campaign.id;
-        const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || record.influencer_id);
         await reDispatchQueueService.recordReDispatchIssue(targetCampId, {
           influencer_id: record.influencer_id,
           influencer_code: cleanInfCode,
@@ -2092,6 +2112,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         const result = await saveMilestone(recordId, updates);
         if (result.success) {
           toast.success('Shipment issue reported. Influencer moved to Re-Dispatch in Logistics.', { id: toastId });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('influencer_tracking_updated', {
+              detail: { campaignId: targetCampId, influencerId: record.influencer_id, status: 'Re-Dispatch Required' }
+            }));
+            window.dispatchEvent(new CustomEvent('influencer_status_updated', {
+              detail: { campaignId: targetCampId, influencerId: record.influencer_id }
+            }));
+            window.dispatchEvent(new CustomEvent('velmora:influencer-updated', {
+              detail: { campaignId: targetCampId, influencerId: record.influencer_id }
+            }));
+          }
           await refresh();
           setActiveModal(null);
         } else {
@@ -2108,13 +2139,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           await shipmentAttemptService.confirmShipmentDelivery(attemptId, data.delivery_photo_url);
         }
 
+        const targetCampId = record.campaign_id || campaign.id;
+        const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || record.influencer_id);
+
         metadata.last_updated = new Date().toISOString();
         metadata.delivered_confirmed = true;
         metadata.delivery_photo_url = data.delivery_photo_url;
         if (metadata.redispatch_lifecycle_status || metadata.re_dispatch_moved_to_active || metadata.re_dispatch_required) {
           metadata.redispatch_lifecycle_status = 'COMPLETED';
-          const targetCampId = record.campaign_id || campaign.id;
-          const cleanInfCode = cleanCodeRef(record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || record.influencer_id);
           await reDispatchQueueService.completeReDispatch(targetCampId, {
             influencer_id: record.influencer_id,
             influencer_code: cleanInfCode
@@ -2139,6 +2171,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         const result = await saveMilestone(recordId, updates);
         if (result.success) {
           toast.success('Delivery confirmation saved successfully.', { id: toastId });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('influencer_tracking_updated', {
+              detail: { campaignId: targetCampId, influencerId: record.influencer_id, status: 'Active' }
+            }));
+            window.dispatchEvent(new CustomEvent('influencer_status_updated', {
+              detail: { campaignId: targetCampId, influencerId: record.influencer_id }
+            }));
+            window.dispatchEvent(new CustomEvent('velmora:influencer-updated', {
+              detail: { campaignId: targetCampId, influencerId: record.influencer_id }
+            }));
+          }
           await refresh();
           setActiveModal(null);
         } else {
@@ -2869,6 +2912,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                 const isDelivered = isDeliveryStepCompleted(record);
                 const overallStatus = getOverallStatus(record);
+                const isReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED' || isInfluencerInReDispatch(record);
                 const isMenuOpen = openMenuId === record.id;
 
                 // Derive status for the selected video workflow
@@ -3046,7 +3090,28 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 justify-end w-auto min-w-0">
                       {/* Video Status Badge */}
                       {(() => {
-                        if (currentVideoData.status === 'COMPLETED') {
+                        if (overallStatus.key === 'RE_DISPATCH_REQUIRED' || isReDispatch) {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-amber-950/80 text-amber-300 border border-amber-600/60 animate-pulse flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <AlertTriangle size={13} className="text-amber-400" />
+                              <span>Re-Dispatch Required</span>
+                            </span>
+                          );
+                        } else if (overallStatus.key === 'RE_DISPATCH_ACTIVE') {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-300 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <RotateCcw size={13} className="text-blue-400" />
+                              <span>Active — Re-Dispatch</span>
+                            </span>
+                          );
+                        } else if (overallStatus.key === 'ON_HOLD') {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                              <span>On Hold</span>
+                            </span>
+                          );
+                        } else if (currentVideoData.status === 'COMPLETED') {
                           return (
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
                               <Check size={13} strokeWidth={2.5} />
@@ -3079,17 +3144,30 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                       {/* Manage Video Action Button */}
                       {!isDelivered ? (
-                        <button
-                          onClick={() => {
-                            toast.error('Please complete Delivery Confirmation first.');
-                            setActiveModal({ recordId: record.id, stageId: 'delivered' });
-                          }}
-                          className="px-2.5 sm:px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/80 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
-                          title="Delivery confirmation is required before managing video"
-                        >
-                          <Lock size={12} />
-                          <span>Requires Delivery</span>
-                        </button>
+                        isReDispatch ? (
+                          <button
+                            onClick={() => {
+                              setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                            }}
+                            className="px-2.5 sm:px-3 py-1.5 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 hover:text-amber-200 border border-amber-600/50 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
+                            title="Review Reported Issue / Delivery Details"
+                          >
+                            <AlertTriangle size={12} className="text-amber-400" />
+                            <span>Review Issue</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              toast.error('Please complete Delivery Confirmation first.');
+                              setActiveModal({ recordId: record.id, stageId: 'delivered' });
+                            }}
+                            className="px-2.5 sm:px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/80 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
+                            title="Delivery confirmation is required before managing video"
+                          >
+                            <Lock size={12} />
+                            <span>Requires Delivery</span>
+                          </button>
+                        )
                       ) : (
                         <button
                           onClick={() => handleOpenVideo(record, selectedVideoNumber)}
@@ -3707,7 +3785,8 @@ const DeliveredForm = ({ record, onSave }: any) => {
     rawStatus.includes('re-dispatch') || 
     rawStatus.includes('redispatch') || 
     metadata.re_dispatch_required || 
-    metadata.issue_reported
+    metadata.issue_reported ||
+    metadata.redispatch_lifecycle_status === 'PENDING_REDISPATCH'
   );
 
   // Segmented Selection: 'NO_ISSUE' | 'PRODUCT_ISSUE'
@@ -3748,12 +3827,21 @@ const DeliveredForm = ({ record, onSave }: any) => {
     try {
       const data = await shipmentAttemptService.getShipmentAttempts(record.campaign_id, record.influencer_id);
       setAttempts(data);
+      const latestIssueAttempt = [...data].reverse().find(a => a.issue_reported);
+      if (latestIssueAttempt) {
+        if (!issueRemarks && latestIssueAttempt.issue_remarks) setIssueRemarks(latestIssueAttempt.issue_remarks);
+        if (!issuePhoto && latestIssueAttempt.issue_proof_url) {
+          setIssuePhoto(latestIssueAttempt.issue_proof_url);
+          setIssuePreview(latestIssueAttempt.issue_proof_url);
+        }
+        if (latestIssueAttempt.issue_type) setIssueType(latestIssueAttempt.issue_type as ShipmentIssueType);
+      }
     } catch (e) {
       console.error('Error loading shipment attempts:', e);
     } finally {
       setIsLoadingAttempts(false);
     }
-  }, [record?.campaign_id, record?.influencer_id]);
+  }, [record?.campaign_id, record?.influencer_id, issueRemarks, issuePhoto]);
 
   useEffect(() => {
     loadAttempts();

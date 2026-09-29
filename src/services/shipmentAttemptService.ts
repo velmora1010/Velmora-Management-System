@@ -320,6 +320,7 @@ export const shipmentAttemptService = {
       issue_type: ShipmentIssueType;
       issue_remarks?: string;
       issue_proof_url?: string;
+      influencer_code?: string;
     }
   ): Promise<{ success: boolean; attempt?: ShipmentAttempt; error?: any }> {
     try {
@@ -422,7 +423,21 @@ export const shipmentAttemptService = {
 
       // 5. Persist to authoritative redispatch_records table
       try {
-        const infCode = cleanCodeRef(attempt.influencer_code || (updatedAttempt as any)?.influencer_code);
+        let infCode = cleanCodeRef(issueData.influencer_code);
+        if (!infCode && numInfId && !isNaN(numInfId)) {
+          const { data: infInfo } = await supabaseAdmin
+            .from(SUPABASE_TABLES.influencersInfo)
+            .select('code, name')
+            .eq('id', numInfId)
+            .maybeSingle();
+          if (infInfo?.code) {
+            infCode = cleanCodeRef(infInfo.code);
+          }
+        }
+        if (!infCode && attempt.order_id) {
+          infCode = cleanCodeRef(attempt.order_id);
+        }
+
         if (infCode) {
           await supabaseAdmin
             .from(SUPABASE_TABLES.redispatchRecords)

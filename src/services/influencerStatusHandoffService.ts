@@ -583,7 +583,8 @@ export function isDeliveryStepCompleted(record: any): boolean {
     rawStatus.includes('re-dispatch') ||
     rawStatus.includes('redispatch') ||
     meta?.re_dispatch_required ||
-    meta?.issue_reported
+    meta?.issue_reported ||
+    meta?.redispatch_lifecycle_status === 'PENDING_REDISPATCH'
   ) {
     return false;
   }
