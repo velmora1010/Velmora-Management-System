@@ -1344,22 +1344,13 @@ export async function upsertCampaignShipmentsToDb(
       };
     }
 
-    // 10. Defensive uniqueness check: base_code + shipment_type (NORMAL or RE_DISPATCH)
-    const baseTypeMap = new Map<string, InfluencerDispatchedShipment>();
-    strictlyValid.forEach(s => {
-      const rawOrd = s.orderId || s.rawOrderId || s.influencerCode || '';
-      const norm = normalizeOrderId(rawOrd, validCodesSet);
-      const baseCode = norm.baseCode || s.influencerCode || '';
-      const shipmentType = (s.isResend || norm.isResend) ? 'RE_DISPATCH' : 'NORMAL';
-      const key = `${baseCode.toUpperCase()}__${shipmentType}`;
-      baseTypeMap.set(key, s);
-    });
-
-    // Deduplicate incoming batch by (campaign_id, courier, awb_number)
+    // 10. Deduplicate incoming batch by (campaign_id, courier, awb_number) matching DB unique constraint
+    // Preserves every valid distinct shipment without collapsing multiple packages/attempts
     const payloadMap = new Map<string, any>();
-    baseTypeMap.forEach(s => {
+    strictlyValid.forEach(s => {
       const p = mapShipmentToDbPayload(s, cleanCampaignId);
-      const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${p.awb_number.toLowerCase()}`;
+      const awbKey = (p.awb_number || s.id || '').toLowerCase().trim();
+      const key = `${p.campaign_id}__${(p.courier || '').toLowerCase()}__${awbKey}`;
       payloadMap.set(key, p);
     });
 

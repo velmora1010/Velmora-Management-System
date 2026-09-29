@@ -568,6 +568,15 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             }
           }
 
+          // Fallback: match by consignee name if present and unique in active campaign influencers
+          if (!matchedInf && rawConsigneeName) {
+            const cleanName = rawConsigneeName.trim().toLowerCase();
+            matchedInf = activeCampaignInfluencers.find(inf => {
+              const infName = (inf.influencer_name || inf.name || '').trim().toLowerCase();
+              return infName && infName === cleanName;
+            });
+          }
+
           if (!matchedInf) {
             if (rawOrderId) {
               ignoredCustomerRowsCount++;
@@ -589,7 +598,8 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
 
           const orderInfo = normalizeOrderId(rawOrderId || matchedInf.code, validCampaignCodesSet);
           const canonicalBase = orderInfo.baseCode || (matchedInf.code ? matchedInf.code.replace(/^#+/, '') : '');
-          const resolvedOrderId = orderInfo.isResend 
+          const isExplicitResend = orderInfo.isResend || (typeof rawOrderId === 'string' && /^#?R(\d*)[\s#_\-]+/i.test(rawOrderId.trim()));
+          const resolvedOrderId = isExplicitResend 
             ? `R ${canonicalBase}` 
             : (rawOrderId ? (rawOrderId.startsWith('#') ? rawOrderId : `#${rawOrderId}`) : `#${canonicalBase}`);
 
@@ -598,7 +608,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             orderId: resolvedOrderId,
             rawOrderId: rawOrderId || resolvedOrderId,
             baseOrderId: canonicalBase,
-            isResend: orderInfo.isResend,
+            isResend: isExplicitResend,
             attemptNumber: orderInfo.attemptNumber,
             consigneeName: rawConsigneeName,
             currentStatus: rawCurrentStatus,
@@ -621,7 +631,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               ref: rawOrderId,
               displayOrderId: resolvedOrderId,
               influencerName: matchedInf.influencer_name || matchedInf.name || 'Influencer',
-              isReplacement: orderInfo.isResend,
+              isReplacement: isExplicitResend,
               awb: rawAwb,
               status: rawCurrentStatus || 'Pending'
             });
@@ -736,12 +746,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         let liveApiPendingCount = 0;
         let completedCount = 0;
 
-        // Defensive uniqueness check: base_code + shipment_type (NORMAL or RE_DISPATCH)
+        // Defensive deduplication: Deduplicate identical AWBs while preserving every valid distinct shipment
         const dedupedRowsMap = new Map<string, ValidParsedShipmentRow>();
         validRows.forEach(row => {
+          const awb = String(row.rawAwb || '').trim().toLowerCase();
           const baseCode = cleanUploadCode(row.baseOrderId || row.matchedInf?.code || '').toUpperCase();
           const shipmentType = row.isResend ? 'RE_DISPATCH' : 'NORMAL';
-          const key = `${baseCode}__${shipmentType}`;
+          const key = awb ? `awb__${awb}` : `${baseCode}__${shipmentType}__${row.orderId || ''}`;
           dedupedRowsMap.set(key, row);
         });
         const rowsToProcess = Array.from(dedupedRowsMap.values());
@@ -929,22 +940,32 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         } catch (refreshErr) {
           console.warn('Error refreshing tracking data:', refreshErr);
         }
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
-          window.dispatchEvent(new CustomEvent('influencer_status_updated', { detail: { campaignId: String(campaign.id) } }));
-          window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
+
+        try {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+            window.dispatchEvent(new CustomEvent('influencer_status_updated', { detail: { campaignId: String(campaign.id) } }));
+            window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
+          }
+        } catch (eventErr) {
+          console.warn('Window event dispatch error post ST Courier upload:', eventErr);
         }
+
         onClose();
 
-        showUploadResultToast({
-          title: 'ST Courier Upload Complete',
-          isSuccess: true,
-          acceptedCount: acceptedReported,
-          ignoredCustomerCount: ignoredCustomerCount,
-          unmatchedInvalidCount: invalidCount,
-          updatedExistingCount: duplicatesReported,
-          newShipmentsCount: importedReported
-        });
+        try {
+          showUploadResultToast({
+            title: 'ST Courier Upload Complete',
+            isSuccess: true,
+            acceptedCount: acceptedReported,
+            ignoredCustomerCount: ignoredCustomerCount,
+            unmatchedInvalidCount: invalidCount,
+            updatedExistingCount: duplicatesReported,
+            newShipmentsCount: importedReported
+          });
+        } catch (toastErr) {
+          console.warn('ST Courier toast notification error:', toastErr);
+        }
 
       // =======================================================================
       // WORKFLOW B: DELHIVERY (UPLOADED FILE STATUS AS SOURCE OF TRUTH)
@@ -998,12 +1019,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const delhiveryShipments: InfluencerDispatchedShipment[] = [];
         const dispatchUpdates: { id: string; courier_partner: string; tracking_id: string; dispatch_status: string; dispatch_date: string | null; expected_delivery_date: string | null; }[] = [];
 
-        // Defensive uniqueness check: base_code + shipment_type (NORMAL or RE_DISPATCH)
+        // Defensive deduplication: Deduplicate identical AWBs while preserving every valid distinct shipment
         const dedupedRowsMap = new Map<string, ValidParsedShipmentRow>();
         validRows.forEach(row => {
+          const awb = String(row.rawAwb || '').trim().toLowerCase();
           const baseCode = cleanUploadCode(row.baseOrderId || row.matchedInf?.code || '').toUpperCase();
           const shipmentType = row.isResend ? 'RE_DISPATCH' : 'NORMAL';
-          const key = `${baseCode}__${shipmentType}`;
+          const key = awb ? `awb__${awb}` : `${baseCode}__${shipmentType}__${row.orderId || ''}`;
           dedupedRowsMap.set(key, row);
         });
         const rowsToProcess = Array.from(dedupedRowsMap.values());
@@ -1212,31 +1234,41 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         } catch (refreshErr) {
           console.warn('Error refreshing tracking data:', refreshErr);
         }
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
-          window.dispatchEvent(new CustomEvent('influencer_status_updated', { detail: { campaignId: String(campaign.id) } }));
-          window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
+
+        try {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail: { campaignId: String(campaign.id) } }));
+            window.dispatchEvent(new CustomEvent('influencer_status_updated', { detail: { campaignId: String(campaign.id) } }));
+            window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
+          }
+        } catch (eventErr) {
+          console.warn('Window event dispatch error post Delhivery upload:', eventErr);
         }
+
         onClose();
 
-        showUploadResultToast({
-          title: 'Delhivery Upload Complete',
-          isSuccess: true,
-          acceptedCount: acceptedReported,
-          ignoredCustomerCount: ignoredCustomerCount,
-          unmatchedInvalidCount: invalidCount,
-          updatedExistingCount: duplicatesReported,
-          newShipmentsCount: importedReported,
-          rowsWithRemarksCount: rowsWithRemarksCount
-        });
+        try {
+          showUploadResultToast({
+            title: 'Delhivery Upload Complete',
+            isSuccess: true,
+            acceptedCount: acceptedReported,
+            ignoredCustomerCount: ignoredCustomerCount,
+            unmatchedInvalidCount: invalidCount,
+            updatedExistingCount: duplicatesReported,
+            newShipmentsCount: importedReported,
+            rowsWithRemarksCount: rowsWithRemarksCount
+          });
 
-        const matchedRedispatch = validRows.filter(r => r.isResend).length;
-        if (matchedRedispatch > 0 || recResult.dispatchedCount > 0) {
-          const matched = matchedRedispatch || recResult.dispatchedCount;
-          toast.success(`${matched} Re-Dispatch shipment${matched === 1 ? '' : 's'} matched and moved to Prepare Dispatch.`);
-        }
-        if (recResult.pendingCount > 0) {
-          toast.info(`${recResult.pendingCount} Re-Dispatch shipment${recResult.pendingCount === 1 ? '' : 's'} are still pending courier upload.`);
+          const matchedRedispatch = validRows.filter(r => r.isResend).length;
+          if (matchedRedispatch > 0 || recResult.dispatchedCount > 0) {
+            const matched = matchedRedispatch || recResult.dispatchedCount;
+            toast.success(`${matched} Re-Dispatch shipment${matched === 1 ? '' : 's'} matched and moved to Prepare Dispatch.`);
+          }
+          if (recResult.pendingCount > 0) {
+            toast(`${recResult.pendingCount} Re-Dispatch shipment${recResult.pendingCount === 1 ? '' : 's'} are still pending courier upload.`, { icon: 'ℹ️' });
+          }
+        } catch (toastErr) {
+          console.warn('Delhivery toast notification error:', toastErr);
         }
       }
     } catch (err: any) {

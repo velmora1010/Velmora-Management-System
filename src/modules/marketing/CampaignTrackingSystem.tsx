@@ -850,9 +850,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     }
 
     const unsorted = Array.from(shipmentMap.values());
-    const currentShipments = resolveCurrentShipments(unsorted, validCampaignCodesSet);
-    return sortInfluencerShipmentsNaturally(currentShipments);
-  }, [candidateInfluencers, dispatchRecords, savedBatches, campaignShipments, ithinkRecords, indiaPostRecords, campaign.id, trackingCache, validCampaignCodesSet]);
+    return sortInfluencerShipmentsNaturally(unsorted);
+  }, [candidateInfluencers, dispatchRecords, savedBatches, campaignShipments, ithinkRecords, indiaPostRecords, campaign.id, trackingCache]);
+
+  // Active current shipments (one per influencer, showing latest replacement if re-dispatch exists)
+  const activeCurrentShipments = useMemo(() => {
+    return resolveCurrentShipments(allShipments, validCampaignCodesSet);
+  }, [allShipments, validCampaignCodesSet]);
 
   // True if valid campaign tracking shipments exist in the database
   const hasTrackingData = allShipments.length > 0;
@@ -884,9 +888,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     return Array.from(map.values());
   }, [allShipments]);
 
-  // 9 KPI Calculations strictly from real campaign shipment data
+  // 9 KPI Calculations strictly from real active campaign shipment data
   const kpis = useMemo(() => {
-    let total = allShipments.length;
+    let total = activeCurrentShipments.length;
     let inTransit = 0;
     let outForDelivery = 0;
     let delivered = 0;
@@ -896,7 +900,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     let infoReceived = 0;
     let expired = 0;
 
-    for (const s of allShipments) {
+    for (const s of activeCurrentShipments) {
       const cat = getShipmentCategory(s);
       if (cat === 'In Transit') inTransit++;
       else if (cat === 'Out for Delivery') outForDelivery++;
@@ -919,13 +923,13 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       infoReceived,
       expired
     };
-  }, [allShipments]);
+  }, [activeCurrentShipments]);
 
   // Status Tab Counts for the pills
   const statusTabCounts = useMemo(() => {
     const redispatchCount = allShipments.filter(s => isShipmentReDispatch(s, dispatchRecords)).length;
     const counts: Record<TrackingStatusCategory, number> = {
-      All: allShipments.length,
+      All: activeCurrentShipments.length,
       Exception: kpis.exception,
       'Failed Attempt': kpis.failedAttempt,
       Pending: kpis.pending,
@@ -937,7 +941,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
       'Re-Dispatch': redispatchCount
     };
     return counts;
-  }, [allShipments, kpis, dispatchRecords]);
+  }, [activeCurrentShipments, allShipments, kpis, dispatchRecords]);
 
   // Delivery & Delivered Schedule grouping from allShipments
   const deliverySchedule = useMemo(() => {
@@ -1290,7 +1294,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   // Filtered Shipments (applies selected courier filter onto the base shipments)
   const filteredShipments = useMemo(() => {
     if (selectedCourier === 'All') {
-      return sortInfluencerShipmentsNaturally(courierBaseShipments);
+      const active = searchTerm.trim() 
+        ? courierBaseShipments 
+        : resolveCurrentShipments(courierBaseShipments, validCampaignCodesSet);
+      return sortInfluencerShipmentsNaturally(active);
     }
 
     if (
@@ -1335,7 +1342,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     });
 
     return sortInfluencerShipmentsNaturally(filtered);
-  }, [courierBaseShipments, selectedCourier]);
+  }, [courierBaseShipments, selectedCourier, searchTerm, validCampaignCodesSet]);
 
   // Active states for courier filters
   const isDelhiveryActive = 
