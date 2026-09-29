@@ -105,6 +105,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
 
     return result.filter(item => {
       const code = (item.code || '').toLowerCase();
+      const rdCode = (item.redispatch_code || '').toLowerCase();
       const name = (item.influencer_name || '').toLowerCase();
       const user = (item.username || '').toLowerCase();
       const awb = (item.previous_awb || '').toLowerCase();
@@ -114,6 +115,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
 
       return (
         code.includes(q) ||
+        rdCode.includes(q) ||
         name.includes(q) ||
         user.includes(q) ||
         awb.includes(q) ||
@@ -531,9 +533,9 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                       </td>
 
                       {/* 2. Code */}
-                      <td className="py-3 px-2 font-mono font-bold text-purple-300 whitespace-nowrap w-[75px]">
+                      <td className="py-3 px-2 font-mono font-bold text-purple-300 whitespace-nowrap w-[90px]">
                         <span className="px-2 py-0.5 rounded-lg bg-purple-950/50 border border-purple-800/50 text-[11px] inline-block">
-                          #{item.code}
+                          {item.redispatch_code || `R ${item.code}`}
                         </span>
                       </td>
 
@@ -636,7 +638,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">
                             <Check size={11} className="text-emerald-400 shrink-0" />
-                            Moved to Active
+                            {item.redispatch_awb ? 'Dispatched' : 'Moved to Active'}
                           </span>
                         )}
                       </td>
@@ -670,8 +672,8 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                         ) : (
                           <div
                             className="w-8 h-8 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-400 flex items-center justify-center mx-auto select-none"
-                            title="Active — Re-Dispatch"
-                            aria-label="Active — Re-Dispatch"
+                            title={item.redispatch_awb ? `Dispatched (AWB: ${item.redispatch_awb})` : "Active — Re-Dispatch"}
+                            aria-label={item.redispatch_awb ? "Dispatched" : "Active — Re-Dispatch"}
                           >
                             <CheckCircle2 size={14} />
                           </div>

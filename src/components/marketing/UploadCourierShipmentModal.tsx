@@ -47,6 +47,7 @@ import {
   parseDelhiveryReferenceNo,
   ParsedDelhiveryReference
 } from '../../utils/orderIdUtils';
+import { reDispatchQueueService } from '../../services/reDispatchQueueService';
 import toast from 'react-hot-toast';
 
 export interface UploadResultStats {
@@ -806,29 +807,46 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const duplicatesReported = dbResult.duplicatesUpdated;
         const failedReported = dbResult.failed + invalidCount;
 
-        // Persist matched influencers to Supabase influencer_dispatch table
+        // Persist matched influencers to Supabase influencer_dispatch and re-dispatch queue
         for (const s of trackedShipments) {
           if (s.influencerId) {
-            try {
-              const { data: existingRecords } = await supabase
-                .from(SUPABASE_TABLES.influencerDispatch)
-                .select('id')
-                .eq('influencer_id', s.influencerId)
-                .eq('campaign_id', String(campaign.id));
-
-              if (existingRecords && existingRecords.length > 0) {
-                await supabase
+            if (s.isResend) {
+              try {
+                await reDispatchQueueService.transitionReDispatchToDispatched(campaign.id, {
+                  influencer_id: s.influencerId,
+                  influencer_code: s.influencerCode || '',
+                  order_id: s.orderId,
+                  redispatch_awb: s.awbNumber,
+                  courier: 'ST Courier',
+                  displayStatus: s.status,
+                  dispatchDate: s.dispatchDate,
+                  estimatedDeliveryDate: s.expectedDeliveryDate,
+                  deliveredDate: s.deliveredDate,
+                  attemptNumber: s.attemptNumber
+                });
+              } catch (e) {}
+            } else {
+              try {
+                const { data: existingRecords } = await supabase
                   .from(SUPABASE_TABLES.influencerDispatch)
-                  .update({
-                    courier_partner: 'ST Courier',
-                    tracking_id: s.awbNumber,
-                    dispatch_status: 'Dispatched',
-                    dispatch_date: s.dispatchDate || null,
-                    expected_delivery_date: s.expectedDeliveryDate || null
-                  })
-                  .eq('id', existingRecords[0].id);
-              }
-            } catch (e) {}
+                  .select('id')
+                  .eq('influencer_id', s.influencerId)
+                  .eq('campaign_id', String(campaign.id));
+
+                if (existingRecords && existingRecords.length > 0) {
+                  await supabase
+                    .from(SUPABASE_TABLES.influencerDispatch)
+                    .update({
+                      courier_partner: 'ST Courier',
+                      tracking_id: s.awbNumber,
+                      dispatch_status: 'Dispatched',
+                      dispatch_date: s.dispatchDate || null,
+                      expected_delivery_date: s.expectedDeliveryDate || null
+                    })
+                    .eq('id', existingRecords[0].id);
+                }
+              } catch (e) {}
+            }
           }
         }
 
@@ -984,17 +1002,40 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
             });
           } catch (dbErr) {}
 
-          // Queue influencerDispatch update
-          const dispatchId = existingDispatchesMap.get(String(inf.id));
-          if (dispatchId) {
-            dispatchUpdates.push({
-              id: dispatchId,
-              courier_partner: 'Delhivery',
-              tracking_id: awb,
-              dispatch_status: 'Dispatched',
-              dispatch_date: normalizedDate || null,
-              expected_delivery_date: normalizedEdd || null
-            });
+          // Handle Re-Dispatch vs Original Dispatch
+          if (row.isResend) {
+            // It's a Re-Dispatch shipment!
+            // Transition Re-Dispatch lifecycle, shipment attempts, and status tracking notes
+            try {
+              await reDispatchQueueService.transitionReDispatchToDispatched(campaign.id, {
+                influencer_id: inf.id,
+                influencer_code: inf.code || row.baseOrderId,
+                order_id: row.orderId,
+                redispatch_awb: awb,
+                courier: 'Delhivery',
+                displayStatus,
+                dispatchDate: normalizedDate,
+                estimatedDeliveryDate: normalizedEdd,
+                deliveredDate: finalDeliveredDate,
+                remarks: finalRemarks,
+                attemptNumber: row.attemptNumber
+              });
+            } catch (rdErr) {
+              console.warn('Error transitioning re-dispatch record during Delhivery upload:', rdErr);
+            }
+          } else {
+            // Queue influencerDispatch update strictly for ORIGINAL shipments (preserving original tracking_id)
+            const dispatchId = existingDispatchesMap.get(String(inf.id));
+            if (dispatchId) {
+              dispatchUpdates.push({
+                id: dispatchId,
+                courier_partner: 'Delhivery',
+                tracking_id: awb,
+                dispatch_status: 'Dispatched',
+                dispatch_date: normalizedDate || null,
+                expected_delivery_date: normalizedEdd || null
+              });
+            }
           }
 
           if (i % 25 === 0 || i === validRows.length - 1) {

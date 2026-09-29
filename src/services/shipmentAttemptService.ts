@@ -54,24 +54,17 @@ export function cleanCodeRef(val?: string | null): string {
  */
 export function generateReDispatchOrderId(
   influencerCode: string,
-  courier?: string | null,
+  _courier?: string | null,
   attemptNumber: number = 1
 ): string {
   const info = normalizeOrderId(influencerCode);
   const code = info.baseCode || cleanCodeRef(influencerCode);
   if (!code) return '';
   
-  const isDelhivery = (courier || '').toLowerCase().includes('delhivery');
-  if (isDelhivery) {
-    if (attemptNumber <= 1) {
-      return `#${code}`;
-    }
-    const rPrefix = 'R'.repeat(attemptNumber - 1);
-    return `#${rPrefix}${code}`;
+  if (attemptNumber <= 1) {
+    return `#${code}`;
   }
-
-  // ST Courier and other couriers
-  return code;
+  return `R ${code}`;
 }
 
 /**
@@ -286,16 +279,14 @@ export const shipmentAttemptService = {
         return null;
       }
 
-      // Update influencer_dispatch_details_rows with the new attempt info
+      // Update influencer_dispatch_details_rows with dispatch_status without overwriting original tracking_id
       await supabaseAdmin
         .from(SUPABASE_TABLES.influencerDispatch)
         .update({
           dispatch_status: 'Dispatched',
           courier_partner: courier,
-          tracking_id: params.awb_number || null,
           dispatch_date: payload.dispatch_date,
-          expected_delivery_date: payload.estimated_delivery_date,
-          delivered_date: null
+          expected_delivery_date: payload.estimated_delivery_date
         })
         .eq('campaign_id', isNaN(Number(cId)) ? cId : Number(cId))
         .eq('influencer_id', infId);
@@ -745,6 +736,27 @@ export const shipmentAttemptService = {
             updated_at: nowIso
           })
           .eq('id', existingStatus.id);
+      }
+
+      // 4b. Record in authoritative redispatch_records
+      try {
+        await supabaseAdmin
+          .from(SUPABASE_TABLES.redispatchRecords)
+          .upsert({
+            campaign_id: cId,
+            influencer_id: infId,
+            influencer_code: infCode,
+            order_id: `R ${infCode}`,
+            previous_awb: shipment.awbNumber || null,
+            courier: shipment.courier || 'Delhivery',
+            issue_type: 'DAMAGED_PRODUCT',
+            issue_remark: issueRemarks,
+            redispatch_status: 'PENDING_REDISPATCH',
+            created_at: nowIso,
+            updated_at: nowIso
+          }, { onConflict: 'campaign_id,influencer_code' });
+      } catch (rdErr) {
+        console.warn('Could not upsert into redispatch_records from exception:', rdErr);
       }
 
       // 5. Update tracking shipment in influencer_tracking_shipments and localStorage

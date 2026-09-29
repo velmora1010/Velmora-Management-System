@@ -364,7 +364,10 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
   const loadReDispatchCount = useCallback(async () => {
     try {
       const items = await reDispatchQueueService.fetchQueueItems(campaign.id);
-      setReDispatchCount(items.length);
+      const pendingItems = items.filter(
+        i => i.status === 'pending' || i.redispatch_status === 'PENDING_REDISPATCH'
+      );
+      setReDispatchCount(pendingItems.length);
     } catch (e) {
       console.error('Error fetching Re-Dispatch count:', e);
     }

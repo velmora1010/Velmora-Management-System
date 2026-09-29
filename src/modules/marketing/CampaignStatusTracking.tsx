@@ -2288,6 +2288,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           const newCycle: ReDispatchCycle = {
             cycle_number: nextCycleNumber,
             status: 'PENDING_REDISPATCH',
+            redispatch_code: `R ${cleanInfCode}`,
             issue_type: data.issue_type,
             issue_remarks: data.issue_remarks || '',
             issue_proof_url: data.issue_proof_url || '',
@@ -2317,7 +2318,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         await reDispatchQueueService.recordReDispatchIssue(targetCampId, {
           influencer_id: record.influencer_id,
           influencer_code: cleanInfCode,
-          order_id: record.dispatch?.order_id || `#${cleanInfCode}`,
+          order_id: `R ${cleanInfCode}`,
           previous_awb: record.dispatch?.tracking_id,
           courier: record.dispatch?.courier_partner,
           issue_type: data.issue_type,
