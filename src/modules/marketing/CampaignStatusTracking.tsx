@@ -917,20 +917,12 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
       const videoScript = (record.videoScripts || []).find((vs: any) => Number(vs.video_number) === Number(videoNum));
       const st = storedVideo?.steps?.['share_script'];
 
-      const isScriptSkipped = Boolean(
-        st?.skipped === true || 
-        st?.status === 'SKIPPED' || 
-        st?.data?.call_skipped === true || 
-        st?.data?.is_skipped === true ||
-        (videoNum === 1 && metadata.call_skipped === true)
-      );
-
       let isScriptCompleted = false;
       let scriptData: any = {};
 
       if (videoScript) {
         // Priority 1: campaign_video_scripts relational record
-        isScriptCompleted = !isScriptSkipped && Boolean(videoScript.script_shared_approved);
+        isScriptCompleted = Boolean(videoScript.script_shared_approved);
         scriptData = {
           concept: videoScript.custom_concept || '',
           hooks: videoScript.hooks || '',
@@ -942,38 +934,32 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
             storage_path: videoScript.voice_record_storage_path || ''
           } : null,
           script_shared: isScriptCompleted,
-          call_skipped: isScriptSkipped,
-          is_skipped: isScriptSkipped,
           keypoints: st?.data?.keypoints || (videoNum === 1 ? (record.ref_keypoints || metadata.keypoints || '') : ''),
           link: st?.data?.link || (videoNum === 1 ? (record.ref_link || metadata.link || '') : ''),
           reference_videos_list: st?.data?.reference_videos_list || (videoNum === 1 ? (record.reference_videos_list || []) : [])
         };
       } else if (st) {
         // Priority 2: existing notes JSON data
-        isScriptCompleted = !isScriptSkipped && Boolean(st.completed);
+        isScriptCompleted = Boolean(st.completed);
         scriptData = {
           concept: st.data?.concept || '',
           hooks: st.data?.hooks || '',
           script: st.data?.script || '',
           voice_record: st.data?.voice_record || null,
           script_shared: isScriptCompleted,
-          call_skipped: isScriptSkipped,
-          is_skipped: isScriptSkipped,
           keypoints: st.data?.keypoints || '',
           link: st.data?.link || '',
           reference_videos_list: st.data?.reference_videos_list || []
         };
       } else if (videoNum === 1) {
         // Priority 3: legacy ref_concept / ref_script fields
-        isScriptCompleted = !isScriptSkipped && Boolean(metadata.script_shared || record.reference_video_received || record.ref_script || ((record.current_step || 0) >= 3));
+        isScriptCompleted = Boolean(metadata.script_shared || record.reference_video_received || record.ref_script || ((record.current_step || 0) >= 3));
         scriptData = {
           concept: record.ref_concept || metadata.concept || '',
           hooks: metadata.videos?.[1]?.steps?.share_script?.data?.hooks || metadata.hooks || '',
           script: record.ref_script || metadata.script || '',
           voice_record: metadata.videos?.[1]?.steps?.share_script?.data?.voice_record || metadata.voice_record || null,
           script_shared: isScriptCompleted,
-          call_skipped: isScriptSkipped,
-          is_skipped: isScriptSkipped,
           keypoints: record.ref_keypoints || metadata.keypoints || '',
           link: record.ref_link || metadata.link || '',
           reference_videos_list: record.reference_videos_list || []
@@ -986,8 +972,6 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           script: '',
           voice_record: null,
           script_shared: false,
-          call_skipped: false,
-          is_skipped: false,
           keypoints: '',
           link: '',
           reference_videos_list: []
@@ -996,8 +980,8 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
 
       steps[cfg.id] = {
         completed: isScriptCompleted,
-        skipped: isScriptSkipped,
-        status: isScriptSkipped ? 'SKIPPED' : (isScriptCompleted ? 'COMPLETED' : 'NOT_STARTED'),
+        skipped: false,
+        status: isScriptCompleted ? 'COMPLETED' : 'NOT_STARTED',
         data: scriptData
       };
       return;
@@ -1118,6 +1102,27 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
             payment_record: videoPayment
           }
         };
+      } else if (cfg.id === 'call_explain') {
+        const isCallSkipped = Boolean(
+          st.skipped === true || 
+          st.status === 'SKIPPED' || 
+          st.data?.call_skipped === true || 
+          st.data?.is_skipped === true ||
+          (videoNum === 1 && metadata.call_skipped === true)
+        );
+        const isCallCompleted = !isCallSkipped && Boolean(st.completed || st.data?.call_explained);
+        steps[cfg.id] = {
+          ...st,
+          completed: isCallCompleted,
+          skipped: isCallSkipped,
+          status: isCallSkipped ? 'SKIPPED' : (isCallCompleted ? 'COMPLETED' : 'NOT_STARTED'),
+          data: {
+            ...st.data,
+            call_explained: isCallCompleted,
+            call_skipped: isCallSkipped,
+            is_skipped: isCallSkipped
+          }
+        };
       } else {
         steps[cfg.id] = st;
       }
@@ -1130,13 +1135,23 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
 
     if (videoNum === 1) {
       if (cfg.id === 'call_explain') {
-        completed = !!metadata.call_explained || (!!record.ref_call_explanation_required && !metadata.call_explanation_pending) || ((record.current_step || 0) >= 2 && !metadata.call_explanation_pending);
+        const isCallSkipped = Boolean(metadata.call_skipped === true);
+        completed = !isCallSkipped && (!!metadata.call_explained || (!!record.ref_call_explanation_required && !metadata.call_explanation_pending) || ((record.current_step || 0) >= 2 && !metadata.call_explanation_pending));
         data = {
           call_explained: completed,
+          call_skipped: isCallSkipped,
+          is_skipped: isCallSkipped,
           phone_called: metadata.phone_called || record.dispatch?.phone_number || '',
           call_datetime: metadata.call_datetime || '',
           call_notes: metadata.call_notes || ''
         };
+        steps[cfg.id] = {
+          completed,
+          skipped: isCallSkipped,
+          status: isCallSkipped ? 'SKIPPED' : (completed ? 'COMPLETED' : 'NOT_STARTED'),
+          data
+        };
+        return;
       } else if (cfg.id === 'share_script') {
         completed = !!metadata.script_shared || !!record.reference_video_received || !!record.ref_script || ((record.current_step || 0) >= 3);
         data = {
@@ -2692,7 +2707,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           voice_record_file_name: stepData.voice_record?.file_name || null,
           voice_record_file_size: stepData.voice_record?.file_size_formatted || null,
           voice_record_storage_path: stepData.voice_record?.storage_path || null,
-          script_shared_approved: isSkipped ? false : isStepCompleted
+          script_shared_approved: isStepCompleted
         });
       } catch (err) {
         console.error(`Failed to persist video ${videoNumber} script record:`, err);
@@ -2702,20 +2717,20 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     // For Video 1, mirror corresponding legacy columns to maintain backward compatibility
     if (videoNumber === 1) {
       if (stepId === 'call_explain') {
-        updates.ref_call_explanation_required = isStepCompleted;
-        metadata.call_explained = isStepCompleted;
-      } else if (stepId === 'share_script') {
         if (isSkipped) {
-          updates.reference_video_received = false;
-          metadata.script_shared = false;
+          updates.ref_call_explanation_required = false;
+          metadata.call_explained = false;
           metadata.call_skipped = true;
         } else {
-          updates.reference_video_received = isStepCompleted;
-          if (stepData.concept) updates.ref_concept = stepData.concept;
-          if (stepData.script) updates.ref_script = stepData.script;
-          metadata.script_shared = isStepCompleted;
+          updates.ref_call_explanation_required = isStepCompleted;
+          metadata.call_explained = isStepCompleted;
           metadata.call_skipped = false;
         }
+      } else if (stepId === 'share_script') {
+        updates.reference_video_received = isStepCompleted;
+        if (stepData.concept) updates.ref_concept = stepData.concept;
+        if (stepData.script) updates.ref_script = stepData.script;
+        metadata.script_shared = isStepCompleted;
       } else if (stepId === 'pay_advance') {
         updates.pay_advance_completed = isStepCompleted;
         if (stepData.gpay) updates.advance_gpay_number = stepData.gpay;
@@ -4038,7 +4053,16 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             <CallExplainForm 
               record={record} 
               existingData={activeStepState.data}
-              onSave={(formData: any) => onSaveStep('call_explain', formData, formData.call_explained)} 
+              isStepSkipped={Boolean(activeStepState.skipped || activeStepState.status === 'SKIPPED' || activeStepState.data?.call_skipped || activeStepState.data?.is_skipped)}
+              onSave={(formData: any, completed?: boolean, isSkipped?: boolean) => 
+                onSaveStep(
+                  'call_explain', 
+                  formData, 
+                  completed !== undefined ? completed : formData.call_explained,
+                  isSkipped !== undefined ? isSkipped : Boolean(formData.call_skipped || formData.is_skipped)
+                )
+              }
+              onAdvanceStep={handleAdvanceToNextStep}
             />
           )}
 
@@ -4048,13 +4072,11 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               record={record} 
               videoNumber={videoNumber}
               existingData={activeStepState.data}
-              isStepSkipped={Boolean(activeStepState.skipped || activeStepState.status === 'SKIPPED' || activeStepState.data?.call_skipped || activeStepState.data?.is_skipped)}
-              onSave={(formData: any, completed?: boolean, isSkipped?: boolean) => 
+              onSave={(formData: any, completed?: boolean) => 
                 onSaveStep(
                   'share_script', 
                   formData, 
-                  completed !== undefined ? completed : formData.reference_video_received,
-                  isSkipped !== undefined ? isSkipped : Boolean(formData.call_skipped || formData.is_skipped)
+                  completed !== undefined ? completed : formData.reference_video_received
                 )
               }
               onAdvanceStep={handleAdvanceToNextStep}
@@ -4733,10 +4755,27 @@ const DeliveredForm: React.FC<{
 };
 
 // --- STEP: Call & Explain ---
-const CallExplainForm = ({ record, existingData = {}, onSave }: any) => {
+const CallExplainForm = ({ record, existingData = {}, onSave, isStepSkipped, onAdvanceStep }: any) => {
+  const [isCallSkipped, setIsCallSkipped] = useState<boolean>(() => {
+    return Boolean(isStepSkipped || existingData.call_skipped || existingData.is_skipped || existingData.status === 'SKIPPED');
+  });
+  const [showSkipModal, setShowSkipModal] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsCallSkipped(Boolean(isStepSkipped || existingData.call_skipped || existingData.is_skipped || existingData.status === 'SKIPPED'));
+  }, [isStepSkipped, existingData.call_skipped, existingData.is_skipped, existingData.status]);
+
   const [callExplained, setCallExplained] = useState(
     existingData.call_explained !== undefined ? existingData.call_explained : (record.ref_call_explanation_required || false)
   );
+
+  useEffect(() => {
+    if (existingData.call_explained !== undefined) {
+      setCallExplained(existingData.call_explained);
+    }
+  }, [existingData.call_explained]);
+
   const [callNotes, setCallNotes] = useState(existingData.call_notes || '');
   const [callDatetime, setCallDatetime] = useState(
     existingData.call_datetime ? formatForDateTimeInput(existingData.call_datetime) : ''
@@ -4745,30 +4784,118 @@ const CallExplainForm = ({ record, existingData = {}, onSave }: any) => {
     existingData.phone_called || record.dispatch?.phone_number || ''
   );
 
+  const handleCallSkippedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setShowSkipModal(true);
+    } else {
+      setIsCallSkipped(false);
+      onSave({
+        call_explained: false,
+        call_skipped: false,
+        is_skipped: false,
+        call_notes: callNotes,
+        call_datetime: callDatetime ? new Date(callDatetime).toISOString() : '',
+        phone_called: phoneCalled
+      }, false, false);
+      toast.success('Call Skipped unmarked');
+    }
+  };
+
+  const handleCancelSkip = () => {
+    setShowSkipModal(false);
+    setIsCallSkipped(false);
+  };
+
+  const handleConfirmSkip = async () => {
+    setShowSkipModal(false);
+    setIsSaving(true);
+    try {
+      setIsCallSkipped(true);
+      setCallExplained(false);
+      await onSave({
+        call_explained: false,
+        call_skipped: true,
+        is_skipped: true,
+        call_notes: callNotes,
+        call_datetime: callDatetime ? new Date(callDatetime).toISOString() : '',
+        phone_called: phoneCalled
+      }, false, true);
+
+      toast.success('Step skipped successfully');
+      onAdvanceStep?.();
+    } catch (err: any) {
+      console.error('Error confirming skip:', err);
+      toast.error('Failed to skip step: ' + (err?.message || err));
+      setIsCallSkipped(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSave = async () => {
-    setCallExplained(true);
-    await onSave({
-      call_explained: true,
-      call_notes: callNotes,
-      call_datetime: callDatetime ? new Date(callDatetime).toISOString() : new Date().toISOString(),
-      phone_called: phoneCalled
-    });
-    toast.success('Call & Explain confirmed successfully');
+    setIsSaving(true);
+    try {
+      setCallExplained(true);
+      setIsCallSkipped(false);
+      await onSave({
+        call_explained: true,
+        call_skipped: false,
+        is_skipped: false,
+        call_notes: callNotes,
+        call_datetime: callDatetime ? new Date(callDatetime).toISOString() : new Date().toISOString(),
+        phone_called: phoneCalled
+      }, true, false);
+      toast.success('Call & Explain confirmed successfully');
+      onAdvanceStep?.();
+    } catch (err: any) {
+      console.error('Error saving call details:', err);
+      toast.error('Failed to save call details: ' + (err?.message || err));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
-        <input 
-          type="checkbox" 
-          id="call-explained-checkbox"
-          checked={callExplained}
-          onChange={(e) => setCallExplained(e.target.checked)}
-          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
-        />
-        <label htmlFor="call-explained-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer">
-          Call explanation completed with influencer (deliverables, guidelines & creative briefing explained).
-        </label>
+      {/* 1. Checkbox Action Area: Call Explained + Call Skipped in same horizontal action row */}
+      <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 bg-[#0b1329] p-3.5 sm:p-4 rounded-xl border border-slate-800">
+        <div className="flex items-center gap-3">
+          <input 
+            type="checkbox" 
+            id="call-explained-checkbox"
+            checked={callExplained}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setCallExplained(checked);
+              if (checked && isCallSkipped) {
+                setIsCallSkipped(false);
+              }
+            }}
+            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
+          />
+          <label htmlFor="call-explained-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer select-none">
+            Call explanation completed with influencer (deliverables, guidelines & creative briefing explained).
+          </label>
+        </div>
+
+        {/* Right / Beside: Call Skipped Checkbox */}
+        <div className="flex items-center gap-2.5 sm:pl-4 sm:border-l sm:border-slate-800 shrink-0">
+          <input 
+            type="checkbox" 
+            id="call-skipped-checkbox"
+            checked={isCallSkipped}
+            onChange={handleCallSkippedChange}
+            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500" 
+          />
+          <label htmlFor="call-skipped-checkbox" className="text-sm font-semibold text-amber-400 hover:text-amber-300 cursor-pointer select-none flex items-center gap-2">
+            <span>Call Skipped</span>
+            {isCallSkipped && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase font-bold tracking-wider">
+                Skipped
+              </span>
+            )}
+          </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4805,12 +4932,35 @@ const CallExplainForm = ({ record, existingData = {}, onSave }: any) => {
       <div className="flex justify-end pt-2 border-t border-slate-800">
         <button 
           onClick={handleSave} 
-          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer"
+          disabled={isSaving}
+          className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
         >
-          <Check size={16} strokeWidth={2.5} />
-          <span>CONFIRM CALL & EXPLAIN</span>
+          {isSaving ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>CONFIRMING...</span>
+            </>
+          ) : (
+            <>
+              <Check size={16} strokeWidth={2.5} />
+              <span>CONFIRM CALL & EXPLAIN</span>
+            </>
+          )}
         </button>
       </div>
+
+      {/* Confirmation Dialog: Skip Step */}
+      <ConfirmModal
+        isOpen={showSkipModal}
+        title="Skip Step?"
+        message="Are you sure you want to skip this step?"
+        confirmText="Confirm"
+        cancelText="Cancel"
+        isDestructive={false}
+        variant="warning"
+        onClose={handleCancelSkip}
+        onConfirm={handleConfirmSkip}
+      />
     </div>
   );
 };
@@ -4859,7 +5009,6 @@ const ShareScriptForm = ({
   record, 
   videoNumber = 1, 
   existingData = {}, 
-  isStepSkipped = false,
   onSave,
   onAdvanceStep
 }: any) => {
@@ -4879,15 +5028,6 @@ const ShareScriptForm = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [isCallSkipped, setIsCallSkipped] = useState<boolean>(() => {
-    return Boolean(isStepSkipped || existingData.call_skipped || existingData.is_skipped || existingData.status === 'SKIPPED');
-  });
-  const [showSkipModal, setShowSkipModal] = useState<boolean>(false);
-
-  useEffect(() => {
-    setIsCallSkipped(Boolean(isStepSkipped || existingData.call_skipped || existingData.is_skipped || existingData.status === 'SKIPPED'));
-  }, [isStepSkipped, existingData.call_skipped, existingData.is_skipped, existingData.status]);
 
   const [scriptShared, setScriptShared] = useState(
     existingData.script_shared !== undefined 
@@ -5035,76 +5175,14 @@ const ShareScriptForm = ({
     }
   };
 
-  const handleCallSkippedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) {
-      // Prompt confirmation dialog, do NOT immediately mutate or save
-      setShowSkipModal(true);
-    } else {
-      // User manually unchecks Call Skipped
-      setIsCallSkipped(false);
-      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
-      onSave({
-        reference_video_received: false,
-        script_shared: false,
-        call_skipped: false,
-        is_skipped: false,
-        concept: finalConcept,
-        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
-        hooks: hooks || '',
-        script: script || '',
-        voice_record: voiceRecord || null,
-        keypoints: existingData.keypoints || '',
-        link: existingData.link || '',
-        reference_videos_list: existingData.reference_videos_list || []
-      }, false, false);
-      toast.success('Call Skipped unmarked');
-    }
-  };
-
-  const handleConfirmSkip = async () => {
-    setShowSkipModal(false);
-    setIsSaving(true);
-    try {
-      setIsCallSkipped(true);
-      setScriptShared(false);
-      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
-      await onSave({
-        reference_video_received: false,
-        script_shared: false,
-        call_skipped: true,
-        is_skipped: true,
-        concept: finalConcept,
-        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
-        hooks: hooks || '',
-        script: script || '',
-        voice_record: voiceRecord || null,
-        keypoints: existingData.keypoints || '',
-        link: existingData.link || '',
-        reference_videos_list: existingData.reference_videos_list || []
-      }, false, true);
-
-      toast.success('Step skipped successfully');
-      onAdvanceStep?.();
-    } catch (err: any) {
-      console.error('Error confirming skip:', err);
-      toast.error('Failed to skip step: ' + (err?.message || err));
-      setIsCallSkipped(false);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   const handleSave = async () => {
     setIsSaving(true);
     try {
       const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
       setScriptShared(true);
-      setIsCallSkipped(false);
       await onSave({ 
         reference_video_received: true,
         script_shared: true,
-        call_skipped: false,
-        is_skipped: false,
         concept: finalConcept, 
         product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
         hooks: hooks || '',
@@ -5113,7 +5191,7 @@ const ShareScriptForm = ({
         keypoints: existingData.keypoints || '', 
         link: existingData.link || '', 
         reference_videos_list: existingData.reference_videos_list || []
-      }, true, false);
+      }, true);
       toast.success('Share Script confirmed successfully');
       onAdvanceStep?.();
     } catch (err: any) {
@@ -5126,46 +5204,18 @@ const ShareScriptForm = ({
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-5 animate-fade-in">
-      {/* 1. Checkbox Action Area: Script Shared + Call Skipped in same horizontal action row */}
-      <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 bg-[#0b1329] p-3.5 sm:p-4 rounded-xl border border-slate-800/90">
-        {/* Left: Original checkbox completely unchanged in text and position */}
-        <div className="flex items-center gap-3">
-          <input 
-            type="checkbox" 
-            id="script-shared-checkbox"
-            checked={scriptShared}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setScriptShared(checked);
-              if (checked && isCallSkipped) {
-                setIsCallSkipped(false);
-              }
-            }}
-            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
-          />
-          <label htmlFor="script-shared-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer select-none">
-            Script & reference materials shared and approved with the creator.
-          </label>
-        </div>
-
-        {/* Right / Beside: Call Skipped Checkbox */}
-        <div className="flex items-center gap-2.5 sm:pl-4 sm:border-l sm:border-slate-800 shrink-0">
-          <input 
-            type="checkbox" 
-            id="call-skipped-checkbox"
-            checked={isCallSkipped}
-            onChange={handleCallSkippedChange}
-            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500 cursor-pointer accent-amber-500" 
-          />
-          <label htmlFor="call-skipped-checkbox" className="text-sm font-semibold text-amber-400 hover:text-amber-300 cursor-pointer select-none flex items-center gap-2">
-            <span>Call Skipped</span>
-            {isCallSkipped && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase font-bold tracking-wider">
-                Skipped
-              </span>
-            )}
-          </label>
-        </div>
+      {/* 1. Checkbox: Script & Reference Materials Shared */}
+      <div className="flex items-center gap-3 bg-[#0b1329] p-3.5 sm:p-4 rounded-xl border border-slate-800/90">
+        <input 
+          type="checkbox" 
+          id="script-shared-checkbox"
+          checked={scriptShared}
+          onChange={(e) => setScriptShared(e.target.checked)}
+          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
+        />
+        <label htmlFor="script-shared-checkbox" className="text-sm font-medium text-slate-200 cursor-pointer select-none">
+          Script & reference materials shared and approved with the creator.
+        </label>
       </div>
 
       {/* 2-Column Responsive Form Grid */}
@@ -5357,11 +5407,11 @@ const ShareScriptForm = ({
           </div>
         </div>
 
-        {/* ROW 2 - COL 2: Hooks */}
+        {/* ROW 2 - COL 2: Key Points */}
         <div className="space-y-1.5 flex flex-col justify-start">
           <div className="flex items-center justify-between">
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-              HOOKS
+              KEY POINTS
             </label>
             <span className="text-xs text-slate-500 font-medium">Optional</span>
           </div>
@@ -5379,10 +5429,10 @@ const ShareScriptForm = ({
           </div>
         </div>
 
-        {/* ROW 3: Proposed Script (Full Width across both columns) */}
+        {/* ROW 3: Model Script (Full Width across both columns) */}
         <div className="space-y-1.5 col-span-1 md:col-span-2">
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-            PROPOSED SCRIPT
+            MODEL SCRIPT
           </label>
           <div className="relative">
             <textarea 
@@ -5420,19 +5470,6 @@ const ShareScriptForm = ({
           )}
         </button>
       </div>
-
-      {/* Confirmation Dialog: Skip Call Step */}
-      <ConfirmModal
-        isOpen={showSkipModal}
-        title="Skip Call Step?"
-        message="Are you sure you want to skip this step? No call details or other information will be required."
-        confirmText="Confirm Skip"
-        cancelText="Cancel"
-        isDestructive={false}
-        variant="warning"
-        onClose={() => setShowSkipModal(false)}
-        onConfirm={handleConfirmSkip}
-      />
     </div>
   );
 };
