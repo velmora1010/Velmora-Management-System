@@ -47,6 +47,10 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
   const loadQueue = useCallback(async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
     try {
+      // 1. Authoritative reconciliation with uploaded courier shipments (Source of Truth)
+      await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
+
+      // 2. Fetch queue items
       const data = await reDispatchQueueService.fetchQueueItems(campaign.id);
       setItems(data);
     } catch (err) {
@@ -282,7 +286,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                 </span>
                 {movedCount > 0 && (
                   <span className="px-2 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    {movedCount} Moved
+                    {movedCount} Dispatched
                   </span>
                 )}
                 {completedCount > 0 && (
@@ -327,7 +331,7 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                 statusFilter === 'moved' ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400 hover:text-white'
               }`}
             >
-              Moved ({movedCount})
+              Dispatched ({movedCount})
             </button>
             {completedCount > 0 && (
               <button
@@ -471,8 +475,8 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                   {/* 3. Username / Influencer */}
                   <th className="py-3 px-2.5 w-[190px] text-left">Username / Influencer</th>
 
-                  {/* 4. Previous AWB */}
-                  <th className="py-3 px-2 w-[140px] text-left">Previous AWB</th>
+                  {/* 4. Tracking / Prev AWB */}
+                  <th className="py-3 px-2 w-[150px] text-left">Tracking / Prev AWB</th>
 
                   {/* 5. Courier */}
                   <th className="py-3 px-2 w-[90px] text-left">Courier</th>
@@ -567,34 +571,66 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
                         </div>
                       </td>
 
-                      {/* 4. Previous AWB */}
-                      <td className="py-3 px-2 whitespace-nowrap w-[140px]">
-                        {item.previous_awb ? (
-                          <div className="flex items-center gap-1 font-mono text-xs">
-                            <span className="text-slate-200" title={item.previous_awb}>{item.previous_awb}</span>
-                            <button
-                              type="button"
-                              onClick={e => handleCopyAwb(item.previous_awb, e)}
-                              className="text-slate-500 hover:text-white p-0.5 rounded transition-colors cursor-pointer shrink-0"
-                              title="Copy AWB"
-                            >
-                              {copiedAwb === item.previous_awb ? (
-                                <Check size={12} className="text-emerald-400" />
-                              ) : (
-                                <Copy size={12} />
-                              )}
-                            </button>
-                            {item.tracking_url && (
-                              <a
-                                href={item.tracking_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-slate-500 hover:text-purple-400 p-0.5 rounded transition-colors shrink-0"
-                                title="Open tracking in courier portal"
+                      {/* 4. Tracking / Prev AWB */}
+                      <td className="py-3 px-2 whitespace-nowrap w-[150px]">
+                        {item.redispatch_awb ? (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1 font-mono text-xs">
+                              <span className="text-emerald-300 font-bold" title={`Re-Dispatch AWB: ${item.redispatch_awb}`}>
+                                {item.redispatch_awb}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={e => handleCopyAwb(item.redispatch_awb!, e)}
+                                className="text-slate-500 hover:text-white p-0.5 rounded transition-colors cursor-pointer shrink-0"
+                                title="Copy New AWB"
                               >
-                                <ExternalLink size={12} />
-                              </a>
+                                {copiedAwb === item.redispatch_awb ? (
+                                  <Check size={12} className="text-emerald-400" />
+                                ) : (
+                                  <Copy size={12} />
+                                )}
+                              </button>
+                              {item.tracking_url && (
+                                <a
+                                  href={item.tracking_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-emerald-400 hover:text-emerald-300 p-0.5 rounded transition-colors shrink-0"
+                                  title="Track replacement shipment"
+                                >
+                                  <ExternalLink size={12} />
+                                </a>
+                              )}
+                            </div>
+                            {item.previous_awb && (
+                              <div className="text-[10px] text-slate-500 font-mono" title={`Previous AWB: ${item.previous_awb}`}>
+                                Prev: {item.previous_awb}
+                              </div>
                             )}
+                          </div>
+                        ) : item.previous_awb ? (
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1 font-mono text-xs">
+                              <span className="text-slate-300" title={`Previous AWB: ${item.previous_awb}`}>
+                                {item.previous_awb}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={e => handleCopyAwb(item.previous_awb, e)}
+                                className="text-slate-500 hover:text-white p-0.5 rounded transition-colors cursor-pointer shrink-0"
+                                title="Copy Previous AWB"
+                              >
+                                {copiedAwb === item.previous_awb ? (
+                                  <Check size={12} className="text-emerald-400" />
+                                ) : (
+                                  <Copy size={12} />
+                                )}
+                              </button>
+                            </div>
+                            <div className="text-[10px] text-amber-500/70 font-mono">
+                              Upload: Pending
+                            </div>
                           </div>
                         ) : (
                           <span className="text-slate-500 italic text-[11px]">No AWB</span>

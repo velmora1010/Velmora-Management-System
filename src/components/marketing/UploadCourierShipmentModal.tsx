@@ -872,6 +872,13 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         }));
         setStep('completed');
 
+        // Reconcile Re-Dispatch records with courier upload
+        try {
+          await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
+        } catch (recErr) {
+          console.warn('Reconciliation error post ST Courier upload:', recErr);
+        }
+
         try {
           await onSuccess();
         } catch (refreshErr) {
@@ -1105,6 +1112,14 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         setStep('completed');
 
         clearTrackingCache(campaign.id);
+
+        // Reconcile Re-Dispatch records with newly uploaded Delhivery shipments (Source of Truth)
+        try {
+          await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
+        } catch (recErr) {
+          console.warn('Reconciliation error post Delhivery upload:', recErr);
+        }
+
         try {
           await onSuccess();
         } catch (refreshErr) {
