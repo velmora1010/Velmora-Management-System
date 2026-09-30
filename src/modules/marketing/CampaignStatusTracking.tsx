@@ -7,9 +7,10 @@ import {
   Clock, Package, Phone, FileText, Video, Check, 
   XCircle, PauseCircle, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
-  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Edit3, Loader2,
+  History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Pause, Edit3, Loader2,
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, Activity, Truck, Share2, Globe, GitBranch,
-  Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward
+  Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward,
+  FilePlus, CheckCircle2
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -24,6 +25,12 @@ import { getInfluencerResolvedVideoProducts, isVideoLabel } from './AddCampaignI
 import { StatusTrackingPaymentCard, PaymentDetailsInfo } from './StatusTrackingPaymentCard';
 import { saveVideoPayment, fetchVideoPaymentTransactions, InfluencerVideoPayment, InfluencerVideoPaymentTransaction } from '../../services/influencerVideoPaymentService';
 import { upsertCampaignVideoScript, type CampaignVideoScriptRecord } from '../../services/campaignVideoScriptService';
+import { 
+  fetchCampaignScripts, 
+  getScriptAudioUrl, 
+  getScriptVideoUrl, 
+  type CampaignScript 
+} from '../../services/campaignScriptService';
 import { 
   StatusTrackingFilterDrawer, 
   type StatusTrackingFilterState, 
@@ -1656,6 +1663,27 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     return searchParams.get('stStep') || null;
   });
 
+  // Campaign scripts cache for Share Script integration
+  const [campaignScripts, setCampaignScripts] = useState<CampaignScript[]>([]);
+  const [isLoadingCampaignScripts, setIsLoadingCampaignScripts] = useState<boolean>(false);
+
+  const loadCampaignScripts = useCallback(async () => {
+    if (!campaign?.id) return;
+    try {
+      setIsLoadingCampaignScripts(true);
+      const scripts = await fetchCampaignScripts(campaign.id);
+      setCampaignScripts(scripts);
+    } catch (err) {
+      console.error('Failed to load campaign scripts for status tracking:', err);
+    } finally {
+      setIsLoadingCampaignScripts(false);
+    }
+  }, [campaign?.id]);
+
+  useEffect(() => {
+    loadCampaignScripts();
+  }, [loadCampaignScripts]);
+
   // Synchronize selectedVideo with URL query parameters (e.g. browser back/forward or direct refresh)
   useEffect(() => {
     const stInf = searchParams.get('stInfluencer');
@@ -2970,6 +2998,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             record={selectedRecord}
             videoNumber={selectedVideo.videoNumber}
             initialStepId={selectedVideoStepId || selectedVideo.stepId}
+            campaign={campaign}
+            campaignScripts={campaignScripts}
+            onRefreshScripts={loadCampaignScripts}
             onBack={handleBackFromDetail}
             onSwitchVideo={(num) => handleSwitchVideo(selectedRecord.id, num)}
             onSaveStep={(stepId, data, completed, isSkipped) => handleSaveVideoStep(selectedRecord.id, selectedVideo.videoNumber, stepId, data, completed, isSkipped)}
@@ -3900,6 +3931,9 @@ interface VideoDetailViewProps {
   record: StatusTrackingRecord;
   videoNumber: number;
   initialStepId?: string | null;
+  campaign?: Campaign;
+  campaignScripts?: CampaignScript[];
+  onRefreshScripts?: () => Promise<void>;
   onBack: () => void;
   onSwitchVideo: (num: number) => void;
   onSaveStep: (stepId: string, data: any, completed: boolean, isSkipped?: boolean) => Promise<{ success: boolean; error?: any } | void>;
@@ -3910,6 +3944,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   record,
   videoNumber,
   initialStepId,
+  campaign,
+  campaignScripts,
+  onRefreshScripts,
   onBack,
   onSwitchVideo,
   onSaveStep,
@@ -4173,6 +4210,9 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               key={`v-${videoNumber}-share-script-${record.id}`}
               record={record} 
               videoNumber={videoNumber}
+              campaign={campaign}
+              campaignScripts={campaignScripts}
+              onRefreshScripts={onRefreshScripts}
               existingData={activeStepState.data}
               onSave={(formData: any, completed?: boolean) => 
                 onSaveStep(
@@ -5077,6 +5117,13 @@ interface VoiceRecordData {
   uploaded_at?: string;
 }
 
+interface ReferenceVideoData {
+  file_name?: string;
+  storage_path?: string;
+  url: string;
+  uploaded_at?: string;
+}
+
 const formatAudioFileSize = (bytes?: number): string => {
   if (!bytes || isNaN(bytes) || bytes <= 0) return '';
   if (bytes < 1024) return `${bytes} B`;
@@ -5107,40 +5154,303 @@ const normalizeVoiceRecord = (raw: any): VoiceRecordData | null => {
   return null;
 };
 
-const ShareScriptForm = ({ 
+const normalizeReferenceVideo = (raw: any): ReferenceVideoData | null => {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    return {
+      file_name: trimmed.split('/').pop() || 'reference-video.mp4',
+      url: trimmed
+    };
+  }
+  if (typeof raw === 'object' && raw.url) {
+    return {
+      file_name: raw.file_name || raw.fileName || raw.url.split('/').pop() || 'reference-video.mp4',
+      storage_path: raw.storage_path || raw.storagePath || '',
+      url: raw.url,
+      uploaded_at: raw.uploaded_at || raw.uploadedAt
+    };
+  }
+  return null;
+};
+
+/**
+ * Strict normalizer for matching Product and Language values.
+ * Trims whitespace, ignores lowercase/uppercase, and collapses symbols.
+ */
+export const normalizeScriptMatch = (str: string | null | undefined): string => {
+  if (!str) return '';
+  return str.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+};
+
+interface ShareScriptFormProps {
+  record: StatusTrackingRecord;
+  videoNumber?: number;
+  campaign?: Campaign;
+  campaignScripts?: CampaignScript[];
+  onRefreshScripts?: () => Promise<void>;
+  existingData?: any;
+  onSave: (formData: any, completed?: boolean) => Promise<any> | any;
+  onAdvanceStep?: () => void;
+}
+
+const ShareScriptForm: React.FC<ShareScriptFormProps> = ({ 
   record, 
   videoNumber = 1, 
+  campaign,
+  campaignScripts = [],
+  onRefreshScripts,
   existingData = {}, 
   onSave,
   onAdvanceStep
-}: any) => {
+}) => {
+  const [, setSearchParams] = useSearchParams();
+
+  // 1. Resolve Assigned Product for this specific video
   const resolvedProductInfo = useMemo(() => getResolvedProductForVideo(record.influencer, videoNumber), [record.influencer, videoNumber]);
-  const resolvedProductName = resolvedProductInfo.productName;
+  const effectiveProductName = resolvedProductInfo.isAssigned 
+    ? resolvedProductInfo.productName 
+    : (existingData.product_name || (videoNumber === 1 ? record.ref_concept : '') || '');
 
-  // Detect if concept is currently empty or contains legacy video label placeholder (e.g. "Video 1", "Video 2")
-  const rawConcept = existingData.concept || (videoNumber === 1 ? record.ref_concept : '') || '';
-  const isLegacy = isVideoLabel(rawConcept);
-  const initialConcept = isLegacy ? '' : rawConcept;
+  // 2. Resolve Creator & Campaign Languages
+  const influencerLanguages = useMemo(() => {
+    const raw = record.influencer?.languages || record.dispatch?.languages || [];
+    if (Array.isArray(raw)) {
+      return raw
+        .filter((l: any) => typeof l === 'string' && !l.startsWith('views_data:'))
+        .map((l: string) => l.trim())
+        .filter(Boolean);
+    }
+    if (typeof raw === 'string') {
+      return raw
+        .split(/[,/]+/)
+        .filter((l: string) => !l.startsWith('views_data:'))
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+    }
+    return [];
+  }, [record.influencer?.languages, record.dispatch?.languages]);
 
-  const [concept, setConcept] = useState(initialConcept);
-  const [hooks, setHooks] = useState(existingData.hooks || (videoNumber === 1 ? (record.ref_hooks || '') : '') || '');
-  const [script, setScript] = useState(existingData.script || (videoNumber === 1 ? (record.ref_script || '') : '') || '');
-  const [voiceRecord, setVoiceRecord] = useState<VoiceRecordData | null>(normalizeVoiceRecord(existingData.voice_record));
-  const [isUploadingVoice, setIsUploadingVoice] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const campaignLanguages = useMemo(() => {
+    if (!campaign?.target_languages) return [];
+    try {
+      const p = typeof campaign.target_languages === 'string' ? JSON.parse(campaign.target_languages) : campaign.target_languages;
+      return Array.isArray(p) ? p.map((l: string) => l.trim()).filter(Boolean) : [];
+    } catch {
+      return typeof campaign.target_languages === 'string' ? [campaign.target_languages.trim()] : [];
+    }
+  }, [campaign?.target_languages]);
 
-  const [scriptShared, setScriptShared] = useState(
+  // Scripts cache from parent or fetched fallback
+  const [scripts, setScripts] = useState<CampaignScript[]>(campaignScripts || []);
+  const [isLoadingScripts, setIsLoadingScripts] = useState(false);
+
+  useEffect(() => {
+    if (campaignScripts && campaignScripts.length > 0) {
+      setScripts(campaignScripts);
+    }
+  }, [campaignScripts]);
+
+  useEffect(() => {
+    const campId = campaign?.id || record.campaign_id;
+    if ((!campaignScripts || campaignScripts.length === 0) && campId) {
+      let isMounted = true;
+      setIsLoadingScripts(true);
+      fetchCampaignScripts(campId)
+        .then(res => {
+          if (isMounted) setScripts(res);
+        })
+        .catch(err => console.error('Error fetching campaign scripts in ShareScriptForm:', err))
+        .finally(() => {
+          if (isMounted) setIsLoadingScripts(false);
+        });
+      return () => { isMounted = false; };
+    }
+  }, [campaign?.id, record.campaign_id, campaignScripts]);
+
+  // Unified available languages pool
+  const availableLanguages = useMemo(() => {
+    const set = new Set<string>();
+    influencerLanguages.forEach(l => set.add(l));
+    campaignLanguages.forEach(l => set.add(l));
+    scripts.forEach(s => {
+      if (s.language) set.add(s.language.trim());
+    });
+    return Array.from(set).sort();
+  }, [influencerLanguages, campaignLanguages, scripts]);
+
+  // 3. Selected Language for this video / influencer
+  const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
+    if (existingData.language) return existingData.language;
+    if (influencerLanguages.length > 0) return influencerLanguages[0];
+    if (campaignLanguages.length > 0) return campaignLanguages[0];
+    return availableLanguages[0] || '';
+  });
+
+  // Keep selectedLanguage initialized if newly discovered
+  useEffect(() => {
+    if (!selectedLanguage) {
+      if (existingData.language) {
+        setSelectedLanguage(existingData.language);
+      } else if (influencerLanguages.length > 0) {
+        setSelectedLanguage(influencerLanguages[0]);
+      } else if (availableLanguages.length > 0) {
+        setSelectedLanguage(availableLanguages[0]);
+      }
+    }
+  }, [selectedLanguage, existingData.language, influencerLanguages, availableLanguages]);
+
+  // 4. Strict Matching Logic: BOTH Product Name AND Language must match
+  const matchedScript = useMemo(() => {
+    if (!effectiveProductName || !selectedLanguage) return null;
+    const normProd = normalizeScriptMatch(effectiveProductName);
+    const normLang = normalizeScriptMatch(selectedLanguage);
+    if (!normProd || !normLang) return null;
+
+    return scripts.find(s => 
+      normalizeScriptMatch(s.product) === normProd &&
+      normalizeScriptMatch(s.language) === normLang
+    ) || null;
+  }, [scripts, effectiveProductName, selectedLanguage]);
+
+  // Form input states
+  const [scriptShared, setScriptShared] = useState<boolean>(
     existingData.script_shared !== undefined 
-      ? existingData.script_shared 
+      ? Boolean(existingData.script_shared) 
       : (videoNumber === 1 ? (!!record.reference_video_received || !!record.ref_script) : false)
   );
 
+  const [hooks, setHooks] = useState<string>(
+    existingData.hooks || existingData.key_points || existingData.keypoints || (videoNumber === 1 ? (record.ref_hooks || '') : '') || ''
+  );
+  const [script, setScript] = useState<string>(
+    existingData.script || existingData.model_script || (videoNumber === 1 ? (record.ref_script || '') : '') || ''
+  );
+  const [voiceRecord, setVoiceRecord] = useState<VoiceRecordData | null>(normalizeVoiceRecord(existingData.voice_record));
+  const [referenceVideo, setReferenceVideo] = useState<ReferenceVideoData | null>(
+    normalizeReferenceVideo(existingData.reference_video || existingData.reference_video_url)
+  );
+
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingVoice, setIsUploadingVoice] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Helper to apply script fields into form
+  const applyScriptData = useCallback((s: CampaignScript, showToast = true) => {
+    setScript(s.model_script || '');
+    setHooks(s.key_points || '');
+
+    // Reference Audio
+    const audioUrl = s.reference_audio_file_path
+      ? getScriptAudioUrl(s.reference_audio_file_path)
+      : (s.reference_audio_url || '');
+
+    if (audioUrl) {
+      setVoiceRecord({
+        file_name: s.reference_audio_file_path 
+          ? s.reference_audio_file_path.split('/').pop() || `${s.product} (${s.language}) Audio` 
+          : `${s.product} (${s.language}) Audio`,
+        storage_path: s.reference_audio_file_path || '',
+        url: audioUrl,
+        uploaded_at: s.updated_at || s.created_at || new Date().toISOString()
+      });
+    } else {
+      setVoiceRecord(null);
+    }
+
+    // Reference Video
+    const videoUrl = s.reference_video_file_path
+      ? getScriptVideoUrl(s.reference_video_file_path)
+      : (s.reference_video_url || '');
+
+    if (videoUrl) {
+      setReferenceVideo({
+        file_name: s.reference_video_file_path 
+          ? s.reference_video_file_path.split('/').pop() || `${s.product} (${s.language}) Video` 
+          : `${s.product} (${s.language}) Video`,
+        storage_path: s.reference_video_file_path || '',
+        url: videoUrl,
+        uploaded_at: s.updated_at || s.created_at || new Date().toISOString()
+      });
+    } else {
+      setReferenceVideo(null);
+    }
+
+    if (showToast) {
+      toast.success('Script loaded from Script Management');
+    }
+  }, []);
+
+  // 5. Automatic Loading: If fields are empty on initial mount, automatically load matching script
+  const autoLoadedRef = useRef(false);
+  useEffect(() => {
+    if (autoLoadedRef.current) return;
+    const hasInitialData = Boolean(
+      (existingData.script && existingData.script.trim().length > 0) ||
+      (existingData.hooks && existingData.hooks.trim().length > 0) ||
+      (existingData.key_points && existingData.key_points.trim().length > 0) ||
+      (existingData.keypoints && existingData.keypoints.trim().length > 0) ||
+      existingData.voice_record ||
+      existingData.reference_video ||
+      existingData.reference_video_url
+    );
+
+    if (hasInitialData) {
+      autoLoadedRef.current = true;
+      return;
+    }
+
+    if (matchedScript) {
+      applyScriptData(matchedScript, false);
+      autoLoadedRef.current = true;
+    }
+  }, [matchedScript, existingData, applyScriptData]);
+
+  // Check if form currently has user-entered content before overwriting
+  const hasUserEnteredContent = useCallback(() => {
+    return Boolean(
+      (script && script.trim().length > 0) ||
+      (hooks && hooks.trim().length > 0) ||
+      voiceRecord ||
+      referenceVideo
+    );
+  }, [script, hooks, voiceRecord, referenceVideo]);
+
+  // Manual [Load from Script] handler
+  const handleLoadFromScript = () => {
+    if (!effectiveProductName || !selectedLanguage) {
+      toast.error('Both Product Name and Language must be assigned to load script');
+      return;
+    }
+
+    if (!matchedScript) {
+      toast.error(`No matching script found for ${effectiveProductName} - ${selectedLanguage}`);
+      return;
+    }
+
+    if (hasUserEnteredContent()) {
+      setIsConfirmModalOpen(true);
+    } else {
+      applyScriptData(matchedScript, true);
+    }
+  };
+
+  // Navigate to Script Management section
+  const handleNavigateToScriptManagement = () => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.set('subview', 'script');
+      return next;
+    });
+  };
+
+  // Audio upload handler for custom voice recording
   const handleAudioFileSelect = async (file: File) => {
     if (!file) return;
 
-    // Validate audio extension / type
     const validExts = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'webm'];
     const fileExt = file.name.split('.').pop()?.toLowerCase() || '';
     if (!validExts.includes(fileExt) && !file.type.startsWith('audio/')) {
@@ -5148,7 +5458,6 @@ const ShareScriptForm = ({
       return;
     }
 
-    // Size limit 50MB
     if (file.size > 50 * 1024 * 1024) {
       toast.error('Audio file size must be less than 50MB');
       return;
@@ -5189,7 +5498,6 @@ const ShareScriptForm = ({
 
       setVoiceRecord(newVoiceRecord);
 
-      // Clean up previous storage file if replacing
       if (voiceRecord?.storage_path && voiceRecord.storage_path !== filePath) {
         supabaseAdmin.storage
           .from('influencer-profiles')
@@ -5197,20 +5505,22 @@ const ShareScriptForm = ({
           .catch(e => console.warn('Previous voice record delete error:', e));
       }
 
-      // Persist immediately so audio isn't lost on refresh or navigation
-      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
       await onSave({
         reference_video_received: scriptShared,
         script_shared: scriptShared,
-        concept: finalConcept,
-        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
+        concept: effectiveProductName || '',
+        product_name: effectiveProductName || '',
+        language: selectedLanguage || '',
+        script_id: matchedScript?.id || existingData.script_id || null,
         hooks: hooks || '',
+        key_points: hooks || '',
+        keypoints: hooks || '',
         script: script || '',
         voice_record: newVoiceRecord,
-        keypoints: existingData.keypoints || '',
+        reference_video: referenceVideo || null,
         link: existingData.link || '',
         reference_videos_list: existingData.reference_videos_list || []
-      });
+      }, scriptShared);
 
       toast.success('Voice recording uploaded and saved successfully!', { id: toastId });
     } catch (err: any) {
@@ -5237,60 +5547,70 @@ const ShareScriptForm = ({
     }
 
     try {
-      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
       await onSave({
         reference_video_received: scriptShared,
         script_shared: scriptShared,
-        concept: finalConcept,
-        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
+        concept: effectiveProductName || '',
+        product_name: effectiveProductName || '',
+        language: selectedLanguage || '',
+        script_id: matchedScript?.id || existingData.script_id || null,
         hooks: hooks || '',
+        key_points: hooks || '',
+        keypoints: hooks || '',
         script: script || '',
         voice_record: null,
-        keypoints: existingData.keypoints || '',
+        reference_video: referenceVideo || null,
         link: existingData.link || '',
         reference_videos_list: existingData.reference_videos_list || []
-      });
+      }, scriptShared);
       toast.success('Voice recording removed');
     } catch (err: any) {
       console.error('Error removing voice record:', err);
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleAudioFileSelect(e.dataTransfer.files[0]);
+  const handleRemoveReferenceVideo = async () => {
+    setReferenceVideo(null);
+    try {
+      await onSave({
+        reference_video_received: scriptShared,
+        script_shared: scriptShared,
+        concept: effectiveProductName || '',
+        product_name: effectiveProductName || '',
+        language: selectedLanguage || '',
+        script_id: matchedScript?.id || existingData.script_id || null,
+        hooks: hooks || '',
+        key_points: hooks || '',
+        keypoints: hooks || '',
+        script: script || '',
+        voice_record: voiceRecord || null,
+        reference_video: null,
+        link: existingData.link || '',
+        reference_videos_list: existingData.reference_videos_list || []
+      }, scriptShared);
+      toast.success('Reference video removed');
+    } catch (err: any) {
+      console.error('Error removing reference video:', err);
     }
   };
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const finalConcept = concept.trim() || (resolvedProductInfo.isAssigned ? resolvedProductName : '');
       setScriptShared(true);
       await onSave({ 
         reference_video_received: true,
         script_shared: true,
-        concept: finalConcept, 
-        product_name: resolvedProductInfo.isAssigned ? resolvedProductName : '',
+        concept: effectiveProductName || '', 
+        product_name: effectiveProductName || '',
+        language: selectedLanguage || '',
+        script_id: matchedScript?.id || existingData.script_id || null,
         hooks: hooks || '',
+        key_points: hooks || '',
+        keypoints: hooks || '', 
         script: script || '', 
         voice_record: voiceRecord || null,
-        keypoints: existingData.keypoints || '', 
+        reference_video: referenceVideo || null,
         link: existingData.link || '', 
         reference_videos_list: existingData.reference_videos_list || []
       }, true);
@@ -5305,9 +5625,10 @@ const ShareScriptForm = ({
   };
 
   return (
-    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-5 animate-fade-in">
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-6 animate-fade-in">
+      
       {/* 1. Checkbox: Script & Reference Materials Shared */}
-      <div className="flex items-center gap-3 bg-[#0b1329] p-3.5 sm:p-4 rounded-xl border border-slate-800/90">
+      <div className="flex items-center gap-3 bg-[#0b1329] p-3.5 sm:p-4 rounded-xl border border-slate-800/90 shadow-sm">
         <input 
           type="checkbox" 
           id="script-shared-checkbox"
@@ -5320,120 +5641,210 @@ const ShareScriptForm = ({
         </label>
       </div>
 
-      {/* 2-Column Responsive Form Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 sm:gap-x-6 gap-y-6 sm:gap-y-7">
+      {/* 2. TOP ROW: PRODUCT & LANGUAGE + [Load from Script] */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+        
         {/* ROW 1 - COL 1: Product / Campaign Concept */}
         <div className="space-y-1.5 flex flex-col justify-start">
           <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
             PRODUCT / CAMPAIGN CONCEPT
           </label>
-          <div className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 flex items-center justify-between gap-3 h-[88px] sm:h-[92px]">
+          <div className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 flex items-center justify-between gap-3 h-[88px] sm:h-[92px] shadow-sm">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-10 h-10 rounded-xl bg-purple-950/60 border border-purple-800/40 flex items-center justify-center text-purple-400 shrink-0">
-                <Package size={20} className={resolvedProductInfo.isAssigned ? 'text-purple-400' : 'text-slate-500'} />
+                <Package size={20} className={effectiveProductName ? 'text-purple-400' : 'text-slate-500'} />
               </div>
               <div className="min-w-0">
                 <span className={`text-sm sm:text-base font-bold truncate block ${
-                  resolvedProductInfo.isAssigned ? 'text-white' : 'text-slate-500 italic'
+                  effectiveProductName ? 'text-white' : 'text-slate-500 italic'
                 }`}>
-                  {resolvedProductName}
+                  {effectiveProductName || 'Product not assigned'}
                 </span>
                 <span className="text-[11px] text-slate-400 block mt-0.5">
-                  Assigned Campaign Product
+                  Assigned Campaign Product (Video {videoNumber})
                 </span>
               </div>
             </div>
             <span className="text-[11px] text-purple-300 font-medium flex items-center gap-1.5 bg-purple-950/70 px-3 py-1.5 rounded-lg border border-purple-800/50 shrink-0 select-none shadow-sm">
-              <Lock size={12} /> Auto-filled from Campaign Influencer
+              <Lock size={12} /> Auto-filled
             </span>
           </div>
         </div>
 
-        {/* ROW 1 - COL 2: Upload Voice Record */}
+        {/* ROW 1 - COL 2: Language + Load from Script */}
         <div className="space-y-1.5 flex flex-col justify-start">
           <div className="flex items-center justify-between">
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-              UPLOAD VOICE RECORD
+              LANGUAGE & SCRIPT SOURCE
+            </label>
+            {matchedScript ? (
+              <span className="text-[11px] text-emerald-400 bg-emerald-950/70 border border-emerald-800/50 px-2.5 py-0.5 rounded-md flex items-center gap-1 font-mono">
+                <CheckCircle2 size={12} /> Script ID: {matchedScript.id ? String(matchedScript.id).slice(0, 8) : 'sc_matched'}
+              </span>
+            ) : (
+              <span className="text-[11px] text-amber-400/90 bg-amber-950/50 border border-amber-800/40 px-2 py-0.5 rounded-md flex items-center gap-1">
+                <AlertTriangle size={11} /> Unlinked
+              </span>
+            )}
+          </div>
+
+          <div className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 flex items-center justify-between gap-3 h-[88px] sm:h-[92px] shadow-sm">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-purple-950/60 border border-purple-800/40 flex items-center justify-center text-purple-400 shrink-0">
+                <Globe size={20} />
+              </div>
+              <div className="min-w-0">
+                {availableLanguages.length > 1 ? (
+                  <div className="relative">
+                    <select
+                      value={selectedLanguage}
+                      onChange={(e) => setSelectedLanguage(e.target.value)}
+                      className="bg-[#070c18] text-white text-xs sm:text-sm font-bold border border-slate-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-purple-500 cursor-pointer max-w-[160px] truncate"
+                    >
+                      {availableLanguages.map(lang => (
+                        <option key={lang} value={lang} className="bg-slate-900 text-white">
+                          {lang}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-slate-400 block mt-1">
+                      Assigned Creator Language
+                    </span>
+                  </div>
+                ) : (
+                  <div>
+                    <span className="text-sm sm:text-base font-bold text-white truncate block">
+                      {selectedLanguage || 'Language not set'}
+                    </span>
+                    <span className="text-[11px] text-slate-400 block mt-0.5">
+                      Assigned Creator Language
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Load from Script Button */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleLoadFromScript}
+                disabled={isLoadingScripts || !effectiveProductName || !selectedLanguage}
+                title="Load matching model script, key points, audio and video from Script Management"
+                className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-md shadow-purple-600/30 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {isLoadingScripts ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <FileText size={14} />
+                )}
+                <span>Load from Script</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* 3. MISSING MATCH WARNING BANNER */}
+      {!matchedScript && (
+        <div className="bg-amber-950/30 border border-amber-800/40 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm">
+          <div className="flex items-center gap-2.5 text-amber-300">
+            <AlertTriangle size={16} className="text-amber-400 shrink-0" />
+            <span>
+              {!effectiveProductName || !selectedLanguage ? (
+                <>Product Name or Language is not assigned for Video {videoNumber}. Assign them in Campaign Influencer to link a script.</>
+              ) : (
+                <>
+                  No matching script found for <strong className="text-white font-semibold">{effectiveProductName}</strong> — <strong className="text-white font-semibold">{selectedLanguage}</strong>
+                </>
+              )}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleNavigateToScriptManagement}
+            className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 font-semibold transition-colors flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer"
+          >
+            <FilePlus size={13} />
+            <span>Create Script</span>
+          </button>
+        </div>
+      )}
+
+      {/* 4. ROW 2: MODEL SCRIPT & KEY POINTS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+        
+        {/* MODEL SCRIPT */}
+        <div className="space-y-1.5 flex flex-col justify-start">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              MODEL SCRIPT
+            </label>
+            <span className="text-[10px] text-slate-500 font-mono">
+              {script.length}/2000
+            </span>
+          </div>
+          <div className="relative">
+            <textarea 
+              rows={6}
+              value={script} 
+              onChange={e => setScript(e.target.value)} 
+              placeholder="Enter the proposed video talking points, hook, body, and call-to-action..."
+              className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 pb-7 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none min-h-[160px] sm:min-h-[170px]" 
+            />
+          </div>
+        </div>
+
+        {/* KEY POINTS */}
+        <div className="space-y-1.5 flex flex-col justify-start">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              KEY POINTS
+            </label>
+            <span className="text-[10px] text-slate-500 font-mono">
+              {hooks.length}/1000
+            </span>
+          </div>
+          <div className="relative">
+            <textarea 
+              rows={6}
+              value={hooks} 
+              onChange={e => setHooks(e.target.value)} 
+              placeholder="Enter the video hook, key features to highlight, opening line..."
+              className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 pb-7 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none min-h-[160px] sm:min-h-[170px]" 
+            />
+          </div>
+        </div>
+
+      </div>
+
+      {/* 5. ROW 3: REFERENCE AUDIO & REFERENCE VIDEO */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+        
+        {/* REFERENCE AUDIO */}
+        <div className="space-y-1.5 flex flex-col justify-start">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              REFERENCE AUDIO
             </label>
             <span className="text-xs text-slate-500 font-medium">Optional</span>
           </div>
 
-          {!voiceRecord ? (
-            /* Dropzone / Upload Area */
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`border border-dashed rounded-xl px-4 py-3 h-[88px] sm:h-[92px] transition-all cursor-pointer flex items-center justify-between gap-3 select-none ${
-                isDragOver 
-                  ? 'border-purple-500 bg-purple-950/30 ring-2 ring-purple-500/20' 
-                  : 'border-purple-800/60 bg-[#0b1329]/80 hover:border-purple-600 hover:bg-[#0b1329]'
-              }`}
-            >
-              <input 
-                ref={fileInputRef}
-                type="file" 
-                accept=".mp3,.wav,.m4a,.aac,.ogg,.webm,audio/*"
-                onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    handleAudioFileSelect(e.target.files[0]);
-                  }
-                }}
-                className="hidden" 
-              />
-
-              {isUploadingVoice ? (
-                <div className="flex items-center justify-center gap-3 w-full py-2">
-                  <Loader2 size={24} className="text-purple-400 animate-spin shrink-0" />
-                  <div className="text-left">
-                    <span className="text-xs font-bold text-purple-300 block">Uploading voice recording...</span>
-                    <span className="text-[11px] text-slate-500 block">Please wait a moment</span>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-purple-950/80 border border-purple-800/60 flex items-center justify-center text-purple-400 shrink-0 shadow-inner">
-                      <UploadCloud size={20} />
-                    </div>
-                    <div className="truncate min-w-0 text-left">
-                      <p className="text-xs sm:text-sm font-bold text-white truncate">
-                        Upload Voice Recording
-                      </p>
-                      <p className="text-[11px] text-slate-400 truncate">
-                        Drag & drop or click to upload
-                      </p>
-                      <p className="text-[10px] text-slate-500 font-mono truncate">
-                        MP3, WAV, M4A, AAC, OGG, WEBM (Max 50MB)
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-600/30 flex items-center gap-1.5 shrink-0 pointer-events-none"
-                  >
-                    <UploadCloud size={13} />
-                    <span>Choose File</span>
-                  </button>
-                </>
-              )}
-            </div>
-          ) : (
-            /* Uploaded Audio File Card with Audio Player */
-            <div className="bg-[#0b1329] border border-purple-900/50 rounded-xl px-4 py-2.5 h-[88px] sm:h-[92px] flex flex-col justify-between gap-1.5 shadow-sm">
-              {/* Top row: Audio Info + Actions */}
+          {voiceRecord?.url ? (
+            /* Uploaded Audio Card with Audio Player */
+            <div className="bg-[#0b1329] border border-purple-900/50 rounded-xl px-4 py-3 min-h-[120px] flex flex-col justify-between gap-2 shadow-sm">
               <div className="flex items-center justify-between gap-2 min-w-0">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-7 h-7 rounded-lg bg-purple-950/80 border border-purple-800/70 flex items-center justify-center text-purple-400 shrink-0">
-                    <Volume2 size={14} />
+                  <div className="w-8 h-8 rounded-lg bg-purple-950/80 border border-purple-800/70 flex items-center justify-center text-purple-400 shrink-0">
+                    <Volume2 size={16} />
                   </div>
                   <div className="truncate min-w-0">
                     <p className="text-xs font-bold text-white truncate" title={voiceRecord.file_name}>
                       {voiceRecord.file_name}
                     </p>
                     <p className="text-[10px] text-purple-300 font-mono">
-                      {voiceRecord.file_size_formatted || ''}
+                      {voiceRecord.file_size_formatted || 'Reference Audio'}
                     </p>
                   </div>
                 </div>
@@ -5443,13 +5854,13 @@ const ShareScriptForm = ({
                     href={voiceRecord.url} 
                     target="_blank" 
                     rel="noopener noreferrer" 
-                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700/80 shrink-0" 
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700/80 shrink-0" 
                     title="Open Audio in New Tab"
                   >
-                    <ExternalLink size={12} />
+                    <ExternalLink size={13} />
                   </a>
                   <label className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-semibold cursor-pointer transition-colors border border-slate-700/80 flex items-center gap-1 shrink-0">
-                    <UploadCloud size={10} />
+                    <UploadCloud size={11} />
                     <span>Replace</span>
                     <input 
                       type="file" 
@@ -5468,90 +5879,157 @@ const ShareScriptForm = ({
                     className="px-2 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 text-[10px] font-semibold transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                     title="Remove voice recording"
                   >
-                    <Trash2 size={10} />
+                    <Trash2 size={11} />
                     <span>Remove</span>
                   </button>
                 </div>
               </div>
 
-              {/* Bottom row: Compact Audio Player */}
-              <div className="w-full flex items-center">
+              {/* HTML5 Audio Player */}
+              <div className="w-full pt-1">
                 <audio 
                   controls 
                   src={voiceRecord.url} 
-                  className="h-6 w-full rounded accent-purple-500" 
+                  className="h-8 w-full rounded accent-purple-500" 
                   preload="metadata" 
                 />
+              </div>
+            </div>
+          ) : (
+            /* Empty State: Audio Upload Dropzone */
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={(e) => { e.preventDefault(); setIsDragOver(false); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                  handleAudioFileSelect(e.dataTransfer.files[0]);
+                }
+              }}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border border-dashed rounded-xl px-4 py-3 min-h-[120px] transition-all cursor-pointer flex flex-col justify-center items-center gap-1.5 select-none text-center ${
+                isDragOver 
+                  ? 'border-purple-500 bg-purple-950/30 ring-2 ring-purple-500/20' 
+                  : 'border-slate-800 bg-[#0b1329]/80 hover:border-purple-600/70 hover:bg-[#0b1329]'
+              }`}
+            >
+              <input 
+                ref={fileInputRef}
+                type="file" 
+                accept=".mp3,.wav,.m4a,.aac,.ogg,.webm,audio/*"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleAudioFileSelect(e.target.files[0]);
+                  }
+                }}
+                className="hidden" 
+              />
+
+              {isUploadingVoice ? (
+                <div className="flex flex-col items-center justify-center gap-2 py-2">
+                  <Loader2 size={24} className="text-purple-400 animate-spin" />
+                  <span className="text-xs font-bold text-purple-300">Uploading voice recording...</span>
+                </div>
+              ) : (
+                <>
+                  <div className="w-9 h-9 rounded-xl bg-purple-950/80 border border-purple-800/60 flex items-center justify-center text-purple-400 shrink-0">
+                    <Mic size={18} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-300">
+                      No Reference Audio Attached
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Drag & drop or click to upload custom voice recording (Max 50MB)
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* REFERENCE VIDEO */}
+        <div className="space-y-1.5 flex flex-col justify-start">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              REFERENCE VIDEO
+            </label>
+            <span className="text-xs text-slate-500 font-medium">Optional</span>
+          </div>
+
+          {referenceVideo?.url ? (
+            /* Uploaded/Loaded Video Preview Card */
+            <div className="bg-[#0b1329] border border-purple-900/50 rounded-xl p-3 min-h-[120px] flex flex-col justify-between gap-2 shadow-sm">
+              <div className="flex items-center justify-between gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-purple-950/80 border border-purple-800/70 flex items-center justify-center text-purple-400 shrink-0">
+                    <Video size={16} />
+                  </div>
+                  <div className="truncate min-w-0">
+                    <p className="text-xs font-bold text-white truncate" title={referenceVideo.file_name}>
+                      {referenceVideo.file_name}
+                    </p>
+                    <p className="text-[10px] text-purple-300 font-mono">
+                      Script Reference Video
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <a 
+                    href={referenceVideo.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700/80 shrink-0" 
+                    title="Open Video in New Tab"
+                  >
+                    <ExternalLink size={13} />
+                  </a>
+                  <button 
+                    type="button" 
+                    onClick={handleRemoveReferenceVideo} 
+                    className="px-2 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 text-[10px] font-semibold transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                    title="Remove reference video"
+                  >
+                    <Trash2 size={11} />
+                    <span>Remove</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Playable Video Player */}
+              <div className="w-full flex justify-center bg-black/60 rounded-lg overflow-hidden border border-slate-800">
+                <video 
+                  controls 
+                  preload="metadata" 
+                  src={referenceVideo.url} 
+                  className="w-full max-h-[140px] rounded-lg object-contain bg-black" 
+                />
+              </div>
+            </div>
+          ) : (
+            /* Clean Empty State for Video */
+            <div className="border border-dashed border-slate-800 rounded-xl px-4 py-3 min-h-[120px] bg-[#0b1329]/80 flex flex-col justify-center items-center gap-1.5 text-center select-none">
+              <div className="w-9 h-9 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center text-slate-500 shrink-0">
+                <Video size={18} />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-400">
+                  No Reference Video Uploaded
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Upload a reference video in Script Management to preview it here
+                </p>
               </div>
             </div>
           )}
         </div>
 
-        {/* ROW 2 - COL 1: Custom Concept / Angle Notes */}
-        <div className="space-y-1.5 flex flex-col justify-start">
-          <div className="flex items-center justify-between">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-              CUSTOM CONCEPT / ANGLE NOTES
-            </label>
-            <span className="text-xs text-slate-500 font-medium">Optional</span>
-          </div>
-          <div className="relative">
-            <textarea 
-              rows={5}
-              value={concept} 
-              onChange={e => setConcept(e.target.value)} 
-              placeholder="e.g. Morning Glow Routine, Unboxing & First Impressions..."
-              className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 pb-7 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none h-[135px] sm:h-[140px]" 
-            />
-            <span className="absolute bottom-2.5 right-3 text-[10px] text-slate-500 font-mono select-none">
-              {concept.length}/1000
-            </span>
-          </div>
-        </div>
-
-        {/* ROW 2 - COL 2: Key Points */}
-        <div className="space-y-1.5 flex flex-col justify-start">
-          <div className="flex items-center justify-between">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-              KEY POINTS
-            </label>
-            <span className="text-xs text-slate-500 font-medium">Optional</span>
-          </div>
-          <div className="relative">
-            <textarea 
-              rows={5}
-              value={hooks} 
-              onChange={e => setHooks(e.target.value)} 
-              placeholder="Enter the video hook, opening line, attention-grabber..."
-              className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 pb-7 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none h-[135px] sm:h-[140px]" 
-            />
-            <span className="absolute bottom-2.5 right-3 text-[10px] text-slate-500 font-mono select-none">
-              {hooks.length}/1000
-            </span>
-          </div>
-        </div>
-
-        {/* ROW 3: Model Script (Full Width across both columns) */}
-        <div className="space-y-1.5 col-span-1 md:col-span-2">
-          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-            MODEL SCRIPT
-          </label>
-          <div className="relative">
-            <textarea 
-              rows={6}
-              value={script} 
-              onChange={e => setScript(e.target.value)} 
-              placeholder="Enter the proposed video talking points, hook, body, and call-to-action..."
-              className="w-full bg-[#0b1329] border border-slate-800/90 rounded-xl px-4 py-3 pb-7 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500 transition-colors resize-none min-h-[160px] sm:min-h-[170px]" 
-            />
-            <span className="absolute bottom-2.5 right-3 text-[10px] text-slate-500 font-mono select-none">
-              {script.length}/2000
-            </span>
-          </div>
-        </div>
       </div>
 
-      {/* Save Action Button */}
+      {/* 6. SAVE ACTION BUTTON */}
       <div className="flex justify-end pt-3 border-t border-slate-800/90">
         <button 
           type="button"
@@ -5572,6 +6050,25 @@ const ShareScriptForm = ({
           )}
         </button>
       </div>
+
+      {/* CONFIRMATION MODAL: OVERWRITE SCRIPT DETAILS */}
+      <ConfirmModal
+        isOpen={isConfirmModalOpen}
+        title="Replace Current Script Details?"
+        message="Load the script from Script Management? This will replace the current script details."
+        confirmText="Load Script"
+        cancelText="Cancel"
+        isDestructive={false}
+        variant="warning"
+        onClose={() => setIsConfirmModalOpen(false)}
+        onConfirm={() => {
+          if (matchedScript) {
+            applyScriptData(matchedScript, true);
+          }
+          setIsConfirmModalOpen(false);
+        }}
+      />
+
     </div>
   );
 };
