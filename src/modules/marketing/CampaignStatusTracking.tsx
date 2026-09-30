@@ -10,7 +10,7 @@ import {
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Pause, Edit3, Loader2,
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, Activity, Truck, Share2, Globe, GitBranch,
   Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward,
-  FilePlus, CheckCircle2
+  FilePlus, CheckCircle2, Save, Sparkles
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -240,6 +240,70 @@ export const getResolvedProductForVideo = (
     return { productName: 'Product not assigned', isAssigned: false, amount: 0 };
   }
 };
+
+/**
+ * Strict normalizer for matching Product and Language values.
+ * Trims whitespace, ignores lowercase/uppercase, and collapses symbols.
+ */
+export const normalizeScriptMatch = (str: string | null | undefined): string => {
+  if (!str) return '';
+  return str.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+};
+
+/**
+ * Finds a matching Script Management record for a specific influencer and video number.
+ * Strict exact match on BOTH Product AND Creator Language.
+ */
+export function findMatchingScriptForInfluencer(
+  scripts: CampaignScript[],
+  record: any,
+  videoNumber: number
+): CampaignScript | null {
+  if (!scripts || scripts.length === 0 || !record) return null;
+
+  // 1. Resolve assigned product for this video
+  const resolvedProductInfo = getResolvedProductForVideo(record.influencer, videoNumber);
+  const effectiveProduct = resolvedProductInfo.isAssigned
+    ? resolvedProductInfo.productName
+    : (record.ref_concept && videoNumber === 1 ? record.ref_concept : '');
+
+  if (!effectiveProduct) return null;
+  const normProduct = normalizeScriptMatch(effectiveProduct);
+  if (!normProduct) return null;
+
+  // 2. Resolve languages for this creator
+  const rawLangs = record.influencer?.languages || record.dispatch?.languages || [];
+  let influencerLanguages: string[] = [];
+  if (Array.isArray(rawLangs)) {
+    influencerLanguages = rawLangs
+      .filter((l: any) => typeof l === 'string' && !l.startsWith('views_data:'))
+      .map((l: string) => l.trim())
+      .filter(Boolean);
+  } else if (typeof rawLangs === 'string') {
+    influencerLanguages = rawLangs
+      .split(/[,/]+/)
+      .filter((l: string) => !l.startsWith('views_data:'))
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+  }
+
+  // Also check if stepData has an explicit language saved
+  try {
+    const metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+    const stepLang = metadata.videos?.[String(videoNumber)]?.steps?.share_script?.data?.language;
+    if (stepLang && typeof stepLang === 'string' && stepLang.trim()) {
+      influencerLanguages.unshift(stepLang.trim());
+    }
+  } catch (e) {}
+
+  if (influencerLanguages.length === 0) return null;
+
+  return scripts.find(s => {
+    if (normalizeScriptMatch(s.product) !== normProduct) return false;
+    const normScriptLang = normalizeScriptMatch(s.language);
+    return influencerLanguages.some(infLang => normalizeScriptMatch(infLang) === normScriptLang);
+  }) || null;
+}
 
 // =========================================================================
 // PER-VIDEO PRICING RESOLUTION HELPERS
@@ -2106,6 +2170,148 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     return counts;
   }, [activeTrackingRecords, selectedVideoNumber]);
 
+  // Bulk Sync New Scripts across all active influencers safely without overwriting manual customizations
+  const [isSyncingScripts, setIsSyncingScripts] = useState<boolean>(false);
+
+  const handleSyncNewScripts = async () => {
+    if (!campaign?.id) return;
+    setIsSyncingScripts(true);
+    const toastId = toast.loading('Syncing scripts from Script Management...');
+    try {
+      const freshScripts = await fetchCampaignScripts(campaign.id);
+      setCampaignScripts(freshScripts);
+
+      if (!freshScripts || freshScripts.length === 0) {
+        toast.error('No scripts found in Script Management to sync.', { id: toastId });
+        return;
+      }
+
+      let syncedCount = 0;
+      const recordsToUpdate: Array<{ id: string; notes: string }> = [];
+
+      for (const record of activeTrackingRecords) {
+        const assignedVideos = getInfluencerAssignedVideos(record);
+        let recordModified = false;
+        let metadata: any = {};
+        try {
+          metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+        } catch (e) {
+          metadata = {};
+        }
+        if (!metadata.videos) metadata.videos = {};
+
+        for (const vNum of assignedVideos) {
+          const vKey = String(vNum);
+          if (!metadata.videos[vKey]) {
+            metadata.videos[vKey] = { steps: {} };
+          }
+          if (!metadata.videos[vKey].steps) {
+            metadata.videos[vKey].steps = {};
+          }
+
+          const stepObj = metadata.videos[vKey].steps['share_script'] || { completed: false, data: {} };
+          const stepData = stepObj.data || {};
+
+          // Match script for this influencer and video
+          const matching = findMatchingScriptForInfluencer(freshScripts, record, vNum);
+          if (!matching) continue;
+
+          const matchingUpdated = matching.updated_at || matching.created_at;
+          if (stepData.sourceScriptId === matching.id && stepData.sourceScriptUpdatedAt === matchingUpdated) {
+            continue;
+          }
+
+          // Safety check: do not overwrite user-customized text
+          const hasCustomContent = Boolean(
+            (stepData.script && stepData.script.trim().length > 0 && stepData.script !== matching.model_script) ||
+            (stepData.hooks && stepData.hooks.trim().length > 0 && stepData.hooks !== matching.key_points) ||
+            stepData.is_customized
+          );
+
+          if (hasCustomContent) {
+            stepData.has_newer_script_available = true;
+            stepData.newer_script_id = matching.id;
+            stepData.newer_script_updated_at = matchingUpdated;
+            metadata.videos[vKey].steps['share_script'] = {
+              ...stepObj,
+              data: stepData
+            };
+            recordModified = true;
+            continue;
+          }
+
+          const audioUrl = matching.reference_audio_file_path 
+            ? getScriptAudioUrl(matching.reference_audio_file_path)
+            : (matching.reference_audio_url || '');
+          const videoUrl = matching.reference_video_file_path
+            ? getScriptVideoUrl(matching.reference_video_file_path)
+            : (matching.reference_video_url || '');
+
+          const newVoiceRecord = audioUrl ? {
+            file_name: matching.reference_audio_file_path?.split('/').pop() || `${matching.product} Audio`,
+            storage_path: matching.reference_audio_file_path || '',
+            url: audioUrl,
+            uploaded_at: matchingUpdated || new Date().toISOString()
+          } : (stepData.voice_record || null);
+
+          const newReferenceVideo = videoUrl ? {
+            file_name: matching.reference_video_file_path?.split('/').pop() || `${matching.product} Video`,
+            storage_path: matching.reference_video_file_path || '',
+            url: videoUrl,
+            uploaded_at: matchingUpdated || new Date().toISOString()
+          } : (stepData.reference_video || null);
+
+          metadata.videos[vKey].steps['share_script'] = {
+            ...stepObj,
+            completed: stepObj.completed || false,
+            data: {
+              ...stepData,
+              script: matching.model_script || '',
+              hooks: matching.key_points || '',
+              product_name: matching.product,
+              language: matching.language,
+              voice_record: newVoiceRecord,
+              reference_video: newReferenceVideo,
+              sourceScriptId: matching.id,
+              sourceScriptUpdatedAt: matchingUpdated,
+              loadedAt: new Date().toISOString(),
+              has_newer_script_available: false
+            }
+          };
+
+          recordModified = true;
+          syncedCount++;
+        }
+
+        if (recordModified) {
+          metadata.last_updated = new Date().toISOString();
+          recordsToUpdate.push({
+            id: record.id,
+            notes: JSON.stringify(metadata)
+          });
+        }
+      }
+
+      if (recordsToUpdate.length > 0) {
+        for (const item of recordsToUpdate) {
+          await supabaseAdmin
+            .from(SUPABASE_TABLES.influencerStatus)
+            .update({ notes: item.notes, updated_at: new Date().toISOString() })
+            .eq('id', item.id);
+        }
+        await refresh();
+        toast.success(`Successfully synced scripts for ${syncedCount} influencer video(s)!`, { id: toastId });
+      } else {
+        toast.success('All influencer scripts are already up to date!', { id: toastId });
+      }
+    } catch (err: any) {
+      console.error('Error syncing scripts:', err);
+      toast.error('Failed to sync scripts: ' + (err?.message || err), { id: toastId });
+    } finally {
+      setIsSyncingScripts(false);
+    }
+  };
+
   // Overall KPI Counts based on unique filtered influencers
   const kpiCounts = useMemo(() => {
     const total = filteredRecords.length;
@@ -3230,6 +3436,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                {/* Sync New Scripts Button */}
+                <button
+                  type="button"
+                  onClick={handleSyncNewScripts}
+                  disabled={isSyncingScripts || isLoadingCampaignScripts}
+                  className="h-[38px] px-3.5 bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/40 hover:border-purple-500/70 text-purple-300 hover:text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  title="Sync new/updated scripts from Script Management to matching influencers safely without overwriting manual customizations"
+                >
+                  <RefreshCcw size={14} className={isSyncingScripts ? 'animate-spin text-purple-400' : 'text-purple-400'} />
+                  <span className="hidden sm:inline">{isSyncingScripts ? 'Syncing Scripts...' : 'Sync New Scripts'}</span>
+                  <span className="sm:hidden">{isSyncingScripts ? 'Syncing...' : 'Sync Scripts'}</span>
+                </button>
+
                 <div className="relative w-full sm:w-[280px] md:w-[320px]">
                   <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                   <input 
@@ -3442,20 +3661,38 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           const isReDraftReq = cfg.id === 'draft' && currentVideoData.isReDraftRequired;
                           const StepIcon = cfg.icon;
 
+                          // Script availability and progress checks for Share Script step
+                          const isShareScriptStep = cfg.id === 'share_script';
+                          const hasScriptInManagement = isShareScriptStep 
+                            ? Boolean(findMatchingScriptForInfluencer(campaignScripts, record, selectedVideoNumber))
+                            : false;
+                          const isScriptLoaded = isShareScriptStep && Boolean(
+                            stepInfo?.data?.model_script || stepInfo?.data?.script || stepInfo?.data?.script_body || stepInfo?.data?.script_link || stepInfo?.data?.sourceScriptId
+                          );
+
                           let circleStyle = "bg-[#151f32]/60 text-slate-500 border border-slate-800/80 hover:border-slate-700 hover:text-slate-400";
                           let labelStyle = "text-slate-500";
 
                           if (isCompleted) {
-                            circleStyle = "bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.6)] border border-blue-400 hover:scale-105";
-                            labelStyle = "text-blue-400 font-semibold";
+                            // Completed steps across all 6 videos are always styled GREEN (emerald)
+                            circleStyle = "bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105";
+                            labelStyle = "text-emerald-400 font-semibold";
                           } else if (isSkipped) {
                             circleStyle = "bg-amber-500/20 text-amber-400 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] hover:scale-105";
                             labelStyle = "text-amber-400 font-semibold";
                           } else if (isReDraftReq) {
                             circleStyle = "bg-amber-950/80 text-amber-400 border border-amber-600/80 shadow-[0_0_12px_rgba(245,158,11,0.5)] hover:scale-105 animate-pulse";
                             labelStyle = "text-amber-400 font-semibold";
+                          } else if (isShareScriptStep && isScriptLoaded) {
+                            // State B: Script loaded into form but approval checkbox not yet confirmed
+                            circleStyle = "bg-blue-600/20 text-blue-400 border border-blue-500/60 shadow-[0_0_10px_rgba(59,130,246,0.3)] hover:scale-105";
+                            labelStyle = "text-blue-400 font-medium";
+                          } else if (isShareScriptStep && hasScriptInManagement) {
+                            // State A: Script available in Script Management ready to be loaded
+                            circleStyle = "bg-purple-600/20 text-purple-300 border border-purple-500/60 shadow-[0_0_10px_rgba(168,85,247,0.3)] hover:scale-105";
+                            labelStyle = "text-purple-300 font-medium";
                           } else {
-                            // NOT COMPLETED: transparent/dark background, subtle border, muted icon, muted text
+                            // Default pending/unstarted state
                             circleStyle = "bg-[#151f32]/60 text-slate-500 border border-slate-800/80 hover:border-slate-700 hover:text-slate-400";
                             labelStyle = "text-slate-500";
                           }
@@ -3492,7 +3729,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 title={
                                   !isDelivered
                                     ? 'Requires Delivery Confirmation first'
-                                    : `${cfg.label}${isCompleted ? ' (Completed)' : isSkipped ? ' (Skipped)' : isReDraftReq ? ' (Re-Draft Required)' : ' (Not Completed)'}`
+                                    : `${cfg.label}${
+                                        isCompleted 
+                                          ? ' (Completed)' 
+                                          : isSkipped 
+                                          ? ' (Skipped)' 
+                                          : isReDraftReq 
+                                          ? ' (Re-Draft Required)' 
+                                          : isShareScriptStep && isScriptLoaded 
+                                          ? ' (In Progress - Script Loaded)'
+                                          : isShareScriptStep && hasScriptInManagement
+                                          ? ' (Script Available in Script Management)'
+                                          : ' (Not Completed)'
+                                      }`
                                 }
                               >
                                 <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${circleStyle}`}>
@@ -3502,6 +3751,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                     <FastForward size={13} className="text-amber-400" />
                                   ) : isReDraftReq ? (
                                     <span className="font-black text-[9px] text-amber-400 tracking-tight">RD</span>
+                                  ) : isShareScriptStep && hasScriptInManagement && !isScriptLoaded ? (
+                                    <FileText size={13} className="text-purple-300 group-hover:text-white transition-colors" />
                                   ) : (
                                     <StepIcon size={13} className="text-slate-500 group-hover:text-slate-300 transition-colors" />
                                   )}
@@ -3513,10 +3764,10 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 </div>
                               </div>
 
-                              {/* Connecting Line between Sub-Steps */}
+                              {/* Connecting Line between Sub-Steps (Green when both steps are done) */}
                               {idx !== currentVideoData.configs.length - 1 && (
                                 <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
-                                  <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-blue-500' : 'bg-slate-700/60'}`} />
+                                  <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-emerald-500' : 'bg-slate-700/60'}`} />
                                 </div>
                               )}
                             </React.Fragment>
@@ -3530,6 +3781,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 justify-end w-auto min-w-0">
                       {/* Video Status Badge */}
                       {(() => {
+                        const workflowState = getInfluencerCurrentWorkflowState(record, selectedVideoNumber);
+                        const hasMatchingScript = Boolean(findMatchingScriptForInfluencer(campaignScripts, record, selectedVideoNumber));
+                        const shareStep = currentVideoData.steps['share_script'];
+                        const isScriptLoaded = Boolean(
+                          shareStep?.data?.model_script || shareStep?.data?.script || shareStep?.data?.script_body || shareStep?.data?.script_link || shareStep?.data?.sourceScriptId
+                        );
+                        const isShareScriptDone = isInfluencerShareScriptCompleted(record, selectedVideoNumber);
+
                         if (overallStatus.key === 'RE_DISPATCH_REQUIRED' || isReDispatch) {
                           return (
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-amber-950/80 text-amber-300 border border-amber-600/60 animate-pulse flex items-center gap-1.5 whitespace-nowrap shadow-sm">
@@ -3551,7 +3810,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               <span>On Hold</span>
                             </span>
                           );
-                        } else if (currentVideoData.status === 'COMPLETED') {
+                        } else if (currentVideoData.status === 'COMPLETED' || isInfluencerVideoCompleted(record, selectedVideoNumber)) {
                           return (
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
                               <Check size={13} strokeWidth={2.5} />
@@ -3563,6 +3822,72 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-amber-950/80 text-amber-400 border border-amber-600/60 animate-pulse flex items-center gap-1.5 whitespace-nowrap shadow-sm">
                               <AlertTriangle size={13} />
                               <span>Re-Draft Req</span>
+                            </span>
+                          );
+                        } else if (workflowState === 'delivered') {
+                          // Delivered is confirmed, next step is Share Script
+                          if (isScriptLoaded && !isShareScriptDone) {
+                            return (
+                              <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                                <span>In Progress</span>
+                              </span>
+                            );
+                          } else if (hasMatchingScript && !isShareScriptDone) {
+                            return (
+                              <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-purple-950/80 text-purple-300 border border-purple-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                                <FileText size={12} className="text-purple-400" />
+                                <span>Script Available</span>
+                              </span>
+                            );
+                          } else {
+                            return (
+                              <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                                <Package size={12} className="text-emerald-400" />
+                                <span>Delivered</span>
+                              </span>
+                            );
+                          }
+                        } else if (workflowState === 'share_script') {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                              <span>Share Script</span>
+                            </span>
+                          );
+                        } else if (workflowState === 'call_explain') {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                              <span>Call Explain</span>
+                            </span>
+                          );
+                        } else if (workflowState === 'timeline') {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                              <span>Time Line</span>
+                            </span>
+                          );
+                        } else if (workflowState === 'draft') {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                              <span>Draft</span>
+                            </span>
+                          );
+                        } else if (workflowState === 'post_date') {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                              <span>Post Date</span>
+                            </span>
+                          );
+                        } else if (workflowState === 'payment') {
+                          return (
+                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                              <span>Payment</span>
                             </span>
                           );
                         } else if (currentVideoData.status === 'IN_PROGRESS') {
@@ -5175,14 +5500,6 @@ const normalizeReferenceVideo = (raw: any): ReferenceVideoData | null => {
   return null;
 };
 
-/**
- * Strict normalizer for matching Product and Language values.
- * Trims whitespace, ignores lowercase/uppercase, and collapses symbols.
- */
-export const normalizeScriptMatch = (str: string | null | undefined): string => {
-  if (!str) return '';
-  return str.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-};
 
 interface ShareScriptFormProps {
   record: StatusTrackingRecord;
@@ -5338,10 +5655,35 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Script version tracking metadata
+  const [sourceScriptMeta, setSourceScriptMeta] = useState<{
+    id: string | null;
+    updatedAt: string | null;
+    loadedAt: string | null;
+  }>({
+    id: existingData.sourceScriptId || existingData.script_id || null,
+    updatedAt: existingData.sourceScriptUpdatedAt || null,
+    loadedAt: existingData.loadedAt || null,
+  });
+
+  // Check if remote script in Script Management has an update newer than what was loaded
+  const isNewerScriptAvailable = useMemo(() => {
+    if (!matchedScript || !sourceScriptMeta.updatedAt) return false;
+    const remoteTime = new Date(matchedScript.updated_at || matchedScript.created_at).getTime();
+    const localTime = new Date(sourceScriptMeta.updatedAt).getTime();
+    return remoteTime > localTime;
+  }, [matchedScript, sourceScriptMeta.updatedAt]);
+
   // Helper to apply script fields into form
   const applyScriptData = useCallback((s: CampaignScript, showToast = true) => {
     setScript(s.model_script || '');
     setHooks(s.key_points || '');
+    const sUpdated = s.updated_at || s.created_at || new Date().toISOString();
+    setSourceScriptMeta({
+      id: s.id,
+      updatedAt: sUpdated,
+      loadedAt: new Date().toISOString(),
+    });
 
     // Reference Audio
     const audioUrl = s.reference_audio_file_path
@@ -5597,14 +5939,17 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      setScriptShared(true);
+      const isConfirmed = Boolean(scriptShared);
       await onSave({ 
-        reference_video_received: true,
-        script_shared: true,
+        reference_video_received: isConfirmed,
+        script_shared: isConfirmed,
         concept: effectiveProductName || '', 
         product_name: effectiveProductName || '',
         language: selectedLanguage || '',
-        script_id: matchedScript?.id || existingData.script_id || null,
+        script_id: sourceScriptMeta.id || matchedScript?.id || existingData.script_id || null,
+        sourceScriptId: sourceScriptMeta.id || matchedScript?.id || existingData.sourceScriptId || null,
+        sourceScriptUpdatedAt: sourceScriptMeta.updatedAt || matchedScript?.updated_at || matchedScript?.created_at || existingData.sourceScriptUpdatedAt || null,
+        loadedAt: sourceScriptMeta.loadedAt || existingData.loadedAt || new Date().toISOString(),
         hooks: hooks || '',
         key_points: hooks || '',
         keypoints: hooks || '', 
@@ -5613,9 +5958,14 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
         reference_video: referenceVideo || null,
         link: existingData.link || '', 
         reference_videos_list: existingData.reference_videos_list || []
-      }, true);
-      toast.success('Share Script confirmed successfully');
-      onAdvanceStep?.();
+      }, isConfirmed);
+
+      if (isConfirmed) {
+        toast.success('Share Script confirmed successfully');
+        onAdvanceStep?.();
+      } else {
+        toast.success('Script details saved (pending approval checkbox)');
+      }
     } catch (err: any) {
       console.error('Error saving script details:', err);
       toast.error('Failed to save script details: ' + (err?.message || err));
@@ -5673,14 +6023,21 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
 
         {/* ROW 1 - COL 2: Language + Load from Script */}
         <div className="space-y-1.5 flex flex-col justify-start">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-1">
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
               LANGUAGE & SCRIPT SOURCE
             </label>
             {matchedScript ? (
-              <span className="text-[11px] text-emerald-400 bg-emerald-950/70 border border-emerald-800/50 px-2.5 py-0.5 rounded-md flex items-center gap-1 font-mono">
-                <CheckCircle2 size={12} /> Script ID: {matchedScript.id ? String(matchedScript.id).slice(0, 8) : 'sc_matched'}
-              </span>
+              <div className="flex items-center gap-1.5">
+                {isNewerScriptAvailable && (
+                  <span className="text-[10px] text-amber-300 bg-amber-950/80 border border-amber-500/50 px-2 py-0.5 rounded-md flex items-center gap-1 font-bold animate-pulse">
+                    <Sparkles size={10} /> New Script Available
+                  </span>
+                )}
+                <span className="text-[11px] text-emerald-400 bg-emerald-950/70 border border-emerald-800/50 px-2.5 py-0.5 rounded-md flex items-center gap-1 font-mono">
+                  <CheckCircle2 size={12} /> Script ID: {matchedScript.id ? String(matchedScript.id).slice(0, 8) : 'sc_matched'}
+                </span>
+              </div>
             ) : (
               <span className="text-[11px] text-amber-400/90 bg-amber-950/50 border border-amber-800/40 px-2 py-0.5 rounded-md flex items-center gap-1">
                 <AlertTriangle size={11} /> Unlinked
@@ -5730,15 +6087,25 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
                 type="button"
                 onClick={handleLoadFromScript}
                 disabled={isLoadingScripts || !effectiveProductName || !selectedLanguage}
-                title="Load matching model script, key points, audio and video from Script Management"
-                className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-md shadow-purple-600/30 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                title={
+                  isNewerScriptAvailable
+                    ? 'A newer version of this script is available in Script Management! Click to load updated script.'
+                    : 'Load matching model script, key points, audio and video from Script Management'
+                }
+                className={`px-3.5 py-2 rounded-xl disabled:opacity-40 text-white text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed ${
+                  isNewerScriptAvailable
+                    ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/30 ring-1 ring-amber-400/50'
+                    : 'bg-purple-600 hover:bg-purple-500 shadow-purple-600/30'
+                }`}
               >
                 {isLoadingScripts ? (
                   <Loader2 size={14} className="animate-spin" />
+                ) : isNewerScriptAvailable ? (
+                  <Sparkles size={14} className="text-amber-200" />
                 ) : (
                   <FileText size={14} />
                 )}
-                <span>Load from Script</span>
+                <span>{isNewerScriptAvailable ? 'Load Updated Script' : 'Load from Script'}</span>
               </button>
             </div>
           </div>
@@ -6035,17 +6402,26 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
           type="button"
           onClick={handleSave} 
           disabled={isSaving || isUploadingVoice}
-          className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-purple-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+          className={`text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer ${
+            scriptShared 
+              ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20' 
+              : 'bg-purple-600 hover:bg-purple-500 shadow-purple-600/20'
+          }`}
         >
           {isSaving ? (
             <>
               <Loader2 size={16} className="animate-spin" />
-              <span>Confirming...</span>
+              <span>{scriptShared ? 'Confirming...' : 'Saving...'}</span>
             </>
-          ) : (
+          ) : scriptShared ? (
             <>
               <Check size={16} strokeWidth={2.5} />
               <span>CONFIRM SHARE SCRIPT</span>
+            </>
+          ) : (
+            <>
+              <Save size={16} />
+              <span>SAVE SCRIPT DETAILS</span>
             </>
           )}
         </button>
