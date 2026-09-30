@@ -1409,6 +1409,31 @@ export const isInfluencerShareScriptCompleted = (record: StatusTrackingRecord, v
   return Boolean(step?.completed);
 };
 
+// Top-level alias ensuring isShareScriptCompleted is always declared and safely accessible
+export const isShareScriptCompleted = isInfluencerShareScriptCompleted;
+
+/**
+ * Checks if Share Script step is currently in progress (concept, proposed script, or voice note drafted).
+ */
+export const isInfluencerShareScriptInProgress = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const step = vData.steps['share_script'];
+  const data = step?.data || {};
+  return Boolean(
+    data.concept || 
+    data.script || 
+    data.hooks || 
+    data.voice_record || 
+    data.keypoints || 
+    data.link || 
+    (data.reference_videos_list && data.reference_videos_list.length > 0)
+  );
+};
+
 /**
  * Checks if the Call & Explain step for an influencer in a given video number was explicitly marked as Call Skipped.
  */
@@ -1512,13 +1537,14 @@ export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, video
  */
 export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, videoNumber: number): string => {
   return getCurrentWorkflowState(record, videoNumber, {
-    isShareScriptCompleted,
-    isCallCompleted,
-    isCallSkipped,
-    isTimelineCompleted,
-    isDraftCompleted,
-    isPostDateCompleted,
-    isPaymentCompleted,
+    isShareScriptCompleted: isInfluencerShareScriptCompleted,
+    isShareScriptInProgress: isInfluencerShareScriptInProgress,
+    isCallCompleted: isInfluencerCallCompleted,
+    isCallSkipped: isInfluencerCallSkipped,
+    isTimelineCompleted: isInfluencerTimelineCompleted,
+    isDraftCompleted: isInfluencerDraftCompleted,
+    isPostDateCompleted: isInfluencerPostDateCompleted,
+    isPaymentCompleted: isInfluencerPaymentCompleted,
     getDeliveryStatus: getInfluencerDeliveryStatus,
     isVideoStarted: isInfluencerVideoStarted
   });
