@@ -14,7 +14,9 @@ import {
   Volume2, 
   Eye,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Copy,
+  Check
 } from 'lucide-react';
 import type { CampaignScript } from '../../types';
 import { getScriptAudioUrl, getScriptVideoUrl } from '../../services/campaignScriptService';
@@ -34,6 +36,65 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
   const [isExpandedScript, setIsExpandedScript] = useState(false);
   const [isExpandedKeyPoints, setIsExpandedKeyPoints] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Copy to clipboard states
+  const [copiedScript, setCopiedScript] = useState(false);
+  const [copiedKeyPoints, setCopiedKeyPoints] = useState(false);
+  const scriptTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const keyPointsTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (scriptTimeoutRef.current) clearTimeout(scriptTimeoutRef.current);
+      if (keyPointsTimeoutRef.current) clearTimeout(keyPointsTimeoutRef.current);
+    };
+  }, []);
+
+  const handleCopyScript = async () => {
+    const textToCopy = script.model_script || '';
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = textToCopy;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopiedScript(true);
+      if (scriptTimeoutRef.current) clearTimeout(scriptTimeoutRef.current);
+      scriptTimeoutRef.current = setTimeout(() => {
+        setCopiedScript(false);
+      }, 1800);
+    } catch (err) {
+      console.error('Failed to copy model script to clipboard:', err);
+    }
+  };
+
+  const handleCopyKeyPoints = async () => {
+    const textToCopy = script.key_points || '';
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = textToCopy;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopiedKeyPoints(true);
+      if (keyPointsTimeoutRef.current) clearTimeout(keyPointsTimeoutRef.current);
+      keyPointsTimeoutRef.current = setTimeout(() => {
+        setCopiedKeyPoints(false);
+      }, 1800);
+    } catch (err) {
+      console.error('Failed to copy key points to clipboard:', err);
+    }
+  };
 
   // Media preview modal states
   const [activeMediaModal, setActiveMediaModal] = useState<{
@@ -121,9 +182,30 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
 
           {/* Model Script Section */}
           <div className="mb-4">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-              <FileText size={12} className="text-purple-400" />
-              <span>Model Script</span>
+            <div className="flex items-center gap-2 mb-1.5">
+              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <FileText size={12} className="text-purple-400" />
+                <span>Model Script</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyScript}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all duration-150 cursor-pointer ${
+                  copiedScript
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+                title={copiedScript ? 'Copied to clipboard' : 'Copy Model Script'}
+              >
+                {copiedScript ? (
+                  <>
+                    <Check size={11} className="text-emerald-400" />
+                    <span className="text-[10px] font-semibold text-emerald-400">Copied</span>
+                  </>
+                ) : (
+                  <Copy size={11} />
+                )}
+              </button>
             </div>
             <div className="bg-[#070c18] border border-slate-800/80 rounded-xl p-3 text-xs text-slate-300 leading-relaxed relative">
               <p className={!isExpandedScript && isScriptLong ? 'line-clamp-4 whitespace-pre-line' : 'whitespace-pre-line'}>
@@ -153,8 +235,29 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
 
           {/* Key Points Section */}
           <div className="mb-4">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Key Points
+            <div className="flex items-center gap-2 mb-1.5">
+              <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Key Points
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyKeyPoints}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all duration-150 cursor-pointer ${
+                  copiedKeyPoints
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+                title={copiedKeyPoints ? 'Copied to clipboard' : 'Copy Key Points'}
+              >
+                {copiedKeyPoints ? (
+                  <>
+                    <Check size={11} className="text-emerald-400" />
+                    <span className="text-[10px] font-semibold text-emerald-400">Copied</span>
+                  </>
+                ) : (
+                  <Copy size={11} />
+                )}
+              </button>
             </div>
             <div className="bg-[#070c18] border border-slate-800/80 rounded-xl p-3 text-xs text-slate-300 leading-relaxed relative">
               <p className={!isExpandedKeyPoints && isKeyPointsLong ? 'line-clamp-3 whitespace-pre-line' : 'whitespace-pre-line'}>
