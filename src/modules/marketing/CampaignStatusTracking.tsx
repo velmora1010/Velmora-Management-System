@@ -1400,14 +1400,26 @@ export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum:
 };
 
 /**
+ * Checks if Share Script is actually completed/confirmed for an influencer in the given video number.
+ * Independent of delivery status.
+ */
+export const isInfluencerShareScriptCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const step = vData.steps['share_script'];
+  return Boolean(step?.completed);
+};
+
+/**
  * Checks if the Call & Explain step for an influencer in a given video number was explicitly marked as Call Skipped.
  */
 export const isInfluencerCallSkipped = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
-  if (videoNumber === 1 && !isInfluencerDeliveryConfirmed(record)) return false;
-  if (videoNumber > 1 && !isInfluencerVideoStarted(record, videoNumber)) return false;
 
   const vData = getVideoWorkflow(record, videoNumber);
   const callStep = vData.steps['call_explain'];
@@ -1434,9 +1446,86 @@ export const isInfluencerCallSkipped = (record: StatusTrackingRecord, videoNumbe
  */
 export const isInfluencerCallCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerCallSkipped(record, videoNumber)) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
   const vData = getVideoWorkflow(record, videoNumber);
   const callStep = vData.steps['call_explain'];
   return Boolean(callStep?.completed || callStep?.data?.call_explained);
+};
+
+/**
+ * Checks if the Timeline step has actually been completed/confirmed.
+ */
+export const isInfluencerTimelineCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const tlStep = vData.steps['timeline'];
+  return Boolean(tlStep?.completed);
+};
+
+/**
+ * Checks if Draft has actually been completed/submitted.
+ */
+export const isInfluencerDraftCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const dStep = vData.steps['draft'];
+  const hasAttempt = Array.isArray(dStep?.data?.attempts) && dStep.data.attempts.length > 0;
+  return Boolean(dStep?.completed || dStep?.data?.vid || dStep?.data?.video_url || hasAttempt);
+};
+
+/**
+ * Checks if Post Date step has actually been completed/confirmed.
+ */
+export const isInfluencerPostDateCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const pdStep = vData.steps['post_date'];
+  const hasLink = Boolean(pdStep?.data?.link && !isFakeUrl(pdStep.data.link));
+  return Boolean(pdStep?.completed || pdStep?.data?.confirmed || hasLink);
+};
+
+/**
+ * Checks if Payment step is completed (Video > 1).
+ */
+export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const payStep = vData.steps['payment'];
+  return Boolean(payStep?.completed || payStep?.data?.payment_completed);
+};
+
+/**
+ * Checks if NO workflow tracking step has been completed / workflow not started.
+ */
+export const isInfluencerWorkflowNotStarted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  if (isInfluencerShareScriptCompleted(record, videoNumber)) return false;
+  if (isInfluencerCallCompleted(record, videoNumber)) return false;
+  if (isInfluencerCallSkipped(record, videoNumber)) return false;
+  if (isInfluencerTimelineCompleted(record, videoNumber)) return false;
+  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
+  if (isInfluencerPostDateCompleted(record, videoNumber)) return false;
+  if (videoNumber > 1 && isInfluencerPaymentCompleted(record, videoNumber)) return false;
+
+  return true;
 };
 
 /**
@@ -1449,17 +1538,12 @@ export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, vid
     return 're_dispatch';
   }
 
-  // 2. If delivery is not completed for Video 1, it's not started
-  if (videoNumber === 1 && !isInfluencerDeliveryConfirmed(record)) {
+  // 2. If no workflow tracking step has been completed, it's not started
+  if (isInfluencerWorkflowNotStarted(record, videoNumber)) {
     return 'not_started';
   }
 
-  // 3. For Video 2-6, if workflow has not started, it's not started
-  if (videoNumber > 1 && !isInfluencerVideoStarted(record, videoNumber)) {
-    return 'not_started';
-  }
-
-  // 4. Normal video workflow steps
+  // 3. Normal video workflow steps
   const vData = getVideoWorkflow(record, videoNumber);
   if (vData.isReDraftRequired) return 'draft';
   if (vData.activeStepId) {
@@ -1940,29 +2024,25 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       // 9. Top summary step box filter (All, Delivered, Not Started, Share Script, Call Explain, Call Skipped, Time Line, Draft, Post Date, Re-Dispatch, Payment)
       if (selectedSummaryStep) {
         if (selectedSummaryStep === 'delivered') {
-          if (selectedVideoNumber === 1) {
-            if (!isInfluencerDeliveryConfirmed(record)) return false;
-          } else {
-            return false;
-          }
+          if (!isInfluencerDeliveryConfirmed(record)) return false;
         } else if (selectedSummaryStep === 'not_started') {
-          if (isInfluencerInReDispatch(record)) return false;
-          if (selectedVideoNumber === 1) {
-            if (isInfluencerDeliveryConfirmed(record)) return false;
-          } else {
-            if (isInfluencerVideoStarted(record, selectedVideoNumber)) return false;
-          }
-        } else if (selectedSummaryStep === 're_dispatch') {
-          if (!isInfluencerInReDispatch(record)) return false;
+          if (!isInfluencerWorkflowNotStarted(record, selectedVideoNumber)) return false;
+        } else if (selectedSummaryStep === 'share_script') {
+          if (!isInfluencerShareScriptCompleted(record, selectedVideoNumber)) return false;
+        } else if (selectedSummaryStep === 'call_explain') {
+          if (!isInfluencerCallCompleted(record, selectedVideoNumber)) return false;
         } else if (selectedSummaryStep === 'call_skipped') {
           if (!isInfluencerCallSkipped(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 'call_explain') {
-          if (isInfluencerCallSkipped(record, selectedVideoNumber)) return false;
-          const step = getInfluencerActiveSummaryStep(record, selectedVideoNumber);
-          if (step !== 'call_explain') return false;
-        } else {
-          const step = getInfluencerActiveSummaryStep(record, selectedVideoNumber);
-          if (step !== selectedSummaryStep) return false;
+        } else if (selectedSummaryStep === 'timeline') {
+          if (!isInfluencerTimelineCompleted(record, selectedVideoNumber)) return false;
+        } else if (selectedSummaryStep === 'draft') {
+          if (!isInfluencerDraftCompleted(record, selectedVideoNumber)) return false;
+        } else if (selectedSummaryStep === 'post_date') {
+          if (!isInfluencerPostDateCompleted(record, selectedVideoNumber)) return false;
+        } else if (selectedSummaryStep === 'payment') {
+          if (!isInfluencerPaymentCompleted(record, selectedVideoNumber)) return false;
+        } else if (selectedSummaryStep === 're_dispatch') {
+          if (!isInfluencerInReDispatch(record)) return false;
         }
       }
 
@@ -1970,7 +2050,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     });
   }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber, selectedSummaryStep]);
 
-  // Reset Delivered filter automatically if user switches away from Video 1
   // Reset Payment filter automatically if user switches to Video 1 (which has no Payment step)
   // Reset Pay Advance filter if selected
   useEffect(() => {
@@ -2004,57 +2083,54 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
     assigned.forEach(r => {
       // 1. Re-Dispatch
-      const isReDispatch = isInfluencerInReDispatch(r);
-      if (isReDispatch) {
+      if (isInfluencerInReDispatch(r)) {
         counts.re_dispatch++;
         return;
       }
 
-      // Check if call was skipped for this video
-      const isCallSkipped = isInfluencerCallSkipped(r, selectedVideoNumber);
-      if (isCallSkipped) {
+      // 2. Delivered - strictly counts if shipment is Delivered
+      if (isInfluencerDeliveryConfirmed(r)) {
+        counts.delivered++;
+      }
+
+      // 3. Not Started - strictly counts if no workflow step is completed/skipped
+      if (isInfluencerWorkflowNotStarted(r, selectedVideoNumber)) {
+        counts.not_started++;
+      }
+
+      // 4. Share Script - ONLY if Share Script step is actually completed/confirmed
+      if (isInfluencerShareScriptCompleted(r, selectedVideoNumber)) {
+        counts.share_script++;
+      }
+
+      // 5. Call Explain - ONLY if Call & Explain is completed (not skipped)
+      if (isInfluencerCallCompleted(r, selectedVideoNumber)) {
+        counts.call_explain++;
+      }
+
+      // 6. Call Skipped - ONLY if Call & Explain was explicitly marked as Call Skipped
+      if (isInfluencerCallSkipped(r, selectedVideoNumber)) {
         counts.call_skipped++;
       }
 
-      // 2. Video 1 specific counts
-      if (selectedVideoNumber === 1) {
-        const isDelivered = isInfluencerDeliveryConfirmed(r);
-        if (isDelivered) {
-          counts.delivered++;
-        } else {
-          counts.not_started++;
-          return;
-        }
+      // 7. Time Line - ONLY if Timeline step is completed/confirmed
+      if (isInfluencerTimelineCompleted(r, selectedVideoNumber)) {
+        counts.timeline++;
+      }
 
-        const step = getInfluencerActiveSummaryStep(r, 1);
-        if (step && counts[step] !== undefined) {
-          if (step === 'call_explain' && isCallSkipped) {
-            // Already counted in call_skipped
-          } else {
-            counts[step]++;
-          }
-        }
-      } else {
-        // Video 2 to 6
-        const isDelivered = isInfluencerDeliveryConfirmed(r);
-        if (isDelivered) {
-          counts.delivered++;
-        }
+      // 8. Draft - ONLY if Draft step is completed/submitted
+      if (isInfluencerDraftCompleted(r, selectedVideoNumber)) {
+        counts.draft++;
+      }
 
-        const isStarted = isInfluencerVideoStarted(r, selectedVideoNumber);
-        if (!isStarted) {
-          counts.not_started++;
-          return;
-        }
+      // 9. Post Date - ONLY if Post Date step is completed/confirmed
+      if (isInfluencerPostDateCompleted(r, selectedVideoNumber)) {
+        counts.post_date++;
+      }
 
-        const step = getInfluencerActiveSummaryStep(r, selectedVideoNumber);
-        if (step && counts[step] !== undefined) {
-          if (step === 'call_explain' && isCallSkipped) {
-            // Already counted in call_skipped
-          } else {
-            counts[step]++;
-          }
-        }
+      // 10. Payment (for Video > 1)
+      if (selectedVideoNumber > 1 && isInfluencerPaymentCompleted(r, selectedVideoNumber)) {
+        counts.payment++;
       }
     });
 
@@ -3318,7 +3394,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         {prerequisiteSteps.map((pStep, pIdx) => {
                           const isLastPrereq = pIdx === prerequisiteSteps.length - 1;
                           const nextPrereq = !isLastPrereq ? prerequisiteSteps[pIdx + 1] : null;
-                          const isLineActive = pStep.isCompleted && (nextPrereq ? nextPrereq.isCompleted : isDelivered);
+                          const isFirstVideoStepDone = isInfluencerShareScriptCompleted(record, selectedVideoNumber);
+                          const isLineActive = pStep.isCompleted && (nextPrereq ? nextPrereq.isCompleted : isFirstVideoStepDone);
 
                           let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200";
                           let labelStyle = "text-slate-400";
@@ -3372,35 +3449,57 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         {/* 2. SUB-STEPS FOR THE SELECTED VIDEO (Dynamically using currentVideoData.configs) */}
                         {currentVideoData.configs.map((cfg, idx) => {
                           const stepInfo = currentVideoData.steps[cfg.id];
-                          const isCompleted = !!stepInfo?.completed;
-                          const isSkipped = !!stepInfo?.skipped || stepInfo?.status === 'SKIPPED' || !!stepInfo?.data?.call_skipped || !!stepInfo?.data?.is_skipped;
+                          const isCompleted = cfg.id === 'share_script' 
+                            ? isInfluencerShareScriptCompleted(record, selectedVideoNumber)
+                            : cfg.id === 'call_explain'
+                            ? isInfluencerCallCompleted(record, selectedVideoNumber)
+                            : cfg.id === 'timeline'
+                            ? isInfluencerTimelineCompleted(record, selectedVideoNumber)
+                            : cfg.id === 'draft'
+                            ? isInfluencerDraftCompleted(record, selectedVideoNumber)
+                            : cfg.id === 'post_date'
+                            ? isInfluencerPostDateCompleted(record, selectedVideoNumber)
+                            : cfg.id === 'payment'
+                            ? isInfluencerPaymentCompleted(record, selectedVideoNumber)
+                            : !!stepInfo?.completed;
+
+                          const isSkipped = cfg.id === 'call_explain'
+                            ? isInfluencerCallSkipped(record, selectedVideoNumber)
+                            : (!!stepInfo?.skipped || stepInfo?.status === 'SKIPPED' || !!stepInfo?.data?.call_skipped || !!stepInfo?.data?.is_skipped);
+
                           const isReDraftReq = cfg.id === 'draft' && currentVideoData.isReDraftRequired;
-                          const isCurrentActive = cfg.id === currentVideoData.activeStepId;
                           const StepIcon = cfg.icon;
 
-                          let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-blue-500 hover:text-blue-300";
-                          let labelStyle = "text-slate-400";
+                          let circleStyle = "bg-[#151f32]/60 text-slate-500 border border-slate-800/80 hover:border-slate-700 hover:text-slate-400";
+                          let labelStyle = "text-slate-500";
 
-                          if (!isDelivered || (currentVideoData.status === 'NOT_STARTED' && !isCurrentActive && !isCompleted && !isSkipped)) {
-                            circleStyle = "bg-[#090e1c] text-slate-600 border border-slate-800/80 opacity-60";
-                            labelStyle = "text-slate-600";
-                          } else if (isCompleted) {
-                            circleStyle = "bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.5)] border border-emerald-400 hover:scale-105";
-                            labelStyle = "text-emerald-400 font-semibold";
+                          if (isCompleted) {
+                            circleStyle = "bg-blue-600 text-white shadow-[0_0_10px_rgba(37,99,235,0.6)] border border-blue-400 hover:scale-105";
+                            labelStyle = "text-blue-400 font-semibold";
                           } else if (isSkipped) {
                             circleStyle = "bg-amber-500/20 text-amber-400 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] hover:scale-105";
                             labelStyle = "text-amber-400 font-semibold";
                           } else if (isReDraftReq) {
                             circleStyle = "bg-amber-950/80 text-amber-400 border border-amber-600/80 shadow-[0_0_12px_rgba(245,158,11,0.5)] hover:scale-105 animate-pulse";
                             labelStyle = "text-amber-400 font-semibold";
-                          } else if (isCurrentActive) {
-                            circleStyle = "bg-blue-600 text-white shadow-[0_0_12px_rgba(37,99,235,0.7)] ring-2 ring-blue-500/30 border border-blue-400 hover:scale-105";
-                            labelStyle = "text-blue-400 font-semibold";
+                          } else {
+                            // NOT COMPLETED: transparent/dark background, subtle border, muted icon, muted text
+                            circleStyle = "bg-[#151f32]/60 text-slate-500 border border-slate-800/80 hover:border-slate-700 hover:text-slate-400";
+                            labelStyle = "text-slate-500";
                           }
 
-                          const nextStep = idx < currentVideoData.configs.length - 1 ? currentVideoData.steps[currentVideoData.configs[idx + 1].id] : null;
-                          const nextStepCompletedOrSkipped = Boolean(nextStep?.completed || nextStep?.skipped || nextStep?.status === 'SKIPPED');
-                          const isLineActive = (isCompleted || isSkipped) && nextStepCompletedOrSkipped;
+                          const nextStepCfg = idx < currentVideoData.configs.length - 1 ? currentVideoData.configs[idx + 1] : null;
+                          const isCurrentStepDone = isCompleted || isSkipped;
+                          const isNextStepDone = nextStepCfg ? (
+                            nextStepCfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, selectedVideoNumber) :
+                            nextStepCfg.id === 'call_explain' ? (isInfluencerCallCompleted(record, selectedVideoNumber) || isInfluencerCallSkipped(record, selectedVideoNumber)) :
+                            nextStepCfg.id === 'timeline' ? isInfluencerTimelineCompleted(record, selectedVideoNumber) :
+                            nextStepCfg.id === 'draft' ? isInfluencerDraftCompleted(record, selectedVideoNumber) :
+                            nextStepCfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, selectedVideoNumber) :
+                            nextStepCfg.id === 'payment' ? isInfluencerPaymentCompleted(record, selectedVideoNumber) :
+                            false
+                          ) : false;
+                          const isLineActive = isCurrentStepDone && isNextStepDone;
 
                           return (
                             <React.Fragment key={`${selectedVideoNumber}-${cfg.id}`}>
@@ -3421,7 +3520,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 title={
                                   !isDelivered
                                     ? 'Requires Delivery Confirmation first'
-                                    : `${cfg.label}${isCompleted ? ' (Completed)' : isSkipped ? ' (Skipped)' : isReDraftReq ? ' (Re-Draft Required)' : ''}`
+                                    : `${cfg.label}${isCompleted ? ' (Completed)' : isSkipped ? ' (Skipped)' : isReDraftReq ? ' (Re-Draft Required)' : ' (Not Completed)'}`
                                 }
                               >
                                 <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${circleStyle}`}>
@@ -3432,7 +3531,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                   ) : isReDraftReq ? (
                                     <span className="font-black text-[9px] text-amber-400 tracking-tight">RD</span>
                                   ) : (
-                                    <StepIcon size={13} />
+                                    <StepIcon size={13} className="text-slate-500 group-hover:text-slate-300 transition-colors" />
                                   )}
                                 </div>
                                 <div className="flex flex-col items-center text-center min-w-0 mt-1">
@@ -3445,7 +3544,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               {/* Connecting Line between Sub-Steps */}
                               {idx !== currentVideoData.configs.length - 1 && (
                                 <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
-                                  <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500' : isCurrentActive ? 'bg-blue-500/50' : 'bg-slate-700/60'}`} />
+                                  <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-blue-500' : 'bg-slate-700/60'}`} />
                                 </div>
                               )}
                             </React.Fragment>
