@@ -39,4 +39,5 @@ export const SUPABASE_TABLES = {
   qcBarcodes: "qc_barcodes",
   rawMaterialBarcodes: "raw_material_barcodes",
   redispatchRecords: "redispatch_records",
+  campaignScripts: "campaign_scripts",
 };

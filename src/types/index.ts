@@ -230,6 +230,21 @@ export interface Campaign {
   created_at?: string;
 }
 
+export interface CampaignScript {
+  id: string;
+  campaign_id: string;
+  product: string;
+  language: string;
+  model_script: string;
+  key_points: string;
+  reference_audio_url?: string | null;
+  reference_audio_file_path?: string | null;
+  reference_video_url?: string | null;
+  reference_video_file_path?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface InfluencerPlatformDetail {
   id?: string;
   influencer_id?: string;
