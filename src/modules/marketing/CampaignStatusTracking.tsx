@@ -45,7 +45,8 @@ import {
   isInfluencerInReDispatch as isInfluencerInReDispatchUtil,
   isInfluencerReDispatchActive as isInfluencerReDispatchActiveUtil,
   isInfluencerWorkflowNotStarted as isWorkflowNotStartedUtil,
-  getInfluencerWorkflowStatus as getInfluencerWorkflowStatusUtil
+  getInfluencerWorkflowStatus as getInfluencerWorkflowStatusUtil,
+  getCurrentWorkflowState
 } from '../../utils/workflowStatusUtils';
 
 interface CampaignStatusTrackingProps {
@@ -1505,37 +1506,40 @@ export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, video
 };
 
 /**
+ * ONE CENTRALIZED WORKFLOW-STATE CALCULATION
+ * Returns the exact current active workflow step for an influencer in a given video number:
+ * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'timeline' | 'draft' | 'post_date' | 'payment' | 'completed'
+ */
+export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, videoNumber: number): string => {
+  return getCurrentWorkflowState(record, videoNumber, {
+    isShareScriptCompleted,
+    isCallCompleted,
+    isCallSkipped,
+    isTimelineCompleted,
+    isDraftCompleted,
+    isPostDateCompleted,
+    isPaymentCompleted,
+    getDeliveryStatus: getInfluencerDeliveryStatus,
+    isVideoStarted: isInfluencerVideoStarted
+  });
+};
+
+/**
  * Checks if NO workflow tracking step has been completed / workflow not started.
  */
 export const isInfluencerWorkflowNotStarted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
 
-  return isWorkflowNotStartedUtil(record, videoNumber, {
-    isShareScriptCompleted: isInfluencerShareScriptCompleted,
-    isCallCompleted: isInfluencerCallCompleted,
-    isCallSkipped: isInfluencerCallSkipped,
-    isTimelineCompleted: isInfluencerTimelineCompleted,
-    isDraftCompleted: isInfluencerDraftCompleted,
-    isPostDateCompleted: isInfluencerPostDateCompleted,
-    isPaymentCompleted: isInfluencerPaymentCompleted
-  });
+  return getInfluencerCurrentWorkflowState(record, videoNumber) === 'not_started';
 };
 
 /**
  * Resolves the single active summary workflow step for an influencer in a given video number:
- * One of: 'delivered' | 'not_started' | 'share_script' | 'call_explain' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment' | 're_dispatch' | null
+ * One of: 'delivered' | 'not_started' | 'share_script' | 'call_explain' | 'timeline' | 'draft' | 'post_date' | 'payment' | 're_dispatch' | null
  */
 export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, videoNumber: number): string | null => {
-  return getInfluencerWorkflowStatusUtil(record, videoNumber, {
-    isShareScriptCompleted: isInfluencerShareScriptCompleted,
-    isCallCompleted: isInfluencerCallCompleted,
-    isCallSkipped: isInfluencerCallSkipped,
-    isTimelineCompleted: isInfluencerTimelineCompleted,
-    isDraftCompleted: isInfluencerDraftCompleted,
-    isPostDateCompleted: isInfluencerPostDateCompleted,
-    isPaymentCompleted: isInfluencerPaymentCompleted
-  });
+  return getInfluencerCurrentWorkflowState(record, videoNumber);
 };
 
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
@@ -1997,26 +2001,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
       // 9. Top summary step box filter (All, Delivered, Not Started, Share Script, Call Explain, Call Skipped, Time Line, Draft, Post Date, Re-Dispatch, Payment)
       if (selectedSummaryStep) {
-        if (selectedSummaryStep === 'delivered') {
-          if (!isInfluencerDeliveryConfirmed(record)) return false;
-        } else if (selectedSummaryStep === 'not_started') {
-          if (!isInfluencerWorkflowNotStarted(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 'share_script') {
-          if (!isInfluencerShareScriptCompleted(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 'call_explain') {
-          if (!isInfluencerCallCompleted(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 'call_skipped') {
-          if (!isInfluencerCallSkipped(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 'timeline') {
-          if (!isInfluencerTimelineCompleted(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 'draft') {
-          if (!isInfluencerDraftCompleted(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 'post_date') {
-          if (!isInfluencerPostDateCompleted(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 'payment') {
-          if (!isInfluencerPaymentCompleted(record, selectedVideoNumber)) return false;
-        } else if (selectedSummaryStep === 're_dispatch') {
-          if (!isInfluencerInReDispatch(record)) return false;
+        const currentState = getInfluencerCurrentWorkflowState(record, selectedVideoNumber);
+        if (currentState !== selectedSummaryStep) {
+          return false;
         }
       }
 
@@ -2056,55 +2043,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     };
 
     assigned.forEach(r => {
-      // 1. Re-Dispatch
-      if (isInfluencerInReDispatch(r)) {
-        counts.re_dispatch++;
-        return;
-      }
-
-      // 2. Delivered - strictly counts if shipment is Delivered
-      if (isInfluencerDeliveryConfirmed(r)) {
-        counts.delivered++;
-      }
-
-      // 3. Not Started - strictly counts if no workflow step is completed/skipped
-      if (isInfluencerWorkflowNotStarted(r, selectedVideoNumber)) {
-        counts.not_started++;
-      }
-
-      // 4. Share Script - ONLY if Share Script step is actually completed/confirmed
-      if (isInfluencerShareScriptCompleted(r, selectedVideoNumber)) {
-        counts.share_script++;
-      }
-
-      // 5. Call Explain - ONLY if Call & Explain is completed (not skipped)
-      if (isInfluencerCallCompleted(r, selectedVideoNumber)) {
-        counts.call_explain++;
-      }
-
-      // 6. Call Skipped - ONLY if Call & Explain was explicitly marked as Call Skipped
-      if (isInfluencerCallSkipped(r, selectedVideoNumber)) {
-        counts.call_skipped++;
-      }
-
-      // 7. Time Line - ONLY if Timeline step is completed/confirmed
-      if (isInfluencerTimelineCompleted(r, selectedVideoNumber)) {
-        counts.timeline++;
-      }
-
-      // 8. Draft - ONLY if Draft step is completed/submitted
-      if (isInfluencerDraftCompleted(r, selectedVideoNumber)) {
-        counts.draft++;
-      }
-
-      // 9. Post Date - ONLY if Post Date step is completed/confirmed
-      if (isInfluencerPostDateCompleted(r, selectedVideoNumber)) {
-        counts.post_date++;
-      }
-
-      // 10. Payment (for Video > 1)
-      if (selectedVideoNumber > 1 && isInfluencerPaymentCompleted(r, selectedVideoNumber)) {
-        counts.payment++;
+      const state = getInfluencerCurrentWorkflowState(r, selectedVideoNumber);
+      if (counts[state] !== undefined) {
+        counts[state]++;
       }
     });
 

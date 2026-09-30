@@ -8,6 +8,31 @@ export interface WorkflowStatusInfo {
   dotClass: string;
 }
 
+export type WorkflowStateKey = 
+  | 're_dispatch'
+  | 'not_started'
+  | 'delivered'
+  | 'share_script'
+  | 'call_explain'
+  | 'call_skipped'
+  | 'timeline'
+  | 'draft'
+  | 'post_date'
+  | 'payment'
+  | 'completed';
+
+export interface WorkflowStepHelpers {
+  isShareScriptCompleted?: (r: any, v: number) => boolean;
+  isCallCompleted?: (r: any, v: number) => boolean;
+  isCallSkipped?: (r: any, v: number) => boolean;
+  isTimelineCompleted?: (r: any, v: number) => boolean;
+  isDraftCompleted?: (r: any, v: number) => boolean;
+  isPostDateCompleted?: (r: any, v: number) => boolean;
+  isPaymentCompleted?: (r: any, v: number) => boolean;
+  getDeliveryStatus?: (r: any) => string;
+  isVideoStarted?: (r: any, v: number) => boolean;
+}
+
 /**
  * Parses notes metadata safely from a record
  */
@@ -136,50 +161,133 @@ export function isInfluencerDeliveryConfirmed(record: any): boolean {
 }
 
 /**
- * Strictly checks if the influencer has completed ZERO workflow steps.
- * (Delivered = false, Share Script = false, Call Explain = false, Timeline = false, 
- * Draft = false, Post Date = false, Re-Dispatch = false).
+ * ONE CENTRALIZED WORKFLOW-STATE CALCULATION
+ * Determines exactly ONE mutually exclusive current workflow state for an influencer
+ * for a specific video number.
+ * 
+ * Possible States:
+ * - 're_dispatch'
+ * - 'not_started'
+ * - 'delivered'
+ * - 'share_script'
+ * - 'call_explain'
+ * - 'call_skipped'
+ * - 'timeline'
+ * - 'draft'
+ * - 'post_date'
+ * - 'payment'
+ * - 'completed'
+ */
+export function getCurrentWorkflowState(
+  record: any,
+  videoNumber: number = 1,
+  helpers?: WorkflowStepHelpers
+): WorkflowStateKey {
+  if (!record) return 'not_started';
+
+  // 1. Re-Dispatch check (Authoritative: pending re-dispatch requirement)
+  if (isInfluencerInReDispatch(record)) {
+    return 're_dispatch';
+  }
+
+  // 2. Delivery check
+  const isDelivered = isInfluencerDeliveryConfirmed(record);
+
+  if (!isDelivered) {
+    const delivStatus = helpers?.getDeliveryStatus 
+      ? helpers.getDeliveryStatus(record)
+      : ((record.dispatch as any)?.dispatch_status || record.status || '');
+    
+    const cleanStatus = (delivStatus || '').toLowerCase();
+    if (cleanStatus === 'delivered') {
+      return 'delivered';
+    }
+    return 'not_started';
+  }
+
+  // 3. For Video > 1: Has this video started?
+  if (videoNumber > 1 && helpers?.isVideoStarted) {
+    if (!helpers.isVideoStarted(record, videoNumber)) {
+      return 'not_started';
+    }
+  }
+
+  // 4. Step 1: Share Script
+  const isScriptCompleted = helpers?.isShareScriptCompleted
+    ? helpers.isShareScriptCompleted(record, videoNumber)
+    : false;
+
+  if (!isScriptCompleted) {
+    return 'share_script';
+  }
+
+  // Step 2: Call & Explain / Call Skipped
+  const isCallSkipped = helpers?.isCallSkipped
+    ? helpers.isCallSkipped(record, videoNumber)
+    : false;
+
+  const isCallCompleted = helpers?.isCallCompleted
+    ? helpers.isCallCompleted(record, videoNumber)
+    : false;
+
+  const isTimelineCompleted = helpers?.isTimelineCompleted
+    ? helpers.isTimelineCompleted(record, videoNumber)
+    : false;
+
+  if (!isCallCompleted && !isCallSkipped) {
+    return 'call_explain';
+  }
+
+  if (isCallSkipped && !isTimelineCompleted) {
+    return 'call_skipped';
+  }
+
+  // Step 3: Timeline
+  if (!isTimelineCompleted) {
+    return 'timeline';
+  }
+
+  // Step 4: Draft
+  const isDraftCompleted = helpers?.isDraftCompleted
+    ? helpers.isDraftCompleted(record, videoNumber)
+    : false;
+
+  if (!isDraftCompleted) {
+    return 'draft';
+  }
+
+  // Step 5: Post Date
+  const isPostDateCompleted = helpers?.isPostDateCompleted
+    ? helpers.isPostDateCompleted(record, videoNumber)
+    : false;
+
+  if (!isPostDateCompleted) {
+    return 'post_date';
+  }
+
+  // Step 6: Payment (Video > 1)
+  if (videoNumber > 1) {
+    const isPaymentCompleted = helpers?.isPaymentCompleted
+      ? helpers.isPaymentCompleted(record, videoNumber)
+      : false;
+
+    if (!isPaymentCompleted) {
+      return 'payment';
+    }
+  }
+
+  return 'completed';
+}
+
+/**
+ * Checks if the influencer is currently at the NOT_STARTED workflow state.
  */
 export function isInfluencerWorkflowNotStarted(
   record: any,
   videoNumber: number = 1,
-  helpers?: {
-    isShareScriptCompleted?: (r: any, v: number) => boolean;
-    isCallCompleted?: (r: any, v: number) => boolean;
-    isCallSkipped?: (r: any, v: number) => boolean;
-    isTimelineCompleted?: (r: any, v: number) => boolean;
-    isDraftCompleted?: (r: any, v: number) => boolean;
-    isPostDateCompleted?: (r: any, v: number) => boolean;
-    isPaymentCompleted?: (r: any, v: number) => boolean;
-  }
+  helpers?: WorkflowStepHelpers
 ): boolean {
-  if (!record) return false;
-
-  // 1. Re-Dispatch pending or active
-  if (isInfluencerInReDispatch(record)) return false;
-  if (isInfluencerReDispatchActive(record)) return false;
-
-  // 2. Delivered confirmation
-  if (isInfluencerDeliveryConfirmed(record)) return false;
-
-  // 3. Workflow steps
-  if (helpers) {
-    if (helpers.isShareScriptCompleted && helpers.isShareScriptCompleted(record, videoNumber)) return false;
-    if (helpers.isCallCompleted && helpers.isCallCompleted(record, videoNumber)) return false;
-    if (helpers.isCallSkipped && helpers.isCallSkipped(record, videoNumber)) return false;
-    if (helpers.isTimelineCompleted && helpers.isTimelineCompleted(record, videoNumber)) return false;
-    if (helpers.isDraftCompleted && helpers.isDraftCompleted(record, videoNumber)) return false;
-    if (helpers.isPostDateCompleted && helpers.isPostDateCompleted(record, videoNumber)) return false;
-    if (videoNumber > 1 && helpers.isPaymentCompleted && helpers.isPaymentCompleted(record, videoNumber)) return false;
-  } else {
-    // Basic direct property checks when helpers not passed
-    if (record.reference_video_received || record.reference_video_url) return false;
-    if (record.draft_received || record.draft_video_url) return false;
-    if (record.final_post_completed || record.final_post_url) return false;
-    if (Number(record.current_step) > 0) return false;
-  }
-
-  return true;
+  return getCurrentWorkflowState(record, videoNumber, helpers) === 'not_started';
 }
 
 /**
@@ -190,50 +298,7 @@ export function isInfluencerWorkflowNotStarted(
 export function getInfluencerWorkflowStatus(
   record: any,
   videoNumber: number = 1,
-  helpers?: {
-    isShareScriptCompleted?: (r: any, v: number) => boolean;
-    isCallCompleted?: (r: any, v: number) => boolean;
-    isCallSkipped?: (r: any, v: number) => boolean;
-    isTimelineCompleted?: (r: any, v: number) => boolean;
-    isDraftCompleted?: (r: any, v: number) => boolean;
-    isPostDateCompleted?: (r: any, v: number) => boolean;
-    isPaymentCompleted?: (r: any, v: number) => boolean;
-  }
+  helpers?: WorkflowStepHelpers
 ): string {
-  // 1. Re-Dispatch check (Authoritative: pending re-dispatch requirement)
-  if (isInfluencerInReDispatch(record)) {
-    return 're_dispatch';
-  }
-
-  // 2. Not Started check (Strictly 0 steps completed)
-  if (isInfluencerWorkflowNotStarted(record, videoNumber, helpers)) {
-    return 'not_started';
-  }
-
-  // 3. Workflow steps in reverse chronological order
-  if (helpers?.isPostDateCompleted && helpers.isPostDateCompleted(record, videoNumber)) {
-    return 'post_date';
-  }
-  if (helpers?.isDraftCompleted && helpers.isDraftCompleted(record, videoNumber)) {
-    return 'draft';
-  }
-  if (helpers?.isTimelineCompleted && helpers.isTimelineCompleted(record, videoNumber)) {
-    return 'timeline';
-  }
-  if (helpers?.isCallCompleted && helpers.isCallCompleted(record, videoNumber)) {
-    return 'call_explain';
-  }
-  if (helpers?.isCallSkipped && helpers.isCallSkipped(record, videoNumber)) {
-    return 'call_skipped';
-  }
-  if (helpers?.isShareScriptCompleted && helpers.isShareScriptCompleted(record, videoNumber)) {
-    return 'share_script';
-  }
-
-  // 4. Delivered
-  if (isInfluencerDeliveryConfirmed(record)) {
-    return 'delivered';
-  }
-
-  return 'not_started';
+  return getCurrentWorkflowState(record, videoNumber, helpers);
 }
