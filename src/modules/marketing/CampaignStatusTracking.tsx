@@ -1602,6 +1602,23 @@ export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, video
 };
 
 /**
+ * Checks if all workflow steps for an influencer in a given video number are completed.
+ */
+export const isInfluencerVideoCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  const isDelivered = isInfluencerDeliveryConfirmed(record);
+  if (!isDelivered) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  if (videoNumber === 1) {
+    return isInfluencerPostDateCompleted(record, 1);
+  }
+  return isInfluencerPaymentCompleted(record, videoNumber);
+};
+
+/**
  * ONE CENTRALIZED WORKFLOW-STATE CALCULATION
  * Returns the exact current active workflow step for an influencer in a given video number:
  * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'timeline' | 'draft' | 'post_date' | 'payment' | 'completed'
