@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2, FileText } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { AddCampaignInfluencer } from './AddCampaignInfluencer';
 import { CampaignInfluencerList } from './CampaignInfluencerList';
 import { CampaignDispatchedList } from './CampaignDispatchedList';
 import { CampaignStatusTracking } from './CampaignStatusTracking';
+import { CampaignScriptSection } from './CampaignScriptSection';
 import { CampaignAnalytics } from './CampaignAnalytics';
 import { CampaignCalendar } from './CampaignCalendar';
 import { CampaignInfoTab } from './CampaignInfoTab';
@@ -26,7 +27,7 @@ interface CampaignDetailsProps {
   onCampaignUpdate?: (campaign: Campaign) => void;
 }
 
-type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'calendar' | 'analytics';
+type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'script' | 'calendar' | 'analytics';
 
 import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
 
@@ -34,7 +35,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const [searchParams, setSearchParams] = useSearchParams();
 
   const subviewParam = searchParams.get('subview');
-  const validSubviews: CampaignView[] = ['overview', 'add-influencer', 'influencer-list', 'dispatched-list', 'status-tracking', 'calendar', 'analytics'];
+  const validSubviews: CampaignView[] = ['overview', 'add-influencer', 'influencer-list', 'dispatched-list', 'status-tracking', 'script', 'calendar', 'analytics'];
   const currentView: CampaignView = (subviewParam && validSubviews.includes(subviewParam as CampaignView))
     ? (subviewParam as CampaignView)
     : 'overview';
@@ -402,6 +403,8 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                />;
       case 'status-tracking':
         return <CampaignStatusTracking campaign={campaign} onBack={() => handleViewChange('overview')} />;
+      case 'script':
+        return <CampaignScriptSection campaign={campaign} onBack={() => handleViewChange('overview')} />;
       case 'calendar':
         return <CampaignCalendar campaign={campaign} onBack={() => handleViewChange('overview')} onNavigateToStatusTracking={() => handleViewChange('status-tracking')} />;
       case 'analytics':
@@ -422,7 +425,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             {campaign.status}
           </span>
         </div>
-        <div className="flex items-center gap-2 sm:gap-2.5 overflow-x-auto max-w-full pb-1 scrollbar-none">
+        <div className="flex items-center gap-2 sm:gap-2.5 overflow-x-auto max-w-full pb-1 scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <button 
             type="button"
             onClick={(e) => { e.preventDefault(); handleViewChange('overview'); }}
@@ -450,6 +453,13 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'status-tracking' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
           >
             <Settings size={15} /> Status Tracking
+          </button>
+          <button 
+            type="button"
+            onClick={(e) => { e.preventDefault(); handleViewChange('script'); }}
+            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'script' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
+          >
+            <FileText size={15} /> Script
           </button>
           <button 
             type="button"

@@ -2,7 +2,7 @@ export interface DepartmentNavigation {
   route: string;
   marketingView?: 'home' | 'influencer-dashboard' | 'influence-db';
   dashboardView?: 'overview' | 'create-campaign' | 'campaign-details';
-  campaignView?: 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'calendar' | 'analytics';
+  campaignView?: 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'script' | 'calendar' | 'analytics';
   selectedCampaignId?: string;
   editingInfluencerId?: string;
   activeTab?: string;
