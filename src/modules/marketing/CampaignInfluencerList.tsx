@@ -14,7 +14,7 @@ import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookVie
 import { getCanonicalInfluencerPostDates } from '../../utils/influencerDateUtils';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
-import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName } from '../../components/marketing/InfluencerFilterDrawer';
+import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName, isAutoDmConnected } from '../../components/marketing/InfluencerFilterDrawer';
 import { areFilterValuesEqual } from '../../utils/filterUtils';
 import { CampaignInfluencerAnalytics } from './CampaignInfluencerAnalytics';
 import { CampaignInfluencerAnalyticsFilterDrawer, CampaignAnalyticsFilterState, initialAnalyticsFilterState } from '../../components/marketing/CampaignInfluencerAnalyticsFilterDrawer';
@@ -343,7 +343,7 @@ City: ${influencer.city}`;
                 </div>
                 <div>
                   <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Auto DM Tool</span>
-                  <span className="text-slate-200 font-medium">{influencer.auto_dm ? 'Yes' : 'No'}</span>
+                  <span className="text-slate-200 font-medium">{isAutoDmConnected(influencer.auto_dm) ? 'Yes' : 'No'}</span>
                 </div>
 
                 <div className="col-span-1 sm:col-span-1 md:col-span-2">
@@ -891,7 +891,10 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
 
     // 4. Auto DM Tool Filter
     if (filterState.autoDmStatus && filterState.autoDmStatus !== 'all') {
-      const isConnected = Boolean(influencer.auto_dm);
+      if (!isActiveStatus(influencer.is_archived)) {
+        return false;
+      }
+      const isConnected = isAutoDmConnected(influencer.auto_dm);
       if (filterState.autoDmStatus === 'connected' && !isConnected) {
         return false;
       }

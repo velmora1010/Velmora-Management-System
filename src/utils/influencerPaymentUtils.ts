@@ -82,6 +82,19 @@ export function normalizePaymentMethod(rawMethod: any): NormalizedPaymentMethod 
   // Clean alphanumeric + lowercase
   const clean = str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+  // Explicit null / empty placeholders
+  if (
+    clean === 'null' ||
+    clean === 'none' ||
+    clean === 'na' ||
+    clean === 'nil' ||
+    clean === 'undefined' ||
+    clean === 'notapplicable' ||
+    clean === 'nopayment'
+  ) {
+    return null;
+  }
+
   // Combined mode like "bank / upi"
   if (clean.includes('bank') && clean.includes('upi')) {
     return 'UPI';
@@ -303,54 +316,75 @@ export function parseBankDetailsText(input?: any): {
  */
 export function parseExcelPaymentDetails(params: ParseExcelPaymentParams): NormalizedPaymentDetails {
   const rawMode = params.paymentMode !== undefined && params.paymentMode !== null ? String(params.paymentMode).trim() : '';
+
+  const isPlaceholderValue = (val: any): boolean => {
+    if (val === undefined || val === null) return true;
+    const v = String(val).trim().toLowerCase();
+    return (
+      !v ||
+      v === 'null' ||
+      v === 'undefined' ||
+      v === '—' ||
+      v === '-' ||
+      v === '--' ||
+      v === 'na' ||
+      v === 'n/a' ||
+      v === 'none' ||
+      v === 'nil' ||
+      v === '0' ||
+      v === 'available' ||
+      v === 'not applicable' ||
+      v === 'no payment'
+    );
+  };
   
   // Safe string coercion for financial identifiers
   let rawUpi = params.upiNumber !== undefined && params.upiNumber !== null
     ? String(params.upiNumber).trim()
     : (params.payments !== undefined && params.payments !== null ? String(params.payments).trim() : '');
-  if (rawUpi.toLowerCase() === 'null' || rawUpi.toLowerCase() === 'undefined' || rawUpi === '—') {
+  if (isPlaceholderValue(rawUpi)) {
     rawUpi = '';
   }
 
   let rawAccNum = params.accountNumber !== undefined && params.accountNumber !== null ? String(params.accountNumber).trim() : '';
-  if (rawAccNum.toLowerCase() === 'null' || rawAccNum.toLowerCase() === 'undefined' || rawAccNum === '—' || rawAccNum.toLowerCase() === 'available') {
+  if (isPlaceholderValue(rawAccNum)) {
     rawAccNum = '';
   }
 
   let rawAccHolder = params.accountHolderName !== undefined && params.accountHolderName !== null ? String(params.accountHolderName).trim() : '';
-  if (rawAccHolder.toLowerCase() === 'null' || rawAccHolder.toLowerCase() === 'undefined' || rawAccHolder === '—') {
+  if (isPlaceholderValue(rawAccHolder)) {
     rawAccHolder = '';
   }
 
   let rawIfsc = params.ifscCode !== undefined && params.ifscCode !== null ? String(params.ifscCode).trim().toUpperCase() : '';
-  if (rawIfsc.toLowerCase() === 'null' || rawIfsc.toLowerCase() === 'undefined' || rawIfsc === '—') {
+  if (isPlaceholderValue(rawIfsc)) {
     rawIfsc = '';
   }
 
   let rawBank = params.bankName !== undefined && params.bankName !== null ? String(params.bankName).trim() : '';
-  if (rawBank.toLowerCase() === 'null' || rawBank.toLowerCase() === 'undefined' || rawBank === '—') {
+  if (isPlaceholderValue(rawBank)) {
     rawBank = '';
   }
 
   let rawPan = params.panNumber !== undefined && params.panNumber !== null ? String(params.panNumber).trim().toUpperCase() : '';
-  if (rawPan.toLowerCase() === 'null' || rawPan.toLowerCase() === 'undefined' || rawPan === '—') {
+  if (isPlaceholderValue(rawPan)) {
     rawPan = '';
   }
 
   const rawDetails = params.details !== undefined && params.details !== null ? String(params.details).trim() : '';
 
   // If unstructured details string is provided and structured fields are missing, extract from details:
-  if (rawDetails) {
+  if (rawDetails && !isPlaceholderValue(rawDetails)) {
     const parsedBank = parseBankDetailsText(rawDetails);
-    if (!rawAccNum && parsedBank.account_number) rawAccNum = parsedBank.account_number;
-    if (!rawIfsc && parsedBank.ifsc_code) rawIfsc = parsedBank.ifsc_code;
-    if (!rawAccHolder && parsedBank.account_holder_name) rawAccHolder = parsedBank.account_holder_name;
-    if (!rawBank && parsedBank.bank_name) rawBank = parsedBank.bank_name;
-    if (!rawPan && parsedBank.pan_number) rawPan = parsedBank.pan_number;
+    if (!rawAccNum && parsedBank.account_number && !isPlaceholderValue(parsedBank.account_number)) rawAccNum = parsedBank.account_number;
+    if (!rawIfsc && parsedBank.ifsc_code && !isPlaceholderValue(parsedBank.ifsc_code)) rawIfsc = parsedBank.ifsc_code;
+    if (!rawAccHolder && parsedBank.account_holder_name && !isPlaceholderValue(parsedBank.account_holder_name)) rawAccHolder = parsedBank.account_holder_name;
+    if (!rawBank && parsedBank.bank_name && !isPlaceholderValue(parsedBank.bank_name)) rawBank = parsedBank.bank_name;
+    if (!rawPan && parsedBank.pan_number && !isPlaceholderValue(parsedBank.pan_number)) rawPan = parsedBank.pan_number;
 
     if (!rawUpi) {
       const detected = detectUpiId(rawDetails);
-      if (detected) rawUpi = detected;
+      if (detected && !isPlaceholderValue(detected)) rawUpi = detected;
     }
   }
 
@@ -377,10 +411,13 @@ export function parseExcelPaymentDetails(params: ParseExcelPaymentParams): Norma
   const hasUpiInfo = Boolean(rawUpi && rawUpi.trim());
   const hasBankInfo = Boolean(rawAccNum || rawIfsc || rawAccHolder || rawBank);
 
-  const isExplicitUpi = cleanMode === 'upi' || cleanMode === 'gpay' || cleanMode === 'googlepay' || cleanMode === 'gpaynumber' || cleanMode === 'phonepe' || cleanMode === 'phonepaynumber' || cleanMode === 'paytm' || cleanMode.includes('upi') || cleanMode.includes('gpay');
-  const isExplicitBank = cleanMode === 'bank' || cleanMode === 'acc' || cleanMode === 'account' || cleanMode === 'bankaccount' || cleanMode === 'bankdetails' || cleanMode === 'accountdetails' || cleanMode.includes('bank') || cleanMode.includes('account');
+  const isExplicitNull = cleanMode === 'null' || cleanMode === 'none' || cleanMode === 'na' || cleanMode === 'nil' || cleanMode === 'notapplicable' || cleanMode === 'nopayment';
+  const isExplicitUpi = !isExplicitNull && (cleanMode === 'upi' || cleanMode === 'gpay' || cleanMode === 'googlepay' || cleanMode === 'gpaynumber' || cleanMode === 'phonepe' || cleanMode === 'phonepaynumber' || cleanMode === 'paytm' || cleanMode.includes('upi') || cleanMode.includes('gpay'));
+  const isExplicitBank = !isExplicitNull && (cleanMode === 'bank' || cleanMode === 'acc' || cleanMode === 'account' || cleanMode === 'bankaccount' || cleanMode === 'bankdetails' || cleanMode === 'accountdetails' || cleanMode.includes('bank') || cleanMode.includes('account'));
 
-  if (isExplicitUpi && isExplicitBank) {
+  if (isExplicitNull && !hasUpiInfo && !hasBankInfo) {
+    payment_method = null;
+  } else if (isExplicitUpi && isExplicitBank) {
     // Mixed mode like "bank / upi": prefer UPI when valid UPI exists, else ACCOUNT_DETAILS
     payment_method = hasUpiInfo ? 'UPI' : (hasBankInfo ? 'ACCOUNT_DETAILS' : 'UPI');
   } else if (isExplicitUpi) {
@@ -394,6 +431,7 @@ export function parseExcelPaymentDetails(params: ParseExcelPaymentParams): Norma
   } else if (hasUpiInfo && hasBankInfo) {
     payment_method = 'UPI';
   } else {
+    // If neither UPI nor Bank info is present, default to null
     payment_method = null;
   }
 

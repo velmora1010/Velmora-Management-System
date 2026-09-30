@@ -5,6 +5,7 @@ import { naturalSortCompare } from '../config/skuMapping';
 import { dispatchBatchService } from './dispatchBatchService';
 import { getCourierTrackingUrl } from './influencerTrackingService';
 import { shipmentAttemptService } from './shipmentAttemptService';
+import { isActiveStatus } from '../utils/marketingUtils';
 
 export interface ReDispatchRecord {
   id: string;
@@ -92,38 +93,129 @@ export const reDispatchQueueService = {
       const numCampId = Number(cId);
       const campQuery = !isNaN(numCampId) ? numCampId : cId;
 
-      // 1. Fetch all redispatch_records for campaign
-      const { data: rdRows, error: rdErr } = await supabaseAdmin
+      // 1. Fetch all redispatch_records for campaign joined with active influencer
+      // SINGLE SOURCE OF TRUTH: Only consider records where the linked campaign influencer exists and is active
+      let rdRows: any[] = [];
+      const { data: joinedRows, error: rdErr } = await supabaseAdmin
         .from(SUPABASE_TABLES.redispatchRecords)
-        .select('*')
-        .eq('campaign_id', cId);
+        .select('*, influencer:influencer_id!inner(id, code, is_archived, campaign_id)')
+        .eq('campaign_id', cId)
+        .eq('influencer.campaign_id', cId)
+        .or('is_archived.eq.false,is_archived.is.null', { foreignTable: 'influencer' });
 
-      if (rdErr || !rdRows || rdRows.length === 0) {
+      if (rdErr) {
+        console.warn('Error in joined query in reconcileRedispatchShipments, falling back:', rdErr);
+        const { data: baseRows } = await supabaseAdmin
+          .from(SUPABASE_TABLES.redispatchRecords)
+          .select('*')
+          .eq('campaign_id', cId);
+        rdRows = baseRows || [];
+      } else {
+        rdRows = joinedRows || [];
+      }
+
+      if (rdRows.length === 0) {
         return { total: 0, dispatchedCount: 0, pendingCount: 0, fixedCount: 0, fixedCodes: [] };
       }
 
-      // 2. Fetch all tracking shipments for campaign (Uploaded Courier Shipments = SOURCE OF TRUTH)
-      const { data: trackingRows, error: trErr } = await supabaseAdmin
-        .from(SUPABASE_TABLES.influencerTrackingShipments)
-        .select('id, campaign_id, influencer_id, influencer_code, order_id, awb_number, courier, status, sync_error')
-        .eq('campaign_id', campQuery);
+      // 2. Fetch all tracking shipments for campaign across all courier sources (Delhivery, ST Courier, Amazon/iThink, India Post) + campaign influencers
+      const [trackingRes, ithinkRes, indiaPostRes, infoRes] = await Promise.all([
+        supabaseAdmin
+          .from(SUPABASE_TABLES.influencerTrackingShipments)
+          .select('id, campaign_id, influencer_id, influencer_code, order_id, awb_number, courier, status, sync_error, dispatch_date, expected_delivery_date')
+          .eq('campaign_id', campQuery),
+        supabaseAdmin
+          .from(SUPABASE_TABLES.ithinkLogistics)
+          .select('id, order_number, awb_no, courier_company, order_status, order_pickup_date, campaign_id'),
+        supabaseAdmin
+          .from(SUPABASE_TABLES.indiaPostTracking)
+          .select('id, order_id, awb_number, courier, status, dispatch_date, expected_delivery_date, campaign_id')
+          .eq('campaign_id', campQuery),
+        supabaseAdmin
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, code, is_archived, campaign_id')
+          .eq('campaign_id', campQuery)
+      ]);
 
-      if (trErr) {
-        console.error('Error fetching tracking shipments in reconcileRedispatchShipments:', trErr);
+      if (trackingRes.error) {
+        console.error('Error fetching tracking shipments in reconcileRedispatchShipments:', trackingRes.error);
       }
 
-      // 3. Index verified replacement shipments strictly by R-prefixed Order ID
-      const repShipmentByCode = new Map<string, any>();
+      const trackingRows = trackingRes.data || [];
+      const ithinkRows = (ithinkRes.data || []).filter((r: any) => !r.campaign_id || String(r.campaign_id) === cId);
+      const indiaPostRows = indiaPostRes.data || [];
 
-      (trackingRows || []).forEach((s: any) => {
+      // Unified tracking shipments across all couriers
+      const allCourierShipments: Array<{
+        id: string;
+        order_id: string;
+        awb_number: string;
+        courier: string;
+        status: string;
+        dispatch_date?: string | null;
+        expected_delivery_date?: string | null;
+      }> = [];
+
+      trackingRows.forEach((s: any) => {
+        allCourierShipments.push({
+          id: s.id,
+          order_id: s.order_id || s.influencer_code,
+          awb_number: s.awb_number,
+          courier: s.courier || 'Delhivery',
+          status: s.status,
+          dispatch_date: s.dispatch_date,
+          expected_delivery_date: s.expected_delivery_date
+        });
+      });
+
+      ithinkRows.forEach((r: any) => {
+        allCourierShipments.push({
+          id: r.id,
+          order_id: r.order_number,
+          awb_number: r.awb_no,
+          courier: r.courier_company || 'Amazon',
+          status: r.order_status || 'In Transit',
+          dispatch_date: r.order_pickup_date,
+          expected_delivery_date: null
+        });
+      });
+
+      indiaPostRows.forEach((r: any) => {
+        allCourierShipments.push({
+          id: r.id,
+          order_id: r.order_id,
+          awb_number: r.awb_number,
+          courier: r.courier || 'India Post',
+          status: r.status || 'In Transit',
+          dispatch_date: r.dispatch_date,
+          expected_delivery_date: r.expected_delivery_date
+        });
+      });
+
+      // 3. Index verified replacement shipments strictly by R-prefixed Order ID or different AWB
+      const repShipmentByCode = new Map<string, any>();
+      const allShipmentsByCode = new Map<string, any[]>();
+
+      allCourierShipments.forEach(s => {
         const oId = String(s.order_id || '').trim();
+        const awb = String(s.awb_number || '').trim();
+        if (!awb) return;
+
         // Match strictly R-prefixed order ID (e.g. "R HIS1", "#R HIS1", "R-HIS1", "R_HIS1", "RHIS1")
         const rMatch = /^#?R[\s#_\-]+([A-Za-z0-9]+)$/i.exec(oId) || /^R([A-Za-z]+[0-9]+)$/i.exec(oId);
-        if (rMatch && s.awb_number) {
+        if (rMatch) {
           const rawCode = rMatch[1].trim().toUpperCase();
           if (rawCode) {
             repShipmentByCode.set(rawCode, s);
           }
+        }
+
+        const baseCode = oId.replace(/^#+/, '').replace(/^R[\s#_\-]+/i, '').replace(/^R(?=[A-Za-z])/i, '').trim().toUpperCase();
+        if (baseCode) {
+          if (!allShipmentsByCode.has(baseCode)) {
+            allShipmentsByCode.set(baseCode, []);
+          }
+          allShipmentsByCode.get(baseCode)!.push(s);
         }
       });
 
@@ -133,12 +225,40 @@ export const reDispatchQueueService = {
       let fixedCount = 0;
       const fixedCodes: string[] = [];
 
+      const infoById = new Map<string, any>();
+      const infoByCode = new Map<string, any>();
+      (infoRes.data || []).forEach((inf: any) => {
+        if (inf.id) infoById.set(String(inf.id), inf);
+        if (inf.code) infoByCode.set(cleanCode(inf.code).toUpperCase(), inf);
+      });
+
       for (const row of rdRows) {
         const code = cleanCode(row.influencer_code);
         const codeUpper = code.toUpperCase();
 
-        // Check if verified replacement shipment exists in uploaded Delhivery file strictly by R-prefix
-        const matchedRepShipment = repShipmentByCode.get(codeUpper);
+        const linkedInf = (row.influencer_id ? infoById.get(String(row.influencer_id)) : null) || infoByCode.get(codeUpper);
+
+        // SINGLE SOURCE OF TRUTH: If linked campaign influencer does not exist or is eliminated / recycled, EXCLUDE!
+        if (!linkedInf || !linkedInf.id || !isActiveStatus(linkedInf.is_archived) || (linkedInf.campaign_id && String(linkedInf.campaign_id) !== cId)) {
+          continue;
+        }
+
+        // 1. Primary match: strictly by R-prefix
+        let matchedRepShipment = repShipmentByCode.get(codeUpper);
+
+        // 2. Secondary match: if shipment has different AWB than previous_awb
+        if (!matchedRepShipment && allShipmentsByCode.has(codeUpper)) {
+          const list = allShipmentsByCode.get(codeUpper)!;
+          const prevAwbNorm = (row.previous_awb || '').trim().toLowerCase();
+          const candidate = list.find(s => {
+            const cAwb = (s.awb_number || '').trim().toLowerCase();
+            return cAwb && cAwb !== prevAwbNorm;
+          });
+          if (candidate) {
+            matchedRepShipment = candidate;
+          }
+        }
+
         const hasVerifiedCourierShipment = Boolean(
           matchedRepShipment &&
           matchedRepShipment.awb_number &&
@@ -148,6 +268,11 @@ export const reDispatchQueueService = {
         if (hasVerifiedCourierShipment) {
           dispatchedCount++;
           const targetOrderId = `R ${code}`;
+          const repCourier = matchedRepShipment.courier || 'Delhivery';
+          const repAwb = String(matchedRepShipment.awb_number).trim();
+          const repDispDate = matchedRepShipment.dispatch_date || null;
+          const repEdd = matchedRepShipment.expected_delivery_date || null;
+          const repStatus = matchedRepShipment.status || 'Dispatched';
 
           // If not marked MOVED_TO_ACTIVE or order_id missing 'R ' prefix, update it
           if (row.redispatch_status !== 'MOVED_TO_ACTIVE' && row.redispatch_status !== 'COMPLETED') {
@@ -156,6 +281,7 @@ export const reDispatchQueueService = {
               .update({
                 redispatch_status: 'MOVED_TO_ACTIVE',
                 order_id: targetOrderId,
+                courier: repCourier,
                 moved_to_active_at: row.moved_to_active_at || nowIso,
                 updated_at: nowIso
               })
@@ -165,18 +291,57 @@ export const reDispatchQueueService = {
             fixedCodes.push(code);
           }
 
+          // Ensure shipment_attempts has Attempt #2 for this re-dispatch
+          if (row.influencer_id) {
+            try {
+              const existingAttempts = await shipmentAttemptService.getShipmentAttempts(cId, row.influencer_id);
+              const reAttempt = existingAttempts.find(a => 
+                (a.awb_number && a.awb_number.trim().toLowerCase() === repAwb.toLowerCase()) || 
+                a.shipment_type === 'RE_DISPATCH'
+              );
+
+              if (!reAttempt) {
+                await supabaseAdmin.from(SUPABASE_TABLES.shipmentAttempts).insert({
+                  campaign_id: cId,
+                  influencer_id: row.influencer_id,
+                  parent_attempt_id: existingAttempts.length > 0 ? existingAttempts[0].id : null,
+                  attempt_number: 2,
+                  shipment_type: 'RE_DISPATCH',
+                  courier: repCourier,
+                  order_id: targetOrderId,
+                  awb_number: repAwb,
+                  shipment_status: repStatus,
+                  dispatch_date: repDispDate,
+                  estimated_delivery_date: repEdd,
+                  remarks: `Re-Dispatch replacement shipment via ${repCourier}`,
+                  delivery_confirmed: false,
+                  status_tracking_started: false,
+                  created_at: nowIso,
+                  updated_at: nowIso
+                });
+              } else {
+                await supabaseAdmin.from(SUPABASE_TABLES.shipmentAttempts).update({
+                  courier: repCourier,
+                  awb_number: repAwb,
+                  order_id: targetOrderId,
+                  shipment_status: repStatus,
+                  dispatch_date: repDispDate || reAttempt.dispatch_date || null,
+                  estimated_delivery_date: repEdd || reAttempt.estimated_delivery_date || null,
+                  updated_at: nowIso
+                }).eq('id', reAttempt.id);
+              }
+            } catch (attErr) {
+              console.warn(`Error ensuring shipment attempt for ${code}:`, attErr);
+            }
+          }
+
           // Ensure influencer_dispatch_details_rows is updated with replacement shipment logistics
           // Automatically moves to 'prepare_dispatch' unless already confirmed dispatched by user
           if (row.influencer_id) {
             try {
-              const repCourier = matchedRepShipment.courier || 'Delhivery';
-              const repAwb = String(matchedRepShipment.awb_number).trim();
-              const repDispDate = matchedRepShipment.dispatchDate || matchedRepShipment.dispatch_date || null;
-              const repEdd = matchedRepShipment.expectedDeliveryDate || matchedRepShipment.expected_delivery_date || null;
-
               const { data: currDisp } = await supabaseAdmin
                 .from(SUPABASE_TABLES.influencerDispatch)
-                .select('id, dispatch_status')
+                .select('id, dispatch_status, remarks')
                 .eq('campaign_id', campQuery)
                 .eq('influencer_id', row.influencer_id)
                 .maybeSingle();
@@ -205,7 +370,7 @@ export const reDispatchQueueService = {
             }
           }
         } else {
-          // NOT in uploaded Delhivery file -> MUST BE PENDING_REDISPATCH!
+          // NOT in uploaded courier files -> MUST BE PENDING_REDISPATCH!
           pendingCount++;
 
           if (row.redispatch_status !== 'PENDING_REDISPATCH') {
@@ -289,7 +454,7 @@ export const reDispatchQueueService = {
       console.log(`[reconcileRedispatchShipments] Campaign ${cId}: Total=${rdRows.length}, Dispatched=${dispatchedCount}, Pending=${pendingCount}, Fixed=${fixedCount} (${fixedCodes.join(', ')})`);
 
       return {
-        total: rdRows.length,
+        total: dispatchedCount + pendingCount,
         dispatchedCount,
         pendingCount,
         fixedCount,
@@ -315,14 +480,26 @@ export const reDispatchQueueService = {
       const campQuery = !isNaN(numCampId) ? numCampId : cId;
 
       // 1. Fetch Authoritative Re-Dispatch Records from public.redispatch_records
-      const { data: redispatchRows, error: rdErr } = await supabaseAdmin
+      // Enforce database-level join requiring linked influencer to exist, belong to this campaign, and be active
+      let redispatchRows: any[] = [];
+      const { data: joinedRows, error: rdErr } = await supabaseAdmin
         .from(SUPABASE_TABLES.redispatchRecords)
-        .select('*')
+        .select('*, influencer:influencer_id!inner(id, code, is_archived, campaign_id)')
         .eq('campaign_id', cId)
+        .eq('influencer.campaign_id', cId)
+        .or('is_archived.eq.false,is_archived.is.null', { foreignTable: 'influencer' })
         .order('created_at', { ascending: false });
 
       if (rdErr) {
-        console.error('Error fetching redispatch_records:', rdErr);
+        console.warn('Error fetching joined redispatch_records, falling back to base select:', rdErr);
+        const { data: baseRows } = await supabaseAdmin
+          .from(SUPABASE_TABLES.redispatchRecords)
+          .select('*')
+          .eq('campaign_id', cId)
+          .order('created_at', { ascending: false });
+        redispatchRows = baseRows || [];
+      } else {
+        redispatchRows = joinedRows || [];
       }
 
       // If redispatch_records is empty for this campaign, run auto-migration/reconciliation
@@ -331,7 +508,7 @@ export const reDispatchQueueService = {
       }
 
       // 2. Fetch accompanying data in parallel to enrich view (including tracking shipments as SOURCE OF TRUTH)
-      const [infoRes, dispRes, stRes, batchesRes, attemptsRes, trackingShipmentsRes] = await Promise.all([
+      const [infoRes, dispRes, stRes, batchesRes, attemptsRes, trackingShipmentsRes, ithinkRes, indiaPostRes] = await Promise.all([
         supabaseAdmin
           .from(SUPABASE_TABLES.influencersInfo)
           .select('id, code, influencer_name, name, phone_number, is_archived, profile_file_url')
@@ -356,6 +533,13 @@ export const reDispatchQueueService = {
         supabaseAdmin
           .from(SUPABASE_TABLES.influencerTrackingShipments)
           .select('id, campaign_id, influencer_id, influencer_code, order_id, awb_number, courier, status, sync_error')
+          .eq('campaign_id', campQuery),
+        supabaseAdmin
+          .from(SUPABASE_TABLES.ithinkLogistics)
+          .select('id, order_number, awb_no, courier_company, order_status, order_pickup_date, campaign_id'),
+        supabaseAdmin
+          .from(SUPABASE_TABLES.indiaPostTracking)
+          .select('id, order_id, awb_number, courier, status, dispatch_date, expected_delivery_date, campaign_id')
           .eq('campaign_id', campQuery)
       ]);
 
@@ -365,6 +549,55 @@ export const reDispatchQueueService = {
       const batches = (batchesRes.data?.setting_value || []) as any[];
       const attempts = (attemptsRes.data || []) as any[];
       const trackingShipments = (trackingShipmentsRes.data || []) as any[];
+      const ithinkRows = (ithinkRes.data || []).filter((r: any) => !r.campaign_id || String(r.campaign_id) === cId);
+      const indiaPostRows = (indiaPostRes.data || []) as any[];
+
+      // Unified tracking shipments across all couriers (Delhivery, ST Courier, Amazon, India Post)
+      const allCourierShipments: Array<{
+        id: string;
+        order_id: string;
+        awb_number: string;
+        courier: string;
+        status: string;
+        dispatch_date?: string | null;
+        expected_delivery_date?: string | null;
+      }> = [];
+
+      trackingShipments.forEach((s: any) => {
+        allCourierShipments.push({
+          id: s.id,
+          order_id: s.order_id || s.influencer_code,
+          awb_number: s.awb_number,
+          courier: s.courier || 'Delhivery',
+          status: s.status,
+          dispatch_date: s.dispatch_date,
+          expected_delivery_date: s.expected_delivery_date
+        });
+      });
+
+      ithinkRows.forEach((r: any) => {
+        allCourierShipments.push({
+          id: r.id,
+          order_id: r.order_number,
+          awb_number: r.awb_no,
+          courier: r.courier_company || 'Amazon',
+          status: r.order_status || 'In Transit',
+          dispatch_date: r.order_pickup_date,
+          expected_delivery_date: null
+        });
+      });
+
+      indiaPostRows.forEach((r: any) => {
+        allCourierShipments.push({
+          id: r.id,
+          order_id: r.order_id,
+          awb_number: r.awb_number,
+          courier: r.courier || 'India Post',
+          status: r.status || 'In Transit',
+          dispatch_date: r.dispatch_date,
+          expected_delivery_date: r.expected_delivery_date
+        });
+      });
 
       const infoByCode = new Map<string, any>();
       const infoById = new Map<string, any>();
@@ -399,17 +632,30 @@ export const reDispatchQueueService = {
         });
       });
 
-      // Index verified replacement shipments from uploaded courier files (SOURCE OF TRUTH)
+      // Index verified replacement shipments from all uploaded courier files (SOURCE OF TRUTH)
       const repShipmentByCode = new Map<string, any>();
+      const allShipmentsByCode = new Map<string, any[]>();
 
-      trackingShipments.forEach(s => {
+      allCourierShipments.forEach(s => {
         const oId = String(s.order_id || '').trim();
+        const awb = String(s.awb_number || '').trim();
+        if (!awb) return;
+
+        // 1. R-prefixed: R HIS1, #R HIS1, R-HIS1, R_HIS1, RHIS1
         const rMatch = /^#?R[\s#_\-]+([A-Za-z0-9]+)$/i.exec(oId) || /^R([A-Za-z]+[0-9]+)$/i.exec(oId);
-        if (rMatch && s.awb_number) {
+        if (rMatch) {
           const rawCode = rMatch[1].trim().toUpperCase();
           if (rawCode) {
             repShipmentByCode.set(rawCode, s);
           }
+        }
+
+        const baseCode = oId.replace(/^#+/, '').replace(/^R[\s#_\-]+/i, '').replace(/^R(?=[A-Za-z])/i, '').trim().toUpperCase();
+        if (baseCode) {
+          if (!allShipmentsByCode.has(baseCode)) {
+            allShipmentsByCode.set(baseCode, []);
+          }
+          allShipmentsByCode.get(baseCode)!.push(s);
         }
       });
 
@@ -421,8 +667,12 @@ export const reDispatchQueueService = {
         const redispatchCode = `R ${code}`;
         const inf = (row.influencer_id ? infoById.get(String(row.influencer_id)) : null) || infoByCode.get(code);
 
-        // Exclude archived influencers
-        if (inf && (inf.is_archived === true || inf.is_archived === 'true' || inf.is_archived === 1)) {
+        // SINGLE SOURCE OF TRUTH: If influencer does not exist, belongs to another campaign, or is eliminated / recycled, EXCLUDE!
+        if (!inf || !inf.id || !isActiveStatus(inf.is_archived)) {
+          continue;
+        }
+
+        if (inf.campaign_id && String(inf.campaign_id) !== cId) {
           continue;
         }
 
@@ -431,8 +681,22 @@ export const reDispatchQueueService = {
         const disp = dispById.get(infIdStr);
         const st = stById.get(infIdStr);
 
-        // SOURCE OF TRUTH: Match against uploaded courier replacement shipments strictly by R-prefixed Order ID
-        const matchedRepShipment = repShipmentByCode.get(codeUpper);
+        // SOURCE OF TRUTH: Match against uploaded courier replacement shipments
+        let matchedRepShipment = repShipmentByCode.get(codeUpper);
+
+        // Secondary match: if shipment has different AWB than previous_awb
+        if (!matchedRepShipment && allShipmentsByCode.has(codeUpper)) {
+          const list = allShipmentsByCode.get(codeUpper)!;
+          const prevAwbNorm = (row.previous_awb || '').trim().toLowerCase();
+          const candidate = list.find(s => {
+            const cAwb = (s.awb_number || '').trim().toLowerCase();
+            return cAwb && cAwb !== prevAwbNorm;
+          });
+          if (candidate) {
+            matchedRepShipment = candidate;
+          }
+        }
+
         const prevAwbVal = (row.previous_awb || disp?.tracking_id || '').trim();
 
         // Valid replacement shipment must exist with a non-empty AWB
@@ -629,7 +893,7 @@ export const reDispatchQueueService = {
         if (!isCand) return;
 
         const inf = infoMap.get(String(st.influencer_id));
-        if (inf && (inf.is_archived === true || inf.is_archived === 'true' || inf.is_archived === 1)) return;
+        if (!inf || !inf.id || !isActiveStatus(inf.is_archived) || (inf.campaign_id && String(inf.campaign_id) !== cId)) return;
 
         const codeVal = cleanCode(inf?.code || '');
         if (!codeVal) return;
@@ -702,11 +966,34 @@ export const reDispatchQueueService = {
 
     try {
       const nowIso = new Date().toISOString();
-      const numInfId = data.influencer_id ? Number(data.influencer_id) : null;
+      let numInfId = data.influencer_id ? Number(data.influencer_id) : null;
+
+      // Validate single source of truth: Influencer must exist, belong to campaign, and be active
+      if (!numInfId || isNaN(numInfId)) {
+        const { data: infRow } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, is_archived, campaign_id')
+          .eq('campaign_id', cId)
+          .ilike('code', code)
+          .maybeSingle();
+        if (!infRow || !isActiveStatus(infRow.is_archived)) {
+          return { success: false, error: 'Cannot record re-dispatch for an eliminated or inactive influencer' };
+        }
+        numInfId = Number(infRow.id);
+      } else {
+        const { data: infRow } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, is_archived, campaign_id')
+          .eq('id', numInfId)
+          .maybeSingle();
+        if (!infRow || !isActiveStatus(infRow.is_archived) || String(infRow.campaign_id) !== cId) {
+          return { success: false, error: 'Cannot record re-dispatch for an eliminated or inactive influencer' };
+        }
+      }
 
       const recordPayload = {
         campaign_id: cId,
-        influencer_id: numInfId && !isNaN(numInfId) ? numInfId : null,
+        influencer_id: numInfId,
         influencer_code: code,
         order_id: data.order_id || `R ${code}`,
         previous_awb: data.previous_awb || null,
@@ -827,10 +1114,35 @@ export const reDispatchQueueService = {
       const displayStatus = data.displayStatus || 'Pending';
       const orderId = data.order_id || `R ${code}`;
 
+      // Validate single source of truth: Influencer must exist, belong to campaign, and be active
+      let targetInfId = numInfId;
+      if (!targetInfId || isNaN(targetInfId)) {
+        const { data: infRow } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, is_archived, campaign_id')
+          .eq('campaign_id', cId)
+          .ilike('code', code)
+          .maybeSingle();
+        if (!infRow || !isActiveStatus(infRow.is_archived)) {
+          return { success: false, error: 'Cannot transition re-dispatch for an eliminated or inactive influencer' };
+        }
+        targetInfId = Number(infRow.id);
+      } else {
+        const { data: infRow } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, is_archived, campaign_id')
+          .eq('id', targetInfId)
+          .maybeSingle();
+        if (!infRow || !isActiveStatus(infRow.is_archived) || String(infRow.campaign_id) !== cId) {
+          return { success: false, error: 'Cannot transition re-dispatch for an eliminated or inactive influencer' };
+        }
+      }
+
       // 1. Authoritative update in redispatch_records: redispatch_status = 'MOVED_TO_ACTIVE'
       let rdQuery = supabaseAdmin
         .from(SUPABASE_TABLES.redispatchRecords)
         .update({
+          influencer_id: targetInfId,
           redispatch_status: 'MOVED_TO_ACTIVE',
           moved_to_active_at: nowIso,
           order_id: orderId,
@@ -1232,6 +1544,19 @@ export const reDispatchQueueService = {
       const campQuery = !isNaN(numCampId) ? numCampId : cId;
       const numInfId = Number(infId);
       const nowIso = new Date().toISOString();
+
+      // 0. Verify influencer exists, belongs to campaign, and is active
+      if (!isNaN(numInfId) && numInfId > 0) {
+        const { data: infCheck } = await supabaseAdmin
+          .from(SUPABASE_TABLES.influencersInfo)
+          .select('id, is_archived, campaign_id')
+          .eq('id', numInfId)
+          .maybeSingle();
+
+        if (!infCheck || !isActiveStatus(infCheck.is_archived) || String(infCheck.campaign_id) !== cId) {
+          return { success: false, error: 'Cannot move eliminated or inactive influencer to active' };
+        }
+      }
 
       // 1. Authoritative Update in redispatch_records: redispatch_status = 'MOVED_TO_ACTIVE'
       let rdQuery = supabaseAdmin

@@ -11,6 +11,16 @@ import {
   getUniqueFilterOptions, 
   areFilterValuesEqual 
 } from '../../utils/filterUtils';
+import { isActiveStatus } from '../../utils/marketingUtils';
+
+export const isAutoDmConnected = (val: any): boolean => {
+  if (val === true || val === 1 || val === '1') return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === 'enabled' || s === 'connected' || s === 'yes' || s === '1';
+  }
+  return false;
+};
 
 export const normalizeStateName = (stateStr?: string | null): string => {
   if (!stateStr) return '';
@@ -223,7 +233,8 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
 
   // Context-aware counts for Auto DM Tool options based on currently drafted filters
   const autoDmCounts = React.useMemo(() => {
-    let contextList = influencers;
+    // Auto DM Tool filter operates strictly on Active influencers
+    let contextList = influencers.filter(inf => isActiveStatus(inf.is_archived));
 
     // Filter by location (state & city)
     if (draft.state) {
@@ -319,7 +330,7 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
     let connected = 0;
     let notConnected = 0;
     contextList.forEach(inf => {
-      if (inf.auto_dm) {
+      if (isAutoDmConnected(inf.auto_dm)) {
         connected++;
       } else {
         notConnected++;

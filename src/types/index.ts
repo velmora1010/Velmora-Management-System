@@ -331,7 +331,7 @@ export interface CampaignInfluencer {
   phone_number: string;
   alternative_number: string;
   email?: string;
-  payment_method?: 'UPI' | 'ACCOUNT_DETAILS' | string | null;
+  payment_method?: 'UPI' | 'ACCOUNT_DETAILS' | 'NULL' | string | null;
   upi_number?: string | null;
   account_holder_name?: string | null;
   account_number?: string | null;

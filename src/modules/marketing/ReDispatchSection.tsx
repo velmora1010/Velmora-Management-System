@@ -34,6 +34,14 @@ import {
   fetchCampaignShipmentsFromDb, 
   InfluencerDispatchedShipment 
 } from '../../services/influencerTrackingService';
+import { 
+  fetchIThinkLogisticsRecords, 
+  mapIThinkRecordToShipment 
+} from '../../services/ithinkLogisticsService';
+import { 
+  fetchIndiaPostRecords, 
+  mapIndiaPostRecordToShipment 
+} from '../../services/indiaPostTrackingService';
 import { shipmentAttemptService, ShipmentAttempt } from '../../services/shipmentAttemptService';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -126,21 +134,37 @@ export const ReDispatchSection: React.FC<ReDispatchSectionProps> = ({
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [msgs, ships, attempts, dispData] = await Promise.all([
+      const [msgs, dbShips, attempts, dispData, ithinkData, indiaPostData] = await Promise.all([
         reDispatchFormatService.getMessages(campaign.id),
         fetchCampaignShipmentsFromDb(campaign.id),
         shipmentAttemptService.getCampaignShipmentAttempts(campaign.id),
-        supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').eq('campaign_id', campaign.id)
+        supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').eq('campaign_id', campaign.id),
+        fetchIThinkLogisticsRecords(),
+        fetchIndiaPostRecords(campaign.id)
       ]);
 
       const currentDispatches = Array.isArray(dispData?.data) ? dispData.data : [];
-      setShipments(ships || []);
+
+      // Combine shipments from all couriers (Delhivery, ST Courier, Amazon, India Post)
+      const allUnifiedShips: InfluencerDispatchedShipment[] = [...(dbShips || [])];
+      (ithinkData || []).forEach(ir => {
+        if (!ir.campaign_id || String(ir.campaign_id) === String(campaign.id)) {
+          allUnifiedShips.push(mapIThinkRecordToShipment(ir, activeInfluencers));
+        }
+      });
+      (indiaPostData || []).forEach(ip => {
+        if (!ip.campaign_id || String(ip.campaign_id) === String(campaign.id)) {
+          allUnifiedShips.push(mapIndiaPostRecordToShipment(ip, activeInfluencers));
+        }
+      });
+
+      setShipments(allUnifiedShips);
       setShipmentAttempts(attempts || []);
       setDispatchRecords(currentDispatches);
 
       // Identify genuine re-dispatch influencers strictly based on workflow data
       const eligible = activeInfluencers.filter(inf => {
-        return isGenuineReDispatchInfluencer(inf, currentDispatches, attempts || [], ships || []);
+        return isGenuineReDispatchInfluencer(inf, currentDispatches, attempts || [], allUnifiedShips);
       });
 
       const eligibleIds = new Set(eligible.map(inf => String(inf.id)));
@@ -169,7 +193,7 @@ export const ReDispatchSection: React.FC<ReDispatchSectionProps> = ({
         const existing = updatedMap[infId];
 
         if (!existing || isStaleMessage(existing.message_text)) {
-          const shipmentInfo = resolveReDispatchShipmentInfo(inf, ships, attempts, currentDispatches);
+          const shipmentInfo = resolveReDispatchShipmentInfo(inf, allUnifiedShips, attempts, currentDispatches);
           const dispatchedProds = resolveReDispatchProducts(inf, currentDispatches);
           const payment = resolvePaymentDetails(inf, dispatchedProds);
           const msgText = buildReDispatchMessage(inf, shipmentInfo);

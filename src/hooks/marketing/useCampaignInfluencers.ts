@@ -105,9 +105,11 @@ export const getCampaignCode = (campaignName: string): string => {
 
 export const notifyInfluencerChange = (campaignId?: string | number) => {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('velmora:influencer-updated', { 
-      detail: { campaignId: campaignId ? String(campaignId) : undefined } 
-    }));
+    const detail = { campaignId: campaignId ? String(campaignId) : undefined };
+    window.dispatchEvent(new CustomEvent('velmora:influencer-updated', { detail }));
+    window.dispatchEvent(new CustomEvent('influencer_tracking_updated', { detail }));
+    window.dispatchEvent(new CustomEvent('influencer_status_updated', { detail }));
+    window.dispatchEvent(new CustomEvent('status_tracking_updated', { detail }));
   }
 };
 
@@ -1237,6 +1239,13 @@ export const useCampaignInfluencers = (campaignId?: string) => {
 
       const { error: dispatchDelErr } = await supabase.from(SUPABASE_TABLES.influencerDispatch).delete().eq('influencer_id', numericId);
       if (dispatchDelErr) throw dispatchDelErr;
+
+      // Delete re-dispatch records safely
+      try {
+        await supabase.from(SUPABASE_TABLES.redispatchRecords).delete().eq('influencer_id', numericId);
+      } catch (rdErr) {
+        console.warn('Failed to delete redispatch_records on influencer delete:', rdErr);
+      }
 
       // 2. Delete base influencer info row
       const { error: infoDelErr } = await supabase.from(SUPABASE_TABLES.influencersInfo).delete().eq('id', numericId);

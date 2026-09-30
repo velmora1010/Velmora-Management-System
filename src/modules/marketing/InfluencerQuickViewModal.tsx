@@ -453,7 +453,9 @@ export const InfluencerQuickViewModal: React.FC<InfluencerQuickViewModalProps> =
                     </div>
                   </div>
                 </div>
-              ) : (
+              ) : ((influencer.payment_method || '').toUpperCase() === 'UPI' ||
+                   (influencer.payment_method || '').toLowerCase().includes('upi') ||
+                   Boolean(influencer.upi_number)) ? (
                 <div className="bg-[#0b101c] border border-slate-800/60 rounded-xl p-3 flex items-start gap-3">
                   <div className="p-2 rounded-lg bg-purple-950/50 text-purple-400 border border-purple-800/30 shrink-0">
                     <CreditCard size={14} />
@@ -461,7 +463,19 @@ export const InfluencerQuickViewModal: React.FC<InfluencerQuickViewModalProps> =
                   <div className="min-w-0">
                     <div className="text-[11px] font-medium text-slate-400">Payment Method: UPI</div>
                     <div className="text-xs sm:text-sm font-semibold text-slate-200 truncate select-all">
-                      UPI Number: {upiId}
+                      UPI Number: {upiId || '—'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-[#0b101c] border border-slate-800/60 rounded-xl p-3 flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-slate-900 text-slate-500 border border-slate-800 shrink-0">
+                    <CreditCard size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-medium text-slate-400">Payment Method: Null</div>
+                    <div className="text-xs sm:text-sm font-normal text-slate-500 italic">
+                      No payment details provided
                     </div>
                   </div>
                 </div>

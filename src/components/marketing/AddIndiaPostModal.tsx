@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { X, Send, PlusCircle, AlertCircle, Calendar } from 'lucide-react';
 import type { Campaign } from '../../types';
 import { createIndiaPostRecord } from '../../services/indiaPostTrackingService';
+import { reDispatchQueueService } from '../../services/reDispatchQueueService';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { isReplacementOrderId, getOriginalOrderId } from '../../utils/orderIdUtils';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
 interface AddIndiaPostModalProps {
@@ -95,6 +100,44 @@ export const AddIndiaPostModal: React.FC<AddIndiaPostModalProps> = ({
         throw new Error(res.error || 'Failed to save tracking record.');
       }
 
+      // Sync Re-Dispatch records for replacement shipments across India Post entries
+      if (campaign?.id) {
+        try {
+          const campIdStr = String(campaign.id);
+          const baseCode = (getOriginalOrderId(cleanOrderId) || cleanOrderId.replace(/^#+/, '').replace(/^R[\s#_\-]+/i, '')).trim().toUpperCase();
+          const isRep = isReplacementOrderId(cleanOrderId) || /^#?R[\s#_\-]+/i.test(cleanOrderId);
+
+          const [rdRes, infRes] = await Promise.all([
+            supabaseAdmin.from(SUPABASE_TABLES.redispatchRecords).select('influencer_id, influencer_code').eq('campaign_id', campIdStr),
+            supabaseAdmin.from(SUPABASE_TABLES.influencersInfo).select('id, code, is_archived').eq('campaign_id', campIdStr)
+          ]);
+
+          const redispatchRows = rdRes.data || [];
+          const campaignInfs = (infRes.data || []).filter((i: any) => isActiveStatus(i.is_archived));
+
+          const matchedInf = campaignInfs.find((inf: any) => (inf.code || '').replace(/^#+/, '').trim().toUpperCase() === baseCode);
+          const isInfInRd = redispatchRows.some((r: any) => 
+            (matchedInf && String(r.influencer_id) === String(matchedInf.id)) || 
+            (r.influencer_code && r.influencer_code.replace(/^#+/, '').trim().toUpperCase() === baseCode)
+          );
+
+          if (isRep || isInfInRd) {
+            await reDispatchQueueService.transitionReDispatchToPrepareDispatch(campaign.id, {
+              influencer_id: matchedInf?.id,
+              influencer_code: matchedInf?.code || baseCode,
+              order_id: cleanOrderId,
+              redispatch_awb: cleanAwb,
+              courier: 'India Post',
+              displayStatus: canonicalStatus,
+              dispatchDate: cleanDispatchDate
+            });
+            await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
+          }
+        } catch (syncErr) {
+          console.warn('[AddIndiaPostModal] Error synchronizing re-dispatch:', syncErr);
+        }
+      }
+
       toast.success('India Post tracking entry added successfully.', { id: toastId });
 
       // Notify other components of the tracking update
@@ -103,6 +146,12 @@ export const AddIndiaPostModal: React.FC<AddIndiaPostModalProps> = ({
           detail: { campaignId: campaign.id }
         })
       );
+      window.dispatchEvent(
+        new CustomEvent('influencer_status_updated', {
+          detail: { campaignId: campaign.id }
+        })
+      );
+      window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
 
       if (onSuccess) {
         await onSuccess();

@@ -362,8 +362,13 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
             };
           })
           .filter(r => {
-            // Keep only active influencers (exclude eliminate and recycle bin)
-            return isActiveStatus(r.dispatch.is_archived);
+            // Keep only active influencers (exclude eliminate, recycle bin, and deleted)
+            return Boolean(
+              r.influencer && 
+              r.influencer.id && 
+              isActiveStatus(r.influencer.is_archived) && 
+              isActiveStatus(r.dispatch?.is_archived)
+            );
           });
         
         // Ascending natural sort by Influencer Code (J2, J10, J61, J174, J203)

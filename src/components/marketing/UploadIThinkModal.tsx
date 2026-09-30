@@ -14,6 +14,11 @@ import {
   upsertIThinkLogisticsRecords, 
   fetchIThinkLogisticsRecords 
 } from '../../services/ithinkLogisticsService';
+import { reDispatchQueueService } from '../../services/reDispatchQueueService';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
+import { SUPABASE_TABLES } from '../../config/supabaseTables';
+import { isReplacementOrderId, getOriginalOrderId } from '../../utils/orderIdUtils';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
 interface UploadIThinkModalProps {
@@ -213,17 +218,73 @@ export const UploadIThinkModal: React.FC<UploadIThinkModalProps> = ({
         throw new Error(res.error || 'Failed to save to database.');
       }
 
+      // Sync Re-Dispatch records for replacement shipments across Amazon uploads
+      if (campaign?.id) {
+        try {
+          const campIdStr = String(campaign.id);
+          const [rdRes, infRes] = await Promise.all([
+            supabaseAdmin.from(SUPABASE_TABLES.redispatchRecords).select('influencer_id, influencer_code, previous_awb').eq('campaign_id', campIdStr),
+            supabaseAdmin.from(SUPABASE_TABLES.influencersInfo).select('id, code, is_archived').eq('campaign_id', campIdStr)
+          ]);
+
+          const redispatchRows = rdRes.data || [];
+          const campaignInfs = (infRes.data || []).filter((i: any) => isActiveStatus(i.is_archived));
+
+          const rdCodeSet = new Set<string>();
+          const rdIdSet = new Set<string>();
+          redispatchRows.forEach((r: any) => {
+            if (r.influencer_code) rdCodeSet.add(r.influencer_code.replace(/^#+/, '').trim().toUpperCase());
+            if (r.influencer_id) rdIdSet.add(String(r.influencer_id));
+          });
+
+          const infByCode = new Map<string, any>();
+          campaignInfs.forEach((inf: any) => {
+            if (inf.code) infByCode.set(inf.code.replace(/^#+/, '').trim().toUpperCase(), inf);
+          });
+
+          for (const r of validRows) {
+            const rawOrd = (r.order_number || '').trim();
+            const baseCode = (getOriginalOrderId(rawOrd) || rawOrd.replace(/^#+/, '').replace(/^R[\s#_\-]+/i, '')).trim().toUpperCase();
+            const isRep = isReplacementOrderId(rawOrd) || /^#?R[\s#_\-]+/i.test(rawOrd);
+            const matchedInf = infByCode.get(baseCode);
+            const isInfInRd = (matchedInf && rdIdSet.has(String(matchedInf.id))) || rdCodeSet.has(baseCode);
+
+            if (isRep || isInfInRd) {
+              await reDispatchQueueService.transitionReDispatchToPrepareDispatch(campaign.id, {
+                influencer_id: matchedInf?.id,
+                influencer_code: matchedInf?.code || baseCode,
+                order_id: rawOrd,
+                redispatch_awb: r.awb_no,
+                courier: r.courier_company || 'Amazon',
+                displayStatus: r.order_status || 'In Transit',
+                dispatchDate: r.order_pickup_date || null
+              });
+            }
+          }
+
+          await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
+        } catch (syncErr) {
+          console.warn('[UploadIThinkModal] Error synchronizing re-dispatch:', syncErr);
+        }
+      }
+
       toast.success(
         `Successfully imported ${validRows.length} Amazon shipments (${res.inserted} new, ${res.updated} updated).`,
         { duration: 5000 }
       );
 
-      // Trigger tracking update event
+      // Trigger tracking and re-dispatch update events
       window.dispatchEvent(
         new CustomEvent('influencer_tracking_updated', {
           detail: { campaignId: campaign.id }
         })
       );
+      window.dispatchEvent(
+        new CustomEvent('influencer_status_updated', {
+          detail: { campaignId: campaign.id }
+        })
+      );
+      window.dispatchEvent(new CustomEvent('velmora:influencer-updated'));
 
       if (onSuccess) {
         await onSuccess();

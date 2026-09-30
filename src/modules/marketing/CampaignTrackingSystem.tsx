@@ -583,7 +583,7 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     const set = new Set<string>();
     campaignAttempts.forEach(a => {
       const clean = safeTrimLower(a.awb_number);
-      if (clean) {
+      if (clean && a.status_tracking_started) {
         set.add(clean);
       }
     });
@@ -612,17 +612,17 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     fetchActive();
   }, [campaign?.id]);
 
-  // Candidate influencers: pool all active influencers and dispatched influencers for the campaign
+  // Candidate influencers: pool strictly active influencers for the campaign (exclude eliminated/recycled)
   const candidateInfluencers = useMemo(() => {
     const map = new Map<string, CampaignInfluencer>();
     (allActiveInfluencers || []).forEach(inf => {
-      if (inf?.id) map.set(String(inf.id), inf);
+      if (inf?.id && isActiveStatus(inf.is_archived)) map.set(String(inf.id), inf);
     });
     (dbActiveInfluencers || []).forEach(inf => {
-      if (inf?.id && !map.has(String(inf.id))) map.set(String(inf.id), inf);
+      if (inf?.id && isActiveStatus(inf.is_archived) && !map.has(String(inf.id))) map.set(String(inf.id), inf);
     });
     (dispatchedInfluencers || []).forEach(inf => {
-      if (inf?.id && !map.has(String(inf.id))) map.set(String(inf.id), inf);
+      if (inf?.id && isActiveStatus(inf.is_archived) && !map.has(String(inf.id))) map.set(String(inf.id), inf);
     });
     return Array.from(map.values());
   }, [allActiveInfluencers, dbActiveInfluencers, dispatchedInfluencers]);
@@ -826,8 +826,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     // 2. Index IThink Logistics shipments
     for (const ir of ithinkRecords) {
       const isForThisCampaign = !ir.campaign_id || String(ir.campaign_id) === String(campaign.id);
+      if (!isForThisCampaign) continue;
       const mapped = mapIThinkRecordToShipment(ir, candidateInfluencers);
-      if (mapped.influencerId || isForThisCampaign) {
+      if (mapped.influencerId && candidateInfluencers.some(i => String(i.id) === String(mapped.influencerId))) {
         const awbKey = safeTrimLower(mapped.awbNumber);
         const uniqueKey = `ithink__${awbKey || safeTrimLower(mapped.id)}`;
         if (!shipmentMap.has(uniqueKey)) {
@@ -839,8 +840,9 @@ export const CampaignTrackingSystem: React.FC<CampaignTrackingSystemProps> = ({
     // 3. Index India Post shipments
     for (const ip of indiaPostRecords) {
       const isForThisCampaign = !ip.campaign_id || String(ip.campaign_id) === String(campaign.id);
+      if (!isForThisCampaign) continue;
       const mapped = mapIndiaPostRecordToShipment(ip, candidateInfluencers);
-      if (mapped.influencerId || isForThisCampaign) {
+      if (mapped.influencerId && candidateInfluencers.some(i => String(i.id) === String(mapped.influencerId))) {
         // Use record id in uniqueKey so multiple entries with duplicate AWBs/Order IDs can coexist
         const uniqueKey = `indiapost__${mapped.id}__${safeTrimLower(mapped.awbNumber)}`;
         if (!shipmentMap.has(uniqueKey)) {

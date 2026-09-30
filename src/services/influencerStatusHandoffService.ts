@@ -16,6 +16,7 @@ import {
   extractInfluencerCodeFromOrderId,
   type ShipmentAttempt
 } from './shipmentAttemptService';
+import { reDispatchQueueService } from './reDispatchQueueService';
 import { 
   normalizeOrderId, 
   isSameUnderlyingOrder,
@@ -925,7 +926,26 @@ export async function handoffDeliveredShipmentToStatusTracking(
           if (!attErr && newAtt) {
             targetAttempt = newAtt as ShipmentAttempt;
           }
+        } else {
+          // Update existing targetAttempt to mark status_tracking_started = true
+          await supabaseAdmin
+            .from(SUPABASE_TABLES.shipmentAttempts)
+            .update({
+              status_tracking_started: true,
+              shipment_status: 'Delivered',
+              delivered_date: shipment.deliveredDate || new Date().toISOString().split('T')[0],
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', targetAttempt.id);
         }
+
+        // Complete Re-Dispatch in redispatch_records
+        try {
+          await reDispatchQueueService.completeReDispatch(cleanCampaignId, {
+            influencer_id: Number(cleanInfId),
+            influencer_code: cleanBaseCode
+          });
+        } catch (e) {}
 
         // Attach replacement shipment to existing #HIS1 influencer status record
         // Step 1 starts uncompleted ("Not Started") ready for new proof photo
@@ -1230,8 +1250,18 @@ export async function bulkHandoffDeliveredShipments(
 
     const infId = String(matchedInfluencer.id);
 
-    // If already in DB before this run
-    if (existingSet.has(infId)) {
+    const rawOrd = s.orderId || (s as any).rawOrderId || s.influencerCode;
+    const isReplacement = Boolean(
+      isReplacementOrderId(rawOrd) || 
+      isReplacementOrderId(s.influencerCode) || 
+      (s as any).isResend || 
+      (Number((s as any).attemptNumber) > 1)
+    );
+
+    // If already in DB before this run:
+    // Only skip original shipments if influencer is already present in status tracking!
+    // For replacement shipments, allow them to transition to status tracking.
+    if (existingSet.has(infId) && !isReplacement) {
       summary.alreadyPresentCount++;
       summary.results.push({
         shipmentAwb: s.awbNumber,

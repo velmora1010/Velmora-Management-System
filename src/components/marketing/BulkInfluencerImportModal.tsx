@@ -439,16 +439,17 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         panNumber: rawPanNumber,
       });
 
+      const cleanMode = rawPaymentMode ? String(rawPaymentMode).trim().toLowerCase() : '';
+      const isPlaceholderMode = !cleanMode || cleanMode === 'null' || cleanMode === 'nil' || cleanMode === 'none' || cleanMode === 'na' || cleanMode === 'n/a' || cleanMode === '-' || cleanMode === '—';
+
       const hasExcelPaymentData = Boolean(
-        (rawPaymentMode && String(rawPaymentMode).trim()) ||
-        (rawPayments && String(rawPayments).trim()) ||
-        (rawDetails && String(rawDetails).trim()) ||
-        (rawUpiNumber && String(rawUpiNumber).trim()) ||
-        (rawAccountHolder && String(rawAccountHolder).trim()) ||
-        (rawAccountNumber && String(rawAccountNumber).trim()) ||
-        (rawIfscCode && String(rawIfscCode).trim()) ||
-        (rawBankName && String(rawBankName).trim()) ||
-        (rawPanNumber && String(rawPanNumber).trim())
+        (!isPlaceholderMode && rawPaymentMode && String(rawPaymentMode).trim()) ||
+        parsedPayment.upi_number ||
+        parsedPayment.account_number ||
+        parsedPayment.account_holder_name ||
+        parsedPayment.ifsc_code ||
+        parsedPayment.bank_name ||
+        parsedPayment.pan_number
       );
 
       let upi: string | null = parsedPayment.upi_number || (map.upiCol ? normalize(row[map.upiCol]) : null);
@@ -1055,7 +1056,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                   <li><strong className="text-slate-300">Influencer Code</strong> (e.g. DDS1, OD5188) — Required</li>
                   <li><strong className="text-slate-300">User Name</strong> (e.g. DINESH_11) — Required</li>
                   <li><strong className="text-slate-300">Influencer Name</strong> (e.g. DINESH) — Required</li>
-                  <li><strong className="text-slate-300">Payment Mode</strong> (e.g. UPI, GPay, ACC, Bank) — Optional</li>
+                  <li><strong className="text-slate-300">Payment Mode</strong> (e.g. UPI, GPay, ACC, Bank, Null) — Optional</li>
                   <li><strong className="text-slate-300">Payments</strong> (e.g. UPI ID / 8180890209@axl) — Optional</li>
                   <li><strong className="text-slate-300">Details</strong> (e.g. A/C, IFSC, Name, PAN) — Optional</li>
                   <li><strong className="text-slate-300">Phone Number</strong> (e.g. 9876543210) — Optional</li>
@@ -1124,7 +1125,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Payment Mode <span className="text-slate-500">(Optional - UPI / GPay / ACC / Details)</span>
+                    Payment Mode <span className="text-slate-500">(Optional - UPI / Account Details / Null)</span>
                   </label>
                   <select
                     value={mapping.paymentModeCol}
@@ -1478,7 +1479,9 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
                                 )}
                               </div>
                             ) : (
-                              <span className="text-slate-500 font-mono text-xs">—</span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700">
+                                Null
+                              </span>
                             )}
                           </td>
                           <td className="p-3 text-slate-400">{row.phone || '—'}</td>

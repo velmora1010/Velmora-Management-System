@@ -644,14 +644,17 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       const bHistory = (initialData.pricing as any)?.bargainHistory || [];
       const cleanBHistory = bHistory.length > 0 ? bHistory : [{ creator_request: 0, brand_request: 0 }];
 
-      const initialPaymentMethod: 'UPI' | 'ACCOUNT_DETAILS' = (function() {
+      const initialPaymentMethod: 'UPI' | 'ACCOUNT_DETAILS' | 'NULL' = (function() {
         const norm = normalizePaymentMethod(initialData.payment_method);
         if (norm === 'ACCOUNT_DETAILS') return 'ACCOUNT_DETAILS';
         if (norm === 'UPI') return 'UPI';
         if (initialData.account_number || initialData.account_holder_name || initialData.ifsc_code || initialData.bank_name) {
           return 'ACCOUNT_DETAILS';
         }
-        return 'UPI';
+        if (initialData.upi_number) {
+          return 'UPI';
+        }
+        return 'NULL';
       })();
 
       return {
@@ -740,7 +743,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         phone_number: '',
         alternative_number: '',
         email: '',
-        payment_method: 'UPI',
+        payment_method: 'UPI' as 'UPI' | 'ACCOUNT_DETAILS' | 'NULL',
         upi_number: '',
         account_holder_name: '',
         account_number: '',
@@ -1248,40 +1251,43 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       console.log("Saving Instagram Views:", instagramViews);
       console.log("Saving Facebook Views:", facebookViews);
       const isAccountDetails = basicInfo.payment_method === 'ACCOUNT_DETAILS';
+      const isNullPayment = basicInfo.payment_method === 'NULL' || !basicInfo.payment_method;
 
-      if (isAccountDetails) {
-        if (!basicInfo.account_holder_name || !basicInfo.account_holder_name.trim()) {
-          toast.error('Account holder Name is required.');
-          return;
-        }
-        if (!basicInfo.account_number || !String(basicInfo.account_number).trim()) {
-          toast.error('Account No is required.');
-          return;
-        }
-        if (!basicInfo.ifsc_code || !basicInfo.ifsc_code.trim()) {
-          toast.error('IFSC Code is required.');
-          return;
-        }
-        if (!basicInfo.bank_name || !basicInfo.bank_name.trim()) {
-          toast.error('Bank Name is required.');
-          return;
-        }
-      } else {
-        if (!basicInfo.upi_number || !basicInfo.upi_number.trim()) {
-          toast.error('UPI Number is required.');
-          return;
+      if (!isNullPayment) {
+        if (isAccountDetails) {
+          if (!basicInfo.account_holder_name || !basicInfo.account_holder_name.trim()) {
+            toast.error('Account holder Name is required.');
+            return;
+          }
+          if (!basicInfo.account_number || !String(basicInfo.account_number).trim()) {
+            toast.error('Account No is required.');
+            return;
+          }
+          if (!basicInfo.ifsc_code || !basicInfo.ifsc_code.trim()) {
+            toast.error('IFSC Code is required.');
+            return;
+          }
+          if (!basicInfo.bank_name || !basicInfo.bank_name.trim()) {
+            toast.error('Bank Name is required.');
+            return;
+          }
+        } else {
+          if (!basicInfo.upi_number || !basicInfo.upi_number.trim()) {
+            toast.error('UPI Number is required.');
+            return;
+          }
         }
       }
 
       const finalBasicInfo = {
         ...basicInfo,
-        payment_method: isAccountDetails ? 'ACCOUNT_DETAILS' : 'UPI',
-        upi_number: isAccountDetails ? null : (basicInfo.upi_number ? basicInfo.upi_number.trim() : null),
-        account_holder_name: isAccountDetails ? (basicInfo.account_holder_name ? basicInfo.account_holder_name.trim() : null) : null,
-        account_number: isAccountDetails ? (basicInfo.account_number ? String(basicInfo.account_number).trim() : null) : null,
-        ifsc_code: isAccountDetails ? (basicInfo.ifsc_code ? basicInfo.ifsc_code.trim().toUpperCase() : null) : null,
-        bank_name: isAccountDetails ? (basicInfo.bank_name ? basicInfo.bank_name.trim() : null) : null,
-        pan_number: isAccountDetails ? (basicInfo.pan_number ? basicInfo.pan_number.trim().toUpperCase() : null) : null
+        payment_method: isNullPayment ? null : (isAccountDetails ? 'ACCOUNT_DETAILS' : 'UPI'),
+        upi_number: isNullPayment ? null : (isAccountDetails ? null : (basicInfo.upi_number ? basicInfo.upi_number.trim() : null)),
+        account_holder_name: isNullPayment ? null : (isAccountDetails ? (basicInfo.account_holder_name ? basicInfo.account_holder_name.trim() : null) : null),
+        account_number: isNullPayment ? null : (isAccountDetails ? (basicInfo.account_number ? String(basicInfo.account_number).trim() : null) : null),
+        ifsc_code: isNullPayment ? null : (isAccountDetails ? (basicInfo.ifsc_code ? basicInfo.ifsc_code.trim().toUpperCase() : null) : null),
+        bank_name: isNullPayment ? null : (isAccountDetails ? (basicInfo.bank_name ? basicInfo.bank_name.trim() : null) : null),
+        pan_number: isNullPayment ? null : (isAccountDetails ? (basicInfo.pan_number ? basicInfo.pan_number.trim().toUpperCase() : null) : null)
       };
 
       const payload = {
@@ -1442,7 +1448,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                         type="radio" 
                         name="payment_method" 
                         value="UPI" 
-                        checked={basicInfo.payment_method !== 'ACCOUNT_DETAILS'} 
+                        checked={basicInfo.payment_method === 'UPI'} 
                         onChange={() => setFormState(prev => ({
                           ...prev,
                           basicInfo: { ...prev.basicInfo, payment_method: 'UPI' }
@@ -1465,10 +1471,24 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       />
                       <span>Account Details</span>
                     </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white select-none">
+                      <input 
+                        type="radio" 
+                        name="payment_method" 
+                        value="NULL" 
+                        checked={basicInfo.payment_method === 'NULL'} 
+                        onChange={() => setFormState(prev => ({
+                          ...prev,
+                          basicInfo: { ...prev.basicInfo, payment_method: 'NULL' }
+                        }))}
+                        className="w-4 h-4 text-purple-600 bg-slate-900 border-slate-700 focus:ring-purple-500 focus:ring-offset-slate-900 cursor-pointer"
+                      />
+                      <span>Null</span>
+                    </label>
                   </div>
                 </div>
 
-                {basicInfo.payment_method !== 'ACCOUNT_DETAILS' ? (
+                {basicInfo.payment_method === 'UPI' && (
                   <div>
                     <label className="block text-sm text-slate-400 mb-1">UPI Number</label>
                     <input 
@@ -1480,7 +1500,9 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       placeholder="Enter UPI number"
                     />
                   </div>
-                ) : (
+                )}
+
+                {basicInfo.payment_method === 'ACCOUNT_DETAILS' && (
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm text-slate-400 mb-1">Name</label>

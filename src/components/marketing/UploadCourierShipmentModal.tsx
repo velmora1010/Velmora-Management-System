@@ -837,15 +837,21 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         // Pre-fetch re-dispatch records to protect Re-Dispatch influencers from being overwritten by original rows
         const stRedispatchInfIdSet = new Set<string>();
         const stRedispatchCodeSet = new Set<string>();
+        const stRedispatchPrevAwbMap = new Map<string, string>();
         try {
           const { data: rdRecords } = await supabaseAdmin
             .from(SUPABASE_TABLES.redispatchRecords)
-            .select('influencer_id, influencer_code')
-            .eq('campaign_id', String(campaign.id));
+            .select('influencer_id, influencer_code, previous_awb, influencer:influencer_id!inner(id, is_archived)')
+            .eq('campaign_id', String(campaign.id))
+            .or('is_archived.eq.false,is_archived.is.null', { foreignTable: 'influencer' });
           if (rdRecords) {
             rdRecords.forEach((r: any) => {
               if (r.influencer_id) stRedispatchInfIdSet.add(String(r.influencer_id));
-              if (r.influencer_code) stRedispatchCodeSet.add(cleanUploadCode(r.influencer_code).toUpperCase());
+              const c = cleanUploadCode(r.influencer_code).toUpperCase();
+              if (c) {
+                stRedispatchCodeSet.add(c);
+                if (r.previous_awb) stRedispatchPrevAwbMap.set(c, String(r.previous_awb).trim());
+              }
             });
           }
         } catch (e) {}
@@ -855,8 +861,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           if (s.influencerId) {
             const cleanInfCode = cleanUploadCode(s.influencerCode || '').toUpperCase();
             const isInfluencerInReDispatch = stRedispatchInfIdSet.has(String(s.influencerId)) || stRedispatchCodeSet.has(cleanInfCode);
+            const prevAwb = stRedispatchPrevAwbMap.get(cleanInfCode) || '';
+            const isDifferentAwb = !prevAwb || (s.awbNumber && s.awbNumber.trim().toLowerCase() !== prevAwb.toLowerCase());
 
-            if (s.isResend) {
+            if (s.isResend || (isInfluencerInReDispatch && isDifferentAwb)) {
               try {
                 await reDispatchQueueService.transitionReDispatchToPrepareDispatch(campaign.id, {
                   influencer_id: s.influencerId,
@@ -988,6 +996,7 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
         const existingDispatchesMap = new Map<string, string>();
         const delhiveryRedispatchInfIdSet = new Set<string>();
         const delhiveryRedispatchCodeSet = new Set<string>();
+        const delhiveryRedispatchPrevAwbMap = new Map<string, string>();
 
         try {
           const [dispRes, rdRes] = await Promise.all([
@@ -997,8 +1006,9 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
               .eq('campaign_id', String(campaign.id)),
             supabaseAdmin
               .from(SUPABASE_TABLES.redispatchRecords)
-              .select('influencer_id, influencer_code')
+              .select('influencer_id, influencer_code, previous_awb, influencer:influencer_id!inner(id, is_archived)')
               .eq('campaign_id', String(campaign.id))
+              .or('is_archived.eq.false,is_archived.is.null', { foreignTable: 'influencer' })
           ]);
 
           if (dispRes.data) {
@@ -1010,7 +1020,11 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           if (rdRes.data) {
             rdRes.data.forEach((r: any) => {
               if (r.influencer_id) delhiveryRedispatchInfIdSet.add(String(r.influencer_id));
-              if (r.influencer_code) delhiveryRedispatchCodeSet.add(cleanUploadCode(r.influencer_code).toUpperCase());
+              const c = cleanUploadCode(r.influencer_code).toUpperCase();
+              if (c) {
+                delhiveryRedispatchCodeSet.add(c);
+                if (r.previous_awb) delhiveryRedispatchPrevAwbMap.set(c, String(r.previous_awb).trim());
+              }
             });
           }
         } catch (e) {}
@@ -1108,8 +1122,10 @@ export const UploadCourierShipmentModal: React.FC<UploadCourierShipmentModalProp
           // Handle Re-Dispatch vs Original Dispatch
           const cleanInfCode = cleanUploadCode(inf.code || row.baseOrderId).toUpperCase();
           const isInfluencerInReDispatch = delhiveryRedispatchInfIdSet.has(String(inf.id)) || delhiveryRedispatchCodeSet.has(cleanInfCode);
+          const prevAwb = delhiveryRedispatchPrevAwbMap.get(cleanInfCode) || '';
+          const isDifferentAwb = !prevAwb || (awb && awb.trim().toLowerCase() !== prevAwb.toLowerCase());
 
-          if (row.isResend) {
+          if (row.isResend || (isInfluencerInReDispatch && isDifferentAwb)) {
             // It's a Re-Dispatch shipment!
             // Transition Re-Dispatch lifecycle, shipment attempts, and move influencer to PREPARE DISPATCH
             try {
