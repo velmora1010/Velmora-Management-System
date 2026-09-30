@@ -47,19 +47,29 @@ export const ReDispatchQueueSection: React.FC<ReDispatchQueueSectionProps> = ({
   const loadQueue = useCallback(async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
     try {
-      // 1. Authoritative reconciliation with uploaded courier shipments (Source of Truth)
-      await reDispatchQueueService.reconcileRedispatchShipments(campaign.id);
-
-      // 2. Fetch queue items
+      // 1. Fetch queue items first for instant display
       const data = await reDispatchQueueService.fetchQueueItems(campaign.id);
       setItems(data);
+      if (showLoading) setIsLoading(false);
+
+      // 2. Authoritative background reconciliation with uploaded courier shipments (Source of Truth)
+      reDispatchQueueService.reconcileRedispatchShipments(campaign.id).then(reconciled => {
+        if (reconciled && reconciled.fixedCount > 0) {
+          reDispatchQueueService.fetchQueueItems(campaign.id).then(updated => {
+            setItems(updated);
+            if (onRefreshCounts) onRefreshCounts();
+          });
+        }
+      }).catch(bgErr => {
+        console.warn('Background reconciliation notice:', bgErr);
+      });
     } catch (err) {
       console.error('Failed to load Re-Dispatch queue:', err);
       toast.error('Failed to load Re-Dispatch queue');
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  }, [campaign.id]);
+  }, [campaign.id, onRefreshCounts]);
 
   useEffect(() => {
     loadQueue(true);

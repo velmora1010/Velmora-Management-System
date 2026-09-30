@@ -106,6 +106,20 @@ export interface StatusTrackingRecord {
   influencer?: any;
   videoPayments?: InfluencerVideoPayment[];
   videoScripts?: CampaignVideoScriptRecord[];
+  redispatch?: {
+    id: string;
+    campaign_id: string;
+    influencer_id: number;
+    influencer_code: string;
+    order_id?: string | null;
+    previous_awb?: string | null;
+    courier?: string | null;
+    issue_type?: string | null;
+    issue_remark?: string | null;
+    redispatch_status: 'PENDING_REDISPATCH' | 'MOVED_TO_ACTIVE' | 'COMPLETED';
+    moved_to_active_at?: string | null;
+    completed_at?: string | null;
+  } | null;
 }
 
 export const useCampaignStatusTracking = (campaignId?: string) => {
@@ -139,52 +153,66 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         const dispatchIds = Array.from(new Set(records.map(r => r.dispatch_id).filter(Boolean)));
         const influencerIds = Array.from(new Set(records.map(r => r.influencer_id).filter(Boolean)));
         const [
-          dispatchData,
-          infoData,
+          dispatchRes,
+          infoRes,
           pricingData,
           productsData,
-          postDatesData,
-          videoPaymentsData,
+          postDatesRes,
+          videoPaymentsRes,
           videoScriptsData,
-          platformData
+          platformData,
+          redispatchRes
         ] = await Promise.all([
-          fetchAllInChunks(
-            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerDispatch).select('*').in('id', chunk),
-            dispatchIds,
-            50
-          ),
-          fetchAllInChunks(
-            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencersInfo).select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name').in('id', chunk),
-            influencerIds,
-            50
-          ),
+          supabaseAdmin
+            .from(SUPABASE_TABLES.influencerDispatch)
+            .select('*')
+            .eq('campaign_id', campQuery),
+          supabaseAdmin
+            .from(SUPABASE_TABLES.influencersInfo)
+            .select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name')
+            .eq('campaign_id', campQuery),
           fetchAllInChunks(
             chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPricing).select('id, influencer_id, final_price, total_videos, product_pricing, video1_price, video2_price, video1_count, video2_count').in('influencer_id', chunk),
             influencerIds,
-            50
+            200
           ),
           fetchAllInChunks(
             chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerProduct).select('id, influencer_id, product_name, name, video_number, qty, selected').in('influencer_id', chunk),
             influencerIds,
-            50
+            200
           ),
-          fetchAllInChunks(
-            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk),
-            influencerIds,
-            50
-          ),
-          fetchAllInChunks(
-            chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerVideoPayment).select('*').in('influencer_id', chunk),
-            influencerIds,
-            50
-          ),
+          supabaseAdmin
+            .from(SUPABASE_TABLES.influencerPostDates)
+            .select('*')
+            .eq('campaign_id', campQuery),
+          supabaseAdmin
+            .from(SUPABASE_TABLES.influencerVideoPayment)
+            .select('*')
+            .eq('campaign_id', campQuery),
           fetchCampaignVideoScripts(cleanCampaignId, influencerIds),
           fetchAllInChunks(
             chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPlatform).select('influencer_id, username, platform').in('influencer_id', chunk),
             influencerIds,
-            50
-          )
+            200
+          ),
+          supabaseAdmin
+            .from(SUPABASE_TABLES.redispatchRecords)
+            .select('id, campaign_id, influencer_id, influencer_code, order_id, previous_awb, courier, issue_type, issue_remark, redispatch_status, moved_to_active_at, completed_at')
+            .eq('campaign_id', cleanCampaignId)
         ]);
+
+        const dispatchData = dispatchRes.data || [];
+        const infoData = infoRes.data || [];
+        const postDatesData = postDatesRes.data || [];
+        const videoPaymentsData = videoPaymentsRes.data || [];
+        const redispatchData = redispatchRes.data || [];
+
+        const redispatchMap: Record<string, any> = {};
+        (redispatchData || []).forEach((rd: any) => {
+          if (rd.influencer_id) {
+            redispatchMap[String(rd.influencer_id)] = rd;
+          }
+        });
 
         let platformMap: Record<string, string> = {};
         const rawPlatformsData: any[] = platformData || [];
@@ -358,7 +386,8 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 total_videos: pricing.total_videos !== undefined ? pricing.total_videos : 1,
                 product_pricing: pricing.product_pricing
               },
-              videoScripts: videoScriptsByInfluencer[String(r.influencer_id)] || []
+              videoScripts: videoScriptsByInfluencer[String(r.influencer_id)] || [],
+              redispatch: redispatchMap[String(r.influencer_id)] || null
             };
           })
           .filter(r => {

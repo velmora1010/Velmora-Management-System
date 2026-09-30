@@ -41,6 +41,12 @@ import {
   extractInfluencerCodeFromOrderId
 } from '../../services/shipmentAttemptService';
 import { reDispatchQueueService } from '../../services/reDispatchQueueService';
+import { 
+  isInfluencerInReDispatch as isInfluencerInReDispatchUtil,
+  isInfluencerReDispatchActive as isInfluencerReDispatchActiveUtil,
+  isInfluencerWorkflowNotStarted as isWorkflowNotStartedUtil,
+  getInfluencerWorkflowStatus as getInfluencerWorkflowStatusUtil
+} from '../../utils/workflowStatusUtils';
 
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
@@ -392,8 +398,25 @@ export const getInfluencerReDispatchCycles = (record: StatusTrackingRecord): ReD
     metadata = {};
   }
 
+  const isMovedToActiveOverall = Boolean(
+    record.redispatch?.redispatch_status === 'MOVED_TO_ACTIVE' ||
+    record.redispatch?.redispatch_status === 'COMPLETED' ||
+    metadata.re_dispatch_moved_to_active ||
+    metadata.moved_to_active ||
+    metadata.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
+    metadata.redispatch_lifecycle_status === 'COMPLETED'
+  );
+
   // 1. Direct structured cycles in notes
   if (Array.isArray(metadata.redispatch_cycles) && metadata.redispatch_cycles.length > 0) {
+    if (isMovedToActiveOverall) {
+      return metadata.redispatch_cycles.map((c: any, idx: number) => {
+        if (idx === metadata.redispatch_cycles.length - 1 && c.status === 'PENDING_REDISPATCH') {
+          return { ...c, status: 'MOVED_TO_ACTIVE' };
+        }
+        return c;
+      });
+    }
     return metadata.redispatch_cycles;
   }
 
@@ -406,6 +429,7 @@ export const getInfluencerReDispatchCycles = (record: StatusTrackingRecord): ReD
     metadata.re_dispatch_moved_to_active ||
     metadata.moved_to_active ||
     metadata.redispatch_lifecycle_status ||
+    record.redispatch ||
     rawStatus.includes('re-dispatch') ||
     rawStatus.includes('redispatch') ||
     dispatchStatus.includes('re_dispatch') ||
@@ -414,12 +438,10 @@ export const getInfluencerReDispatchCycles = (record: StatusTrackingRecord): ReD
 
   if (hasRedispatchActivity) {
     let status: 'PENDING_REDISPATCH' | 'MOVED_TO_ACTIVE' | 'DELIVERED' = 'PENDING_REDISPATCH';
-    if (metadata.redispatch_lifecycle_status === 'COMPLETED') {
+    if (metadata.redispatch_lifecycle_status === 'COMPLETED' || record.redispatch?.redispatch_status === 'COMPLETED') {
       status = 'DELIVERED';
     } else if (
-      metadata.re_dispatch_moved_to_active || 
-      metadata.moved_to_active || 
-      metadata.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
+      isMovedToActiveOverall ||
       rawStatus.includes('active')
     ) {
       status = 'MOVED_TO_ACTIVE';
@@ -430,13 +452,13 @@ export const getInfluencerReDispatchCycles = (record: StatusTrackingRecord): ReD
     const cycle1: ReDispatchCycle = {
       cycle_number: 1,
       status,
-      issue_type: metadata.issue_type || 'DAMAGED_PRODUCT',
-      issue_remarks: metadata.issue_remarks || '',
+      issue_type: metadata.issue_type || record.redispatch?.issue_type || 'DAMAGED_PRODUCT',
+      issue_remarks: metadata.issue_remarks || record.redispatch?.issue_remark || '',
       issue_proof_url: metadata.issue_proof_url || '',
       reported_at: metadata.issue_reported_at || record.updated_at || record.created_at || new Date().toISOString(),
-      previous_awb: metadata.source_awb || (record.dispatch as any)?.tracking_id || '',
-      previous_courier: metadata.source_courier || (record.dispatch as any)?.courier_partner || '',
-      moved_to_active_at: metadata.moved_to_active_at || null,
+      previous_awb: metadata.source_awb || record.redispatch?.previous_awb || (record.dispatch as any)?.tracking_id || '',
+      previous_courier: metadata.source_courier || record.redispatch?.courier || (record.dispatch as any)?.courier_partner || '',
+      moved_to_active_at: metadata.moved_to_active_at || record.redispatch?.moved_to_active_at || null,
       delivered_confirmed: status === 'DELIVERED' || Boolean(record.delivered_confirmed && !metadata.re_dispatch_required && !metadata.re_dispatch_moved_to_active),
       delivery_photo_url: record.delivery_photo_url || metadata.delivery_photo_url || '',
       delivered_at: metadata.delivered_date || null,
@@ -467,41 +489,14 @@ export const isInfluencerDeliveryConfirmed = (record: StatusTrackingRecord): boo
  * Checks if influencer is currently in the pending Re-Dispatch queue (awaiting logistics action)
  */
 export const isInfluencerInReDispatch = (record: StatusTrackingRecord): boolean => {
-  const cycles = getInfluencerReDispatchCycles(record);
-  if (cycles.length > 0) {
-    const latest = cycles[cycles.length - 1];
-    return latest.status === 'PENDING_REDISPATCH';
-  }
+  return isInfluencerInReDispatchUtil(record);
+};
 
-  let metadata: any = {};
-  try {
-    metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
-  } catch (e) {
-    metadata = {};
-  }
-  // Once an influencer has been moved to Active for Re-Dispatch or completed, they are no longer in the pending queue
-  if (
-    metadata.re_dispatch_moved_to_active || 
-    metadata.moved_to_active || 
-    metadata.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' || 
-    metadata.redispatch_lifecycle_status === 'COMPLETED'
-  ) {
-    return false;
-  }
-  if (metadata.redispatch_lifecycle_status === 'PENDING_REDISPATCH') {
-    return true;
-  }
-  const rawStatus = (record.status || '').toLowerCase();
-  const dispatchStatus = ((record.dispatch as any)?.dispatch_status || '').toLowerCase();
-  return Boolean(
-    rawStatus.includes('re-dispatch') ||
-    rawStatus.includes('redispatch') ||
-    dispatchStatus.includes('re_dispatch') ||
-    dispatchStatus.includes('redispatch') ||
-    metadata.re_dispatch_required ||
-    metadata.shipment_issue ||
-    metadata.issue_reported
-  );
+/**
+ * Checks if influencer had a Re-Dispatch that was moved to active
+ */
+export const isInfluencerReDispatchActive = (record: StatusTrackingRecord): boolean => {
+  return isInfluencerReDispatchActiveUtil(record);
 };
 
 export interface PrerequisiteStep {
@@ -1513,19 +1508,18 @@ export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, video
  * Checks if NO workflow tracking step has been completed / workflow not started.
  */
 export const isInfluencerWorkflowNotStarted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
-  if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
 
-  if (isInfluencerShareScriptCompleted(record, videoNumber)) return false;
-  if (isInfluencerCallCompleted(record, videoNumber)) return false;
-  if (isInfluencerCallSkipped(record, videoNumber)) return false;
-  if (isInfluencerTimelineCompleted(record, videoNumber)) return false;
-  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
-  if (isInfluencerPostDateCompleted(record, videoNumber)) return false;
-  if (videoNumber > 1 && isInfluencerPaymentCompleted(record, videoNumber)) return false;
-
-  return true;
+  return isWorkflowNotStartedUtil(record, videoNumber, {
+    isShareScriptCompleted: isInfluencerShareScriptCompleted,
+    isCallCompleted: isInfluencerCallCompleted,
+    isCallSkipped: isInfluencerCallSkipped,
+    isTimelineCompleted: isInfluencerTimelineCompleted,
+    isDraftCompleted: isInfluencerDraftCompleted,
+    isPostDateCompleted: isInfluencerPostDateCompleted,
+    isPaymentCompleted: isInfluencerPaymentCompleted
+  });
 };
 
 /**
@@ -1533,24 +1527,15 @@ export const isInfluencerWorkflowNotStarted = (record: StatusTrackingRecord, vid
  * One of: 'delivered' | 'not_started' | 'share_script' | 'call_explain' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment' | 're_dispatch' | null
  */
 export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, videoNumber: number): string | null => {
-  // 1. Check if influencer has a reported issue or requires Re-Dispatch
-  if (isInfluencerInReDispatch(record)) {
-    return 're_dispatch';
-  }
-
-  // 2. If no workflow tracking step has been completed, it's not started
-  if (isInfluencerWorkflowNotStarted(record, videoNumber)) {
-    return 'not_started';
-  }
-
-  // 3. Normal video workflow steps
-  const vData = getVideoWorkflow(record, videoNumber);
-  if (vData.isReDraftRequired) return 'draft';
-  if (vData.activeStepId) {
-    return vData.activeStepId;
-  }
-
-  return null;
+  return getInfluencerWorkflowStatusUtil(record, videoNumber, {
+    isShareScriptCompleted: isInfluencerShareScriptCompleted,
+    isCallCompleted: isInfluencerCallCompleted,
+    isCallSkipped: isInfluencerCallSkipped,
+    isTimelineCompleted: isInfluencerTimelineCompleted,
+    isDraftCompleted: isInfluencerDraftCompleted,
+    isPostDateCompleted: isInfluencerPostDateCompleted,
+    isPaymentCompleted: isInfluencerPaymentCompleted
+  });
 };
 
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
@@ -1780,29 +1765,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
     const rawStatus = (record.status || '').toLowerCase();
 
-    // Active - Re-Dispatch: already moved to active queue for re-dispatch
-    if (
-      metadata.re_dispatch_moved_to_active || 
-      metadata.moved_to_active || 
-      metadata.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE'
-    ) {
-      return {
-        key: 'RE_DISPATCH_ACTIVE',
-        label: 'Active — Re-Dispatch',
-        badgeClass: 'bg-blue-950/80 text-blue-300 border-blue-600/60',
-        dotClass: 'bg-blue-400'
-      };
-    }
-
-    // Re-Dispatch Required: if shipment issue reported or re-dispatch required
-    if (
-      rawStatus.includes('re-dispatch') ||
-      rawStatus.includes('redispatch') ||
-      metadata.redispatch_lifecycle_status === 'PENDING_REDISPATCH' ||
-      metadata.re_dispatch_required ||
-      metadata.shipment_issue ||
-      metadata.issue_reported
-    ) {
+    // 1. Re-Dispatch Required: strictly active pending re-dispatch requirement
+    if (isInfluencerInReDispatch(record)) {
       return {
         key: 'RE_DISPATCH_REQUIRED',
         label: 'Re-Dispatch Required',
@@ -1811,7 +1775,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
-    // On Hold
+    // 2. On Hold
     if (rawStatus === 'on_hold' || rawStatus === 'on hold' || metadata.on_hold) {
       return {
         key: 'ON_HOLD',
@@ -1821,8 +1785,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
-    // Not Started: if delivery is not confirmed yet
-    if (!isInfluencerDeliveryConfirmed(record)) {
+    // 3. Not Started: if zero workflow steps completed
+    if (isInfluencerWorkflowNotStarted(record, selectedVideoNumber)) {
       return {
         key: 'NOT_STARTED',
         label: 'Not Started',
@@ -1862,7 +1826,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
-    // If delivered but videos not started
+    // 5. Active - Re-Dispatch: moved to active and replacement not yet confirmed delivered
+    if (isInfluencerReDispatchActive(record) && !isInfluencerDeliveryConfirmed(record)) {
+      return {
+        key: 'RE_DISPATCH_ACTIVE',
+        label: 'Active — Re-Dispatch',
+        badgeClass: 'bg-blue-950/80 text-blue-300 border-blue-600/60',
+        dotClass: 'bg-blue-400'
+      };
+    }
+
+    // 6. If delivered but videos not started
     return {
       key: 'IN_PROGRESS',
       label: 'Delivery Confirmed',

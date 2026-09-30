@@ -126,7 +126,8 @@ export const reDispatchQueueService = {
           .eq('campaign_id', campQuery),
         supabaseAdmin
           .from(SUPABASE_TABLES.ithinkLogistics)
-          .select('id, order_number, awb_no, courier_company, order_status, order_pickup_date, campaign_id'),
+          .select('id, order_number, awb_no, courier_company, order_status, order_pickup_date, campaign_id')
+          .or(`campaign_id.is.null,campaign_id.eq.${cId}`),
         supabaseAdmin
           .from(SUPABASE_TABLES.indiaPostTracking)
           .select('id, order_id, awb_number, courier, status, dispatch_date, expected_delivery_date, campaign_id')
@@ -536,7 +537,8 @@ export const reDispatchQueueService = {
           .eq('campaign_id', campQuery),
         supabaseAdmin
           .from(SUPABASE_TABLES.ithinkLogistics)
-          .select('id, order_number, awb_no, courier_company, order_status, order_pickup_date, campaign_id'),
+          .select('id, order_number, awb_no, courier_company, order_status, order_pickup_date, campaign_id')
+          .or(`campaign_id.is.null,campaign_id.eq.${cId}`),
         supabaseAdmin
           .from(SUPABASE_TABLES.indiaPostTracking)
           .select('id, order_id, awb_number, courier, status, dispatch_date, expected_delivery_date, campaign_id')

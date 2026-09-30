@@ -43,7 +43,10 @@ export const isInfluencerReDispatch = (
     return true;
   }
   const remarks = (dispatch?.remarks || '').trim().toLowerCase();
-  if (remarks.startsWith('issue reported') || remarks.includes('moved to active for re-dispatch')) {
+  if (remarks.includes('moved to active') || remarks.includes('active for re-dispatch')) {
+    return false;
+  }
+  if (remarks.startsWith('issue reported')) {
     return true;
   }
   return false;

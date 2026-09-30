@@ -745,14 +745,23 @@ export function isDeliveryStepCompleted(record: any): boolean {
   } catch (e) {}
 
   const rawStatus = (record.status || '').toLowerCase();
-  if (
-    rawStatus.includes('re-dispatch') ||
-    rawStatus.includes('redispatch') ||
-    meta?.re_dispatch_required ||
-    meta?.issue_reported ||
-    meta?.redispatch_lifecycle_status === 'PENDING_REDISPATCH'
-  ) {
-    return false;
+  const isMovedToActive = Boolean(
+    meta?.re_dispatch_moved_to_active ||
+    meta?.moved_to_active ||
+    meta?.redispatch_lifecycle_status === 'MOVED_TO_ACTIVE' ||
+    meta?.redispatch_lifecycle_status === 'COMPLETED' ||
+    rawStatus.includes('active')
+  );
+
+  if (!isMovedToActive) {
+    if (
+      rawStatus.includes('re-dispatch required') ||
+      meta?.re_dispatch_required ||
+      meta?.issue_reported ||
+      meta?.redispatch_lifecycle_status === 'PENDING_REDISPATCH'
+    ) {
+      return false;
+    }
   }
 
   // If explicitly not confirmed, definitely not completed
