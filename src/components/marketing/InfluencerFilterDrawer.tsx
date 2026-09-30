@@ -49,6 +49,7 @@ export interface InfluencerFilterState {
 
   state: string;
   city: string;
+  autoDmStatus: string;
   creatorCategory: string;
   followerRange: string;
   languages: string[];
@@ -73,6 +74,7 @@ export const initialFilterState: InfluencerFilterState = {
 
   state: '',
   city: '',
+  autoDmStatus: 'all',
   creatorCategory: '',
   followerRange: '',
   languages: [],
@@ -219,6 +221,127 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
     return Array.from(prods).sort();
   }, [influencers]);
 
+  // Context-aware counts for Auto DM Tool options based on currently drafted filters
+  const autoDmCounts = React.useMemo(() => {
+    let contextList = influencers;
+
+    // Filter by location (state & city)
+    if (draft.state) {
+      contextList = contextList.filter(inf => {
+        const infState = normalizeStateName(inf.state);
+        return areFilterValuesEqual(draft.state, infState);
+      });
+    }
+
+    if (draft.city) {
+      contextList = contextList.filter(inf => areFilterValuesEqual(draft.city, inf.city));
+    }
+
+    // Filter by creator category
+    if (draft.creatorCategory) {
+      const targetCat = draft.creatorCategory.toLowerCase();
+      contextList = contextList.filter(inf => {
+        const codes = [
+          inf.instagram_view_code,
+          inf.facebook_view_code,
+          inf.youtube_view_code
+        ].map(c => (c || '').toLowerCase());
+        const platCodes = (inf.platforms || []).map(p => (p.performance_code || '').toLowerCase());
+        return [...codes, ...platCodes].some(c => c === targetCat || c.includes(targetCat));
+      });
+    }
+
+    // Filter by followers range
+    if (draft.followerRange) {
+      contextList = contextList.filter(inf => {
+        const maxFollowers = Math.max(
+          0,
+          ...(inf.platforms || []).map(p => {
+            const num = Number(String(p.followers_count || 0).replace(/[^0-9.]/g, ''));
+            return isNaN(num) ? 0 : num;
+          })
+        );
+        switch (draft.followerRange) {
+          case 'below_10k': return maxFollowers < 10000;
+          case '10k_25k': return maxFollowers >= 10000 && maxFollowers <= 25000;
+          case '25k_50k': return maxFollowers >= 25000 && maxFollowers <= 50000;
+          case '50k_100k': return maxFollowers >= 50000 && maxFollowers <= 100000;
+          case '100k_200k': return maxFollowers >= 100000 && maxFollowers <= 200000;
+          case '200k_300k': return maxFollowers >= 200000 && maxFollowers <= 300000;
+          case '300k_400k': return maxFollowers >= 300000 && maxFollowers <= 400000;
+          case '400k_500k': return maxFollowers >= 400000 && maxFollowers <= 500000;
+          case 'above_500k': return maxFollowers > 500000;
+          default: return true;
+        }
+      });
+    }
+
+    // Filter by languages
+    if (draft.languages && draft.languages.length > 0) {
+      contextList = contextList.filter(inf => {
+        const infLangs = Array.isArray(inf.languages) 
+          ? inf.languages.map(l => String(l).trim().toLowerCase())
+          : (typeof inf.languages === 'string' ? (inf.languages as string).split(',').map(s => s.trim().toLowerCase()) : []);
+        return draft.languages.some(lang => infLangs.includes(lang.toLowerCase()));
+      });
+    }
+
+    // Filter by platform combination
+    if (draft.platformCombo && draft.platformCombo !== 'all') {
+      contextList = contextList.filter(inf => {
+        const influencerPlatforms = (inf.platforms || []).map(p => p.platform.toLowerCase());
+        const hasInstagram = influencerPlatforms.includes('instagram');
+        const hasFacebook = influencerPlatforms.includes('facebook');
+        const hasYoutube = influencerPlatforms.includes('youtube');
+        switch (draft.platformCombo) {
+          case 'instagram': return hasInstagram && !hasFacebook && !hasYoutube;
+          case 'youtube': return hasYoutube && !hasInstagram && !hasFacebook;
+          case 'facebook': return hasFacebook && !hasInstagram && !hasYoutube;
+          case 'instagram_youtube': return hasInstagram && hasYoutube && !hasFacebook;
+          case 'instagram_facebook': return hasInstagram && hasFacebook && !hasYoutube;
+          case 'youtube_facebook': return hasYoutube && hasFacebook && !hasInstagram;
+          case 'instagram_youtube_facebook': return hasInstagram && hasYoutube && hasFacebook;
+          case 'none': return !hasInstagram && !hasFacebook && !hasYoutube;
+          default: return true;
+        }
+      });
+    }
+
+    // Filter by product
+    if (draft.product) {
+      const targetProd = draft.product.toLowerCase();
+      contextList = contextList.filter(inf => {
+        const rawProds = (inf.products || []).map((p: any) => (p.product_name || p.name || '').toLowerCase());
+        return rawProds.some(p => p.includes(targetProd));
+      });
+    }
+
+    let connected = 0;
+    let notConnected = 0;
+    contextList.forEach(inf => {
+      if (inf.auto_dm) {
+        connected++;
+      } else {
+        notConnected++;
+      }
+    });
+
+    return {
+      all: contextList.length,
+      connected,
+      notConnected
+    };
+  }, [
+    influencers, 
+    draft.state, 
+    draft.city, 
+    draft.creatorCategory, 
+    draft.followerRange, 
+    draft.languages, 
+    draft.platformCombo, 
+    draft.product
+  ]);
+
   if (!isOpen) return null;
 
   const toggleLanguage = (lang: string) => {
@@ -242,7 +365,7 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
   };
 
   const hasActiveFilters = 
-    draft.state || draft.city || draft.creatorCategory || draft.followerRange ||
+    draft.state || draft.city || (draft.autoDmStatus && draft.autoDmStatus !== 'all') || draft.creatorCategory || draft.followerRange ||
     draft.languages.length > 0 || (draft.platformCombo && draft.platformCombo !== 'all') || draft.product ||
     draft.minPrice || draft.maxPrice || draft.missingPhone || draft.missingAltPhone ||
     draft.missingUpi || draft.missingCity || draft.missingState || draft.missingAddress ||
@@ -330,6 +453,61 @@ export const InfluencerFilterDrawer: React.FC<InfluencerFilterDrawerProps> = ({
                   ))}
                 </select>
               </div>
+            </div>
+          </div>
+
+          <hr className="border-slate-800" />
+
+          {/* Auto DM Tool */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400">
+              Auto DM Tool
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'all' }))}
+                className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between ${
+                  draft.autoDmStatus === 'all' || !draft.autoDmStatus
+                    ? 'bg-purple-600/20 border-purple-500 text-purple-300 font-semibold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <span>All ({autoDmCounts.all})</span>
+                {(draft.autoDmStatus === 'all' || !draft.autoDmStatus) && (
+                  <Check size={14} className="text-purple-400 shrink-0 ml-1" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'connected' }))}
+                className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between ${
+                  draft.autoDmStatus === 'connected'
+                    ? 'bg-purple-600/20 border-purple-500 text-purple-300 font-semibold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <span className="leading-tight">Connected / Enabled ({autoDmCounts.connected})</span>
+                {draft.autoDmStatus === 'connected' && (
+                  <Check size={14} className="text-purple-400 shrink-0 ml-1" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'not_connected' }))}
+                className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between ${
+                  draft.autoDmStatus === 'not_connected'
+                    ? 'bg-purple-600/20 border-purple-500 text-purple-300 font-semibold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <span className="leading-tight">Not Connected / Disabled ({autoDmCounts.notConnected})</span>
+                {draft.autoDmStatus === 'not_connected' && (
+                  <Check size={14} className="text-purple-400 shrink-0 ml-1" />
+                )}
+              </button>
             </div>
           </div>
 

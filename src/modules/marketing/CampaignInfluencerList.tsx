@@ -889,6 +889,17 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
       }
     }
 
+    // 4. Auto DM Tool Filter
+    if (filterState.autoDmStatus && filterState.autoDmStatus !== 'all') {
+      const isConnected = Boolean(influencer.auto_dm);
+      if (filterState.autoDmStatus === 'connected' && !isConnected) {
+        return false;
+      }
+      if (filterState.autoDmStatus === 'not_connected' && isConnected) {
+        return false;
+      }
+    }
+
     // 4. Creator Category Filter
     if (filterState.creatorCategory) {
       const targetCat = filterState.creatorCategory.toLowerCase();
@@ -1109,6 +1120,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
 
     if (filterState.state) count++;
     if (filterState.city) count++;
+    if (filterState.autoDmStatus && filterState.autoDmStatus !== 'all') count++;
     if (filterState.creatorCategory) count++;
     if (filterState.followerRange) count++;
     if (filterState.languages.length > 0) count += filterState.languages.length;
@@ -1774,6 +1786,12 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
               <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
                 City: {filterState.city}
                 <button onClick={() => setFilterState(prev => ({ ...prev, city: '' }))} className="hover:text-white text-slate-400">&times;</button>
+              </span>
+            )}
+            {filterState.autoDmStatus && filterState.autoDmStatus !== 'all' && (
+              <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium">
+                Auto DM: {filterState.autoDmStatus === 'connected' ? 'Connected / Enabled' : 'Not Connected / Disabled'}
+                <button onClick={() => setFilterState(prev => ({ ...prev, autoDmStatus: 'all' }))} className="hover:text-white text-slate-400">&times;</button>
               </span>
             )}
             {filterState.creatorCategory && (
