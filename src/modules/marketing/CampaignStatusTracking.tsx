@@ -53,7 +53,8 @@ import {
   isInfluencerReDispatchActive as isInfluencerReDispatchActiveUtil,
   isInfluencerWorkflowNotStarted as isWorkflowNotStartedUtil,
   getInfluencerWorkflowStatus as getInfluencerWorkflowStatusUtil,
-  getCurrentWorkflowState
+  getCurrentWorkflowState,
+  getRecordNotesMetadata
 } from '../../utils/workflowStatusUtils';
 
 interface CampaignStatusTrackingProps {
@@ -103,26 +104,22 @@ export interface VideoStepConfig {
   icon: any;
 }
 
-// Video 1 Steps: Share Script -> Call & Explain -> Time Line -> Draft -> Post Date (NO Payment, NO Pay Advance)
-export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
+// Unified Video Workflow Steps across all videos (Videos 1 through 6):
+// Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date -> Payment
+export const VIDEO_WORKFLOW_CONFIGS: VideoStepConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
-  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
-  { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
-  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
-];
-
-// Videos 2 through N Steps: Share Script -> Call & Explain -> Time Line -> Draft -> Post Date -> Payment (NO Pay Advance)
-export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
-  { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
-  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
+  { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: CreditCard },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
 
-// Top Workflow Summary Box Step Definitions (Payment dynamically rendered only for Videos 2–6)
+export const VIDEO_1_STEP_CONFIGS = VIDEO_WORKFLOW_CONFIGS;
+export const VIDEO_N_STEP_CONFIGS = VIDEO_WORKFLOW_CONFIGS;
+
+// Top Workflow Summary Box Step Definitions (All 11 status categories across Videos 1–6)
 export interface WorkflowSummaryBoxConfig {
   id: string;
   label: string;
@@ -136,6 +133,7 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain', icon: PhoneCall },
   { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
+  { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: CreditCard },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
@@ -254,6 +252,8 @@ export const normalizeScriptMatch = (str: string | null | undefined): string => 
  * Finds a matching Script Management record for a specific influencer and video number.
  * Strict exact match on BOTH Product AND Creator Language.
  */
+const matchingScriptCache = new Map<string, CampaignScript | null>();
+
 export function findMatchingScriptForInfluencer(
   scripts: CampaignScript[],
   record: any,
@@ -261,15 +261,27 @@ export function findMatchingScriptForInfluencer(
 ): CampaignScript | null {
   if (!scripts || scripts.length === 0 || !record) return null;
 
+  const recKey = record.id || record.dispatch_id || '';
+  const cacheKey = `${scripts.length}_${recKey}_${videoNumber}_${record.updated_at || ''}`;
+  if (matchingScriptCache.has(cacheKey)) {
+    return matchingScriptCache.get(cacheKey) || null;
+  }
+
   // 1. Resolve assigned product for this video
   const resolvedProductInfo = getResolvedProductForVideo(record.influencer, videoNumber);
   const effectiveProduct = resolvedProductInfo.isAssigned
     ? resolvedProductInfo.productName
     : (record.ref_concept && videoNumber === 1 ? record.ref_concept : '');
 
-  if (!effectiveProduct) return null;
+  if (!effectiveProduct) {
+    matchingScriptCache.set(cacheKey, null);
+    return null;
+  }
   const normProduct = normalizeScriptMatch(effectiveProduct);
-  if (!normProduct) return null;
+  if (!normProduct) {
+    matchingScriptCache.set(cacheKey, null);
+    return null;
+  }
 
   // 2. Resolve languages for this creator
   const rawLangs = record.influencer?.languages || record.dispatch?.languages || [];
@@ -289,20 +301,27 @@ export function findMatchingScriptForInfluencer(
 
   // Also check if stepData has an explicit language saved
   try {
-    const metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+    const metadata = getRecordNotesMetadata(record);
     const stepLang = metadata.videos?.[String(videoNumber)]?.steps?.share_script?.data?.language;
     if (stepLang && typeof stepLang === 'string' && stepLang.trim()) {
       influencerLanguages.unshift(stepLang.trim());
     }
   } catch (e) {}
 
-  if (influencerLanguages.length === 0) return null;
+  if (influencerLanguages.length === 0) {
+    matchingScriptCache.set(cacheKey, null);
+    return null;
+  }
 
-  return scripts.find(s => {
+  const result = scripts.find(s => {
     if (normalizeScriptMatch(s.product) !== normProduct) return false;
     const normScriptLang = normalizeScriptMatch(s.language);
     return influencerLanguages.some(infLang => normalizeScriptMatch(infLang) === normScriptLang);
   }) || null;
+
+  if (matchingScriptCache.size > 2000) matchingScriptCache.clear();
+  matchingScriptCache.set(cacheKey, result);
+  return result;
 }
 
 // =========================================================================
@@ -361,7 +380,15 @@ export const getInfluencerCampaignTotalPrice = (influencer: any, recordPricing?:
 // =========================================================================
 // FILTER RESOLUTION HELPERS FOR VIDEOS, CATEGORIES & DELIVERY STATUS
 // =========================================================================
+const assignedVideosCache = new WeakMap<StatusTrackingRecord, number[]>();
+
 export const getInfluencerAssignedVideos = (record: StatusTrackingRecord): number[] => {
+  if (!record) return [];
+  if (typeof record === 'object' && record !== null) {
+    const cached = assignedVideosCache.get(record);
+    if (cached) return cached;
+  }
+
   let count = Number(record.pricing?.total_videos) || 0;
   
   if (Array.isArray(record.postDates) && record.postDates.length > 0) {
@@ -370,7 +397,7 @@ export const getInfluencerAssignedVideos = (record: StatusTrackingRecord): numbe
   }
   
   try {
-    const meta = JSON.parse(record.notes || '{}');
+    const meta = getRecordNotesMetadata(record);
     if (meta.videos && typeof meta.videos === 'object') {
       const keys = Object.keys(meta.videos).map(k => Number(k)).filter(n => !isNaN(n));
       if (keys.length > 0) {
@@ -385,6 +412,10 @@ export const getInfluencerAssignedVideos = (record: StatusTrackingRecord): numbe
   const result: number[] = [];
   for (let i = 1; i <= count; i++) {
     result.push(i);
+  }
+
+  if (typeof record === 'object' && record !== null) {
+    assignedVideosCache.set(record, result);
   }
   return result;
 };
@@ -934,14 +965,26 @@ export interface VideoWorkflowData {
   draftStatus: 'Approved' | 'Not Approved' | 'Pending Approval' | 'Not Started';
 }
 
-export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number, depth = 0): VideoWorkflowData => {
-  const configs = videoNum === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
-  let metadata: any = {};
-  try {
-    metadata = JSON.parse(record.notes || '{}');
-  } catch (e) {
-    metadata = {};
+// High-performance WeakMap cache for getVideoWorkflow results to eliminate lag when switching tabs
+export const videoWorkflowCache = new WeakMap<StatusTrackingRecord, Map<number, VideoWorkflowData>>();
+
+export const clearVideoWorkflowCache = (record?: StatusTrackingRecord) => {
+  if (record) {
+    videoWorkflowCache.delete(record);
   }
+};
+
+export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number, depth = 0): VideoWorkflowData => {
+  if (depth === 0 && record && typeof record === 'object') {
+    const recordCache = videoWorkflowCache.get(record);
+    if (recordCache) {
+      const cached = recordCache.get(videoNum);
+      if (cached) return cached;
+    }
+  }
+
+  const configs = VIDEO_WORKFLOW_CONFIGS;
+  const metadata: any = getRecordNotesMetadata(record);
 
   const storedVideo = metadata.videos?.[String(videoNum)] || metadata.videos?.[videoNum];
 
@@ -1135,18 +1178,18 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           }
         };
       } else if (cfg.id === 'pay_advance') {
-        const v1Price = getInfluencerVideoPrice(record.influencer, 1);
-        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'advance');
+        const vPrice = getInfluencerVideoPrice(record.influencer, videoNum);
+        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === Number(videoNum) && vp.payment_type === 'advance');
         const isPaid = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : st.completed;
         steps[cfg.id] = {
           ...st,
           completed: isPaid,
           data: {
             ...st.data,
-            gpay: videoPayment?.transaction_reference || st.data?.gpay || record.advance_gpay_number || '',
-            total: (videoPayment?.agreed_amount != null ? String(videoPayment.agreed_amount) : (st.data?.total || (v1Price !== null ? String(v1Price) : (record.advance_total_amount || '')))),
-            advance: (videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (st.data?.advance || record.advance_paid_amount || '')),
-            photo: videoPayment?.payment_proof_url || st.data?.photo || record.pay_advance_photo_url || '',
+            gpay: videoPayment?.transaction_reference || st.data?.gpay || (videoNum === 1 ? record.advance_gpay_number : '') || '',
+            total: (videoPayment?.agreed_amount != null ? String(videoPayment.agreed_amount) : (st.data?.total || (vPrice !== null ? String(vPrice) : (videoNum === 1 ? record.advance_total_amount : '')))),
+            advance: (videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (st.data?.advance || (videoNum === 1 ? record.advance_paid_amount : ''))),
+            photo: videoPayment?.payment_proof_url || st.data?.photo || (videoNum === 1 ? record.pay_advance_photo_url : '') || '',
             payment_status: videoPayment?.payment_status || (isPaid ? 'paid' : 'pending'),
             payment_method: videoPayment?.payment_method || st.data?.payment_method || '',
             payment_record: videoPayment
@@ -1154,8 +1197,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         };
       } else if (cfg.id === 'payment') {
         const vPrice = getInfluencerVideoPrice(record.influencer, videoNum);
-        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === videoNum && vp.payment_type === 'final');
-        const isPaid = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : st.completed;
+        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === Number(videoNum) && vp.payment_type === 'final');
+        const isPaid = videoPayment 
+          ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) 
+          : (videoNum === 1 ? (Boolean(record.payment_remaining_completed) || st.completed) : st.completed);
         steps[cfg.id] = {
           ...st,
           completed: isPaid,
@@ -1163,7 +1208,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
             ...st.data,
             amount: (videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (st.data?.amount || (vPrice !== null ? String(vPrice) : ''))),
             gpay: videoPayment?.transaction_reference || st.data?.gpay || '',
-            photo: videoPayment?.payment_proof_url || st.data?.photo || '',
+            photo: videoPayment?.payment_proof_url || st.data?.photo || (videoNum === 1 ? record.payment_remaining_photo_url : '') || '',
             payment_status: videoPayment?.payment_status || (isPaid ? 'paid' : 'pending'),
             payment_completed: isPaid,
             payment_method: videoPayment?.payment_method || st.data?.payment_method || '',
@@ -1294,9 +1339,37 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           platform: metadata.video1_platform || 'Instagram',
           confirmed: completed
         };
+      } else if (cfg.id === 'payment') {
+        const vPrice = getInfluencerVideoPrice(record.influencer, 1);
+        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'final');
+        completed = videoPayment 
+          ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) 
+          : Boolean(record.payment_remaining_completed);
+        data = {
+          amount: videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (vPrice !== null ? String(vPrice) : ''),
+          gpay: videoPayment?.transaction_reference || '',
+          photo: videoPayment?.payment_proof_url || record.payment_remaining_photo_url || '',
+          payment_status: videoPayment?.payment_status || (completed ? 'paid' : 'pending'),
+          payment_completed: completed,
+          payment_method: videoPayment?.payment_method || '',
+          payment_record: videoPayment
+        };
       }
     } else {
-      if (cfg.id === 'timeline') {
+      if (cfg.id === 'pay_advance') {
+        const vPrice = getInfluencerVideoPrice(record.influencer, videoNum);
+        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === Number(videoNum) && vp.payment_type === 'advance');
+        completed = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : false;
+        data = {
+          gpay: videoPayment?.transaction_reference || '',
+          total: videoPayment?.agreed_amount != null ? String(videoPayment.agreed_amount) : (vPrice !== null ? String(vPrice) : ''),
+          advance: videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : '',
+          photo: videoPayment?.payment_proof_url || '',
+          payment_status: videoPayment?.payment_status || (completed ? 'paid' : 'pending'),
+          payment_method: videoPayment?.payment_method || '',
+          payment_record: videoPayment
+        };
+      } else if (cfg.id === 'timeline') {
         data = {
           date: scheduledDraftDate || '',
           time: '',
@@ -1393,7 +1466,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     activeStepId = firstIncomplete ? firstIncomplete.id : '';
   }
 
-  return {
+  const result: VideoWorkflowData = {
     videoNumber: videoNum,
     configs,
     steps,
@@ -1404,6 +1477,17 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     isReDraftRequired,
     draftStatus
   };
+
+  if (depth === 0 && record && typeof record === 'object') {
+    let recordCache = videoWorkflowCache.get(record);
+    if (!recordCache) {
+      recordCache = new Map<number, VideoWorkflowData>();
+      videoWorkflowCache.set(record, recordCache);
+    }
+    recordCache.set(videoNum, result);
+  }
+
+  return result;
 };
 
 
@@ -1589,7 +1673,41 @@ export const isInfluencerPostDateCompleted = (record: StatusTrackingRecord, vide
 };
 
 /**
- * Checks if Payment step is completed (Video > 1).
+ * Checks if Pay Advance step is completed for an influencer in a given video number.
+ */
+export const isInfluencerPayAdvanceCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const advStep = vData.steps['pay_advance'];
+  if (advStep?.completed || advStep?.data?.payment_status === 'paid' || advStep?.data?.pay_advance_completed) return true;
+  if (videoNumber === 1 && (record.pay_advance_completed || parseFloat(record.advance_paid_amount || '0') > 0)) return true;
+  return false;
+};
+
+/**
+ * Checks if Pay Advance step is in progress for an influencer in a given video number.
+ */
+export const isInfluencerPayAdvanceInProgress = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+  if (isInfluencerPayAdvanceCompleted(record, videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const advStep = vData.steps['pay_advance'];
+  if (!advStep) return false;
+
+  const data = advStep.data || {};
+  const hasAdvanceVal = parseFloat(data.advance || '0') > 0 || Boolean(data.photo) || Boolean(data.gpay);
+  const paymentStatus = data.payment_status;
+  return Boolean(hasAdvanceVal || paymentStatus === 'pending' || paymentStatus === 'initiated' || advStep.status === 'IN_PROGRESS');
+};
+
+/**
+ * Checks if Payment step is completed (Videos 1 to 6).
  */
 export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
@@ -1598,7 +1716,9 @@ export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, video
 
   const vData = getVideoWorkflow(record, videoNumber);
   const payStep = vData.steps['payment'];
-  return Boolean(payStep?.completed || payStep?.data?.payment_completed);
+  if (payStep?.completed || payStep?.data?.payment_completed || payStep?.data?.payment_status === 'paid') return true;
+  if (videoNumber === 1 && record.payment_remaining_completed) return true;
+  return false;
 };
 
 /**
@@ -1612,16 +1732,14 @@ export const isInfluencerVideoCompleted = (record: StatusTrackingRecord, videoNu
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
 
-  if (videoNumber === 1) {
-    return isInfluencerPostDateCompleted(record, 1);
-  }
-  return isInfluencerPaymentCompleted(record, videoNumber);
+  const vData = getVideoWorkflow(record, videoNumber);
+  return vData.status === 'COMPLETED';
 };
 
 /**
  * ONE CENTRALIZED WORKFLOW-STATE CALCULATION
  * Returns the exact current active workflow step for an influencer in a given video number:
- * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'timeline' | 'draft' | 'post_date' | 'payment' | 'completed'
+ * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment' | 'completed'
  */
 export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, videoNumber: number): string => {
   return getCurrentWorkflowState(record, videoNumber, {
@@ -1629,6 +1747,7 @@ export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, 
     isShareScriptInProgress: isInfluencerShareScriptInProgress,
     isCallCompleted: isInfluencerCallCompleted,
     isCallSkipped: isInfluencerCallSkipped,
+    isPayAdvanceCompleted: isInfluencerPayAdvanceCompleted,
     isTimelineCompleted: isInfluencerTimelineCompleted,
     isDraftCompleted: isInfluencerDraftCompleted,
     isPostDateCompleted: isInfluencerPostDateCompleted,
@@ -2146,30 +2265,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     });
   }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber, selectedSummaryStep]);
 
-  // Reset Payment filter automatically if user switches to Video 1 (which has no Payment step)
-  // Reset Pay Advance filter if selected
-  useEffect(() => {
-    if (selectedVideoNumber === 1 && selectedSummaryStep === 'payment') {
-      setSelectedSummaryStep(null);
-    }
-    if (selectedSummaryStep === 'pay_advance') {
-      setSelectedSummaryStep(null);
-    }
-  }, [selectedVideoNumber, selectedSummaryStep]);
-
   // Dynamic workflow step counts for horizontal summary boxes based on CURRENTLY SELECTED VIDEO
   const workflowStepCounts = useMemo(() => {
-    const assigned = activeTrackingRecords.filter(r => 
-      getInfluencerAssignedVideos(r).includes(selectedVideoNumber)
-    );
-
     const counts: Record<string, number> = {
-      all: assigned.length,
+      all: 0,
       delivered: 0,
       not_started: 0,
       share_script: 0,
       call_explain: 0,
       call_skipped: 0,
+      pay_advance: 0,
       timeline: 0,
       draft: 0,
       post_date: 0,
@@ -2177,12 +2282,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       payment: 0
     };
 
-    assigned.forEach(r => {
+    for (let i = 0; i < activeTrackingRecords.length; i++) {
+      const r = activeTrackingRecords[i];
+      const assigned = getInfluencerAssignedVideos(r);
+      if (!assigned.includes(selectedVideoNumber)) continue;
+      counts.all++;
+
       const state = getInfluencerCurrentWorkflowState(r, selectedVideoNumber);
       if (counts[state] !== undefined) {
         counts[state]++;
       }
-    });
+    }
 
     return counts;
   }, [activeTrackingRecords, selectedVideoNumber]);
@@ -2428,17 +2538,21 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         { id: 'delivery_confirmed', label: 'Delivery Confirmed', count: activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivery Confirmed').length },
       ];
     }
-    const configs = selectedVideoNumber === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
+    const configs = VIDEO_WORKFLOW_CONFIGS;
+    const activeStepCounts: Record<string, number> = {};
+    for (let i = 0; i < activeTrackingRecords.length; i++) {
+      const vData = getVideoWorkflow(activeTrackingRecords[i], selectedVideoNumber);
+      if (vData.activeStepId) {
+        activeStepCounts[vData.activeStepId] = (activeStepCounts[vData.activeStepId] || 0) + 1;
+      }
+    }
+
     const base = configs.map(cfg => {
       const label = cfg.id === 'pay_advance' ? 'Pay Advance' : (cfg.id === 'timeline' ? 'Timeline' : (cfg.id === 'call_explain' ? 'Call & Explain' : cfg.label));
-      const count = activeTrackingRecords.filter(r => {
-        const vData = getVideoWorkflow(r, selectedVideoNumber);
-        return vData.activeStepId === cfg.id;
-      }).length;
       return {
         id: cfg.id,
         label,
-        count,
+        count: activeStepCounts[cfg.id] || 0,
         icon: cfg.icon
       };
     });
@@ -2727,6 +2841,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               detail: { campaignId: targetCampId, influencerId: record.influencer_id }
             }));
           }
+          clearVideoWorkflowCache(record);
           await refresh();
           setActiveModal(null);
         } else {
@@ -2801,6 +2916,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               detail: { campaignId: targetCampId, influencerId: record.influencer_id }
             }));
           }
+          clearVideoWorkflowCache(record);
           await refresh();
           setActiveModal(null);
         } else {
@@ -3067,26 +3183,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (stepData.total) updates.advance_total_amount = stepData.total;
         if (stepData.advance) updates.advance_paid_amount = stepData.advance;
         if (stepData.photo) updates.pay_advance_photo_url = stepData.photo;
-
-        try {
-          const v1Agreed = parseFloat(stepData.total) || getInfluencerVideoPrice(record.influencer, 1) || 0;
-          const v1Paid = parseFloat(stepData.advance) || 0;
-          await saveVideoPayment({
-            campaignId: record.campaign_id,
-            influencerId: record.influencer_id,
-            videoNumber: 1,
-            paymentType: 'advance',
-            agreedAmount: v1Agreed,
-            paidAmount: v1Paid,
-            paymentStatus: isStepCompleted || v1Paid > 0 ? 'paid' : 'pending',
-            paymentMethod: stepData.payment_method || (stepData.isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
-            transactionReference: stepData.gpay || stepData.upi_id || stepData.upi_number || null,
-            paymentProofUrl: stepData.photo || null,
-            notes: stepData.notes || (stepData.account_number ? `Account: ${stepData.account_number}` : null),
-          });
-        } catch (err) {
-          console.error('Failed to persist video 1 payment record:', err);
-        }
       } else if (stepId === 'timeline') {
         updates.expected_delivery_completed = isStepCompleted;
         if (stepData.date) updates.draft_expected_date = stepData.date;
@@ -3105,6 +3201,28 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (stepData.postedAt) updates.final_post_actual_datetime = stepData.postedAt;
       }
       updates.notes = JSON.stringify(metadata);
+    }
+
+    if (stepId === 'pay_advance') {
+      try {
+        const vAgreed = parseFloat(stepData.total) || getInfluencerVideoPrice(record.influencer, videoNumber) || 0;
+        const vPaid = parseFloat(stepData.advance) || 0;
+        await saveVideoPayment({
+          campaignId: record.campaign_id,
+          influencerId: record.influencer_id,
+          videoNumber: videoNumber,
+          paymentType: 'advance',
+          agreedAmount: vAgreed,
+          paidAmount: vPaid,
+          paymentStatus: isStepCompleted || vPaid > 0 ? 'paid' : 'pending',
+          paymentMethod: stepData.payment_method || (stepData.isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
+          transactionReference: stepData.gpay || stepData.upi_id || stepData.upi_number || null,
+          paymentProofUrl: stepData.photo || null,
+          notes: stepData.notes || (stepData.account_number ? `Account: ${stepData.account_number}` : null),
+        });
+      } catch (err) {
+        console.error(`Failed to persist video ${videoNumber} advance payment record:`, err);
+      }
     } else if (stepId === 'payment') {
       try {
         const vAgreed = getInfluencerVideoPrice(record.influencer, videoNumber) || parseFloat(stepData.amount) || 0;
@@ -3129,6 +3247,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
     const result = await saveMilestone(recordId, updates);
     if (result.success) {
+      clearVideoWorkflowCache(record);
       if (!stepData?.suppressDefaultToast) {
         toast.success(`Video ${videoNumber} step updated successfully!`);
       }
@@ -3166,6 +3285,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       notes: JSON.stringify(metadata)
     });
     if (result.success) {
+      clearVideoWorkflowCache(record);
       toast.success(newOnHold ? 'Influencer set to On Hold' : 'Influencer resumed');
       await refresh();
       setOpenMenuId(null);
@@ -3340,7 +3460,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           <div className="flex flex-col gap-2.5 shrink-0">
             {/* Top: Horizontal Workflow Step Summary Boxes in ONE Single Line */}
             <div className="w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-smooth pb-1">
-              <div className={`grid grid-flow-col auto-cols-[minmax(96px,1fr)] sm:auto-cols-[minmax(105px,1fr)] 2xl:auto-cols-auto ${selectedVideoNumber === 1 ? '2xl:grid-cols-10' : '2xl:grid-cols-11'} gap-1.5 sm:gap-2 w-full min-w-[1020px] 2xl:min-w-0`}>
+              <div className="grid grid-flow-col auto-cols-[minmax(96px,1fr)] sm:auto-cols-[minmax(105px,1fr)] 2xl:auto-cols-auto 2xl:grid-cols-12 gap-1.5 sm:gap-2 w-full min-w-[1020px] 2xl:min-w-0">
                 {/* 1. All Box */}
                 <button
                   type="button"
@@ -3375,8 +3495,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   </div>
                 </button>
 
-                {/* Workflow Step Boxes (Payment omitted for Video 1) */}
-                {WORKFLOW_SUMMARY_BOX_CONFIGS.filter(s => selectedVideoNumber > 1 || s.id !== 'payment').map(step => {
+                {/* Workflow Step Boxes */}
+                {WORKFLOW_SUMMARY_BOX_CONFIGS.map(step => {
                   const isSelected = selectedSummaryStep === step.id;
                   const count = workflowStepCounts[step.id] || 0;
                   const StepIcon = step.icon;
@@ -3661,6 +3781,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             ? isInfluencerShareScriptCompleted(record, selectedVideoNumber)
                             : cfg.id === 'call_explain'
                             ? isInfluencerCallCompleted(record, selectedVideoNumber)
+                            : cfg.id === 'pay_advance'
+                            ? isInfluencerPayAdvanceCompleted(record, selectedVideoNumber)
                             : cfg.id === 'timeline'
                             ? isInfluencerTimelineCompleted(record, selectedVideoNumber)
                             : cfg.id === 'draft'
@@ -3687,6 +3809,10 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             stepInfo?.data?.model_script || stepInfo?.data?.script || stepInfo?.data?.script_body || stepInfo?.data?.script_link || stepInfo?.data?.sourceScriptId
                           );
 
+                          // Pay advance progress checks
+                          const isPayAdvanceStep = cfg.id === 'pay_advance';
+                          const isPayAdvanceInProg = isPayAdvanceStep && isInfluencerPayAdvanceInProgress(record, selectedVideoNumber);
+
                           let circleStyle = "bg-[#151f32]/60 text-slate-500 border border-slate-800/80 hover:border-slate-700 hover:text-slate-400";
                           let labelStyle = "text-slate-500";
 
@@ -3700,6 +3826,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           } else if (isReDraftReq) {
                             circleStyle = "bg-amber-950/80 text-amber-400 border border-amber-600/80 shadow-[0_0_12px_rgba(245,158,11,0.5)] hover:scale-105 animate-pulse";
                             labelStyle = "text-amber-400 font-semibold";
+                          } else if (isPayAdvanceStep && isPayAdvanceInProg) {
+                            circleStyle = "bg-blue-600/20 text-blue-400 border border-blue-500/60 shadow-[0_0_10px_rgba(59,130,246,0.3)] hover:scale-105";
+                            labelStyle = "text-blue-400 font-medium";
                           } else if (isShareScriptStep && isScriptLoaded) {
                             // State B: Script loaded into form but approval checkbox not yet confirmed
                             circleStyle = "bg-blue-600/20 text-blue-400 border border-blue-500/60 shadow-[0_0_10px_rgba(59,130,246,0.3)] hover:scale-105";
@@ -3719,6 +3848,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           const isNextStepDone = nextStepCfg ? (
                             nextStepCfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, selectedVideoNumber) :
                             nextStepCfg.id === 'call_explain' ? (isInfluencerCallCompleted(record, selectedVideoNumber) || isInfluencerCallSkipped(record, selectedVideoNumber)) :
+                            nextStepCfg.id === 'pay_advance' ? isInfluencerPayAdvanceCompleted(record, selectedVideoNumber) :
                             nextStepCfg.id === 'timeline' ? isInfluencerTimelineCompleted(record, selectedVideoNumber) :
                             nextStepCfg.id === 'draft' ? isInfluencerDraftCompleted(record, selectedVideoNumber) :
                             nextStepCfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, selectedVideoNumber) :
@@ -3753,6 +3883,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                           ? ' (Skipped)' 
                                           : isReDraftReq 
                                           ? ' (Re-Draft Required)' 
+                                          : isPayAdvanceStep && isPayAdvanceInProg
+                                          ? ' (In Progress - Advance Pending/Entered)'
                                           : isShareScriptStep && isScriptLoaded 
                                           ? ' (In Progress - Script Loaded)'
                                           : isShareScriptStep && hasScriptInManagement
@@ -4569,8 +4701,8 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
           {activeStepConfig?.id === 'pay_advance' && (
             <PayAdvanceForm 
-              key={`v1-pay-advance-${record.id}`}
-              videoNumber={1}
+              key={`v${videoNumber}-pay-advance-${record.id}`}
+              videoNumber={videoNumber}
               record={record} 
               existingData={activeStepState.data}
               onSave={(formData: any) => onSaveStep('pay_advance', formData, formData.pay_advance_completed)} 
@@ -6482,25 +6614,25 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
   const isUPI = currentPaymentMethod === 'UPI' || (!currentPaymentMethod && Boolean(currentUpi));
   const isHistorical = Boolean(existingData.pay_advance_completed || record.pay_advance_completed);
 
-  const v1Price = useMemo(() => getInfluencerVideoPrice(influencer, 1), [influencer]);
+  const vPrice = useMemo(() => getInfluencerVideoPrice(influencer, videoNumber), [influencer, videoNumber]);
   const totalCampaignPrice = useMemo(() => getInfluencerCampaignTotalPrice(influencer, record.pricing), [influencer, record.pricing]);
 
   const defaultTotal = isHistorical 
-    ? (existingData.total || record.advance_total_amount || (v1Price !== null ? String(v1Price) : ''))
-    : (v1Price !== null ? String(v1Price) : (existingData.total || record.advance_total_amount || ''));
+    ? (existingData.total || (videoNumber === 1 ? record.advance_total_amount : '') || (vPrice !== null ? String(vPrice) : ''))
+    : (vPrice !== null ? String(vPrice) : (existingData.total || (videoNumber === 1 ? record.advance_total_amount : '') || ''));
 
-  const [gpay, setGpay] = useState(existingData.gpay || record.advance_gpay_number || currentUpi || '');
+  const [gpay, setGpay] = useState(existingData.gpay || (videoNumber === 1 ? record.advance_gpay_number : '') || currentUpi || '');
   const [total, setTotal] = useState(defaultTotal);
-  const [advance, setAdvance] = useState(existingData.advance || record.advance_paid_amount || '');
+  const [advance, setAdvance] = useState(existingData.advance || (videoNumber === 1 ? record.advance_paid_amount : '') || '');
 
-  // Keep total in sync if not historical and v1Price changes in Campaign Influencer
+  // Keep total in sync if not historical and vPrice changes in Campaign Influencer
   useEffect(() => {
-    if (!isHistorical && v1Price !== null) {
-      setTotal(String(v1Price));
+    if (!isHistorical && vPrice !== null) {
+      setTotal(String(vPrice));
     }
-  }, [v1Price, isHistorical]);
+  }, [vPrice, isHistorical]);
   
-  const [photo, setPhoto] = useState(existingData.photo || record.pay_advance_photo_url || '');
+  const [photo, setPhoto] = useState(existingData.photo || (videoNumber === 1 ? record.pay_advance_photo_url : '') || '');
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<string | null>(photo || null);
@@ -6509,10 +6641,10 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
 
   const loadTransactions = useCallback(async () => {
     if (record?.campaign_id && record?.influencer_id) {
-      const txs = await fetchVideoPaymentTransactions(record.campaign_id, record.influencer_id, 1);
+      const txs = await fetchVideoPaymentTransactions(record.campaign_id, record.influencer_id, videoNumber);
       setTransactions(txs);
     }
-  }, [record?.campaign_id, record?.influencer_id]);
+  }, [record?.campaign_id, record?.influencer_id, videoNumber]);
 
   useEffect(() => {
     loadTransactions();
@@ -6539,7 +6671,7 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
 
   const handleSave = async () => {
     if (!total || !advance) {
-      toast.error('Please enter both Video 1 Agreed Amount and Advance Amount.');
+      toast.error(`Please enter both Video ${videoNumber} Agreed Amount and Advance Amount.`);
       return;
     }
     setIsUploading(true);
@@ -6588,8 +6720,8 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
       <StatusTrackingPaymentCard 
         paymentInfo={paymentInfoForCard} 
         isHistorical={isHistorical}
-        videoNumber={1}
-        perVideoAmount={v1Price}
+        videoNumber={videoNumber}
+        perVideoAmount={vPrice}
         totalCampaignAmount={totalCampaignPrice}
         paymentStatus={existingData.payment_status || (isHistorical ? 'paid' : 'pending')}
         transactions={transactions}
@@ -6615,13 +6747,13 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
           )}
           <div>
             <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">
-              Video 1 Agreed Amount (₹)
+              Video {videoNumber} Agreed Amount (₹)
             </label>
             <input 
               type="text" 
               value={total} 
               onChange={e => setTotal(e.target.value)} 
-              placeholder={v1Price !== null ? String(v1Price) : "Not assigned"}
+              placeholder={vPrice !== null ? String(vPrice) : "Not assigned"}
               className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono" 
             />
           </div>
@@ -6636,7 +6768,7 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
             />
           </div>
 
-          {/* Remaining Balance Indicator for Video 1 */}
+          {/* Remaining Balance Indicator */}
           {(() => {
             const numTotal = parseFloat(total);
             const numAdv = parseFloat(advance);
@@ -6644,7 +6776,7 @@ const PayAdvanceForm = ({ record, existingData = {}, onSave, videoNumber = 1 }: 
               const remaining = Math.max(0, numTotal - numAdv);
               return (
                 <div className="bg-[#0b1329]/60 border border-slate-800/80 rounded-lg px-3 py-2 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">Remaining Balance for Video 1:</span>
+                  <span className="text-slate-400">Remaining Balance for Video {videoNumber}:</span>
                   <span className="font-mono font-bold text-amber-400">₹{remaining.toLocaleString('en-IN')}</span>
                 </div>
               );

@@ -15,6 +15,7 @@ export type WorkflowStateKey =
   | 'share_script'
   | 'call_explain'
   | 'call_skipped'
+  | 'pay_advance'
   | 'timeline'
   | 'draft'
   | 'post_date'
@@ -26,6 +27,7 @@ export interface WorkflowStepHelpers {
   isShareScriptInProgress?: (r: any, v: number) => boolean;
   isCallCompleted?: (r: any, v: number) => boolean;
   isCallSkipped?: (r: any, v: number) => boolean;
+  isPayAdvanceCompleted?: (r: any, v: number) => boolean;
   isTimelineCompleted?: (r: any, v: number) => boolean;
   isDraftCompleted?: (r: any, v: number) => boolean;
   isPostDateCompleted?: (r: any, v: number) => boolean;
@@ -34,19 +36,42 @@ export interface WorkflowStepHelpers {
   isVideoStarted?: (r: any, v: number) => boolean;
 }
 
+// In-memory caches to prevent repetitive expensive JSON.parse during renders and filtering
+const notesMetadataCache = new WeakMap<any, Record<string, any>>();
+const notesStringCache = new Map<string, Record<string, any>>();
+
 /**
- * Parses notes metadata safely from a record
+ * Parses notes metadata safely from a record with high-performance memoization
  */
 export function getRecordNotesMetadata(record: any): Record<string, any> {
   if (!record) return {};
+  if (typeof record === 'object' && record !== null) {
+    const cached = notesMetadataCache.get(record);
+    if (cached) return cached;
+  }
+
+  let metadata: Record<string, any> = {};
   try {
     if (typeof record.notes === 'string') {
-      return JSON.parse(record.notes || '{}');
+      const raw = record.notes || '{}';
+      let parsed = notesStringCache.get(raw);
+      if (!parsed) {
+        parsed = JSON.parse(raw);
+        if (notesStringCache.size > 2000) notesStringCache.clear();
+        notesStringCache.set(raw, parsed);
+      }
+      metadata = parsed;
+    } else {
+      metadata = record.notes || {};
     }
-    return record.notes || {};
   } catch (e) {
-    return {};
+    metadata = {};
   }
+
+  if (typeof record === 'object' && record !== null) {
+    notesMetadataCache.set(record, metadata);
+  }
+  return metadata;
 }
 
 /**
@@ -206,6 +231,10 @@ export function getCurrentWorkflowState(
     ? helpers.isCallCompleted(record, videoNumber)
     : false;
 
+  const isPayAdvanceCompleted = helpers?.isPayAdvanceCompleted
+    ? helpers.isPayAdvanceCompleted(record, videoNumber)
+    : false;
+
   const isTimelineCompleted = helpers?.isTimelineCompleted
     ? helpers.isTimelineCompleted(record, videoNumber)
     : false;
@@ -218,7 +247,7 @@ export function getCurrentWorkflowState(
     ? helpers.isPostDateCompleted(record, videoNumber)
     : false;
 
-  const isPaymentCompleted = (videoNumber > 1 && helpers?.isPaymentCompleted)
+  const isPaymentCompleted = helpers?.isPaymentCompleted
     ? helpers.isPaymentCompleted(record, videoNumber)
     : false;
 
@@ -228,6 +257,7 @@ export function getCurrentWorkflowState(
     isScriptCompleted || 
     isCallCompleted || 
     isCallSkipped || 
+    isPayAdvanceCompleted ||
     isTimelineCompleted || 
     isDraftCompleted || 
     isPostDateCompleted || 
@@ -262,36 +292,41 @@ export function getCurrentWorkflowState(
     return 'share_script';
   }
 
-  // Call was explicitly skipped, Timeline not completed
-  if (isCallSkipped && !isTimelineCompleted) {
-    return 'call_skipped';
-  }
-
-  // Call was completed, Timeline not completed
-  if (!isTimelineCompleted) {
+  // 6. Pay Advance step
+  // Call completed or skipped, but Pay Advance not completed (and subsequent steps not completed):
+  if (!isPayAdvanceCompleted && !isTimelineCompleted && !isDraftCompleted && !isPostDateCompleted && !isPaymentCompleted) {
+    if (isCallSkipped) {
+      return 'call_skipped';
+    }
     return 'call_explain';
   }
 
-  // 6. Timeline step
-  // Timeline completed, Draft not completed
-  if (!isDraftCompleted) {
+  // 7. Timeline step
+  // Pay Advance completed, but Timeline not completed (and subsequent steps not completed):
+  if (!isTimelineCompleted && !isDraftCompleted && !isPostDateCompleted && !isPaymentCompleted) {
+    return 'pay_advance';
+  }
+
+  // 8. Draft step
+  // Timeline completed, Draft not completed (and subsequent steps not completed):
+  if (!isDraftCompleted && !isPostDateCompleted && !isPaymentCompleted) {
     return 'timeline';
   }
 
-  // 7. Draft step
-  // Draft completed, Post Date not completed
-  if (!isPostDateCompleted) {
+  // 9. Post Date step
+  // Draft completed, Post Date not completed (and subsequent steps not completed):
+  if (!isPostDateCompleted && !isPaymentCompleted) {
     return 'draft';
   }
 
-  // 8. Post Date / Payment (Video > 1)
-  if (videoNumber > 1) {
-    if (!isPaymentCompleted) {
-      return 'payment';
-    }
+  // 10. Payment step
+  // Post Date completed, Payment not completed:
+  if (!isPaymentCompleted) {
+    return 'post_date';
   }
 
-  return 'post_date';
+  // All completed (including Payment)
+  return 'payment';
 }
 
 /**
@@ -308,6 +343,7 @@ export function getStepCompletion(
   if (stepId === 'share_script') return helpers?.isShareScriptCompleted ? helpers.isShareScriptCompleted(record, videoNumber) : false;
   if (stepId === 'call_explain') return helpers?.isCallCompleted ? helpers.isCallCompleted(record, videoNumber) : false;
   if (stepId === 'call_skipped') return helpers?.isCallSkipped ? helpers.isCallSkipped(record, videoNumber) : false;
+  if (stepId === 'pay_advance') return helpers?.isPayAdvanceCompleted ? helpers.isPayAdvanceCompleted(record, videoNumber) : false;
   if (stepId === 'timeline') return helpers?.isTimelineCompleted ? helpers.isTimelineCompleted(record, videoNumber) : false;
   if (stepId === 'draft') return helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false;
   if (stepId === 'post_date') return helpers?.isPostDateCompleted ? helpers.isPostDateCompleted(record, videoNumber) : false;
