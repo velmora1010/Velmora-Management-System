@@ -953,6 +953,9 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
             }
           }
 
+          // Ensure active status for all valid imported records
+          updates.is_archived = 'false';
+
           if (Object.keys(updates).length > 0) {
             const { error: updateErr } = await supabase
               .from(SUPABASE_TABLES.influencersInfo)
@@ -972,6 +975,31 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       const processedCount = updatedCount + insertedCount;
       if (processedCount !== expectedValid) {
         throw new Error(`Import count verification failed: processed ${processedCount} records, but expected ${expectedValid}.`);
+      }
+
+      // 3. Reconcile against Current Imported Source File:
+      // Any influencer currently active in this campaign whose code is NOT present in the imported file
+      // must be marked 'other' (Eliminate/inactive) so they do NOT appear in the Active list or Status Tracking.
+      const importedCodeSet = new Set(
+        parsedRows
+          .filter(r => r.status !== 'Invalid' && r.code && r.code !== '—')
+          .map(r => normalizeCode(r.code))
+      );
+
+      const staleActiveInfluencers = (existingInfluencers || []).filter(inf =>
+        isActiveStatus(inf.is_archived) && !importedCodeSet.has(normalizeCode(inf.code))
+      );
+
+      if (staleActiveInfluencers.length > 0) {
+        const staleIds = staleActiveInfluencers.map(inf => inf.id);
+        const { error: staleErr } = await supabase
+          .from(SUPABASE_TABLES.influencersInfo)
+          .update({ is_archived: 'other' })
+          .in('id', staleIds);
+
+        if (staleErr) {
+          console.warn('Warning: Failed to reconcile some inactive records:', staleErr);
+        }
       }
 
       // Prepare concise activity and toast messages
