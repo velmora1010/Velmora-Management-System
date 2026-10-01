@@ -104,22 +104,35 @@ export interface VideoStepConfig {
   icon: any;
 }
 
-// Unified Video Workflow Steps across all videos (Videos 1 through 6):
-// Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date -> Payment
-export const VIDEO_WORKFLOW_CONFIGS: VideoStepConfig[] = [
+// VIDEO 1 WORKFLOW STEPS: Delivered -> Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date (7 steps, NO Payment)
+export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
+  { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
   { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: CreditCard },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
-  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Check },
+  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
+];
+
+// VIDEOS 2 TO 6 WORKFLOW STEPS: Share Script -> Call & Explain -> Time Line -> Draft -> Post Date -> Payment (6 steps, NO Delivered, NO Pay Advance)
+export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
+  { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
+  { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
+  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
+  { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
+  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
 
-export const VIDEO_1_STEP_CONFIGS = VIDEO_WORKFLOW_CONFIGS;
-export const VIDEO_N_STEP_CONFIGS = VIDEO_WORKFLOW_CONFIGS;
+export const getVideoWorkflowConfigs = (videoNumber: number): VideoStepConfig[] => {
+  return videoNumber === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
+};
 
-// Top Workflow Summary Box Step Definitions (All 11 status categories across Videos 1–6)
+// Backward compatibility alias
+export const VIDEO_WORKFLOW_CONFIGS = VIDEO_1_STEP_CONFIGS;
+
+// Top Workflow Summary Box Step Definitions: Video-specific single source of truth
 export interface WorkflowSummaryBoxConfig {
   id: string;
   label: string;
@@ -127,7 +140,7 @@ export interface WorkflowSummaryBoxConfig {
   icon: any;
 }
 
-export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
+export const VIDEO_1_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
   { id: 'not_started', label: 'Not Started', shortLabel: 'Not Started', icon: Clock },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
@@ -138,8 +151,25 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 're_dispatch', label: 'Re-Dispatch', shortLabel: 'Re-Dispatch', icon: RotateCcw },
+];
+
+export const VIDEO_N_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
+  { id: 'not_started', label: 'Not Started', shortLabel: 'Not Started', icon: Clock },
+  { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
+  { id: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain', icon: PhoneCall },
+  { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
+  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
+  { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
+  { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
+
+export const getVideoSummaryBoxConfigs = (videoNumber: number): WorkflowSummaryBoxConfig[] => {
+  return videoNumber === 1 ? VIDEO_1_SUMMARY_BOX_CONFIGS : VIDEO_N_SUMMARY_BOX_CONFIGS;
+};
+
+// Backward compatibility alias
+export const WORKFLOW_SUMMARY_BOX_CONFIGS = VIDEO_1_SUMMARY_BOX_CONFIGS;
 
 const isFakeUrl = (url: string | undefined | null) => {
   if (!url) return true;
@@ -1048,7 +1078,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     }
   }
 
-  const configs = VIDEO_WORKFLOW_CONFIGS;
+  const configs = getVideoWorkflowConfigs(videoNum);
   const metadata: any = getRecordNotesMetadata(record);
 
   const storedVideo = metadata.videos?.[String(videoNum)] || metadata.videos?.[videoNum];
@@ -1088,6 +1118,22 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   const steps: Record<string, { completed: boolean; skipped?: boolean; status?: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' | 'SKIPPED'; data: any; updated_at?: string }> = {};
 
   configs.forEach(cfg => {
+    // Dedicated Step: Delivered (Video 1 only)
+    if (cfg.id === 'delivered') {
+      const isDeliv = isInfluencerDeliveryConfirmed(record);
+      steps[cfg.id] = {
+        completed: isDeliv,
+        skipped: false,
+        status: isDeliv ? 'COMPLETED' : 'NOT_STARTED',
+        data: {
+          delivery_photo_url: record.delivery_photo_url || metadata.delivery_photo_url || '',
+          delivered_date: metadata.delivered_date || record.delivered_date || null,
+          confirmed: isDeliv
+        }
+      };
+      return;
+    }
+
     // Dedicated Step: Share Script Resolution (Priority: 1. campaign_video_scripts, 2. notes JSON, 3. legacy columns)
     if (cfg.id === 'share_script') {
       const videoScript = (record.videoScripts || []).find((vs: any) => Number(vs.video_number) === Number(videoNum));
@@ -1373,7 +1419,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           payment_record: videoPayment
         };
       } else if (cfg.id === 'timeline') {
-        completed = !!record.expected_delivery_completed || (!!record.draft_expected_date && !!record.draft_expected_time);
+        completed = Boolean(record.draft_submission_completed || (metadata.timeline_completed && record.draft_expected_date));
         data = {
           date: scheduledDraftDate || record.draft_expected_date || '',
           time: record.draft_expected_time || '',
@@ -1538,7 +1584,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   const isStarted = depth > 0 ? isDelivered : isInfluencerVideoStarted(record, videoNum);
 
   let status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' = 'NOT_STARTED';
-  if (!isDelivered || !isAssigned || !isStarted) {
+  if (!isAssigned || (videoNum > 1 && !isStarted)) {
     status = 'NOT_STARTED';
   } else if (completedOrSkippedCount === totalSteps) {
     status = 'COMPLETED';
@@ -1549,10 +1595,14 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   }
 
   // Active step calculation:
-  // If delivery is not completed, influencer not assigned, or video not started, no step in this video is active yet
+  // If influencer not assigned or video not started, no step in this video is active yet
   let activeStepId = '';
-  if (!isDelivered || !isAssigned || !isStarted) {
+  if (!isAssigned) {
     activeStepId = '';
+  } else if (videoNum > 1 && !isStarted) {
+    activeStepId = '';
+  } else if (videoNum === 1 && !isDelivered) {
+    activeStepId = 'delivered';
   } else if (isReDraftRequired) {
     activeStepId = 'draft';
   } else if (completedOrSkippedCount === totalSteps) {
@@ -1609,13 +1659,7 @@ export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum:
     return true;
   }
 
-  // 3. Explicit Video N post/draft dates
-  const vPostDate = (record.postDates || []).find((pd: any) => Number(pd.video_number) === videoNum);
-  if (vPostDate && (vPostDate.post_date || vPostDate.draft_date)) {
-    return true;
-  }
-
-  // 4. Notes metadata
+  // 3. Notes metadata (check for explicit progress, not just pre-scheduled dates)
   let metadata: any = {};
   try {
     metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
@@ -1629,15 +1673,15 @@ export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum:
       st?.status === 'SKIPPED' || 
       st?.data?.call_skipped || 
       st?.data?.is_skipped || 
-      st?.data?.script || 
-      st?.data?.concept || 
-      st?.data?.date || 
+      (st?.data?.script && String(st.data.script).trim().length > 0) || 
+      (st?.data?.concept && String(st.data.concept).trim().length > 0) || 
+      st?.data?.manualOverride === true ||
       st?.data?.vid
     );
     if (hasAnyStep) return true;
   }
 
-  // 5. Prior video (videoNum - 1) is fully completed
+  // 4. Prior video (videoNum - 1) is fully completed
   const prevWorkflow = getVideoWorkflow(record, videoNum - 1, 1);
   if (prevWorkflow.completedCount === prevWorkflow.totalSteps && prevWorkflow.totalSteps > 0) {
     return true;
@@ -1850,66 +1894,78 @@ export const isInfluencerPostDateCompleted = (record: StatusTrackingRecord, vide
 };
 
 /**
- * Checks if Pay Advance step is completed for an influencer in a given video number.
+ * Checks if Pay Advance step is completed (Video 1 ONLY).
  */
-export const isInfluencerPayAdvanceCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+export const isInfluencerPayAdvanceCompleted = (record: StatusTrackingRecord, videoNumber: number = 1): boolean => {
+  if (videoNumber !== 1) return false;
+  if (!record) return false;
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
-  if (!assigned.includes(videoNumber)) return false;
+  if (!assigned.includes(1)) return false;
 
-  const vData = getVideoWorkflow(record, videoNumber);
+  const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'advance');
+  if (videoPayment && (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0)) {
+    return true;
+  }
+  if (record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0)) {
+    return true;
+  }
+  const vData = getVideoWorkflow(record, 1);
   const advStep = vData.steps['pay_advance'];
-  if (advStep?.completed || advStep?.data?.payment_status === 'paid' || advStep?.data?.pay_advance_completed) return true;
-  if (videoNumber === 1 && (record.pay_advance_completed || parseFloat(record.advance_paid_amount || '0') > 0)) return true;
-  return false;
+  return Boolean(advStep?.completed || advStep?.data?.payment_status === 'paid' || advStep?.data?.pay_advance_completed);
 };
 
 /**
- * Checks if Pay Advance step is in progress for an influencer in a given video number.
+ * Checks if Pay Advance step is in progress (Video 1 ONLY).
  */
-export const isInfluencerPayAdvanceInProgress = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+export const isInfluencerPayAdvanceInProgress = (record: StatusTrackingRecord, videoNumber: number = 1): boolean => {
+  if (videoNumber !== 1) return false;
+  if (!record) return false;
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
-  if (!assigned.includes(videoNumber)) return false;
+  if (!assigned.includes(1)) return false;
   if (!isInfluencerDeliveryConfirmed(record)) return false;
-  if (isInfluencerPayAdvanceCompleted(record, videoNumber)) return false;
+  if (isInfluencerPayAdvanceCompleted(record, 1)) return false;
 
-  const vData = getVideoWorkflow(record, videoNumber);
+  const vData = getVideoWorkflow(record, 1);
   const advStep = vData.steps['pay_advance'];
   if (!advStep) return false;
 
   const data = advStep.data || {};
-  const hasAdvanceVal = parseFloat(data.advance || (videoNumber === 1 ? record.advance_paid_amount : '') || '0') > 0;
-  const hasPhoto = Boolean(data.photo || data.paymentProof?.url || (videoNumber === 1 ? record.pay_advance_photo_url : ''));
-  const hasGpay = Boolean(data.gpay || (videoNumber === 1 ? record.advance_gpay_number : ''));
+  const hasAdvanceVal = parseFloat(data.advance || record.advance_paid_amount || '0') > 0;
+  const hasPhoto = Boolean(data.photo || data.paymentProof?.url || record.pay_advance_photo_url);
+  const hasGpay = Boolean(data.gpay || record.advance_gpay_number);
 
-  const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'advance');
+  const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'advance');
   const hasInitiated = videoPayment && (videoPayment.payment_status === 'initiated' || videoPayment.payment_status === 'processing');
 
   return Boolean(hasAdvanceVal || hasPhoto || hasGpay || hasInitiated);
 };
 
 /**
- * Checks if Payment step is completed (Videos 1 to 6).
+ * Checks if Payment step is completed (Video 2-6 ONLY).
  */
 export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (videoNumber === 1) return false; // Payment belongs ONLY to Video 2-6
+  if (!record) return false;
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
 
+  const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'final');
+  if (videoPayment && (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0)) {
+    return true;
+  }
   const vData = getVideoWorkflow(record, videoNumber);
   const payStep = vData.steps['payment'];
-  if (payStep?.completed || payStep?.data?.payment_completed || payStep?.data?.payment_status === 'paid') return true;
-  if (videoNumber === 1 && record.payment_remaining_completed) return true;
-  return false;
+  return Boolean(payStep?.completed || payStep?.data?.payment_completed || payStep?.data?.payment_status === 'paid');
 };
 
 /**
  * Checks if all workflow steps for an influencer in a given video number are completed.
  */
 export const isInfluencerVideoCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
-  const isDelivered = isInfluencerDeliveryConfirmed(record);
-  if (!isDelivered) return false;
+  if (videoNumber === 1 && !isInfluencerDeliveryConfirmed(record)) return false;
   if (isInfluencerInReDispatch(record)) return false;
 
   const assigned = getInfluencerAssignedVideos(record);
@@ -1917,6 +1973,102 @@ export const isInfluencerVideoCompleted = (record: StatusTrackingRecord, videoNu
 
   const vData = getVideoWorkflow(record, videoNumber);
   return vData.status === 'COMPLETED';
+};
+
+/**
+ * Authoritative Not Started check for an influencer in a given video number.
+ * "Not Started" means the workflow has not started and none of the required workflow progress has been completed.
+ * It must NEVER be classified as Not Started if any step has progress, is completed, skipped, or in progress.
+ */
+export const isInfluencerVideoNotStarted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (!record) return true;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  if (videoNumber === 1) {
+    if (isInfluencerDeliveryConfirmed(record)) return false;
+    if (isInfluencerInReDispatch(record)) return false;
+    if (isInfluencerShareScriptCompleted(record, 1) || isInfluencerShareScriptInProgress(record, 1)) return false;
+    if (isInfluencerCallCompleted(record, 1) || isInfluencerCallSkipped(record, 1)) return false;
+    if (isInfluencerPayAdvanceCompleted(record, 1) || isInfluencerPayAdvanceInProgress(record, 1)) return false;
+    if (isInfluencerTimelineCompleted(record, 1)) return false;
+    if (isInfluencerDraftCompleted(record, 1) || getInfluencerDraftStatus(record, 1) !== 'not_started') return false;
+    if (isInfluencerPostDateCompleted(record, 1)) return false;
+    return true;
+  }
+
+  // Videos 2 to 6
+  if (isInfluencerShareScriptCompleted(record, videoNumber) || isInfluencerShareScriptInProgress(record, videoNumber)) return false;
+  if (isInfluencerCallCompleted(record, videoNumber) || isInfluencerCallSkipped(record, videoNumber)) return false;
+  if (isInfluencerTimelineCompleted(record, videoNumber)) return false;
+  if (isInfluencerDraftCompleted(record, videoNumber) || getInfluencerDraftStatus(record, videoNumber) !== 'not_started') return false;
+  if (isInfluencerPostDateCompleted(record, videoNumber)) return false;
+  if (isInfluencerPaymentCompleted(record, videoNumber)) return false;
+  return true;
+};
+
+export const isInfluencerWorkflowNotStarted = isInfluencerVideoNotStarted;
+
+/**
+ * Reusable single predicate matching step ID for both counts and filtered list.
+ * Guarantees that summary filter count exactly equals the number of matching rows when clicked!
+ */
+export const isStepFilterMatch = (
+  stepId: string,
+  record: StatusTrackingRecord,
+  videoNumber: number
+): boolean => {
+  switch (stepId) {
+    case 'delivered':
+      return videoNumber === 1 && isInfluencerDeliveryConfirmed(record);
+    case 'not_started':
+      return isInfluencerVideoNotStarted(record, videoNumber);
+    case 'share_script':
+      return isInfluencerShareScriptCompleted(record, videoNumber);
+    case 'call_explain':
+      return isInfluencerCallCompleted(record, videoNumber);
+    case 'call_skipped':
+      return isInfluencerCallSkipped(record, videoNumber);
+    case 'pay_advance':
+      return videoNumber === 1 && isInfluencerPayAdvanceCompleted(record, 1);
+    case 'timeline':
+      return isInfluencerTimelineCompleted(record, videoNumber);
+    case 'draft':
+      return isInfluencerDraftCompleted(record, videoNumber);
+    case 'post_date':
+      return isInfluencerPostDateCompleted(record, videoNumber);
+    case 'payment':
+      return videoNumber >= 2 && isInfluencerPaymentCompleted(record, videoNumber);
+    case 're_dispatch':
+      return videoNumber === 1 && isInfluencerInReDispatch(record);
+    default:
+      return false;
+  }
+};
+
+/**
+ * Authoritative debug & runtime validation function for filter counts.
+ * Calculates exact step counts directly from source status records.
+ */
+export const validateFilterCounts = (
+  records: StatusTrackingRecord[],
+  videoNumber: number
+): Record<string, number> => {
+  const counts: Record<string, number> = { all: 0 };
+  const summaryConfigs = getVideoSummaryBoxConfigs(videoNumber);
+  summaryConfigs.forEach(cfg => {
+    counts[cfg.id] = 0;
+  });
+
+  const assignedRecords = records.filter(r => getInfluencerAssignedVideos(r).includes(videoNumber));
+  counts.all = assignedRecords.length;
+
+  for (const cfg of summaryConfigs) {
+    if (cfg.id === 'all') continue;
+    counts[cfg.id] = assignedRecords.filter(r => isStepFilterMatch(cfg.id, r, videoNumber)).length;
+  }
+
+  return counts;
 };
 
 /**
@@ -1941,18 +2093,7 @@ export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, 
 };
 
 /**
- * Checks if NO workflow tracking step has been completed / workflow not started.
- */
-export const isInfluencerWorkflowNotStarted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
-  const assigned = getInfluencerAssignedVideos(record);
-  if (!assigned.includes(videoNumber)) return false;
-
-  return getInfluencerCurrentWorkflowState(record, videoNumber) === 'not_started';
-};
-
-/**
  * Resolves the single active summary workflow step for an influencer in a given video number:
- * One of: 'delivered' | 'not_started' | 'share_script' | 'call_explain' | 'timeline' | 'draft' | 'post_date' | 'payment' | 're_dispatch' | null
  */
 export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, videoNumber: number): string | null => {
   return getInfluencerCurrentWorkflowState(record, videoNumber);
@@ -1963,7 +2104,8 @@ export type StepVisualState = 'completed' | 'pending' | 'in_progress' | 'skipped
 /**
  * Single authoritative visual-state calculation for any workflow step.
  * Returns: 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started'
- * Priority: COMPLETED > PENDING > IN_PROGRESS > NOT_STARTED
+ * Priority: COMPLETED (Green) > SKIPPED (Amber) > PENDING (Amber) > IN_PROGRESS (Blue) > NOT_STARTED (Dim)
+ * NOTE: "Not Started" must NEVER be blue.
  */
 export const getStepVisualState = (
   record: StatusTrackingRecord,
@@ -1972,8 +2114,9 @@ export const getStepVisualState = (
 ): StepVisualState => {
   if (!record) return 'not_started';
 
-  // 1. Re-Dispatch check
+  // 1. Delivery step check (Video 1 only)
   if (stepId === 'delivered') {
+    if (videoNumber !== 1) return 'not_started';
     if (isInfluencerInReDispatch(record)) {
       return 'pending'; // Pending Re-Dispatch shipment/delivery action
     }
@@ -1988,7 +2131,7 @@ export const getStepVisualState = (
     return 'not_started';
   }
 
-  // 2. Delivery is the prerequisite for all subsequent video workflow steps
+  // 2. Delivery is the prerequisite for all subsequent Video 1 video workflow steps
   const isDelivered = isInfluencerDeliveryConfirmed(record);
 
   // 3. For Video > 1, check if video is started
@@ -1996,16 +2139,16 @@ export const getStepVisualState = (
     return 'not_started';
   }
 
-  // 4. Check completion first (COMPLETED HAS HIGHEST PRIORITY)
+  // 4. Check completion first (COMPLETED HAS HIGHEST PRIORITY - GREEN)
   const isDone = (
     stepId === 'share_script' ? isInfluencerShareScriptCompleted(record, videoNumber) :
     stepId === 'call_explain' ? isInfluencerCallCompleted(record, videoNumber) :
     stepId === 'call_skipped' ? isInfluencerCallSkipped(record, videoNumber) :
-    stepId === 'pay_advance' ? isInfluencerPayAdvanceCompleted(record, videoNumber) :
+    stepId === 'pay_advance' ? (videoNumber === 1 && isInfluencerPayAdvanceCompleted(record, 1)) :
     stepId === 'timeline' ? isInfluencerTimelineCompleted(record, videoNumber) :
     stepId === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
     stepId === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
-    stepId === 'payment' ? isInfluencerPaymentCompleted(record, videoNumber) :
+    stepId === 'payment' ? (videoNumber >= 2 && isInfluencerPaymentCompleted(record, videoNumber)) :
     false
   );
 
@@ -2018,8 +2161,8 @@ export const getStepVisualState = (
     return 'skipped';
   }
 
-  // If Delivery is not confirmed, video steps CANNOT be in progress or pending!
-  if (!isDelivered) {
+  // If Delivery is not confirmed for Video 1, subsequent steps CANNOT be in progress or pending!
+  if (videoNumber === 1 && !isDelivered) {
     return 'not_started';
   }
 
@@ -2027,7 +2170,7 @@ export const getStepVisualState = (
   const stepObj = vData.steps[stepId];
   const stepData = stepObj?.data || {};
 
-  // 6. Step-specific pending & in-progress evaluations
+  // 6. Step-specific pending & in-progress evaluations (BLUE or AMBER)
   if (stepId === 'draft') {
     const draftStatus = getInfluencerDraftStatus(record, videoNumber);
     if (draftStatus === 'completed') return 'completed';
@@ -2038,7 +2181,7 @@ export const getStepVisualState = (
   }
 
   if (stepId === 'pay_advance') {
-    if (isInfluencerPayAdvanceInProgress(record, videoNumber)) {
+    if (videoNumber === 1 && isInfluencerPayAdvanceInProgress(record, 1)) {
       return 'in_progress';
     }
     return 'not_started';
@@ -2052,7 +2195,7 @@ export const getStepVisualState = (
   }
 
   if (stepId === 'call_explain') {
-    const hasCallData = Boolean(stepData.date || stepData.time || stepData.call_summary || stepData.notes);
+    const hasCallData = Boolean(stepData.date || stepData.time || stepData.call_summary || stepData.call_notes);
     if (hasCallData) {
       return 'in_progress';
     }
@@ -2060,8 +2203,9 @@ export const getStepVisualState = (
   }
 
   if (stepId === 'timeline') {
-    const hasTimelineDate = Boolean(stepData.date || (videoNumber === 1 ? record.draft_expected_date : ''));
-    if (hasTimelineDate) {
+    // A pre-scheduled date from the campaign does NOT make Timeline in_progress!
+    // Timeline must remain NOT STARTED (dim) unless actively modified or confirmed!
+    if (stepObj?.status === 'IN_PROGRESS' || stepData.manualOverride === true || (Array.isArray(stepData.history) && stepData.history.length > 0)) {
       return 'in_progress';
     }
     return 'not_started';
@@ -2076,9 +2220,11 @@ export const getStepVisualState = (
   }
 
   if (stepId === 'payment') {
-    const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'final');
-    if (videoPayment && (videoPayment.payment_status === 'initiated' || videoPayment.payment_status === 'processing')) {
-      return 'in_progress';
+    if (videoNumber >= 2) {
+      const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'final');
+      if (videoPayment && (videoPayment.payment_status === 'initiated' || videoPayment.payment_status === 'processing')) {
+        return 'in_progress';
+      }
     }
     return 'not_started';
   }
@@ -2211,6 +2357,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       default: return 1;
     }
   }, [selectedWorkflowStep]);
+
+  // Auto-reset invalid selectedSummaryStep when switching videos
+  useEffect(() => {
+    if (selectedSummaryStep) {
+      const validConfigs = getVideoSummaryBoxConfigs(selectedVideoNumber);
+      if (!validConfigs.some(c => c.id === selectedSummaryStep)) {
+        setSelectedSummaryStep(null);
+      }
+    }
+  }, [selectedVideoNumber, selectedSummaryStep]);
 
   // LEVEL 2 VIEW STATE: null = Main List View; object = Video Detail View
   // Initialized from URL query params (stInfluencer, stVideo, stStep)
@@ -2620,8 +2776,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
       // 9. Top summary step box filter (All, Delivered, Not Started, Share Script, Call Explain, Call Skipped, Time Line, Draft, Post Date, Re-Dispatch, Payment)
       if (selectedSummaryStep) {
-        const currentState = getInfluencerCurrentWorkflowState(record, selectedVideoNumber);
-        if (currentState !== selectedSummaryStep) {
+        if (!isStepFilterMatch(selectedSummaryStep, record, selectedVideoNumber)) {
           return false;
         }
       }
@@ -2632,34 +2787,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
   // Dynamic workflow step counts for horizontal summary boxes based on CURRENTLY SELECTED VIDEO
   const workflowStepCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      all: 0,
-      delivered: 0,
-      not_started: 0,
-      share_script: 0,
-      call_explain: 0,
-      call_skipped: 0,
-      pay_advance: 0,
-      timeline: 0,
-      draft: 0,
-      post_date: 0,
-      re_dispatch: 0,
-      payment: 0
-    };
-
-    for (let i = 0; i < activeTrackingRecords.length; i++) {
-      const r = activeTrackingRecords[i];
-      const assigned = getInfluencerAssignedVideos(r);
-      if (!assigned.includes(selectedVideoNumber)) continue;
-      counts.all++;
-
-      const state = getInfluencerCurrentWorkflowState(r, selectedVideoNumber);
-      if (counts[state] !== undefined) {
-        counts[state]++;
-      }
-    }
-
-    return counts;
+    return validateFilterCounts(activeTrackingRecords, selectedVideoNumber);
   }, [activeTrackingRecords, selectedVideoNumber]);
 
   // Bulk Sync New Scripts across all active influencers safely without overwriting manual customizations
@@ -2903,7 +3031,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         { id: 'delivery_confirmed', label: 'Delivery Confirmed', count: activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivery Confirmed').length },
       ];
     }
-    const configs = VIDEO_WORKFLOW_CONFIGS;
+    const configs = getVideoWorkflowConfigs(selectedVideoNumber);
     const activeStepCounts: Record<string, number> = {};
     for (let i = 0; i < activeTrackingRecords.length; i++) {
       const vData = getVideoWorkflow(activeTrackingRecords[i], selectedVideoNumber);
@@ -3924,7 +4052,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 </button>
 
                 {/* Workflow Step Boxes */}
-                {WORKFLOW_SUMMARY_BOX_CONFIGS.map(step => {
+                {getVideoSummaryBoxConfigs(selectedVideoNumber).filter(step => step.id !== 'all').map(step => {
                   const isSelected = selectedSummaryStep === step.id;
                   const count = workflowStepCounts[step.id] || 0;
                   const StepIcon = step.icon;
@@ -3981,7 +4109,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-slate-400">Filtered by:</span>
                     <span className="px-2.5 py-1 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 font-semibold flex items-center gap-1.5 text-xs">
-                      <span>{WORKFLOW_SUMMARY_BOX_CONFIGS.find(b => b.id === selectedSummaryStep)?.label}</span>
+                      <span>{getVideoSummaryBoxConfigs(selectedVideoNumber).find(b => b.id === selectedSummaryStep)?.label}</span>
                       <button 
                         type="button" 
                         onClick={() => setSelectedSummaryStep(null)}
@@ -4146,11 +4274,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     <div className="flex-1 px-1 sm:px-2 xl:px-3 py-1 min-w-0 w-full overflow-hidden">
                       <div className="flex items-center w-full min-w-0 justify-between">
                         
-                        {/* 1. PREREQUISITES: DYNAMIC DELIVERY & RE-DISPATCH CYCLES */}
-                        {prerequisiteSteps.map((pStep, pIdx) => {
-                          const isLastPrereq = pIdx === prerequisiteSteps.length - 1;
-                          const isLineActive = pStep.isCompleted;
-
+                        {/* 1. PREREQUISITES: ONLY for Video 1 with active Re-Dispatch */}
+                        {selectedVideoNumber === 1 && isReDispatch && prerequisiteSteps.map((pStep, pIdx) => {
                           const pVisualState = pStep.isCompleted ? 'completed' : pStep.isPending ? 'pending' : 'not_started';
                           const pVisualStyles = getStepVisualStyles(pVisualState);
 
@@ -4185,7 +4310,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               {/* Connecting Line after this prerequisite step */}
                               <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
                                 <div className={`h-full w-full rounded-full transition-all duration-300 ${
-                                  isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'
+                                  pStep.isCompleted ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'
                                 }`} />
                               </div>
                             </React.Fragment>
@@ -4193,7 +4318,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         })}
 
                         {/* 2. SUB-STEPS FOR THE SELECTED VIDEO (Dynamically using currentVideoData.configs) */}
-                        {currentVideoData.configs.map((cfg, idx) => {
+                        {currentVideoData.configs
+                          .filter(cfg => !(selectedVideoNumber === 1 && isReDispatch && cfg.id === 'delivered'))
+                          .map((cfg, idx, arr) => {
                           const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
                           const visualStyles = getStepVisualStyles(visualState);
 
@@ -4210,6 +4337,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               <div
                                 className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
                                 onClick={() => {
+                                  if (selectedVideoNumber === 1 && cfg.id === 'delivered') {
+                                    setActiveModal({
+                                      recordId: record.id,
+                                      stageId: 'delivered',
+                                      mode: isReDispatch ? 'review_issue' : 'confirm_delivery'
+                                    });
+                                    return;
+                                  }
                                   if (!isDelivered) {
                                     toast.error('Please complete Delivery Confirmation first.');
                                     setActiveModal({
@@ -4222,7 +4357,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                   handleOpenVideo(record, selectedVideoNumber, cfg.id);
                                 }}
                                 title={
-                                  !isDelivered
+                                  selectedVideoNumber === 1 && cfg.id === 'delivered'
+                                    ? `Delivery Confirmation: ${isDelivered ? 'Completed' : 'Not Confirmed'}`
+                                    : !isDelivered
                                     ? 'Requires Delivery Confirmation first'
                                     : `${cfg.label} (${
                                         visualState === 'completed'
@@ -4258,7 +4395,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               </div>
 
                               {/* Connecting Line between Sub-Steps (Green when current step is done) */}
-                              {idx !== currentVideoData.configs.length - 1 && (
+                              {idx !== arr.length - 1 && (
                                 <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
                                   <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'}`} />
                                 </div>
@@ -5022,6 +5159,17 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
         {/* Step Component Form - Exclusively renders the active step */}
         <div>
+          {activeStepConfig?.id === 'delivered' && (
+            <DeliveredForm
+              record={record}
+              initialMode={isInfluencerInReDispatch(record) ? 'review_issue' : 'confirm_delivery'}
+              onSave={async (formData: any) => {
+                await onSaveStep('delivered', formData, isInfluencerDeliveryConfirmed(record));
+                handleAdvanceToNextStep();
+              }}
+            />
+          )}
+
           {activeStepConfig?.id === 'call_explain' && (
             <CallExplainForm 
               record={record} 

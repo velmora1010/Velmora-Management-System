@@ -85,6 +85,11 @@ interface ColumnMapping {
   profileImgCol: string;
 }
 
+// Robust Code Normalizer (Single Source of Truth)
+export const normalizeCode = (code: any): string => {
+  return String(code || '').trim().toUpperCase();
+};
+
 export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps> = ({
   campaign,
   existingInfluencers,
@@ -349,18 +354,51 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
   // Process rows into ParsedRow objects based on column mapping
   const processRowsWithMapping = (rows: Record<string, any>[], map: ColumnMapping) => {
+    // Build comprehensive map of all existing influencers in the campaign
+    // Must include ALL records regardless of is_archived value ('false', 'true', 'other')
+    // Must key STRICTLY on normalized influencer code (never on user handle/name)
     const existingCodeMap = new Map<string, CampaignInfluencer>();
-    existingInfluencers.forEach(i => {
-      if (isActiveStatus(i.is_archived)) {
-        if (i.code) existingCodeMap.set(normalize(i.code).toLowerCase(), i);
-        if (i.name) existingCodeMap.set(normalize(i.name).toLowerCase(), i);
+    (existingInfluencers || []).forEach(i => {
+      const norm = normalizeCode(i.code);
+      if (norm) {
+        existingCodeMap.set(norm, i);
       }
     });
 
     const seenCodesInFile = new Set<string>();
 
-    const parsed: ParsedRow[] = rows.map((row) => {
-      const code = normalize(row[map.codeCol]);
+    // 1. Filter out completely blank rows, empty codes, and repeated header rows
+    const cleanedRows = rows.filter((row) => {
+      const rawCode = map.codeCol ? row[map.codeCol] : '';
+      const normCode = normalizeCode(rawCode);
+      if (!normCode) return false;
+
+      // Ignore repeated/accidental header rows inside data
+      const headerPatterns = ['INFLUENCER CODE', 'CODE', 'INF CODE', 'CODE ID', 'INFLUENCER_CODE'];
+      if (headerPatterns.includes(normCode)) return false;
+
+      // Ensure row has at least some meaningful value
+      const hasAnyValue = Object.entries(row).some(([k, v]) => {
+        if (!v) return false;
+        const str = String(v).trim();
+        return str !== '' && str !== '—' && str.toLowerCase() !== 'null' && str.toLowerCase() !== 'undefined';
+      });
+      return hasAnyValue;
+    });
+
+    // 2. De-duplicate inside the file (keep first occurrence, ignore subsequent duplicates)
+    const uniqueFileRows: Record<string, any>[] = [];
+    cleanedRows.forEach((row) => {
+      const normCode = normalizeCode(row[map.codeCol]);
+      if (!seenCodesInFile.has(normCode)) {
+        seenCodesInFile.add(normCode);
+        uniqueFileRows.push(row);
+      }
+    });
+
+    const parsed: ParsedRow[] = uniqueFileRows.map((row) => {
+      const normCode = normalizeCode(row[map.codeCol]);
+      const code = normCode;
       const name = normalize(row[map.nameCol]);
       const userId = normalize(row[map.userIdCol]);
 
@@ -514,38 +552,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         };
       }
 
-      const lowerCode = code.toLowerCase();
-      if (seenCodesInFile.has(lowerCode)) {
-        return {
-          code,
-          name: name || '—',
-          userId: userId || '—',
-          phone,
-          altPhone,
-          email,
-          pincode,
-          upi,
-          city,
-          state,
-          address,
-          languages,
-          autoDm,
-          profileImg,
-          paymentMethod: parsedPayment.payment_method,
-          upiNumber: parsedPayment.upi_number,
-          accountHolderName: parsedPayment.account_holder_name,
-          accountNumber: parsedPayment.account_number,
-          ifscCode: parsedPayment.ifsc_code,
-          bankName: parsedPayment.bank_name,
-          panNumber: parsedPayment.pan_number,
-          hasExcelPaymentData,
-          status: 'Invalid',
-          reason: 'Duplicate Influencer Code in file'
-        };
-      }
-      seenCodesInFile.add(lowerCode);
-
-      const existingRecord = existingCodeMap.get(lowerCode);
+      const existingRecord = existingCodeMap.get(normCode);
 
       if (existingRecord) {
         // Priority: Explicit Excel data > Existing Record
@@ -824,8 +831,18 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     const existingRows = parsedRows.filter(r => r.status === 'Existing');
     const invalidCount = parsedRows.filter(r => r.status === 'Invalid').length;
 
-    if (validRows.length === 0 && existingRows.length === 0) {
+    const expectedExisting = existingRows.length;
+    const expectedNew = validRows.length;
+    const expectedValid = expectedExisting + expectedNew;
+
+    if (expectedValid === 0) {
       toast.error('No valid rows to import.');
+      return;
+    }
+
+    // Safety Assertion: If preview showed New = 0, validRows MUST be exactly 0
+    if (expectedNew === 0 && validRows.length > 0) {
+      toast.error('Safety violation: Preview indicated 0 new influencers, but detected rows to insert. Aborting to prevent duplicate creation.');
       return;
     }
 
@@ -836,7 +853,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
     let updatedCount = 0;
 
     try {
-      // 1. Insert New Influencers
+      // 1. Insert New Influencers (ONLY if expectedNew > 0)
       if (validRows.length > 0) {
         let nextIdVal = await getMaxId(SUPABASE_TABLES.influencersInfo);
 
@@ -848,7 +865,7 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           return {
             id: nextIdVal,
             campaign_id: campaign.id,
-            code: row.code,
+            code: normalizeCode(row.code),
             influencer_name: row.name,
             name: row.userId,
             phone_number: row.phone || null,
@@ -944,11 +961,17 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
 
             if (updateErr) {
               console.error('Error updating existing influencer:', updateErr);
-            } else {
-              updatedCount++;
+              throw new Error(`Failed to update influencer ${row.code}: ${updateErr.message || JSON.stringify(updateErr)}`);
             }
           }
+          updatedCount++;
         }
+      }
+
+      // Verification check: Processed count must equal expected valid count
+      const processedCount = updatedCount + insertedCount;
+      if (processedCount !== expectedValid) {
+        throw new Error(`Import count verification failed: processed ${processedCount} records, but expected ${expectedValid}.`);
       }
 
       // Prepare concise activity and toast messages
