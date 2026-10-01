@@ -1125,7 +1125,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         const attempts: DraftAttempt[] = Array.isArray(draftData.attempts) ? [...draftData.attempts] : [];
         
         // Backward compatibility if attempts is empty but draft video was stored
-        if (attempts.length === 0 && (draftData.vid || draftData.video_url || (videoNum === 1 && record.draft_video_url))) {
+        if (!draftData.is_deleted && attempts.length === 0 && (draftData.vid || draftData.video_url || (videoNum === 1 && record.draft_video_url && !draftData.attempts))) {
           const legacyVid = draftData.vid || draftData.video_url || record.draft_video_url || '';
           const legacyApp = draftData.appStat || draftData.approval_status || record.draft_approval_status || (st.completed ? 'Approved' : '');
           attempts.push({
@@ -1143,19 +1143,28 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         }
 
         const latestAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
-        const activeApprovalStatus = latestAttempt ? latestAttempt.approval_status : (draftData.approval_status || (st.completed ? 'Approved' : ''));
-        const isApproved = activeApprovalStatus === 'Approved';
+        const activeApprovalStatus = latestAttempt ? latestAttempt.approval_status : (draftData.approval_status || '');
+        const activeTiming = latestAttempt ? latestAttempt.timing_status : (draftData.timing || '');
+        const hasVid = Boolean(latestAttempt?.video_url || draftData.vid || draftData.video_url || (videoNum === 1 && record.draft_video_url));
+        const isApproved = Boolean(
+          hasVid && 
+          activeApprovalStatus === 'Approved' && 
+          activeTiming && 
+          activeTiming !== 'Not Submit' && 
+          st.completed
+        );
 
         steps[cfg.id] = {
           ...st,
-          completed: isApproved, // STRICTLY ONLY COMPLETED IF APPROVED
+          completed: isApproved, // STRICTLY ONLY COMPLETED IF APPROVED + VALID TIMING + CONFIRMED
+          status: isApproved ? 'COMPLETED' : (hasVid ? 'IN_PROGRESS' : 'NOT_STARTED'),
           data: {
             ...draftData,
             attempts,
-            active_attempt_number: latestAttempt?.attempt_number || 1,
+            active_attempt_number: latestAttempt?.attempt_number || 0,
             approval_status: activeApprovalStatus,
             vid: latestAttempt?.video_url || draftData.vid || '',
-            timing: latestAttempt?.timing_status || draftData.timing || '',
+            timing: activeTiming || '',
             corr: latestAttempt?.corrections || draftData.corr || '',
             finalL: latestAttempt?.final_product_link || draftData.finalL || '',
             finalD: latestAttempt?.final_description || draftData.finalD || ''
@@ -1303,14 +1312,21 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
       } else if (cfg.id === 'draft') {
         const legacyVid = record.draft_video_url || '';
         const legacyApp = record.draft_approval_status || '';
-        const isApproved = legacyApp === 'Approved';
+        const legacyTiming = record.draft_timing_status || '';
+        const isApproved = Boolean(
+          legacyVid && 
+          legacyApp === 'Approved' && 
+          legacyTiming && 
+          legacyTiming !== 'Not Submit' && 
+          record.draft_received
+        );
         const attempts: DraftAttempt[] = [];
         if (legacyVid) {
           attempts.push({
             attempt_number: 1,
             video_url: legacyVid,
             approval_status: isApproved ? 'Approved' : (legacyApp === 'Not Approved' ? 'Not Approved' : 'Pending Approval'),
-            timing_status: record.draft_timing_status || '',
+            timing_status: legacyTiming,
             corrections: record.draft_corrections_required || '',
             final_product_link: record.draft_final_product_link || '',
             final_description: record.draft_final_description || '',
@@ -1321,12 +1337,12 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         data = {
           vid: legacyVid,
           appStat: legacyApp,
-          timing: record.draft_timing_status || '',
+          timing: legacyTiming,
           corr: record.draft_corrections_required || '',
           finalL: record.draft_final_product_link || '',
           finalD: record.draft_final_description || '',
           attempts,
-          active_attempt_number: 1,
+          active_attempt_number: attempts.length,
           approval_status: legacyApp
         };
       } else if (cfg.id === 'post_date') {
@@ -1424,11 +1440,17 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   const isAssigned = assignedVideos.includes(videoNum);
 
   const draftStep = steps['draft'];
-  const draftApprovalStatus = draftStep?.data?.approval_status || '';
+  const dData = draftStep?.data || {};
+  const dAttempts: DraftAttempt[] = Array.isArray(dData.attempts) ? dData.attempts : [];
+  const activeDAttempt = dAttempts.length > 0 ? dAttempts[dAttempts.length - 1] : null;
+  const draftApprovalStatus = activeDAttempt?.approval_status || dData.approval_status || dData.appStat || (videoNum === 1 ? record.draft_approval_status : '') || '';
   const isReDraftRequired = draftApprovalStatus === 'Not Approved';
+  const hasDraftVid = Boolean(activeDAttempt?.video_url || dData.vid || dData.video_url || (videoNum === 1 && record.draft_video_url));
+  const isDraftTrulyCompleted = Boolean(hasDraftVid && draftApprovalStatus === 'Approved' && (activeDAttempt?.timing_status || dData.timing || (videoNum === 1 ? record.draft_timing_status : '')) !== 'Not Submit' && draftStep?.completed);
+
   const draftStatus = isReDraftRequired 
     ? 'Not Approved' 
-    : (draftStep?.completed ? 'Approved' : (draftStep?.data?.vid ? 'Pending Approval' : 'Not Started'));
+    : (isDraftTrulyCompleted ? 'Approved' : (hasDraftVid ? 'Pending Approval' : 'Not Started'));
 
   const isStepDone = (cId: string) => {
     const s = steps[cId];
@@ -1645,7 +1667,9 @@ export const isInfluencerTimelineCompleted = (record: StatusTrackingRecord, vide
 };
 
 /**
- * Checks if Draft has actually been completed/submitted.
+ * Checks if Draft has actually been completed/approved with valid timing.
+ * Strict Rule: UPLOAD SUCCESS != STEP COMPLETED.
+ * Requires: Video exists + Approval is 'Approved' + Timing status is selected and != 'Not Submit' + Saved confirmed.
  */
 export const isInfluencerDraftCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
@@ -1654,8 +1678,85 @@ export const isInfluencerDraftCompleted = (record: StatusTrackingRecord, videoNu
 
   const vData = getVideoWorkflow(record, videoNumber);
   const dStep = vData.steps['draft'];
-  const hasAttempt = Array.isArray(dStep?.data?.attempts) && dStep.data.attempts.length > 0;
-  return Boolean(dStep?.completed || dStep?.data?.vid || dStep?.data?.video_url || hasAttempt);
+  if (!dStep) return false;
+
+  const data = dStep.data || {};
+  const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+  const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+  // 1. Video must exist
+  const hasVideo = Boolean(
+    activeAttempt?.video_url || 
+    data.vid || 
+    data.video_url || 
+    (videoNumber === 1 && record.draft_video_url)
+  );
+  if (!hasVideo) return false;
+
+  // 2. Approval decision must be explicitly 'Approved'
+  const approvalStatus = activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
+  if (approvalStatus !== 'Approved') return false;
+
+  // 3. Timing status must be chosen and NOT 'Not Submit'
+  const timingStatus = activeAttempt?.timing_status || data.timing || (videoNumber === 1 ? record.draft_timing_status : '');
+  if (!timingStatus || timingStatus === 'Not Submit') return false;
+
+  // 4. Must be marked completed
+  return Boolean(dStep.completed || (videoNumber === 1 && record.draft_received && record.draft_approval_status === 'Approved'));
+};
+
+/**
+ * Checks if Draft step is currently in progress (video uploaded, pending review or re-draft required).
+ */
+export const isInfluencerDraftInProgress = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const dStep = vData.steps['draft'];
+  if (!dStep) return false;
+
+  const data = dStep.data || {};
+  const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+  const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+  const hasVideo = Boolean(
+    activeAttempt?.video_url || 
+    data.vid || 
+    data.video_url || 
+    (videoNumber === 1 && record.draft_video_url)
+  );
+
+  const approvalStatus = activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
+
+  return Boolean(
+    hasVideo || 
+    dStep.status === 'IN_PROGRESS' || 
+    approvalStatus === 'Pending Approval' || 
+    approvalStatus === 'Not Approved' || 
+    vData.isReDraftRequired
+  );
+};
+
+export type DraftStatusKind = 'not_started' | 'pending_approval' | 'not_approved' | 'completed';
+
+export const getInfluencerDraftStatus = (record: StatusTrackingRecord, videoNumber: number): DraftStatusKind => {
+  if (isInfluencerDraftCompleted(record, videoNumber)) return 'completed';
+  if (isInfluencerDraftInProgress(record, videoNumber)) {
+    const vData = getVideoWorkflow(record, videoNumber);
+    const dStep = vData.steps['draft'];
+    const data = dStep?.data || {};
+    const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+    const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+    const approvalStatus = activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
+    if (approvalStatus === 'Not Approved' || vData.isReDraftRequired) {
+      return 'not_approved';
+    }
+    return 'pending_approval';
+  }
+  return 'not_started';
 };
 
 /**
@@ -2980,9 +3081,32 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     const updates: Partial<StatusTrackingRecord> = {};
 
     if (stepId === 'draft') {
-      videoObj.is_re_draft_required = (stepData.approval_status === 'Not Approved');
+      const hasVid = Boolean(stepData.vid || (Array.isArray(stepData.attempts) && stepData.attempts.length > 0 && stepData.attempts[stepData.attempts.length - 1]?.video_url));
+      if (!hasVid) {
+        videoObj.is_re_draft_required = false;
+        videoObj.steps['draft'] = {
+          completed: false,
+          skipped: false,
+          status: 'NOT_STARTED',
+          data: {
+            attempts: [],
+            active_attempt_number: 0,
+            approval_status: '',
+            vid: '',
+            timing: 'Not Submit',
+            corr: '',
+            finalL: '',
+            finalD: '',
+            re_draft_submit_date: '',
+            latest_re_draft_submit_date: '',
+            is_deleted: true
+          },
+          updated_at: new Date().toISOString()
+        };
+      } else {
+        videoObj.is_re_draft_required = (stepData.approval_status === 'Not Approved');
 
-      if (stepData.approval_status === 'Not Approved' && stepData.re_draft_submit_date) {
+        if (stepData.approval_status === 'Not Approved' && stepData.re_draft_submit_date) {
         // Automatically populate / update timeline step for Re-Upload
         if (!videoObj.steps.timeline) {
           videoObj.steps.timeline = { completed: false, data: {} };
@@ -3025,7 +3149,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         videoObj.steps.timeline.completed = true;
         videoObj.steps.timeline.data.re_upload_status = 'Completed';
       }
-    } else if (stepId === 'timeline') {
+    }
+  } else if (stepId === 'timeline') {
       if (stepData.is_re_upload_timeline && stepData.date && videoObj.steps.draft?.data) {
         videoObj.steps.draft.data.latest_re_draft_submit_date = stepData.date;
         if (videoNumber === 1) {
@@ -3188,13 +3313,24 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (stepData.date) updates.draft_expected_date = stepData.date;
         if (stepData.time) updates.draft_expected_time = stepData.time;
       } else if (stepId === 'draft') {
-        updates.draft_received = isStepCompleted;
-        if (stepData.vid) updates.draft_video_url = stepData.vid;
-        if (stepData.approval_status || stepData.appStat) updates.draft_approval_status = stepData.approval_status || stepData.appStat;
-        if (stepData.timing) updates.draft_timing_status = stepData.timing;
-        if (stepData.corr) updates.draft_corrections_required = stepData.corr;
-        if (stepData.finalL) updates.draft_final_product_link = stepData.finalL;
-        if (stepData.finalD) updates.draft_final_description = stepData.finalD;
+        const hasVid = Boolean(stepData.vid || (Array.isArray(stepData.attempts) && stepData.attempts.length > 0 && stepData.attempts[stepData.attempts.length - 1]?.video_url));
+        if (!hasVid) {
+          updates.draft_received = false;
+          updates.draft_video_url = null;
+          updates.draft_approval_status = null;
+          updates.draft_timing_status = 'Not Submit';
+          updates.draft_corrections_required = null;
+          updates.draft_final_product_link = null;
+          updates.draft_final_description = null;
+        } else {
+          updates.draft_received = isStepCompleted;
+          if (stepData.vid) updates.draft_video_url = stepData.vid;
+          if (stepData.approval_status || stepData.appStat) updates.draft_approval_status = stepData.approval_status || stepData.appStat;
+          if (stepData.timing) updates.draft_timing_status = stepData.timing;
+          if (stepData.corr !== undefined) updates.draft_corrections_required = stepData.corr;
+          if (stepData.finalL !== undefined) updates.draft_final_product_link = stepData.finalL;
+          if (stepData.finalD !== undefined) updates.draft_final_description = stepData.finalD;
+        }
       } else if (stepId === 'post_date') {
         updates.final_post_completed = isStepCompleted;
         if (stepData.link) updates.final_post_link = stepData.link;
@@ -3721,9 +3857,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         {/* 1. PREREQUISITES: DYNAMIC DELIVERY & RE-DISPATCH CYCLES */}
                         {prerequisiteSteps.map((pStep, pIdx) => {
                           const isLastPrereq = pIdx === prerequisiteSteps.length - 1;
-                          const nextPrereq = !isLastPrereq ? prerequisiteSteps[pIdx + 1] : null;
-                          const isFirstVideoStepDone = isInfluencerShareScriptCompleted(record, selectedVideoNumber);
-                          const isLineActive = pStep.isCompleted && (nextPrereq ? nextPrereq.isCompleted : isFirstVideoStepDone);
+                          const isLineActive = pStep.isCompleted;
 
                           let circleStyle = "bg-[#151f32] text-slate-400 border border-slate-700/80 hover:border-slate-500 hover:text-slate-200";
                           let labelStyle = "text-slate-400";
@@ -3815,6 +3949,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                           let circleStyle = "bg-[#151f32]/60 text-slate-500 border border-slate-800/80 hover:border-slate-700 hover:text-slate-400";
                           let labelStyle = "text-slate-500";
+                          const isDraftStep = cfg.id === 'draft';
+                          const isDraftInProg = isDraftStep && isInfluencerDraftInProgress(record, selectedVideoNumber);
 
                           if (isCompleted) {
                             // Completed steps across all 6 videos are always styled GREEN (emerald)
@@ -3824,8 +3960,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             circleStyle = "bg-amber-500/20 text-amber-400 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] hover:scale-105";
                             labelStyle = "text-amber-400 font-semibold";
                           } else if (isReDraftReq) {
-                            circleStyle = "bg-amber-950/80 text-amber-400 border border-amber-600/80 shadow-[0_0_12px_rgba(245,158,11,0.5)] hover:scale-105 animate-pulse";
-                            labelStyle = "text-amber-400 font-semibold";
+                            circleStyle = "bg-rose-950/80 text-rose-400 border border-rose-600/80 shadow-[0_0_12px_rgba(244,63,94,0.4)] hover:scale-105 animate-pulse";
+                            labelStyle = "text-rose-400 font-semibold";
+                          } else if (isDraftStep && isDraftInProg) {
+                            // Video uploaded, but approval/timing not completed -> Step = Pending / In Progress (YELLOW)
+                            circleStyle = "bg-amber-500/20 text-amber-400 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] hover:scale-105";
+                            labelStyle = "text-amber-400 font-medium";
                           } else if (isPayAdvanceStep && isPayAdvanceInProg) {
                             circleStyle = "bg-blue-600/20 text-blue-400 border border-blue-500/60 shadow-[0_0_10px_rgba(59,130,246,0.3)] hover:scale-105";
                             labelStyle = "text-blue-400 font-medium";
@@ -3845,17 +3985,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                           const nextStepCfg = idx < currentVideoData.configs.length - 1 ? currentVideoData.configs[idx + 1] : null;
                           const isCurrentStepDone = isCompleted || isSkipped;
-                          const isNextStepDone = nextStepCfg ? (
-                            nextStepCfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, selectedVideoNumber) :
-                            nextStepCfg.id === 'call_explain' ? (isInfluencerCallCompleted(record, selectedVideoNumber) || isInfluencerCallSkipped(record, selectedVideoNumber)) :
-                            nextStepCfg.id === 'pay_advance' ? isInfluencerPayAdvanceCompleted(record, selectedVideoNumber) :
-                            nextStepCfg.id === 'timeline' ? isInfluencerTimelineCompleted(record, selectedVideoNumber) :
-                            nextStepCfg.id === 'draft' ? isInfluencerDraftCompleted(record, selectedVideoNumber) :
-                            nextStepCfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, selectedVideoNumber) :
-                            nextStepCfg.id === 'payment' ? isInfluencerPaymentCompleted(record, selectedVideoNumber) :
-                            false
-                          ) : false;
-                          const isLineActive = isCurrentStepDone && isNextStepDone;
+                          const isLineActive = isCurrentStepDone;
 
                           return (
                             <React.Fragment key={`${selectedVideoNumber}-${cfg.id}`}>
@@ -4639,6 +4769,40 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             const isCompleted = activeStepState.completed;
             const isSkipped = Boolean(activeStepState.skipped || activeStepState.status === 'SKIPPED' || activeStepState.data?.call_skipped || activeStepState.data?.is_skipped);
 
+            if (activeStepConfig?.id === 'draft') {
+              const draftKind = getInfluencerDraftStatus(record, videoNumber);
+              if (draftKind === 'completed') {
+                return (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-emerald-950/80 text-emerald-400 border-emerald-700/60">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    Completed
+                  </span>
+                );
+              }
+              if (draftKind === 'not_approved') {
+                return (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-rose-950/80 text-rose-400 border-rose-700/60">
+                    <span className="w-2 h-2 rounded-full bg-rose-400" />
+                    Not Approved / Re-Draft
+                  </span>
+                );
+              }
+              if (draftKind === 'pending_approval') {
+                return (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-amber-950/80 text-amber-400 border-amber-700/60">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    Pending Approval
+                  </span>
+                );
+              }
+              return (
+                <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-slate-900 text-slate-400 border-slate-800">
+                  <span className="w-2 h-2 rounded-full bg-slate-500" />
+                  Not Started
+                </span>
+              );
+            }
+
             return (
               <span className={`px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
                 isCompleted 
@@ -4721,6 +4885,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
           {activeStepConfig?.id === 'draft' && (
             <DraftForm 
+              key={`v-${videoNumber}-draft-form-${record.id}`}
               record={record} 
               videoNumber={videoNumber}
               existingData={activeStepState.data}
@@ -7312,7 +7477,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
 }) => {
   // Extract attempts or initialize with full video preservation
   const attempts: DraftAttempt[] = useMemo(() => {
-    if (Array.isArray(existingData.attempts) && existingData.attempts.length > 0) {
+    if (existingData.is_deleted) return [];
+    if (Array.isArray(existingData.attempts)) {
       return existingData.attempts;
     }
     const legacyVid = existingData.vid || (videoNumber === 1 ? record.draft_video_url : '');
@@ -7369,6 +7535,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [initialUrl, setInitialUrl] = useState(activeAttempt?.video_url || existingData.vid || '');
 
   const [isUploading, setIsUploading] = useState(false);
+  const [attemptToDelete, setAttemptToDelete] = useState<DraftAttempt | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const [calculatedTiming, setCalculatedTiming] = useState(
     activeAttempt?.timing_status || existingData.timing || 'Not Submit'
   );
@@ -7422,6 +7591,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
   // Submit Initial Draft (Attempt 1)
   const handleSubmitInitialDraft = async () => {
+    if (isUploading) return;
     if (!initialFile && !initialUrl) {
       toast.error('Please upload a draft video first.');
       return;
@@ -7437,15 +7607,19 @@ const DraftForm: React.FC<DraftFormProps> = ({
         const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
         const filePath = `drafts/camp_${campId}_inf_${infId}_v${videoNumber}_att1_${uniqueKey}.${fileExt}`;
 
-        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, initialFile);
+        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, initialFile, {
+          contentType: initialFile.type || 'video/mp4',
+          cacheControl: '3600',
+          upsert: true
+        });
         if (error) throw error;
 
         const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
         finalUrl = publicData.publicUrl;
         setInitialUrl(finalUrl);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error uploading draft video:', err);
-        toast.error('Failed to upload video file.');
+        toast.error('Failed to upload video file: ' + (err?.message || 'Storage error'));
         setIsUploading(false);
         return;
       }
@@ -7467,12 +7641,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
       timing: calculatedTiming
     }, false);
 
+    setInitialFile(null);
     setIsUploading(false);
     toast.success('Draft uploaded successfully! Please review and select approval status.');
   };
 
   // Submit Re-Draft (Attempt N + 1) — Creates new attempt, preserving all previous attempts permanently
   const handleSubmitReDraft = async () => {
+    if (isUploading) return;
     if (!reDraftFile && !reDraftUrl) {
       toast.error('Please select a new re-draft video file.');
       return;
@@ -7489,14 +7665,18 @@ const DraftForm: React.FC<DraftFormProps> = ({
         const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
         const filePath = `drafts/camp_${campId}_inf_${infId}_v${videoNumber}_att${nextAttemptNumber}_${uniqueKey}.${fileExt}`;
 
-        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, reDraftFile);
+        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, reDraftFile, {
+          contentType: reDraftFile.type || 'video/mp4',
+          cacheControl: '3600',
+          upsert: true
+        });
         if (error) throw error;
 
         const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
         finalUrl = publicData.publicUrl;
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error uploading re-draft video:', err);
-        toast.error('Failed to upload re-draft video file.');
+        toast.error('Failed to upload re-draft video file: ' + (err?.message || 'Storage error'));
         setIsUploading(false);
         return;
       }
@@ -7533,6 +7713,95 @@ const DraftForm: React.FC<DraftFormProps> = ({
     toast.success(`Re-Draft Attempt ${nextAttemptNumber} submitted for review!`);
   };
 
+  // Delete Draft Attempt
+  const handleDeleteAttempt = async (attempt: DraftAttempt) => {
+    setIsDeleting(true);
+    try {
+      // 1. Remove file from Supabase storage if stored in influencer-profiles
+      let storagePath: string | null = null;
+      const vUrl = attempt.video_url;
+      if (vUrl && vUrl.includes('/influencer-profiles/')) {
+        const parts = vUrl.split('/influencer-profiles/');
+        if (parts[1]) {
+          storagePath = decodeURIComponent(parts[1].split('?')[0]);
+        }
+      }
+      if (storagePath) {
+        try {
+          await supabaseAdmin.storage.from('influencer-profiles').remove([storagePath]);
+        } catch (sErr) {
+          console.warn('Storage file deletion error (non-fatal):', sErr);
+        }
+      }
+
+      // 2. Filter out deleted attempt
+      const remainingAttempts = attempts.filter(a => a.attempt_number !== attempt.attempt_number);
+
+      if (remainingAttempts.length === 0) {
+        // Reset to NOT_STARTED
+        const emptyPayload = {
+          attempts: [],
+          active_attempt_number: 0,
+          approval_status: '',
+          vid: '',
+          timing: 'Not Submit',
+          corr: '',
+          finalL: '',
+          finalD: '',
+          re_draft_submit_date: '',
+          latest_re_draft_submit_date: '',
+          is_deleted: true
+        };
+        await onSave(emptyPayload, false);
+
+        setInitialFile(null);
+        setInitialUrl('');
+        setAppStat('');
+        setCorr('');
+        setFinalL('');
+        setFinalD('');
+        setCalculatedTiming('Not Submit');
+        setReDraftSubmitDate('');
+        setAttemptToDelete(null);
+        setPreviewModalAttempt(null);
+        toast.success('Draft video deleted. Step reset to Not Started.');
+      } else {
+        // Revert to previous attempt
+        const prevAttempt = remainingAttempts[remainingAttempts.length - 1];
+        const isPrevApproved = prevAttempt.approval_status === 'Approved' && prevAttempt.timing_status !== 'Not Submit';
+
+        const rollbackPayload = {
+          attempts: remainingAttempts,
+          active_attempt_number: prevAttempt.attempt_number,
+          approval_status: prevAttempt.approval_status || 'Pending Approval',
+          vid: prevAttempt.video_url || '',
+          timing: prevAttempt.timing_status || 'On Time',
+          corr: prevAttempt.corrections || '',
+          finalL: prevAttempt.final_product_link || '',
+          finalD: prevAttempt.final_description || '',
+          re_draft_submit_date: prevAttempt.re_draft_submit_date || '',
+          latest_re_draft_submit_date: prevAttempt.re_draft_submit_date || ''
+        };
+        await onSave(rollbackPayload, isPrevApproved);
+
+        setAppStat(prevAttempt.approval_status === 'Approved' || prevAttempt.approval_status === 'Not Approved' ? prevAttempt.approval_status : '');
+        setCorr(prevAttempt.corrections || '');
+        setFinalL(prevAttempt.final_product_link || '');
+        setFinalD(prevAttempt.final_description || '');
+        setCalculatedTiming(prevAttempt.timing_status || 'On Time');
+        setReDraftSubmitDate(prevAttempt.re_draft_submit_date || '');
+        setAttemptToDelete(null);
+        setPreviewModalAttempt(null);
+        toast.success(`Draft Attempt ${attempt.attempt_number} deleted. Reverted to Attempt ${prevAttempt.attempt_number}.`);
+      }
+    } catch (err: any) {
+      console.error('Error deleting draft attempt:', err);
+      toast.error('Failed to delete draft attempt: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Save Approval Details (Approved or Not Approved)
   const handleSaveApproval = async () => {
     if (!activeAttempt && !initialUrl) {
@@ -7543,6 +7812,13 @@ const DraftForm: React.FC<DraftFormProps> = ({
     if (!appStat) {
       toast.error('Please select either "Approved" or "Not Approved".');
       return;
+    }
+
+    if (appStat === 'Approved') {
+      if (!calculatedTiming || calculatedTiming === 'Not Submit') {
+        toast.error('Please select a valid timing status (Advance, On Time, or Late) before approving the draft.');
+        return;
+      }
     }
 
     if (appStat === 'Not Approved') {
@@ -7560,7 +7836,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     const userName = await getCurrentUserName();
     const nowIso = new Date().toISOString();
 
-    const isApproved = appStat === 'Approved';
+    const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit';
 
     // Update active attempt in attempts array while preserving video_url and all history
     const updatedAttempts = attempts.map((att, idx) => {
@@ -7593,7 +7869,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
       finalD: isApproved ? finalD : ''
     };
 
-    // Save to Supabase (completed is true ONLY if Approved!)
+    // Save to Supabase (completed is true ONLY if Approved with valid timing!)
     await onSave(payload, isApproved);
     setIsUploading(false);
 
@@ -7609,7 +7885,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
   const isCurrentDraftNotApproved = activeAttempt?.approval_status === 'Not Approved';
   const isCurrentDraftApproved = activeAttempt?.approval_status === 'Approved';
-  const isPendingApproval = activeAttempt && !isCurrentDraftApproved && !isCurrentDraftNotApproved;
+
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
       
@@ -7669,9 +7945,16 @@ const DraftForm: React.FC<DraftFormProps> = ({
               type="button"
               disabled={isUploading || (!reDraftFile && !reDraftUrl)}
               onClick={handleSubmitReDraft}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 shadow-md flex items-center gap-2"
+              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 shadow-md flex items-center gap-2 cursor-pointer"
             >
-              {isUploading ? 'Uploading...' : `Submit Re-Draft Attempt ${(activeAttempt?.attempt_number || 1) + 1}`}
+              {isUploading ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Uploading...</span>
+                </>
+              ) : (
+                <span>Submit Re-Draft Attempt {(activeAttempt?.attempt_number || 1) + 1}</span>
+              )}
             </button>
           </div>
         </div>
@@ -7710,14 +7993,32 @@ const DraftForm: React.FC<DraftFormProps> = ({
           </div>
 
           {initialFile && (
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isUploading}
+                onClick={() => {
+                  setInitialFile(null);
+                  setInitialUrl('');
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
               <button
                 type="button"
                 disabled={isUploading}
                 onClick={handleSubmitInitialDraft}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md"
+                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                {isUploading ? 'Uploading...' : 'Save Uploaded Draft (Attempt 1)'}
+                {isUploading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <span>Save Uploaded Draft (Attempt 1)</span>
+                )}
               </button>
             </div>
           )}
@@ -7749,7 +8050,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   setIsReDraftMode(true);
                 }}
                 disabled={!(activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer ${
                   !(activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date)
                     ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/60 opacity-60'
                     : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30'
@@ -7838,8 +8139,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     </div>
                   </div>
 
-                  {/* Right: View Button */}
-                  <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
+                  {/* Right: View & Delete Buttons */}
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                     {att.reviewed_at && (
                       <span className="text-[10px] text-slate-500 hidden md:inline">
                         Reviewed: {formatHistoryTimestamp(att.reviewed_at)}
@@ -7848,11 +8149,22 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     <button
                       type="button"
                       onClick={() => setPreviewModalAttempt(att)}
-                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 shadow-sm"
+                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
                     >
                       <Eye size={13} />
                       <span>View</span>
                     </button>
+                    {isCurrent && (
+                      <button
+                        type="button"
+                        onClick={() => setAttemptToDelete(att)}
+                        className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-300 text-xs font-bold rounded-lg border border-rose-800/60 transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                        title="Delete current draft attempt"
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -7861,8 +8173,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 4. APPROVAL & TIMING CONTROLS (Displayed ONLY when active draft is Pending Approval) */}
-      {!isReDraftMode && isPendingApproval && (
+      {/* 4. APPROVAL & TIMING CONTROLS */}
+      {!isReDraftMode && activeAttempt && (
         <div className="space-y-6 pt-2 border-t border-slate-800 animate-fade-in">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-2">
             
@@ -7875,7 +8187,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 <button 
                   type="button"
                   onClick={() => setAppStat('Approved')}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 cursor-pointer ${
                     appStat === 'Approved' 
                       ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/30' 
                       : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
@@ -7887,7 +8199,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 <button 
                   type="button"
                   onClick={() => setAppStat('Not Approved')}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 ${
+                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 cursor-pointer ${
                     appStat === 'Not Approved' 
                       ? 'bg-rose-600 border-rose-500 text-white shadow-lg shadow-rose-600/30' 
                       : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
@@ -7962,7 +8274,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   type="date"
                   value={reDraftSubmitDate}
                   onChange={e => setReDraftSubmitDate(e.target.value)}
-                  className="w-full bg-[#070c18] border border-rose-700/70 focus:border-rose-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors"
+                  className="w-full bg-[#070c18] border border-rose-700/70 focus:border-rose-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
                   required
                 />
                 <span className="text-[11px] text-slate-400 block">
@@ -8022,6 +8334,65 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 </>
               )}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 5. DELETE ATTEMPT CONFIRMATION MODAL */}
+      {attemptToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div 
+            className="bg-[#0b1329] border border-rose-800/80 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="w-10 h-10 rounded-xl bg-rose-950/70 border border-rose-700/60 flex items-center justify-center shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white">Delete Draft Attempt {attemptToDelete.attempt_number}?</h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  This action will remove the uploaded draft video file and delete this attempt reference.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-rose-950/20 border border-rose-800/40 rounded-xl text-xs text-rose-300/90">
+              {attempts.length === 1 ? (
+                <span>This is the only draft attempt. Deleting it will reset Step 5: Draft back to <strong>Not Started</strong>.</span>
+              ) : (
+                <span>Draft Attempt {attemptToDelete.attempt_number} will be deleted. Draft Attempt {attemptToDelete.attempt_number - 1} will become the active draft.</span>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setAttemptToDelete(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => handleDeleteAttempt(attemptToDelete)}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-lg shadow-rose-600/30 cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={13} />
+                    <span>Confirm Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -8107,12 +8478,26 @@ const DraftForm: React.FC<DraftFormProps> = ({
               </div>
             )}
 
-            {/* Modal Footer */}
-            <div className="flex justify-end pt-2 border-t border-slate-800">
+            {/* Modal Footer with Delete option for current attempt */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+              {previewModalAttempt.attempt_number === activeAttempt?.attempt_number ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const toDel = previewModalAttempt;
+                    setPreviewModalAttempt(null);
+                    setAttemptToDelete(toDel);
+                  }}
+                  className="px-3.5 py-2 bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 hover:text-rose-200 text-xs font-bold rounded-xl border border-rose-700/60 transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 size={14} />
+                  <span>Delete Video</span>
+                </button>
+              ) : <div />}
               <button
                 type="button"
                 onClick={() => setPreviewModalAttempt(null)}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors"
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Close Preview
               </button>
