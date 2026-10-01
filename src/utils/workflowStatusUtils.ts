@@ -183,6 +183,15 @@ export function isInfluencerDeliveryConfirmed(record: any): boolean {
     return Boolean(latest.delivered_confirmed || latest.status === 'DELIVERED');
   }
 
+  if (record.redispatch || record.redispatch_record) {
+    const rd = record.redispatch || record.redispatch_record;
+    if (rd.redispatch_status === 'COMPLETED') return true;
+    if (rd.redispatch_status === 'MOVED_TO_ACTIVE') {
+      return Boolean(metadata.replacement_delivered_confirmed || metadata.delivered_confirmed || (record.delivered_confirmed && !metadata.re_dispatch_required && !metadata.re_dispatch_moved_to_active));
+    }
+    if (rd.redispatch_status === 'PENDING_REDISPATCH') return false;
+  }
+
   return isDeliveryStepCompleted(record);
 }
 

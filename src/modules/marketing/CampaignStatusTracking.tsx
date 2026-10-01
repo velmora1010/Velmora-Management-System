@@ -767,22 +767,20 @@ export const getInfluencerPrerequisiteSteps = (record: StatusTrackingRecord): Pr
         : `Re-Dispatch${numSuffix}: Completed / Moved to Active (Click to view details)`
     });
 
-    // 2. Replacement Delivery Step (Appears after Re-Dispatch is moved to Active or Delivered)
-    if (isRedispatchCompleted) {
-      const isDeliveryCompleted = Boolean(cycle.delivered_confirmed || cycle.status === 'DELIVERED');
-      steps.push({
-        id: `replacement-delivery-${num}`,
-        type: 'replacement_delivery',
-        label: `Delivered${numSuffix}${isDeliveryCompleted ? ' ✓' : ''}`,
-        isCompleted: isDeliveryCompleted,
-        isPending: false,
-        cycleNumber: num,
-        modalMode: 'confirm_delivery',
-        title: isDeliveryCompleted
-          ? `Replacement Delivery${numSuffix}: Confirmed (Click to view/edit)`
-          : `Replacement Delivery${numSuffix}: Awaiting Delivery Confirmation (Click to confirm)`
-      });
-    }
+    // 2. Replacement Delivery Step (Workflow always proceeds to Delivered)
+    const isDeliveryCompleted = isRedispatchCompleted && Boolean(cycle.delivered_confirmed || cycle.status === 'DELIVERED');
+    steps.push({
+      id: `replacement-delivery-${num}`,
+      type: 'replacement_delivery',
+      label: `Delivered${numSuffix}${isDeliveryCompleted ? ' ✓' : ''}`,
+      isCompleted: isDeliveryCompleted,
+      isPending: false,
+      cycleNumber: num,
+      modalMode: 'confirm_delivery',
+      title: isDeliveryCompleted
+        ? `Replacement Delivery${numSuffix}: Confirmed (Click to view/edit)`
+        : `Replacement Delivery${numSuffix}: Awaiting Delivery Confirmation (Click to confirm)`
+    });
   });
 
   return steps;
@@ -1988,6 +1986,8 @@ export const isInfluencerVideoNotStarted = (record: StatusTrackingRecord, videoN
   if (videoNumber === 1) {
     if (isInfluencerDeliveryConfirmed(record)) return false;
     if (isInfluencerInReDispatch(record)) return false;
+    if (isInfluencerReDispatchActive(record)) return false;
+    if (getInfluencerReDispatchCycles(record).length > 0) return false;
     if (isInfluencerShareScriptCompleted(record, 1) || isInfluencerShareScriptInProgress(record, 1)) return false;
     if (isInfluencerCallCompleted(record, 1) || isInfluencerCallSkipped(record, 1)) return false;
     if (isInfluencerPayAdvanceCompleted(record, 1) || isInfluencerPayAdvanceInProgress(record, 1)) return false;
@@ -2040,7 +2040,7 @@ export const isStepFilterMatch = (
     case 'payment':
       return videoNumber >= 2 && isInfluencerPaymentCompleted(record, videoNumber);
     case 're_dispatch':
-      return videoNumber === 1 && isInfluencerInReDispatch(record);
+      return videoNumber === 1 && (isInfluencerInReDispatch(record) || isInfluencerReDispatchActive(record) || getInfluencerReDispatchCycles(record).length > 0);
     default:
       return false;
   }
@@ -2554,7 +2554,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
-    // 2. On Hold
+    // 2. Active - Re-Dispatch: moved to active and replacement not yet confirmed delivered
+    if ((isInfluencerReDispatchActive(record) || getInfluencerReDispatchCycles(record).length > 0) && !isInfluencerDeliveryConfirmed(record)) {
+      return {
+        key: 'RE_DISPATCH_ACTIVE',
+        label: 'Active — Re-Dispatch',
+        badgeClass: 'bg-blue-950/80 text-blue-300 border-blue-600/60',
+        dotClass: 'bg-blue-400'
+      };
+    }
+
+    // 3. On Hold
     if (rawStatus === 'on_hold' || rawStatus === 'on hold' || metadata.on_hold) {
       return {
         key: 'ON_HOLD',
@@ -2564,7 +2574,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     }
 
-    // 3. Not Started: if zero workflow steps completed
+    // 4. Not Started: if zero workflow steps completed
     if (isInfluencerWorkflowNotStarted(record, selectedVideoNumber)) {
       return {
         key: 'NOT_STARTED',
@@ -2601,16 +2611,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         key: 'IN_PROGRESS',
         label: 'In Progress',
         badgeClass: 'bg-blue-950/80 text-blue-400 border-blue-700/60',
-        dotClass: 'bg-blue-400'
-      };
-    }
-
-    // 5. Active - Re-Dispatch: moved to active and replacement not yet confirmed delivered
-    if (isInfluencerReDispatchActive(record) && !isInfluencerDeliveryConfirmed(record)) {
-      return {
-        key: 'RE_DISPATCH_ACTIVE',
-        label: 'Active — Re-Dispatch',
-        badgeClass: 'bg-blue-950/80 text-blue-300 border-blue-600/60',
         dotClass: 'bg-blue-400'
       };
     }
@@ -4230,7 +4230,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                 const isDelivered = isInfluencerDeliveryConfirmed(record);
                 const overallStatus = getOverallStatus(record);
-                const isReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED' || isInfluencerInReDispatch(record);
+                const redispatchCycles = getInfluencerReDispatchCycles(record);
+                const hasRedispatch = redispatchCycles.length > 0;
+                const isPendingReDispatch = overallStatus.key === 'RE_DISPATCH_REQUIRED' || isInfluencerInReDispatch(record);
                 const isMenuOpen = openMenuId === record.id;
 
                 // Derive status for the selected video workflow
@@ -4274,8 +4276,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     <div className="flex-1 px-1 sm:px-2 xl:px-3 py-1 min-w-0 w-full overflow-hidden">
                       <div className="flex items-center w-full min-w-0 justify-between">
                         
-                        {/* 1. PREREQUISITES: ONLY for Video 1 with active Re-Dispatch */}
-                        {selectedVideoNumber === 1 && isReDispatch && prerequisiteSteps.map((pStep, pIdx) => {
+                        {/* 1. PREREQUISITES: For Video 1 with any Re-Dispatch cycle */}
+                        {selectedVideoNumber === 1 && hasRedispatch && prerequisiteSteps.map((pStep, pIdx) => {
                           const pVisualState = pStep.isCompleted ? 'completed' : pStep.isPending ? 'pending' : 'not_started';
                           const pVisualStyles = getStepVisualStyles(pVisualState);
 
@@ -4296,6 +4298,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                     <Check size={14} strokeWidth={2.5} className="text-white" />
                                   ) : pStep.isPending ? (
                                     <AlertTriangle size={13} className="text-amber-400" />
+                                  ) : pStep.type === 'redispatch' ? (
+                                    <RotateCcw size={13} className={`${pVisualStyles.iconClass} transition-colors`} />
                                   ) : (
                                     <Package size={13} className={`${pVisualStyles.iconClass} transition-colors`} />
                                   )}
@@ -4319,7 +4323,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                         {/* 2. SUB-STEPS FOR THE SELECTED VIDEO (Dynamically using currentVideoData.configs) */}
                         {currentVideoData.configs
-                          .filter(cfg => !(selectedVideoNumber === 1 && isReDispatch && cfg.id === 'delivered'))
+                          .filter(cfg => !(selectedVideoNumber === 1 && hasRedispatch && cfg.id === 'delivered'))
                           .map((cfg, idx, arr) => {
                           const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
                           const visualStyles = getStepVisualStyles(visualState);
@@ -4341,7 +4345,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                     setActiveModal({
                                       recordId: record.id,
                                       stageId: 'delivered',
-                                      mode: isReDispatch ? 'review_issue' : 'confirm_delivery'
+                                      mode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery'
                                     });
                                     return;
                                   }
@@ -4350,7 +4354,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                     setActiveModal({
                                       recordId: record.id,
                                       stageId: 'delivered',
-                                      mode: isReDispatch ? 'review_issue' : 'confirm_delivery'
+                                      mode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery'
                                     });
                                     return;
                                   }
@@ -4419,14 +4423,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         );
                         const isShareScriptDone = isInfluencerShareScriptCompleted(record, selectedVideoNumber);
 
-                        if (overallStatus.key === 'RE_DISPATCH_REQUIRED' || isReDispatch) {
+                        if (overallStatus.key === 'RE_DISPATCH_REQUIRED' || isPendingReDispatch) {
                           return (
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-amber-950/80 text-amber-300 border border-amber-600/60 animate-pulse flex items-center gap-1.5 whitespace-nowrap shadow-sm">
                               <AlertTriangle size={13} className="text-amber-400" />
                               <span>Re-Dispatch Required</span>
                             </span>
                           );
-                        } else if (overallStatus.key === 'RE_DISPATCH_ACTIVE') {
+                        } else if (overallStatus.key === 'RE_DISPATCH_ACTIVE' || (hasRedispatch && !isDelivered)) {
                           return (
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-300 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
                               <RotateCcw size={13} className="text-blue-400" />
@@ -4539,7 +4543,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
                       {/* Manage Video Action Button */}
                       {!isDelivered ? (
-                        isReDispatch ? (
+                        isPendingReDispatch ? (
                           <button
                             onClick={() => {
                               setActiveModal({ recordId: record.id, stageId: 'delivered', mode: 'review_issue' });
@@ -4549,6 +4553,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           >
                             <AlertTriangle size={12} className="text-amber-400" />
                             <span>Review Issue</span>
+                          </button>
+                        ) : hasRedispatch ? (
+                          <button
+                            onClick={() => {
+                              setActiveModal({ recordId: record.id, stageId: 'delivered', mode: 'confirm_delivery' });
+                            }}
+                            className="px-2.5 sm:px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 hover:text-white border border-blue-500/40 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
+                            title="Confirm Replacement Delivery"
+                          >
+                            <Package size={12} className="text-blue-400" />
+                            <span>Confirm Delivery</span>
                           </button>
                         ) : (
                           <button
@@ -4611,14 +4626,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 setActiveModal({
                                   recordId: record.id,
                                   stageId: 'delivered',
-                                  mode: isReDispatch ? 'review_issue' : 'confirm_delivery'
+                                  mode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery'
                                 });
                                 setOpenMenuId(null);
                               }}
                               className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
                             >
                               <Package size={14} className="text-emerald-400" />
-                              <span>{isDelivered ? 'View Delivery Confirmation' : isReDispatch ? 'Review Issue & Re-Dispatch' : 'Confirm Delivery'}</span>
+                              <span>{isDelivered ? 'View Delivery Confirmation' : isPendingReDispatch ? 'Review Issue & Re-Dispatch' : 'Confirm Delivery'}</span>
                             </button>
                             <button 
                               onClick={() => {
@@ -4628,7 +4643,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                   setActiveModal({
                                     recordId: record.id,
                                     stageId: 'delivered',
-                                    mode: isReDispatch ? 'review_issue' : 'confirm_delivery'
+                                    mode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery'
                                   });
                                   return;
                                 }
