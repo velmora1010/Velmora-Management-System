@@ -143,7 +143,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
       // 1. Fetch all campaign influencers first - they are the single source of truth!
       const { data: rawInfoData, error: infoError } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencersInfo)
-        .select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name')
+        .select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name, pan_number')
         .eq('campaign_id', campQuery);
 
       if (infoError) throw infoError;
@@ -446,7 +446,8 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
             account_holder_name: info.account_holder_name || '',
             account_number: info.account_number || '',
             ifsc_code: info.ifsc_code || '',
-            bank_name: info.bank_name || ''
+            bank_name: info.bank_name || '',
+            pan_number: info.pan_number || ''
           },
           pricing: {
             final_price: pricing.final_price,

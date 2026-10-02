@@ -319,19 +319,19 @@ export function getCurrentWorkflowState(
   // 8. Draft step
   // Timeline completed, Draft not completed (and subsequent steps not completed):
   if (!isDraftCompleted && !isPostDateCompleted && !isPaymentCompleted) {
-    return 'timeline';
+    return 'draft';
   }
 
   // 9. Post Date step
   // Draft completed, Post Date not completed (and subsequent steps not completed):
   if (!isPostDateCompleted && !isPaymentCompleted) {
-    return 'draft';
+    return 'post_date';
   }
 
-  // 10. Payment step
+  // 10. Payment step (Video >= 2)
   // Post Date completed, Payment not completed:
   if (!isPaymentCompleted) {
-    return 'post_date';
+    return videoNumber >= 2 ? 'payment' : 'post_date';
   }
 
   // All completed (including Payment)

@@ -244,8 +244,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       else if (!pincodeCol && (clean === 'pincode' || clean === 'pin' || clean === 'pincodenum' || clean === 'postalcode' || clean === 'zipcode' || clean === 'zip' || clean === 'postal')) {
         pincodeCol = h;
       }
-      // 7. Payment Mode (e.g. Payment Mode, Mode, Payment Method, Pay Mode, Payment Details)
-      else if (!paymentModeCol && (clean === 'paymentmode' || clean === 'mode' || clean === 'paymentmethod' || clean === 'paymode' || clean === 'paymethod' || clean === 'paymentdetails')) {
+      // 7. Payment Mode (e.g. Payment Mode, Mode, Payment Method, Pay Mode)
+      else if (!paymentModeCol && (clean === 'paymentmode' || clean === 'mode' || clean === 'paymentmethod' || clean === 'paymode' || clean === 'paymethod')) {
         paymentModeCol = h;
       }
       // 8. UPI ID / UPI Number (Direct UPI column)
@@ -268,8 +268,8 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       else if (!panNumberCol && (clean === 'pannumber' || clean === 'panno' || clean === 'pan' || clean === 'pancard' || clean === 'pancardno')) {
         panNumberCol = h;
       }
-      // 13. Payments (e.g. Payments, Payment, Payment Info)
-      else if (!paymentsCol && (clean === 'payments' || clean === 'payment' || clean === 'paymentinfo')) {
+      // 13. Payments (e.g. Payments, Payment, Payment Info, Payments Details, Payment Details)
+      else if (!paymentsCol && (clean === 'payments' || clean === 'payment' || clean === 'paymentinfo' || clean === 'paymentsdetails' || clean === 'paymentdetails' || clean === 'paymentsdetail' || clean === 'paymentdetail')) {
         paymentsCol = h;
       }
       // 14. Details (composite unstructured text)
@@ -385,6 +385,18 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       });
       return hasAnyValue;
     });
+
+    const hasPaymentColumnsInFile = Boolean(
+      map.paymentModeCol || 
+      map.upiCol || 
+      map.paymentsCol || 
+      map.detailsCol || 
+      map.accountHolderCol || 
+      map.accountNumberCol || 
+      map.ifscCol || 
+      map.bankNameCol || 
+      map.panNumberCol
+    );
 
     // 2. De-duplicate inside the file (keep first occurrence, ignore subsequent duplicates)
     const uniqueFileRows: Record<string, any>[] = [];
@@ -555,34 +567,45 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       const existingRecord = existingCodeMap.get(normCode);
 
       if (existingRecord) {
-        // Priority: Explicit Excel data > Existing Record
-        const resolvedMethod = hasExcelPaymentData && parsedPayment.payment_method
-          ? parsedPayment.payment_method
-          : (normalizePaymentMethod(existingRecord.payment_method) || (existingRecord.upi_number ? 'UPI' : (existingRecord.account_number ? 'ACCOUNT_DETAILS' : null)));
+        // If file explicitly contains payment columns:
+        // - Row has payment info in Excel -> use parsed Excel payment data
+        // - Row has EMPTY payment info in Excel -> do NOT resurrect old DB payment values! (Keep null)
+        // If file has NO payment columns mapped at all -> preserve existing DB record payment values
+        let resolvedMethod: 'UPI' | 'ACCOUNT_DETAILS' | null = null;
+        let resolvedUpi: string | null = null;
+        let resolvedAccHolder: string | null = null;
+        let resolvedAccNum: string | null = null;
+        let resolvedIfsc: string | null = null;
+        let resolvedBankName: string | null = null;
+        let resolvedPan: string | null = null;
 
-        const resolvedUpi = (hasExcelPaymentData && parsedPayment.upi_number)
-          ? parsedPayment.upi_number
-          : (existingRecord.upi_number || null);
-
-        const resolvedAccHolder = (hasExcelPaymentData && parsedPayment.account_holder_name)
-          ? parsedPayment.account_holder_name
-          : (existingRecord.account_holder_name || null);
-
-        const resolvedAccNum = (hasExcelPaymentData && parsedPayment.account_number)
-          ? parsedPayment.account_number
-          : (existingRecord.account_number || null);
-
-        const resolvedIfsc = (hasExcelPaymentData && parsedPayment.ifsc_code)
-          ? parsedPayment.ifsc_code
-          : (existingRecord.ifsc_code || null);
-
-        const resolvedBankName = (hasExcelPaymentData && parsedPayment.bank_name)
-          ? parsedPayment.bank_name
-          : (existingRecord.bank_name || null);
-
-        const resolvedPan = (hasExcelPaymentData && parsedPayment.pan_number)
-          ? parsedPayment.pan_number
-          : ((existingRecord as any).pan_number || null);
+        if (hasPaymentColumnsInFile) {
+          if (hasExcelPaymentData) {
+            resolvedMethod = parsedPayment.payment_method;
+            resolvedUpi = parsedPayment.upi_number;
+            resolvedAccHolder = parsedPayment.account_holder_name;
+            resolvedAccNum = parsedPayment.account_number;
+            resolvedIfsc = parsedPayment.ifsc_code;
+            resolvedBankName = parsedPayment.bank_name;
+            resolvedPan = parsedPayment.pan_number;
+          } else {
+            resolvedMethod = null;
+            resolvedUpi = null;
+            resolvedAccHolder = null;
+            resolvedAccNum = null;
+            resolvedIfsc = null;
+            resolvedBankName = null;
+            resolvedPan = null;
+          }
+        } else {
+          resolvedMethod = normalizePaymentMethod(existingRecord.payment_method) || (existingRecord.upi_number ? 'UPI' : (existingRecord.account_number ? 'ACCOUNT_DETAILS' : null));
+          resolvedUpi = existingRecord.upi_number || null;
+          resolvedAccHolder = existingRecord.account_holder_name || null;
+          resolvedAccNum = existingRecord.account_number || null;
+          resolvedIfsc = existingRecord.ifsc_code || null;
+          resolvedBankName = existingRecord.bank_name || null;
+          resolvedPan = (existingRecord as any).pan_number || null;
+        }
 
         return {
           code,
@@ -926,30 +949,42 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           if (row.autoDm !== null && row.autoDm !== undefined) updates.auto_dm = row.autoDm;
           if (row.profileImg && row.profileImg.trim() !== '' && row.profileImg !== '—') updates.profile_file_url = row.profileImg;
 
-          // Safe Payment Updates: Only update if Excel provided payment information!
-          // Do not overwrite valid existing payment data with blank Excel values!
-          // When mixed credentials exist (e.g. bank / upi), preserve both in DB!
-          if (row.hasExcelPaymentData) {
-            if (row.paymentMethod) {
-              updates.payment_method = row.paymentMethod;
-            }
-            if (row.upiNumber && row.upiNumber.trim() !== '' && row.upiNumber !== '—') {
-              updates.upi_number = row.upiNumber.trim();
-            }
-            if (row.accountHolderName && row.accountHolderName.trim() !== '' && row.accountHolderName !== '—') {
-              updates.account_holder_name = row.accountHolderName.trim();
-            }
-            if (row.accountNumber && row.accountNumber.trim() !== '' && row.accountNumber !== '—') {
-              updates.account_number = row.accountNumber.trim();
-            }
-            if (row.ifscCode && row.ifscCode.trim() !== '' && row.ifscCode !== '—') {
-              updates.ifsc_code = row.ifscCode.trim().toUpperCase();
-            }
-            if (row.bankName && row.bankName.trim() !== '' && row.bankName !== '—') {
-              updates.bank_name = row.bankName.trim();
-            }
-            if (row.panNumber && row.panNumber.trim() !== '' && row.panNumber !== '—') {
-              updates.pan_number = row.panNumber.trim().toUpperCase();
+          // Safe Payment Updates: Only update payment info if the file contained payment columns!
+          const hasPaymentColumnsInFile = Boolean(
+            mapping.paymentModeCol || 
+            mapping.upiCol || 
+            mapping.paymentsCol || 
+            mapping.detailsCol || 
+            mapping.accountHolderCol || 
+            mapping.accountNumberCol || 
+            mapping.ifscCol || 
+            mapping.bankNameCol || 
+            mapping.panNumberCol
+          );
+
+          if (hasPaymentColumnsInFile) {
+            if (row.hasExcelPaymentData) {
+              if (row.paymentMethod) {
+                updates.payment_method = row.paymentMethod;
+              } else {
+                updates.payment_method = null;
+              }
+              updates.upi_number = (row.upiNumber && row.upiNumber.trim() !== '' && row.upiNumber !== '—') ? row.upiNumber.trim() : null;
+              updates.account_holder_name = (row.accountHolderName && row.accountHolderName.trim() !== '' && row.accountHolderName !== '—') ? row.accountHolderName.trim() : null;
+              updates.account_number = (row.accountNumber && row.accountNumber !== '—') ? row.accountNumber.trim() : null;
+              updates.ifsc_code = (row.ifscCode && row.ifscCode !== '—') ? row.ifscCode.trim().toUpperCase() : null;
+              updates.bank_name = (row.bankName && row.bankName !== '—') ? row.bankName.trim() : null;
+              updates.pan_number = (row.panNumber && row.panNumber !== '—') ? row.panNumber.trim().toUpperCase() : null;
+            } else {
+              // The uploaded file explicitly mapped payment columns, but this row has no payment details.
+              // Clear payment fields to match the file.
+              updates.payment_method = null;
+              updates.upi_number = null;
+              updates.account_holder_name = null;
+              updates.account_number = null;
+              updates.ifsc_code = null;
+              updates.bank_name = null;
+              updates.pan_number = null;
             }
           }
 

@@ -23,6 +23,7 @@ import toast from 'react-hot-toast';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { getInfluencerResolvedVideoProducts, isVideoLabel } from './AddCampaignInfluencer';
 import { StatusTrackingPaymentCard, PaymentDetailsInfo } from './StatusTrackingPaymentCard';
+import { resolveInfluencerPaymentDetails } from '../../utils/influencerPaymentUtils';
 import { saveVideoPayment, fetchVideoPaymentTransactions, InfluencerVideoPayment, InfluencerVideoPaymentTransaction } from '../../services/influencerVideoPaymentService';
 import { upsertCampaignVideoScript, type CampaignVideoScriptRecord } from '../../services/campaignVideoScriptService';
 import { 
@@ -1301,18 +1302,22 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         const isPaid = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : st.completed;
         const proofUrl = videoPayment?.payment_proof_url || st.data?.photo || (videoNum === 1 ? record.pay_advance_photo_url : '') || '';
         const normalizedProof = st.data?.paymentProof ? normalizePaymentProof(st.data.paymentProof) : (proofUrl ? normalizePaymentProof(proofUrl) : null);
+        const livePm = resolveInfluencerPaymentDetails({ ...(record.dispatch || {}), ...(record.influencer || {}) });
+        const stepUpi = livePm.payment_method === 'UPI'
+          ? (livePm.upi_number || videoPayment?.transaction_reference || st.data?.gpay || (videoNum === 1 ? record.advance_gpay_number : '') || '')
+          : '';
         steps[cfg.id] = {
           ...st,
           completed: isPaid,
           data: {
             ...st.data,
-            gpay: videoPayment?.transaction_reference || st.data?.gpay || (videoNum === 1 ? record.advance_gpay_number : '') || '',
+            gpay: stepUpi,
             total: (videoPayment?.agreed_amount != null ? String(videoPayment.agreed_amount) : (st.data?.total || (vPrice !== null ? String(vPrice) : (videoNum === 1 ? record.advance_total_amount : '')))),
             advance: (videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (st.data?.advance || (videoNum === 1 ? record.advance_paid_amount : ''))),
             photo: normalizedProof?.url || proofUrl,
             paymentProof: normalizedProof,
             payment_status: videoPayment?.payment_status || (isPaid ? 'paid' : (st.data?.payment_status || null)),
-            payment_method: videoPayment?.payment_method || st.data?.payment_method || '',
+            payment_method: livePm.payment_method || videoPayment?.payment_method || null,
             payment_record: videoPayment
           }
         };
@@ -1406,14 +1411,18 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           : (!!record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0));
         const proofUrl = videoPayment?.payment_proof_url || record.pay_advance_photo_url || '';
         const normalizedProof = proofUrl ? normalizePaymentProof(proofUrl) : null;
+        const livePm = resolveInfluencerPaymentDetails({ ...(record.dispatch || {}), ...(record.influencer || {}) });
+        const stepUpi = livePm.payment_method === 'UPI'
+          ? (livePm.upi_number || videoPayment?.transaction_reference || record.advance_gpay_number || '')
+          : '';
         data = {
-          gpay: videoPayment?.transaction_reference || record.advance_gpay_number || '',
+          gpay: stepUpi,
           total: videoPayment?.agreed_amount != null ? String(videoPayment.agreed_amount) : (record.advance_total_amount || (v1Price !== null ? String(v1Price) : '')),
           advance: videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (record.advance_paid_amount || ''),
           photo: normalizedProof?.url || proofUrl,
           paymentProof: normalizedProof,
           payment_status: videoPayment?.payment_status || (completed ? 'paid' : null),
-          payment_method: videoPayment?.payment_method || '',
+          payment_method: livePm.payment_method || videoPayment?.payment_method || null,
           payment_record: videoPayment
         };
       } else if (cfg.id === 'timeline') {
@@ -1493,14 +1502,18 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         completed = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : false;
         const proofUrl = videoPayment?.payment_proof_url || '';
         const normalizedProof = proofUrl ? normalizePaymentProof(proofUrl) : null;
+        const livePm = resolveInfluencerPaymentDetails({ ...(record.dispatch || {}), ...(record.influencer || {}) });
+        const stepUpi = livePm.payment_method === 'UPI'
+          ? (livePm.upi_number || videoPayment?.transaction_reference || '')
+          : '';
         data = {
-          gpay: videoPayment?.transaction_reference || '',
+          gpay: stepUpi,
           total: videoPayment?.agreed_amount != null ? String(videoPayment.agreed_amount) : (vPrice !== null ? String(vPrice) : ''),
           advance: videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : '',
           photo: normalizedProof?.url || proofUrl,
           paymentProof: normalizedProof,
           payment_status: videoPayment?.payment_status || (completed ? 'paid' : null),
-          payment_method: videoPayment?.payment_method || '',
+          payment_method: livePm.payment_method || videoPayment?.payment_method || null,
           payment_record: videoPayment
         };
       } else if (cfg.id === 'timeline') {
@@ -2010,6 +2023,19 @@ export const isInfluencerVideoNotStarted = (record: StatusTrackingRecord, videoN
 export const isInfluencerWorkflowNotStarted = isInfluencerVideoNotStarted;
 
 /**
+ * Checks if influencer draft is submitted and pending manager review or re-draft required.
+ */
+export const isInfluencerDraftPendingReview = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
+
+  const draftStatus = getInfluencerDraftStatus(record, videoNumber);
+  return draftStatus === 'pending_approval' || draftStatus === 'not_approved';
+};
+
+/**
  * Reusable single predicate matching step ID for both counts and filtered list.
  * Guarantees that summary filter count exactly equals the number of matching rows when clicked!
  */
@@ -2034,9 +2060,9 @@ export const isStepFilterMatch = (
     case 'timeline':
       return isInfluencerTimelineCompleted(record, videoNumber);
     case 'draft':
-      return isInfluencerDraftCompleted(record, videoNumber);
+      return isInfluencerDraftPendingReview(record, videoNumber);
     case 'post_date':
-      return isInfluencerPostDateCompleted(record, videoNumber);
+      return isInfluencerDraftCompleted(record, videoNumber);
     case 'payment':
       return videoNumber >= 2 && isInfluencerPaymentCompleted(record, videoNumber);
     case 're_dispatch':
@@ -2099,12 +2125,12 @@ export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, vid
   return getInfluencerCurrentWorkflowState(record, videoNumber);
 };
 
-export type StepVisualState = 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started';
+export type StepVisualState = 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started' | 'rejected';
 
 /**
  * Single authoritative visual-state calculation for any workflow step.
- * Returns: 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started'
- * Priority: COMPLETED (Green) > SKIPPED (Amber) > PENDING (Amber) > IN_PROGRESS (Blue) > NOT_STARTED (Dim)
+ * Returns: 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started' | 'rejected'
+ * Priority: COMPLETED (Green) > REJECTED (Red) > PENDING (Amber) > IN_PROGRESS (Blue) > NOT_STARTED (Dim)
  * NOTE: "Not Started" must NEVER be blue.
  */
 export const getStepVisualState = (
@@ -2170,12 +2196,12 @@ export const getStepVisualState = (
   const stepObj = vData.steps[stepId];
   const stepData = stepObj?.data || {};
 
-  // 6. Step-specific pending & in-progress evaluations (BLUE or AMBER)
+  // 6. Step-specific pending & in-progress evaluations (BLUE, AMBER, or RED)
   if (stepId === 'draft') {
     const draftStatus = getInfluencerDraftStatus(record, videoNumber);
     if (draftStatus === 'completed') return 'completed';
-    if (draftStatus === 'not_approved') return 'pending'; // Re-Draft required (Needs Action)
-    if (draftStatus === 'pending_approval') return 'pending'; // Video uploaded, pending review (Needs Action)
+    if (draftStatus === 'not_approved') return 'rejected'; // Re-Draft required (RED)
+    if (draftStatus === 'pending_approval') return 'pending'; // Draft Submitted – Pending Manager Approval (YELLOW/AMBER)
     if (stepObj?.status === 'IN_PROGRESS') return 'in_progress';
     return 'not_started';
   }
@@ -2246,6 +2272,15 @@ export const getStepVisualStyles = (state: StepVisualState) => {
         badgeDot: "bg-emerald-400",
         badgeText: "Completed"
       };
+    case 'rejected':
+      return {
+        circle: "bg-rose-500/20 text-rose-400 border border-rose-500/60 shadow-[0_0_10px_rgba(244,63,94,0.3)] hover:scale-105",
+        iconClass: "text-rose-400",
+        label: "text-rose-400 font-medium",
+        badge: "bg-rose-950/80 text-rose-400 border-rose-700/60",
+        badgeDot: "bg-rose-400",
+        badgeText: "Re-Draft Required"
+      };
     case 'pending':
       return {
         circle: "bg-amber-500/20 text-amber-400 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] hover:scale-105 animate-pulse",
@@ -2253,7 +2288,7 @@ export const getStepVisualStyles = (state: StepVisualState) => {
         label: "text-amber-400 font-medium",
         badge: "bg-amber-950/80 text-amber-400 border-amber-700/60",
         badgeDot: "bg-amber-400 animate-pulse",
-        badgeText: "Pending Action"
+        badgeText: "Draft Submitted – Pending Manager Approval"
       };
     case 'skipped':
       return {
@@ -4490,7 +4525,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         metadata.script_shared = isStepCompleted;
       } else if (stepId === 'pay_advance') {
         updates.pay_advance_completed = isStepCompleted;
-        if (stepData.gpay) updates.advance_gpay_number = stepData.gpay;
+        if (stepData.payment_method === 'UPI' && stepData.gpay) {
+          updates.advance_gpay_number = stepData.gpay;
+        } else {
+          updates.advance_gpay_number = null;
+        }
         if (stepData.total) updates.advance_total_amount = stepData.total;
         if (stepData.advance) updates.advance_paid_amount = stepData.advance;
         if (stepData.paymentProof?.url || stepData.photo) {
@@ -4542,8 +4581,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           agreedAmount: vAgreed,
           paidAmount: vPaid,
           paymentStatus: isStepCompleted || vPaid > 0 ? 'paid' : (stepData.payment_status || 'pending'),
-          paymentMethod: stepData.payment_method || (stepData.isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
-          transactionReference: stepData.gpay || stepData.upi_id || stepData.upi_number || null,
+          paymentMethod: stepData.payment_method || null,
+          transactionReference: stepData.payment_method === 'UPI' ? (stepData.gpay || stepData.upi_id || stepData.upi_number || null) : null,
           paymentProofUrl: proofUrl,
           notes: stepData.notes || (stepData.account_number ? `Account: ${stepData.account_number}` : null),
         });
@@ -4559,8 +4598,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           agreed_amount: vAgreed,
           paid_amount: vPaid,
           payment_status: isStepCompleted || vPaid > 0 ? 'paid' : (stepData.payment_status || 'pending'),
-          payment_method: stepData.payment_method || (stepData.isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
-          transaction_reference: stepData.gpay || stepData.upi_id || stepData.upi_number || null,
+          payment_method: stepData.payment_method || null,
+          transaction_reference: stepData.payment_method === 'UPI' ? (stepData.gpay || stepData.upi_id || stepData.upi_number || null) : null,
           payment_proof_url: proofUrl,
           notes: stepData.notes || null,
           updated_at: new Date().toISOString()
@@ -4585,8 +4624,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           agreedAmount: vAgreed,
           paidAmount: vPaid,
           paymentStatus: isStepCompleted || vPaid > 0 ? 'paid' : 'pending',
-          paymentMethod: stepData.payment_method || (stepData.isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
-          transactionReference: stepData.upi_number || stepData.gpay || null,
+          paymentMethod: stepData.payment_method || null,
+          transactionReference: stepData.payment_method === 'UPI' ? (stepData.upi_number || stepData.gpay || null) : null,
           paymentProofUrl: stepData.photo || null,
           notes: stepData.notes || (stepData.account_number ? `Account: ${stepData.account_number}` : null),
         });
@@ -6268,7 +6307,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
                 return (
                   <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-emerald-950/80 text-emerald-400 border-emerald-700/60">
                     <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                    Completed
+                    Approved
                   </span>
                 );
               }
@@ -6276,7 +6315,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
                 return (
                   <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-rose-950/80 text-rose-400 border-rose-700/60">
                     <span className="w-2 h-2 rounded-full bg-rose-400" />
-                    Not Approved / Re-Draft
+                    Re-Draft Required
                   </span>
                 );
               }
@@ -6284,7 +6323,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
                 return (
                   <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-amber-950/80 text-amber-400 border-amber-700/60">
                     <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                    Pending Approval
+                    Draft Submitted – Pending Manager Approval
                   </span>
                 );
               }
@@ -8268,16 +8307,11 @@ const PayAdvanceForm: React.FC<PayAdvanceFormProps> = ({
 }) => {
   const influencer = record.influencer || {};
   const dispatch = record.dispatch || {};
+  const livePaymentSource = { ...(record.dispatch || {}), ...(record.influencer || {}) };
+  const resolvedPayment = resolveInfluencerPaymentDetails(livePaymentSource);
 
-  const currentPaymentMethod = (influencer.payment_method || dispatch.payment_method || '').toUpperCase().trim();
-  const currentUpi = (influencer.upi_number || dispatch.upi_number || '').trim();
-  const currentAccountHolder = influencer.account_holder_name || dispatch.account_holder_name || '';
-  const currentAccountNumber = influencer.account_number || dispatch.account_number || '';
-  const currentIfsc = influencer.ifsc_code || dispatch.ifsc_code || '';
-  const currentBankName = influencer.bank_name || dispatch.bank_name || '';
-
-  const isAccount = currentPaymentMethod === 'ACCOUNT_DETAILS' || currentPaymentMethod.includes('ACCOUNT');
-  const isUPI = currentPaymentMethod === 'UPI' || (!currentPaymentMethod && Boolean(currentUpi));
+  const isAccount = resolvedPayment.payment_method === 'ACCOUNT_DETAILS';
+  const isUPI = resolvedPayment.payment_method === 'UPI';
   const isHistorical = Boolean(existingData.pay_advance_completed || record.pay_advance_completed);
 
   const vPrice = useMemo(() => getInfluencerVideoPrice(influencer, videoNumber), [influencer, videoNumber]);
@@ -8287,7 +8321,11 @@ const PayAdvanceForm: React.FC<PayAdvanceFormProps> = ({
     ? (existingData.total || (videoNumber === 1 ? record.advance_total_amount : '') || (vPrice !== null ? String(vPrice) : ''))
     : (vPrice !== null ? String(vPrice) : (existingData.total || (videoNumber === 1 ? record.advance_total_amount : '') || ''));
 
-  const [gpay, setGpay] = useState(existingData.gpay || (videoNumber === 1 ? record.advance_gpay_number : '') || currentUpi || '');
+  const [gpay, setGpay] = useState(
+    isUPI 
+      ? (resolvedPayment.upi_number || existingData.gpay || (videoNumber === 1 ? record.advance_gpay_number : '') || '')
+      : ''
+  );
   const [total, setTotal] = useState(defaultTotal);
   const [advance, setAdvance] = useState(existingData.advance || (videoNumber === 1 ? record.advance_paid_amount : '') || '');
 
@@ -8297,6 +8335,15 @@ const PayAdvanceForm: React.FC<PayAdvanceFormProps> = ({
       setTotal(String(vPrice));
     }
   }, [vPrice, isHistorical]);
+
+  // Keep gpay in sync if payment details change
+  useEffect(() => {
+    if (isUPI) {
+      setGpay(prev => prev || resolvedPayment.upi_number || '');
+    } else {
+      setGpay('');
+    }
+  }, [isUPI, resolvedPayment.upi_number]);
 
   // Unified Payment Proof state (supporting both Image and PDF)
   const initialProof = useMemo(() => {
@@ -8336,14 +8383,13 @@ const PayAdvanceForm: React.FC<PayAdvanceFormProps> = ({
   }, [loadTransactions]);
 
   const paymentInfoForCard: PaymentDetailsInfo = {
-    payment_method: isHistorical && existingData.payment_method 
-      ? existingData.payment_method 
-      : (isAccount ? 'ACCOUNT_DETAILS' : (isUPI ? 'UPI' : (currentPaymentMethod || null))),
-    upi_number: isHistorical && existingData.gpay ? existingData.gpay : (currentUpi || gpay),
-    account_holder_name: currentAccountHolder,
-    account_number: currentAccountNumber,
-    ifsc_code: currentIfsc,
-    bank_name: currentBankName
+    payment_method: resolvedPayment.payment_method,
+    upi_number: isUPI ? (gpay || resolvedPayment.upi_number || null) : null,
+    account_holder_name: isAccount ? (resolvedPayment.account_holder_name || null) : null,
+    account_number: isAccount ? (resolvedPayment.account_number || null) : null,
+    ifsc_code: isAccount ? (resolvedPayment.ifsc_code || null) : null,
+    bank_name: isAccount ? (resolvedPayment.bank_name || null) : null,
+    pan_number: isAccount ? (resolvedPayment.pan_number || null) : null
   };
 
   // Supported format checker
@@ -8436,12 +8482,13 @@ const PayAdvanceForm: React.FC<PayAdvanceFormProps> = ({
         advance,
         photo: newProof.url,
         paymentProof: newProof,
-        payment_method: isAccount ? 'ACCOUNT_DETAILS' : 'UPI',
-        upi_number: isUPI ? (gpay || currentUpi) : null,
-        account_holder_name: currentAccountHolder,
-        account_number: currentAccountNumber,
-        ifsc_code: currentIfsc,
-        bank_name: currentBankName,
+        payment_method: resolvedPayment.payment_method,
+        upi_number: isUPI ? (gpay || resolvedPayment.upi_number || null) : null,
+        account_holder_name: isAccount ? (resolvedPayment.account_holder_name || null) : null,
+        account_number: isAccount ? (resolvedPayment.account_number || null) : null,
+        ifsc_code: isAccount ? (resolvedPayment.ifsc_code || null) : null,
+        bank_name: isAccount ? (resolvedPayment.bank_name || null) : null,
+        pan_number: isAccount ? (resolvedPayment.pan_number || null) : null,
         pay_advance_completed: isCompleted,
         suppressDefaultToast: true
       });
@@ -8490,12 +8537,13 @@ const PayAdvanceForm: React.FC<PayAdvanceFormProps> = ({
         advance,
         photo: '',
         paymentProof: null,
-        payment_method: isAccount ? 'ACCOUNT_DETAILS' : 'UPI',
-        upi_number: isUPI ? (gpay || currentUpi) : null,
-        account_holder_name: currentAccountHolder,
-        account_number: currentAccountNumber,
-        ifsc_code: currentIfsc,
-        bank_name: currentBankName,
+        payment_method: resolvedPayment.payment_method,
+        upi_number: isUPI ? (gpay || resolvedPayment.upi_number || null) : null,
+        account_holder_name: isAccount ? (resolvedPayment.account_holder_name || null) : null,
+        account_number: isAccount ? (resolvedPayment.account_number || null) : null,
+        ifsc_code: isAccount ? (resolvedPayment.ifsc_code || null) : null,
+        bank_name: isAccount ? (resolvedPayment.bank_name || null) : null,
+        pan_number: isAccount ? (resolvedPayment.pan_number || null) : null,
         pay_advance_completed: isCompleted,
         suppressDefaultToast: true
       });
@@ -8547,12 +8595,13 @@ const PayAdvanceForm: React.FC<PayAdvanceFormProps> = ({
         advance, 
         photo: paymentProof?.url || '',
         paymentProof: paymentProof || null,
-        payment_method: isAccount ? 'ACCOUNT_DETAILS' : 'UPI',
-        upi_number: isUPI ? (gpay || currentUpi) : null,
-        account_holder_name: currentAccountHolder,
-        account_number: currentAccountNumber,
-        ifsc_code: currentIfsc,
-        bank_name: currentBankName,
+        payment_method: resolvedPayment.payment_method,
+        upi_number: isUPI ? (gpay || resolvedPayment.upi_number || null) : null,
+        account_holder_name: isAccount ? (resolvedPayment.account_holder_name || null) : null,
+        account_number: isAccount ? (resolvedPayment.account_number || null) : null,
+        ifsc_code: isAccount ? (resolvedPayment.ifsc_code || null) : null,
+        bank_name: isAccount ? (resolvedPayment.bank_name || null) : null,
+        pan_number: isAccount ? (resolvedPayment.pan_number || null) : null,
         pay_advance_completed: true
       });
       await loadTransactions();
@@ -10954,27 +11003,21 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
 const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: any) => {
   const influencer = record.influencer || {};
   const dispatch = record.dispatch || {};
+  const livePaymentSource = { ...(record.dispatch || {}), ...(record.influencer || {}) };
+  const resolvedPayment = resolveInfluencerPaymentDetails(livePaymentSource);
 
-  const currentPaymentMethod = (influencer.payment_method || dispatch.payment_method || '').toUpperCase().trim();
-  const currentUpi = (influencer.upi_number || dispatch.upi_number || '').trim();
-  const currentAccountHolder = influencer.account_holder_name || dispatch.account_holder_name || '';
-  const currentAccountNumber = influencer.account_number || dispatch.account_number || '';
-  const currentIfsc = influencer.ifsc_code || dispatch.ifsc_code || '';
-  const currentBankName = influencer.bank_name || dispatch.bank_name || '';
-
-  const isAccount = currentPaymentMethod === 'ACCOUNT_DETAILS' || currentPaymentMethod.includes('ACCOUNT');
-  const isUPI = currentPaymentMethod === 'UPI' || (!currentPaymentMethod && Boolean(currentUpi));
+  const isAccount = resolvedPayment.payment_method === 'ACCOUNT_DETAILS';
+  const isUPI = resolvedPayment.payment_method === 'UPI';
   const isHistorical = Boolean(existingData.payment_completed);
 
   const paymentInfoForCard: PaymentDetailsInfo = {
-    payment_method: isHistorical && existingData.payment_method 
-      ? existingData.payment_method 
-      : (isAccount ? 'ACCOUNT_DETAILS' : (isUPI ? 'UPI' : (currentPaymentMethod || null))),
-    upi_number: isHistorical && existingData.upi_number ? existingData.upi_number : currentUpi,
-    account_holder_name: currentAccountHolder,
-    account_number: currentAccountNumber,
-    ifsc_code: currentIfsc,
-    bank_name: currentBankName
+    payment_method: resolvedPayment.payment_method,
+    upi_number: isUPI ? (resolvedPayment.upi_number || null) : null,
+    account_holder_name: isAccount ? (resolvedPayment.account_holder_name || null) : null,
+    account_number: isAccount ? (resolvedPayment.account_number || null) : null,
+    ifsc_code: isAccount ? (resolvedPayment.ifsc_code || null) : null,
+    bank_name: isAccount ? (resolvedPayment.bank_name || null) : null,
+    pan_number: isAccount ? (resolvedPayment.pan_number || null) : null
   };
 
   // Resolve video product & expected payment amount for THIS video
@@ -11055,12 +11098,13 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
     await onSave({
       amount,
       photo: finalUrl,
-      payment_method: isHistorical && existingData.payment_method ? existingData.payment_method : (isAccount ? 'ACCOUNT_DETAILS' : 'UPI'),
-      upi_number: isUPI ? currentUpi : null,
-      account_number: isAccount ? currentAccountNumber : null,
-      account_holder_name: currentAccountHolder,
-      ifsc_code: currentIfsc,
-      bank_name: currentBankName,
+      payment_method: resolvedPayment.payment_method,
+      upi_number: isUPI ? resolvedPayment.upi_number : null,
+      account_number: isAccount ? resolvedPayment.account_number : null,
+      account_holder_name: isAccount ? resolvedPayment.account_holder_name : null,
+      ifsc_code: isAccount ? resolvedPayment.ifsc_code : null,
+      bank_name: isAccount ? resolvedPayment.bank_name : null,
+      pan_number: isAccount ? resolvedPayment.pan_number : null,
       payment_completed: paymentConfirmed
     });
     setIsUploading(false);
