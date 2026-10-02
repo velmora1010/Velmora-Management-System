@@ -768,7 +768,7 @@ export const getInfluencerPrerequisiteSteps = (record: StatusTrackingRecord): Pr
     });
 
     // 2. Replacement Delivery Step (Workflow always proceeds to Delivered)
-    const isDeliveryCompleted = isRedispatchCompleted && Boolean(cycle.delivered_confirmed || cycle.status === 'DELIVERED');
+    const isDeliveryCompleted = isRedispatchCompleted && Boolean(cycle.delivered_confirmed || cycle.status === 'DELIVERED' || idx < cycles.length - 1);
     steps.push({
       id: `replacement-delivery-${num}`,
       type: 'replacement_delivery',
@@ -2286,6 +2286,182 @@ export const getStepVisualStyles = (state: StepVisualState) => {
   }
 };
 
+export interface StepUndoInfo {
+  stepId: string;
+  stepLabel: string;
+  previousStateLabel: string;
+  affectedDownstreamSteps: string[];
+  type: 'video_step' | 'prerequisite_delivery' | 'prerequisite_redispatch';
+  cycleNumber?: number;
+  videoNumber: number;
+}
+
+/**
+ * Calculates the exact latest reversible workflow event for an influencer
+ * based strictly on persisted database state and sequential workflow rules.
+ */
+export const getInfluencerLatestReversibleStep = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): StepUndoInfo | null => {
+  const isV1 = videoNumber === 1;
+  const cycles = getInfluencerReDispatchCycles(record);
+  const configs = getVideoWorkflowConfigs(videoNumber);
+
+  // 1. Inspect Video sub-steps in reverse order (e.g. post_date -> draft -> timeline -> pay_advance / payment -> call_explain -> share_script)
+  const subStepConfigs = configs.filter(c => c.id !== 'delivered');
+
+  for (let idx = subStepConfigs.length - 1; idx >= 0; idx--) {
+    const cfg = subStepConfigs[idx];
+    const isCompleted = (
+      cfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, videoNumber) :
+      cfg.id === 'call_explain' ? isInfluencerCallCompleted(record, videoNumber) :
+      cfg.id === 'pay_advance' ? (isV1 && isInfluencerPayAdvanceCompleted(record, 1)) :
+      cfg.id === 'timeline' ? isInfluencerTimelineCompleted(record, videoNumber) :
+      cfg.id === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
+      cfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
+      cfg.id === 'payment' ? (!isV1 && isInfluencerPaymentCompleted(record, videoNumber)) :
+      false
+    );
+    const isSkipped = cfg.id === 'call_explain' && isInfluencerCallSkipped(record, videoNumber);
+
+    if (isCompleted || isSkipped) {
+      // Find what the workflow will return to
+      let previousStateLabel = '';
+      if (idx > 0) {
+        const prevCfg = subStepConfigs[idx - 1];
+        const isPrevSkipped = prevCfg.id === 'call_explain' && isInfluencerCallSkipped(record, videoNumber);
+        previousStateLabel = `${prevCfg.label} (${isPrevSkipped ? 'Skipped' : 'Completed'})`;
+      } else {
+        // First sub-step (share_script) returns to Delivery Confirmation / Re-Dispatch
+        if (isV1) {
+          if (cycles.length > 0) {
+            const lastCycle = cycles[cycles.length - 1];
+            const num = lastCycle.cycle_number || cycles.length;
+            previousStateLabel = `Delivered #${num} (Confirmed)`;
+          } else {
+            previousStateLabel = 'Delivered (Confirmed)';
+          }
+        } else {
+          previousStateLabel = `Video ${videoNumber}: Not Started`;
+        }
+      }
+
+      // Check if any downstream sub-steps exist (in case of out-of-order data)
+      const affectedDownstreamSteps: string[] = [];
+      for (let dIdx = idx + 1; dIdx < subStepConfigs.length; dIdx++) {
+        const dCfg = subStepConfigs[dIdx];
+        const dDone = (
+          dCfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, videoNumber) :
+          dCfg.id === 'call_explain' ? (isInfluencerCallCompleted(record, videoNumber) || isInfluencerCallSkipped(record, videoNumber)) :
+          dCfg.id === 'pay_advance' ? (isV1 && isInfluencerPayAdvanceCompleted(record, 1)) :
+          dCfg.id === 'timeline' ? isInfluencerTimelineCompleted(record, videoNumber) :
+          dCfg.id === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
+          dCfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
+          dCfg.id === 'payment' ? (!isV1 && isInfluencerPaymentCompleted(record, videoNumber)) :
+          false
+        );
+        if (dDone) {
+          affectedDownstreamSteps.push(dCfg.label);
+        }
+      }
+
+      return {
+        stepId: cfg.id,
+        stepLabel: isSkipped ? `${cfg.label} (Skipped)` : cfg.label,
+        previousStateLabel,
+        affectedDownstreamSteps,
+        type: 'video_step',
+        videoNumber
+      };
+    }
+  }
+
+  // 2. If NO Video sub-step is completed and we are on Video 1, inspect Prerequisite Steps (Delivery / Re-Dispatch Cycles)
+  if (isV1) {
+    if (cycles.length > 0) {
+      const lastIdx = cycles.length - 1;
+      const lastCycle = cycles[lastIdx];
+      const num = lastCycle.cycle_number || (lastIdx + 1);
+
+      // Check downstream video 1 steps that would be reset
+      const affectedVideo1Steps: string[] = [];
+      subStepConfigs.forEach(c => {
+        const isDone = (
+          c.id === 'share_script' ? isInfluencerShareScriptCompleted(record, 1) :
+          c.id === 'call_explain' ? (isInfluencerCallCompleted(record, 1) || isInfluencerCallSkipped(record, 1)) :
+          c.id === 'pay_advance' ? isInfluencerPayAdvanceCompleted(record, 1) :
+          c.id === 'timeline' ? isInfluencerTimelineCompleted(record, 1) :
+          c.id === 'draft' ? isInfluencerDraftCompleted(record, 1) :
+          c.id === 'post_date' ? isInfluencerPostDateCompleted(record, 1) :
+          false
+        );
+        if (isDone) affectedVideo1Steps.push(c.label);
+      });
+
+      if (lastCycle.delivered_confirmed || lastCycle.status === 'DELIVERED') {
+        return {
+          stepId: `replacement-delivery-${num}`,
+          stepLabel: `Delivered #${num}`,
+          previousStateLabel: `Re-Dispatch #${num} (Moved to Active)`,
+          affectedDownstreamSteps: affectedVideo1Steps,
+          type: 'prerequisite_delivery',
+          cycleNumber: num,
+          videoNumber: 1
+        };
+      } else if (lastCycle.status === 'MOVED_TO_ACTIVE') {
+        return {
+          stepId: `redispatch-${num}`,
+          stepLabel: `Re-Dispatch #${num}`,
+          previousStateLabel: `Re-Dispatch #${num} (Pending Logistics Action)`,
+          affectedDownstreamSteps: affectedVideo1Steps,
+          type: 'prerequisite_redispatch',
+          cycleNumber: num,
+          videoNumber: 1
+        };
+      } else if (lastCycle.status === 'PENDING_REDISPATCH') {
+        return {
+          stepId: `redispatch-${num}`,
+          stepLabel: `Re-Dispatch #${num} (Pending Issue)`,
+          previousStateLabel: cycles.length > 1 ? `Delivered #${num - 1} (Confirmed)` : 'Delivered (Initial Confirmed)',
+          affectedDownstreamSteps: affectedVideo1Steps,
+          type: 'prerequisite_redispatch',
+          cycleNumber: num,
+          videoNumber: 1
+        };
+      }
+    } else {
+      // Single initial delivery
+      if (isInfluencerDeliveryConfirmed(record)) {
+        const affectedVideo1Steps: string[] = [];
+        subStepConfigs.forEach(c => {
+          const isDone = (
+            c.id === 'share_script' ? isInfluencerShareScriptCompleted(record, 1) :
+            c.id === 'call_explain' ? (isInfluencerCallCompleted(record, 1) || isInfluencerCallSkipped(record, 1)) :
+            c.id === 'pay_advance' ? isInfluencerPayAdvanceCompleted(record, 1) :
+            c.id === 'timeline' ? isInfluencerTimelineCompleted(record, 1) :
+            c.id === 'draft' ? isInfluencerDraftCompleted(record, 1) :
+            c.id === 'post_date' ? isInfluencerPostDateCompleted(record, 1) :
+            false
+          );
+          if (isDone) affectedVideo1Steps.push(c.label);
+        });
+
+        return {
+          stepId: 'delivery-initial',
+          stepLabel: 'Delivered (Initial Delivery)',
+          previousStateLabel: 'Not Delivered',
+          affectedDownstreamSteps: affectedVideo1Steps,
+          type: 'prerequisite_delivery',
+          videoNumber: 1
+        };
+      }
+    }
+  }
+
+  return null;
+};
+
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
   const { 
     trackingRecords, 
@@ -2342,6 +2518,27 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   } | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [detailsRecord, setDetailsRecord] = useState<StatusTrackingRecord | null>(null);
+
+  // Undo Step Modal State
+  const [undoModalState, setUndoModalState] = useState<{
+    isOpen: boolean;
+    record: StatusTrackingRecord;
+    stepInfo: StepUndoInfo;
+  } | null>(null);
+  const [isUndoingStep, setIsUndoingStep] = useState<boolean>(false);
+
+  const handleOpenUndoModal = (record: StatusTrackingRecord) => {
+    const stepInfo = getInfluencerLatestReversibleStep(record, selectedVideoNumber);
+    if (!stepInfo) {
+      toast.error(`No completed steps found for ${record.influencer?.code || (record as any).code || 'this influencer'} in Video ${selectedVideoNumber} to undo.`);
+      return;
+    }
+    setUndoModalState({
+      isOpen: true,
+      record,
+      stepInfo
+    });
+  };
 
   // LEVEL 1 WORKFLOW SELECTION STATE (Video 1 to Video 6)
   const [selectedWorkflowStep, setSelectedWorkflowStep] = useState<WorkflowStepKey>('video1');
@@ -3854,6 +4051,278 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     setOpenMenuId(null);
   };
 
+  const handleConfirmUndoStep = async () => {
+    if (!undoModalState) return;
+    const { record, stepInfo } = undoModalState;
+    setIsUndoingStep(true);
+    const toastId = toast.loading(`Undoing ${stepInfo.stepLabel}...`);
+
+    try {
+      const targetCampId = record.campaign_id || campaign.id;
+      const targetInfId = record.influencer_id;
+      if (!targetCampId || !targetInfId) {
+        throw new Error('Missing campaign ID or influencer ID.');
+      }
+
+      let metadata: any = {};
+      try {
+        metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+      } catch (e) {
+        metadata = {};
+      }
+
+      const updates: Partial<StatusTrackingRecord> = {};
+      const nowIso = new Date().toISOString();
+
+      // Case 1: Video Sub-Step
+      if (stepInfo.type === 'video_step') {
+        const vKey = String(stepInfo.videoNumber);
+        metadata.videos = metadata.videos || {};
+        metadata.videos[vKey] = metadata.videos[vKey] || { steps: {} };
+        metadata.videos[vKey].steps = metadata.videos[vKey].steps || {};
+
+        // Reset the target step
+        metadata.videos[vKey].steps[stepInfo.stepId] = {
+          completed: false,
+          skipped: false,
+          status: 'IN_PROGRESS',
+          data: {},
+          updated_at: nowIso
+        };
+
+        // Reset any affected downstream steps in this video
+        if (stepInfo.affectedDownstreamSteps.length > 0) {
+          const configs = getVideoWorkflowConfigs(stepInfo.videoNumber);
+          configs.forEach(cfg => {
+            if (stepInfo.affectedDownstreamSteps.some(s => s.toLowerCase().includes(cfg.label.toLowerCase()) || s.toLowerCase().includes(cfg.shortLabel.toLowerCase()))) {
+              metadata.videos[vKey].steps[cfg.id] = {
+                completed: false,
+                skipped: false,
+                status: 'IN_PROGRESS',
+                data: {},
+                updated_at: nowIso
+              };
+            }
+          });
+        }
+
+        // Top-level column resets
+        if (stepInfo.stepId === 'pay_advance') {
+          updates.pay_advance_completed = false;
+          updates.advance_paid_amount = '0';
+          updates.pay_advance_photo_url = '';
+          delete metadata.pay_advance_completed;
+        } else if (stepInfo.stepId === 'call_explain') {
+          updates.ref_call_explanation_required = false;
+          delete metadata.call_explained;
+          delete metadata.call_skipped;
+          delete metadata.call_explanation_pending;
+        } else if (stepInfo.stepId === 'share_script') {
+          delete metadata.script_shared;
+          updates.reference_video_received = false;
+          try {
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.videoScripts)
+              .update({ script_shared_approved: false })
+              .eq('campaign_id', targetCampId)
+              .eq('influencer_id', targetInfId)
+              .eq('video_number', stepInfo.videoNumber);
+          } catch (scErr) {
+            console.warn('Could not reset campaign_video_scripts:', scErr);
+          }
+        } else if (stepInfo.stepId === 'post_date') {
+          if (stepInfo.videoNumber === 1) {
+            updates.final_post_link = '';
+            updates.final_post_completed = false;
+          }
+        } else if (stepInfo.stepId === 'payment') {
+          try {
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.videoPayments)
+              .update({ payment_status: 'pending' })
+              .eq('campaign_id', targetCampId)
+              .eq('influencer_id', targetInfId)
+              .eq('video_number', stepInfo.videoNumber);
+          } catch (pErr) {
+            console.warn('Could not reset videoPayments:', pErr);
+          }
+        }
+
+        // Recalculate current_step for Video 1
+        if (stepInfo.videoNumber === 1) {
+          const v1Steps = metadata.videos['1']?.steps || {};
+          let nextStep = 1; // delivery confirmed
+          if (v1Steps.share_script?.completed) nextStep = 2;
+          if (v1Steps.call_explain?.completed || v1Steps.call_explain?.skipped) nextStep = 2;
+          if (v1Steps.pay_advance?.completed) nextStep = 3;
+          if (v1Steps.timeline?.completed) nextStep = 4;
+          if (v1Steps.draft?.completed) nextStep = 5;
+          if (v1Steps.post_date?.completed) nextStep = 6;
+          updates.current_step = nextStep;
+        }
+
+        updates.notes = JSON.stringify(metadata);
+
+      // Case 2: Prerequisite Delivery
+      } else if (stepInfo.type === 'prerequisite_delivery') {
+        if (stepInfo.cycleNumber) {
+          const cycles: any[] = metadata.redispatch_cycles || [];
+          const targetCycle = cycles.find(c => c.cycle_number === stepInfo.cycleNumber);
+          if (targetCycle) {
+            targetCycle.delivered_confirmed = false;
+            targetCycle.status = 'MOVED_TO_ACTIVE';
+            delete targetCycle.delivery_photo_url;
+            delete targetCycle.delivered_at;
+            targetCycle.updated_at = nowIso;
+          }
+          metadata.delivered_confirmed = false;
+          metadata.redispatch_lifecycle_status = 'MOVED_TO_ACTIVE';
+          updates.delivered_confirmed = false;
+          updates.status = 'Active';
+          updates.current_step = 0;
+
+          await supabaseAdmin
+            .from(SUPABASE_TABLES.redispatchRecords)
+            .update({
+              redispatch_status: 'MOVED_TO_ACTIVE',
+              completed_at: null,
+              updated_at: nowIso
+            })
+            .eq('campaign_id', targetCampId)
+            .eq('influencer_id', targetInfId);
+
+        } else {
+          // Initial delivery
+          metadata.delivered_confirmed = false;
+          delete metadata.delivery_photo_url;
+          delete metadata.delivered_date;
+          updates.delivered_confirmed = false;
+          updates.status = 'Not Delivered';
+          updates.current_step = 0;
+        }
+
+        // Reset any Video 1 sub-steps
+        if (metadata.videos && metadata.videos['1']) {
+          metadata.videos['1'].steps = {};
+          metadata.videos['1'].status = 'NOT_STARTED';
+        }
+        delete metadata.script_shared;
+        delete metadata.call_explained;
+        delete metadata.call_skipped;
+        delete metadata.pay_advance_completed;
+        updates.pay_advance_completed = false;
+        updates.reference_video_received = false;
+        updates.ref_call_explanation_required = false;
+
+        updates.notes = JSON.stringify(metadata);
+
+      // Case 3: Prerequisite Re-Dispatch
+      } else if (stepInfo.type === 'prerequisite_redispatch') {
+        const cycles: any[] = metadata.redispatch_cycles || [];
+        const cycleIdx = cycles.findIndex(c => c.cycle_number === stepInfo.cycleNumber);
+        if (cycleIdx !== -1) {
+          const targetCycle = cycles[cycleIdx];
+          if (targetCycle.status === 'MOVED_TO_ACTIVE') {
+            targetCycle.status = 'PENDING_REDISPATCH';
+            delete targetCycle.moved_to_active_at;
+            targetCycle.updated_at = nowIso;
+            metadata.redispatch_lifecycle_status = 'PENDING_REDISPATCH';
+            metadata.re_dispatch_required = true;
+            updates.status = 'Re-Dispatch Required';
+            updates.delivered_confirmed = false;
+            updates.current_step = 0;
+
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.redispatchRecords)
+              .update({
+                redispatch_status: 'PENDING',
+                moved_to_active_at: null,
+                updated_at: nowIso
+              })
+              .eq('campaign_id', targetCampId)
+              .eq('influencer_id', targetInfId);
+
+          } else {
+            // Target cycle was PENDING_REDISPATCH: remove it completely
+            const remaining = cycles.filter(c => c.cycle_number !== stepInfo.cycleNumber);
+            metadata.redispatch_cycles = remaining;
+
+            await supabaseAdmin
+              .from(SUPABASE_TABLES.redispatchRecords)
+              .delete()
+              .eq('campaign_id', targetCampId)
+              .eq('influencer_id', targetInfId);
+
+            if (remaining.length > 0) {
+              const prev = remaining[remaining.length - 1];
+              if (prev.status === 'DELIVERED' || prev.delivered_confirmed) {
+                metadata.delivered_confirmed = true;
+                metadata.redispatch_lifecycle_status = 'COMPLETED';
+                metadata.re_dispatch_required = false;
+                metadata.issue_reported = false;
+                updates.delivered_confirmed = true;
+                updates.status = 'Active';
+                updates.current_step = 1;
+              } else {
+                metadata.redispatch_lifecycle_status = prev.status;
+                updates.status = prev.status === 'MOVED_TO_ACTIVE' ? 'Active' : 'Re-Dispatch Required';
+              }
+            } else {
+              metadata.re_dispatch_required = false;
+              metadata.issue_reported = false;
+              delete metadata.redispatch_lifecycle_status;
+              updates.status = 'Active';
+              updates.delivered_confirmed = true;
+              updates.current_step = 1;
+            }
+          }
+        }
+        updates.notes = JSON.stringify(metadata);
+      }
+
+      // Persist to influencer_status_tracking_rows
+      const result = await saveMilestone(record.id, updates);
+      if (!result.success) {
+        throw new Error(result.error?.message || 'Failed to update database row.');
+      }
+
+      clearVideoWorkflowCache(record);
+
+      await logActivity(
+        campaign.id,
+        'STATUS_UPDATE',
+        `Undone step "${stepInfo.stepLabel}" for influencer ${record.influencer?.code || record.influencer_id} in Video ${stepInfo.videoNumber}`
+      );
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('influencer_tracking_updated', {
+          detail: {
+            campaignId: targetCampId,
+            influencerId: targetInfId,
+            videoNumber: stepInfo.videoNumber,
+            undoneStep: stepInfo.stepId
+          }
+        }));
+        window.dispatchEvent(new CustomEvent('influencer_status_updated', {
+          detail: {
+            campaignId: targetCampId,
+            influencerId: targetInfId
+          }
+        }));
+      }
+
+      await refresh();
+      toast.success(`Successfully undone "${stepInfo.stepLabel}" for ${record.influencer?.code || 'influencer'}!`, { id: toastId });
+      setUndoModalState(null);
+
+    } catch (err: any) {
+      console.error('Error during undo step execution:', err);
+      toast.error(err.message || 'Failed to undo step. Please try again.', { id: toastId });
+    } finally {
+      setIsUndoingStep(false);
+    }
+  };
+
   // Last Updated timestamp formatted
   const lastUpdatedStr = useMemo(() => {
     const d = new Date();
@@ -4311,12 +4780,31 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 </div>
                               </div>
 
-                              {/* Connecting Line after this prerequisite step */}
-                              <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
-                                <div className={`h-full w-full rounded-full transition-all duration-300 ${
-                                  pStep.isCompleted ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'
-                                }`} />
-                              </div>
+                              {/* Connecting Line after this prerequisite step (Green only if both this and next step are done) */}
+                              {(() => {
+                                let isPrereqLineActive = false;
+                                if (pIdx < prerequisiteSteps.length - 1) {
+                                  const nextPrereq = prerequisiteSteps[pIdx + 1];
+                                  isPrereqLineActive = pStep.isCompleted && nextPrereq.isCompleted;
+                                } else {
+                                  const filteredConfigs = currentVideoData.configs.filter(
+                                    cfg => !(selectedVideoNumber === 1 && hasRedispatch && cfg.id === 'delivered')
+                                  );
+                                  const firstSubStepConfig = filteredConfigs[0];
+                                  if (firstSubStepConfig) {
+                                    const firstSubVisualState = getStepVisualState(record, selectedVideoNumber, firstSubStepConfig.id);
+                                    isPrereqLineActive = pStep.isCompleted && (firstSubVisualState === 'completed' || firstSubVisualState === 'skipped');
+                                  }
+                                }
+
+                                return (
+                                  <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
+                                    <div className={`h-full w-full rounded-full transition-all duration-300 ${
+                                      isPrereqLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'
+                                    }`} />
+                                  </div>
+                                );
+                              })()}
                             </React.Fragment>
                           );
                         })}
@@ -4334,7 +4822,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           const StepIcon = cfg.icon;
 
                           const isCurrentStepDone = isCompleted || isSkipped;
-                          const isLineActive = isCurrentStepDone;
 
                           return (
                             <React.Fragment key={`${selectedVideoNumber}-${cfg.id}`}>
@@ -4398,12 +4885,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                                 </div>
                               </div>
 
-                              {/* Connecting Line between Sub-Steps (Green when current step is done) */}
-                              {idx !== arr.length - 1 && (
-                                <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
-                                  <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'}`} />
-                                </div>
-                              )}
+                              {/* Connecting Line between Sub-Steps (Green only if both current and next step are done) */}
+                              {idx !== arr.length - 1 && (() => {
+                                const nextCfg = arr[idx + 1];
+                                const nextVisualState = getStepVisualState(record, selectedVideoNumber, nextCfg.id);
+                                const isNextStepDone = nextVisualState === 'completed' || nextVisualState === 'skipped';
+                                const isLineActive = isCurrentStepDone && isNextStepDone;
+
+                                return (
+                                  <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
+                                    <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'}`} />
+                                  </div>
+                                );
+                              })()}
                             </React.Fragment>
                           );
                         })}
@@ -4654,6 +5148,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               <Video size={14} className="text-purple-400" />
                               <span>Manage Video {selectedVideoNumber}</span>
                             </button>
+
+                            {/* --- UNDO LAST STEP ACTION --- */}
+                            <div className="h-[1px] bg-slate-800 my-1" />
+                            <button 
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                handleOpenUndoModal(record);
+                              }}
+                              className="w-full px-3.5 py-2 text-left text-amber-300 hover:bg-amber-500/15 hover:text-amber-200 flex items-center gap-2 transition-colors font-medium cursor-pointer"
+                            >
+                              <RotateCcw size={14} className="text-amber-400" />
+                              <span>Undo Last Step</span>
+                            </button>
                             <div className="h-[1px] bg-slate-800 my-1" />
                             <button 
                               onClick={() => handleCopyCode(influencerCode)}
@@ -4864,6 +5371,132 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         }}
         onConfirm={handleConfirmDeleteSingle}
       />
+
+      {/* ========================================================
+          CONFIRMATION MODAL: SAFE SEQUENTIAL UNDO STEP
+      ======================================================== */}
+      {undoModalState && undoModalState.isOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden relative">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-5 border-b border-slate-800 bg-[#070c18]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <RotateCcw size={20} />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-base sm:text-lg flex items-center gap-2">
+                    Undo Last Step
+                  </h3>
+                  <p className="text-slate-400 text-xs mt-0.5">
+                    Safely revert the latest workflow event for this influencer
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  if (!isUndoingStep) setUndoModalState(null);
+                }}
+                disabled={isUndoingStep}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5 space-y-4">
+              {/* Influencer Info Card */}
+              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Influencer</div>
+                  <div className="text-white font-bold text-sm mt-0.5 flex items-center gap-2">
+                    <span>{undoModalState.record.influencer?.name || (undoModalState.record as any).name || undoModalState.record.dispatch?.influencer_name || 'Creator'}</span>
+                    <span className="text-xs text-slate-400 font-normal">
+                      {undoModalState.record.influencer?.instagram_username ? `@${undoModalState.record.influencer.instagram_username}` : ''}
+                    </span>
+                  </div>
+                </div>
+                <div className="px-2.5 py-1 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-400 font-mono font-bold text-xs">
+                  {undoModalState.record.influencer?.code || (undoModalState.record as any).code || undoModalState.record.dispatch?.influencer_code || `ID ${undoModalState.record.influencer_id}`}
+                </div>
+              </div>
+
+              {/* Step Transition Visual */}
+              <div className="space-y-2.5">
+                <div className="p-3 bg-amber-950/20 border border-amber-500/30 rounded-xl flex items-center justify-between">
+                  <div className="text-xs text-amber-300/90 font-medium">Undoing:</div>
+                  <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/30">
+                    <RotateCcw size={13} />
+                    <span>{undoModalState.stepInfo.stepLabel}</span>
+                  </div>
+                </div>
+
+                <div className="flex justify-center text-slate-500">
+                  <ArrowLeft size={16} className="-rotate-90" />
+                </div>
+
+                <div className="p-3 bg-emerald-950/20 border border-emerald-500/30 rounded-xl flex items-center justify-between">
+                  <div className="text-xs text-emerald-300/90 font-medium">Workflow will return to:</div>
+                  <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/30">
+                    <Check size={13} />
+                    <span>{undoModalState.stepInfo.previousStateLabel}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Downstream Warning if any steps will also be reset */}
+              {undoModalState.stepInfo.affectedDownstreamSteps.length > 0 && (
+                <div className="p-3.5 bg-rose-950/30 border border-rose-800/60 rounded-xl space-y-1.5">
+                  <div className="flex items-center gap-2 text-rose-300 font-semibold text-xs">
+                    <AlertTriangle size={15} className="text-rose-400 shrink-0" />
+                    <span>These later steps will also be reset:</span>
+                  </div>
+                  <ul className="list-disc list-inside text-rose-200/90 text-xs pl-1 space-y-0.5">
+                    {undoModalState.stepInfo.affectedDownstreamSteps.map(stepName => (
+                      <li key={stepName} className="font-medium">{stepName}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <p className="text-slate-400 text-xs leading-relaxed">
+                This operation will safely step back the workflow for this influencer and update database records.
+              </p>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-[#070c18] flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setUndoModalState(null)}
+                disabled={isUndoingStep}
+                className="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUndoStep}
+                disabled={isUndoingStep}
+                className="bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold px-5 py-2 rounded-xl text-xs sm:text-sm transition-all duration-200 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-amber-600/25 active:scale-95 cursor-pointer"
+              >
+                {isUndoingStep ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Undoing Step...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw size={16} />
+                    <span>Undo Step</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================
           MULTI-CRITERIA STATUS TRACKING FILTER DRAWER
