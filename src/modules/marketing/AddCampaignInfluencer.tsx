@@ -7,7 +7,7 @@ import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
-import { normalizePaymentMethod } from '../../utils/influencerPaymentUtils';
+import { normalizePaymentMethod, resolvePaymentMethodType } from '../../utils/influencerPaymentUtils';
 
 export const formatDisplayProductName = (name?: string | null): string => {
   if (!name) return '';
@@ -644,18 +644,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       const bHistory = (initialData.pricing as any)?.bargainHistory || [];
       const cleanBHistory = bHistory.length > 0 ? bHistory : [{ creator_request: 0, brand_request: 0 }];
 
-      const initialPaymentMethod: 'UPI' | 'ACCOUNT_DETAILS' | 'NULL' = (function() {
-        const norm = normalizePaymentMethod(initialData.payment_method);
-        if (norm === 'ACCOUNT_DETAILS') return 'ACCOUNT_DETAILS';
-        if (norm === 'UPI') return 'UPI';
-        if (initialData.account_number || initialData.account_holder_name || initialData.ifsc_code || initialData.bank_name) {
-          return 'ACCOUNT_DETAILS';
-        }
-        if (initialData.upi_number) {
-          return 'UPI';
-        }
-        return 'NULL';
-      })();
+      const initialPaymentMethod: 'UPI' | 'ACCOUNT_DETAILS' | 'NULL' = resolvePaymentMethodType(initialData.payment_method);
 
       return {
         basicInfo: {

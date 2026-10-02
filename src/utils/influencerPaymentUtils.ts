@@ -165,6 +165,18 @@ export function isAccountPaymentMethod(rawMethod: any): boolean {
 }
 
 /**
+ * Resolves the payment method strictly from the payment_method field.
+ * Returns 'UPI' | 'ACCOUNT_DETAILS' | 'NULL'.
+ * Never checks individual field values (such as bank_name or upi_number).
+ */
+export function resolvePaymentMethodType(rawMethod: any): 'UPI' | 'ACCOUNT_DETAILS' | 'NULL' {
+  const norm = normalizePaymentMethod(rawMethod);
+  if (norm === 'UPI') return 'UPI';
+  if (norm === 'ACCOUNT_DETAILS') return 'ACCOUNT_DETAILS';
+  return 'NULL';
+}
+
+/**
  * Detect and extract a valid UPI ID from text
  * Matches patterns like example@okaxis, 8180890209@axl, user@upi, etc.
  */

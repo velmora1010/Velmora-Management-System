@@ -849,6 +849,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
         account_number: influencerData.account_number !== undefined ? influencerData.account_number : undefined,
         ifsc_code: influencerData.ifsc_code !== undefined ? influencerData.ifsc_code : undefined,
         bank_name: influencerData.bank_name !== undefined ? influencerData.bank_name : undefined,
+        pan_number: influencerData.pan_number !== undefined ? influencerData.pan_number : undefined,
         complete_address: influencerData.complete_address,
         city: influencerData.city,
         pincode: influencerData.pincode,

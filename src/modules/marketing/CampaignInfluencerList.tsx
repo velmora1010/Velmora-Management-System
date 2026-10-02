@@ -9,6 +9,7 @@ import { ImportPricingInfoModal } from '../../components/marketing/ImportPricing
 import { ImportPostDateModal } from '../../components/marketing/ImportPostDateModal';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { InfluencerQuickViewModal } from './InfluencerQuickViewModal';
+import { resolvePaymentMethodType } from '../../utils/influencerPaymentUtils';
 import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType, isInfluencerDispatched, isInfluencerReDispatch } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, calculateDraftDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination, isVideoLabel, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
@@ -339,7 +340,7 @@ City: ${influencer.city}`;
                 <div>
                   <div className="flex items-center gap-1.5 mb-0.5">
                     <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Payment</span>
-                    {onView && (influencer.payment_method === 'ACCOUNT_DETAILS' || influencer.account_number || influencer.ifsc_code || influencer.upi_number) && (
+                    {onView && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -356,9 +357,16 @@ City: ${influencer.city}`;
                     )}
                   </div>
                   <span className="text-slate-200 font-medium break-all">
-                    {influencer.payment_method === 'ACCOUNT_DETAILS' || influencer.account_number
-                      ? `Bank A/C (${influencer.bank_name || 'Details'})`
-                      : (influencer.upi_number ? `UPI: ${influencer.upi_number}` : '—')}
+                    {(() => {
+                      const pType = resolvePaymentMethodType(influencer.payment_method);
+                      if (pType === 'UPI') {
+                        return influencer.upi_number ? `UPI: ${influencer.upi_number}` : 'UPI';
+                      }
+                      if (pType === 'ACCOUNT_DETAILS') {
+                        return `Bank A/C (${influencer.bank_name || 'Details'})`;
+                      }
+                      return '—';
+                    })()}
                   </span>
                 </div>
                 <div>
@@ -2125,21 +2133,24 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
         </div>
       )}
 
-      {viewInfluencerTarget && (
-        <InfluencerQuickViewModal
-          influencer={viewInfluencerTarget}
-          campaign={campaign}
-          status={
-            isInfluencerDispatched(viewInfluencerTarget) 
-              ? 'Dispatched' 
-              : isInfluencerReDispatch(viewInfluencerTarget) 
-              ? 'Preparing' 
-              : 'Active'
-          }
-          dispatchRecord={(viewInfluencerTarget as any).dispatch || (viewInfluencerTarget as any).dispatches?.[0] || null}
-          onClose={() => setViewInfluencerTarget(null)}
-        />
-      )}
+      {viewInfluencerTarget && (() => {
+        const liveInfluencer = influencers.find(inf => String(inf.id) === String(viewInfluencerTarget.id)) || viewInfluencerTarget;
+        return (
+          <InfluencerQuickViewModal
+            influencer={liveInfluencer}
+            campaign={campaign}
+            status={
+              isInfluencerDispatched(liveInfluencer) 
+                ? 'Dispatched' 
+                : isInfluencerReDispatch(liveInfluencer) 
+                ? 'Preparing' 
+                : 'Active'
+            }
+            dispatchRecord={(liveInfluencer as any).dispatch || (liveInfluencer as any).dispatches?.[0] || null}
+            onClose={() => setViewInfluencerTarget(null)}
+          />
+        );
+      })()}
     </div>
   );
 };
