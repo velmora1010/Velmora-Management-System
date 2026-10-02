@@ -8,7 +8,7 @@ import {
   XCircle, PauseCircle, Target, Search, Trash2, MoreHorizontal, 
   RefreshCcw, X, UploadCloud, IndianRupee, Eye, Copy, ArrowLeft,
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Pause, Edit3, Loader2,
-  Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, Activity, Truck, Share2, Globe, GitBranch,
+  Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Activity, Truck, Share2, Globe, GitBranch,
   Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward,
   FilePlus, CheckCircle2, Save, Sparkles
 } from 'lucide-react';
@@ -2462,6 +2462,602 @@ export const getInfluencerLatestReversibleStep = (
   return null;
 };
 
+interface RowWorkflowTimelineProps {
+  record: StatusTrackingRecord;
+  selectedVideoNumber: number;
+  hasRedispatch: boolean;
+  prerequisiteSteps: PrerequisiteStep[];
+  currentVideoData: VideoWorkflowData;
+  isDelivered: boolean;
+  isPendingReDispatch: boolean;
+  onOpenDeliveryModal: (pStep: PrerequisiteStep) => void;
+  onOpenVideoModal: (cfgId: string) => void;
+  onOpenViewAllModal: (record: StatusTrackingRecord) => void;
+}
+
+export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
+  record,
+  selectedVideoNumber,
+  hasRedispatch,
+  prerequisiteSteps,
+  currentVideoData,
+  isDelivered,
+  isPendingReDispatch,
+  onOpenDeliveryModal,
+  onOpenVideoModal,
+  onOpenViewAllModal,
+}) => {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const activeStepRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
+  const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
+  const [isOverflowing, setIsOverflowing] = useState<boolean>(false);
+
+  // Filter video sub-steps
+  const visibleSubSteps = useMemo(() => {
+    return currentVideoData.configs.filter(
+      cfg => !(selectedVideoNumber === 1 && hasRedispatch && cfg.id === 'delivered')
+    );
+  }, [currentVideoData.configs, selectedVideoNumber, hasRedispatch]);
+
+  const totalStepsCount = (selectedVideoNumber === 1 && hasRedispatch ? prerequisiteSteps.length : 0) + visibleSubSteps.length;
+
+  const updateScrollBounds = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    const overflowing = scrollWidth > clientWidth + 4;
+    setIsOverflowing(overflowing);
+    setCanScrollLeft(overflowing && scrollLeft > 8);
+    setCanScrollRight(overflowing && scrollLeft < scrollWidth - clientWidth - 8);
+  }, []);
+
+  useEffect(() => {
+    updateScrollBounds();
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const handleResize = () => updateScrollBounds();
+    const ro = new ResizeObserver(handleResize);
+    ro.observe(el);
+
+    return () => ro.disconnect();
+  }, [updateScrollBounds, totalStepsCount]);
+
+  // Identify active step ID for auto-scroll
+  const activeStepKey = useMemo(() => {
+    if (selectedVideoNumber === 1 && hasRedispatch) {
+      for (const p of prerequisiteSteps) {
+        if (!p.isCompleted) return p.id;
+      }
+    }
+    for (const cfg of visibleSubSteps) {
+      const state = getStepVisualState(record, selectedVideoNumber, cfg.id);
+      if (state === 'in_progress' || state === 'pending') return cfg.id;
+    }
+    for (const cfg of visibleSubSteps) {
+      const state = getStepVisualState(record, selectedVideoNumber, cfg.id);
+      if (state === 'not_started') return cfg.id;
+    }
+    return visibleSubSteps[visibleSubSteps.length - 1]?.id || '';
+  }, [record, selectedVideoNumber, hasRedispatch, prerequisiteSteps, visibleSubSteps]);
+
+  const lastScrolledStepRef = useRef<string>('');
+
+  // Smooth auto-scroll to active step
+  useEffect(() => {
+    if (!activeStepRef.current || !scrollContainerRef.current) return;
+    if (lastScrolledStepRef.current === activeStepKey) return;
+    lastScrolledStepRef.current = activeStepKey;
+
+    const container = scrollContainerRef.current;
+    const target = activeStepRef.current;
+
+    const timer = setTimeout(() => {
+      if (!container || !target) return;
+      if (container.scrollWidth <= container.clientWidth) return;
+
+      const targetOffset = target.offsetLeft - container.clientWidth / 2 + target.clientWidth / 2;
+      container.scrollTo({
+        left: Math.max(0, targetOffset),
+        behavior: 'smooth'
+      });
+      updateScrollBounds();
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [activeStepKey, updateScrollBounds]);
+
+  const handleScrollBy = (direction: 'left' | 'right') => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distance = 160;
+    el.scrollBy({
+      left: direction === 'left' ? -distance : distance,
+      behavior: 'smooth'
+    });
+  };
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > 0) {
+      el.scrollLeft += e.deltaY;
+    }
+  };
+
+  return (
+    <div className="relative flex-1 min-w-0 flex items-center group/timeline overflow-hidden">
+      {/* Left Navigation Arrow */}
+      {canScrollLeft && (
+        <button
+          type="button"
+          onClick={() => handleScrollBy('left')}
+          className="absolute left-0 z-30 w-6 h-6 rounded-full bg-[#070c18]/95 hover:bg-[#0f1b38] border border-slate-700/90 text-slate-300 hover:text-white flex items-center justify-center shadow-xl transition-all cursor-pointer backdrop-blur-md"
+          title="Scroll left to view previous steps"
+        >
+          <ChevronLeft size={14} />
+        </button>
+      )}
+
+      {/* Horizontally Scrollable Timeline Track */}
+      <div
+        ref={scrollContainerRef}
+        onScroll={updateScrollBounds}
+        onWheel={handleWheel}
+        className="flex-1 overflow-x-auto no-scrollbar scroll-smooth py-1 px-1 min-w-0 [&::-webkit-scrollbar]:hidden"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+      >
+        <div className="flex items-center min-w-max">
+          {/* 1. PREREQUISITES: For Video 1 with Re-Dispatch cycles */}
+          {selectedVideoNumber === 1 && hasRedispatch && prerequisiteSteps.map((pStep, pIdx) => {
+            const pVisualState = pStep.isCompleted ? 'completed' : pStep.isPending ? 'pending' : 'not_started';
+            const pVisualStyles = getStepVisualStyles(pVisualState);
+            const isActiveStep = pStep.id === activeStepKey;
+
+            return (
+              <React.Fragment key={pStep.id}>
+                <div
+                  ref={isActiveStep ? activeStepRef : null}
+                  className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
+                  onClick={() => onOpenDeliveryModal(pStep)}
+                  title={pStep.title}
+                >
+                  <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${pVisualStyles.circle}`}>
+                    {pStep.isCompleted ? (
+                      <Check size={14} strokeWidth={2.5} className="text-white" />
+                    ) : pStep.isPending ? (
+                      <AlertTriangle size={13} className="text-amber-400" />
+                    ) : pStep.type === 'redispatch' ? (
+                      <RotateCcw size={13} className={`${pVisualStyles.iconClass} transition-colors`} />
+                    ) : (
+                      <Package size={13} className={`${pVisualStyles.iconClass} transition-colors`} />
+                    )}
+                  </div>
+                  <div className="flex flex-col items-center text-center min-w-0 mt-1">
+                    <span className={`text-[9px] sm:text-[9.5px] xl:text-[10px] text-center leading-tight transition-colors whitespace-nowrap block ${pVisualStyles.label}`}>
+                      {pStep.label}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Connecting Line after this prerequisite step */}
+                {(() => {
+                  let isPrereqLineActive = false;
+                  if (pIdx < prerequisiteSteps.length - 1) {
+                    const nextPrereq = prerequisiteSteps[pIdx + 1];
+                    isPrereqLineActive = pStep.isCompleted && nextPrereq.isCompleted;
+                  } else {
+                    const firstSubStepConfig = visibleSubSteps[0];
+                    if (firstSubStepConfig) {
+                      const firstSubVisualState = getStepVisualState(record, selectedVideoNumber, firstSubStepConfig.id);
+                      isPrereqLineActive = pStep.isCompleted && (firstSubVisualState === 'completed' || firstSubVisualState === 'skipped');
+                    }
+                  }
+
+                  return (
+                    <div className="w-4 sm:w-6 xl:w-8 h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300 shrink-0">
+                      <div className={`h-full w-full rounded-full transition-all duration-300 ${
+                        isPrereqLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'
+                      }`} />
+                    </div>
+                  );
+                })()}
+              </React.Fragment>
+            );
+          })}
+
+          {/* 2. SUB-STEPS FOR THE SELECTED VIDEO */}
+          {visibleSubSteps.map((cfg, idx, arr) => {
+            const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
+            const visualStyles = getStepVisualStyles(visualState);
+
+            const isCompleted = visualState === 'completed';
+            const isSkipped = visualState === 'skipped';
+            const isReDraftReq = cfg.id === 'draft' && currentVideoData.isReDraftRequired;
+            const StepIcon = cfg.icon;
+
+            const isCurrentStepDone = isCompleted || isSkipped;
+            const isActiveStep = cfg.id === activeStepKey;
+
+            return (
+              <React.Fragment key={`${selectedVideoNumber}-${cfg.id}`}>
+                <div
+                  ref={isActiveStep ? activeStepRef : null}
+                  className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
+                  onClick={() => {
+                    if (selectedVideoNumber === 1 && cfg.id === 'delivered') {
+                      onOpenDeliveryModal({
+                        id: 'delivery-initial',
+                        type: 'initial_delivery',
+                        label: 'Delivered',
+                        isCompleted: isDelivered,
+                        isPending: isPendingReDispatch,
+                        modalMode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery',
+                        title: 'Delivery Confirmation'
+                      });
+                      return;
+                    }
+                    if (!isDelivered) {
+                      toast.error('Please complete Delivery Confirmation first.');
+                      onOpenDeliveryModal({
+                        id: 'delivery-initial',
+                        type: 'initial_delivery',
+                        label: 'Delivered',
+                        isCompleted: isDelivered,
+                        isPending: isPendingReDispatch,
+                        modalMode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery',
+                        title: 'Delivery Confirmation'
+                      });
+                      return;
+                    }
+                    onOpenVideoModal(cfg.id);
+                  }}
+                  title={
+                    selectedVideoNumber === 1 && cfg.id === 'delivered'
+                      ? `Delivery Confirmation: ${isDelivered ? 'Completed' : 'Not Confirmed'}`
+                      : !isDelivered
+                      ? 'Requires Delivery Confirmation first'
+                      : `${cfg.label} (${
+                          visualState === 'completed'
+                            ? 'Completed'
+                            : visualState === 'skipped'
+                            ? 'Skipped'
+                            : isReDraftReq
+                            ? 'Re-Draft Required'
+                            : visualState === 'pending'
+                            ? 'Pending Action'
+                            : visualState === 'in_progress'
+                            ? 'In Progress'
+                            : 'Not Started'
+                        })`
+                  }
+                >
+                  <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${visualStyles.circle}`}>
+                    {isCompleted ? (
+                      <Check size={14} strokeWidth={2.5} className="text-white" />
+                    ) : isSkipped ? (
+                      <FastForward size={13} className="text-amber-400" />
+                    ) : isReDraftReq ? (
+                      <span className="font-black text-[9px] text-rose-400 tracking-tight">RD</span>
+                    ) : (
+                      <StepIcon size={13} className={`${visualStyles.iconClass} transition-colors`} />
+                    )}
+                  </div>
+                  <div className="flex flex-col items-center text-center min-w-0 mt-1">
+                    <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${visualStyles.label}`}>
+                      {cfg.shortLabel || cfg.label}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Connecting Line between Sub-Steps */}
+                {idx !== arr.length - 1 && (() => {
+                  const nextCfg = arr[idx + 1];
+                  const nextVisualState = getStepVisualState(record, selectedVideoNumber, nextCfg.id);
+                  const isNextStepDone = nextVisualState === 'completed' || nextVisualState === 'skipped';
+                  const isLineActive = isCurrentStepDone && isNextStepDone;
+
+                  return (
+                    <div className="w-4 sm:w-6 xl:w-8 h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300 shrink-0">
+                      <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'}`} />
+                    </div>
+                  );
+                })()}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right Navigation Arrow */}
+      {canScrollRight && (
+        <button
+          type="button"
+          onClick={() => handleScrollBy('right')}
+          className="absolute right-0 z-30 w-6 h-6 rounded-full bg-[#070c18]/95 hover:bg-[#0f1b38] border border-slate-700/90 text-slate-300 hover:text-white flex items-center justify-center shadow-xl transition-all cursor-pointer backdrop-blur-md"
+          title="Scroll right to view subsequent steps"
+        >
+          <ChevronRight size={14} />
+        </button>
+      )}
+
+      {/* "View All Steps" Expand Button when workflow overflows */}
+      {isOverflowing && (
+        <button
+          type="button"
+          onClick={() => onOpenViewAllModal(record)}
+          className="ml-2 px-2 py-1 rounded-lg bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/40 hover:border-purple-400 text-purple-300 hover:text-white text-[10px] font-semibold flex items-center gap-1 transition-all shrink-0 cursor-pointer shadow-sm whitespace-nowrap"
+          title="Open complete chronological workflow sequence in modal"
+        >
+          <Maximize2 size={11} className="text-purple-400" />
+          <span>All ({totalStepsCount})</span>
+        </button>
+      )}
+    </div>
+  );
+};
+
+interface ViewAllWorkflowStepsModalProps {
+  record: StatusTrackingRecord;
+  selectedVideoNumber: number;
+  onClose: () => void;
+  onOpenDeliveryModal: (pStep: PrerequisiteStep) => void;
+  onOpenVideoModal: (cfgId: string) => void;
+}
+
+export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps> = ({
+  record,
+  selectedVideoNumber,
+  onClose,
+  onOpenDeliveryModal,
+  onOpenVideoModal,
+}) => {
+  const currentVideoData = getVideoWorkflow(record, selectedVideoNumber);
+  const redispatchCycles = getInfluencerReDispatchCycles(record);
+  const hasRedispatch = redispatchCycles.length > 0;
+  const prerequisiteSteps = getInfluencerPrerequisiteSteps(record);
+  const isDelivered = isInfluencerDeliveryConfirmed(record);
+  const isPendingReDispatch = isInfluencerInReDispatch(record);
+
+  const visibleSubSteps = currentVideoData.configs.filter(
+    cfg => !(selectedVideoNumber === 1 && hasRedispatch && cfg.id === 'delivered')
+  );
+
+  const influencerCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || `ID ${record.influencer_id}`;
+  const influencerName = record.influencer?.name || (record as any).name || record.dispatch?.influencer_name || 'Creator';
+  const username = record.influencer?.instagram_username ? `@${record.influencer.instagram_username}` : '';
+
+  const allOrderedSteps: Array<{
+    id: string;
+    stepNumber: number;
+    label: string;
+    type: 'prerequisite' | 'video_step';
+    visualState: StepVisualState;
+    visualStyles: any;
+    isCompleted: boolean;
+    isSkipped: boolean;
+    isPending: boolean;
+    title: string;
+    pStep?: PrerequisiteStep;
+    cfgId?: string;
+    icon: any;
+  }> = [];
+
+  let stepCounter = 1;
+
+  if (selectedVideoNumber === 1 && hasRedispatch) {
+    prerequisiteSteps.forEach(p => {
+      const pVisualState = p.isCompleted ? 'completed' : p.isPending ? 'pending' : 'not_started';
+      const pVisualStyles = getStepVisualStyles(pVisualState);
+      const StepIcon = p.type === 'redispatch' ? RotateCcw : Package;
+      allOrderedSteps.push({
+        id: p.id,
+        stepNumber: stepCounter++,
+        label: p.label,
+        type: 'prerequisite',
+        visualState: pVisualState,
+        visualStyles: pVisualStyles,
+        isCompleted: p.isCompleted,
+        isSkipped: false,
+        isPending: p.isPending,
+        title: p.title,
+        pStep: p,
+        icon: StepIcon
+      });
+    });
+  }
+
+  visibleSubSteps.forEach(cfg => {
+    const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
+    const visualStyles = getStepVisualStyles(visualState);
+    allOrderedSteps.push({
+      id: cfg.id,
+      stepNumber: stepCounter++,
+      label: cfg.label,
+      type: 'video_step',
+      visualState,
+      visualStyles,
+      isCompleted: visualState === 'completed',
+      isSkipped: visualState === 'skipped',
+      isPending: visualState === 'pending',
+      title: cfg.label,
+      cfgId: cfg.id,
+      icon: cfg.icon
+    });
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+      <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden relative flex flex-col max-h-[90vh]">
+        {/* Modal Header */}
+        <div className="flex justify-between items-center p-5 border-b border-slate-800 bg-[#070c18] shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/40 flex items-center justify-center text-purple-400">
+              <Maximize2 size={20} />
+            </div>
+            <div>
+              <h3 className="text-white font-bold text-base sm:text-lg flex items-center gap-2">
+                Complete Workflow Timeline
+              </h3>
+              <p className="text-slate-400 text-xs mt-0.5">
+                Full chronological sequence for Video {selectedVideoNumber} ({allOrderedSteps.length} Steps)
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={onClose}
+            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-5 overflow-y-auto space-y-4">
+          {/* Influencer Card */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between shrink-0">
+            <div>
+              <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Influencer</div>
+              <div className="text-white font-bold text-sm mt-0.5 flex items-center gap-2">
+                <span>{influencerName}</span>
+                {username && <span className="text-xs text-slate-400 font-normal">{username}</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded-md bg-purple-500/15 border border-purple-500/30 text-purple-300 font-semibold text-xs">
+                Video {selectedVideoNumber}
+              </span>
+              <span className="px-2.5 py-1 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-400 font-mono font-bold text-xs">
+                {influencerCode}
+              </span>
+            </div>
+          </div>
+
+          {/* Full Horizontal Timeline Preview */}
+          <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl overflow-x-auto no-scrollbar">
+            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3">
+              Horizontal Flow
+            </div>
+            <div className="flex items-center min-w-max pb-2">
+              {allOrderedSteps.map((step, idx) => {
+                const StepIcon = step.icon;
+                const isLineActive = step.isCompleted && idx < allOrderedSteps.length - 1 && (allOrderedSteps[idx + 1].isCompleted || allOrderedSteps[idx + 1].isSkipped);
+
+                return (
+                  <React.Fragment key={`h-${step.id}`}>
+                    <div className="flex flex-col items-center">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${step.visualStyles.circle}`}>
+                        {step.isCompleted ? (
+                          <Check size={14} strokeWidth={2.5} className="text-white" />
+                        ) : step.isSkipped ? (
+                          <FastForward size={13} className="text-amber-400" />
+                        ) : (
+                          <StepIcon size={13} className={step.visualStyles.iconClass} />
+                        )}
+                      </div>
+                      <span className={`text-[9.5px] mt-1.5 whitespace-nowrap ${step.visualStyles.label}`}>
+                        {step.label}
+                      </span>
+                    </div>
+
+                    {idx < allOrderedSteps.length - 1 && (
+                      <div className="w-6 sm:w-8 h-[2px] mx-1 -mt-4 shrink-0">
+                        <div className={`h-full w-full rounded-full ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'}`} />
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Step-by-Step Chronological Checklist List */}
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
+              Chronological Step Details
+            </div>
+            <div className="space-y-2">
+              {allOrderedSteps.map((step) => {
+                const StepIcon = step.icon;
+
+                return (
+                  <div
+                    key={`list-${step.id}`}
+                    onClick={() => {
+                      if (step.type === 'prerequisite' && step.pStep) {
+                        onOpenDeliveryModal(step.pStep);
+                      } else if (step.type === 'video_step' && step.cfgId) {
+                        if (selectedVideoNumber === 1 && step.cfgId === 'delivered') {
+                          onOpenDeliveryModal({
+                            id: 'delivery-initial',
+                            type: 'initial_delivery',
+                            label: 'Delivered',
+                            isCompleted: isDelivered,
+                            isPending: isPendingReDispatch,
+                            modalMode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery',
+                            title: 'Delivery Confirmation'
+                          });
+                        } else {
+                          onOpenVideoModal(step.cfgId);
+                        }
+                      }
+                    }}
+                    className="p-3 bg-slate-900/60 hover:bg-slate-800/70 border border-slate-800 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition-all group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-6 h-6 rounded-full bg-slate-800 text-slate-400 font-mono text-xs flex items-center justify-center font-bold shrink-0">
+                        {step.stepNumber}
+                      </span>
+                      <div className={`w-7.5 h-7.5 rounded-full flex items-center justify-center shrink-0 ${step.visualStyles.circle}`}>
+                        {step.isCompleted ? (
+                          <Check size={13} strokeWidth={2.5} className="text-white" />
+                        ) : step.isSkipped ? (
+                          <FastForward size={12} className="text-amber-400" />
+                        ) : (
+                          <StepIcon size={12} className={step.visualStyles.iconClass} />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-white font-bold text-xs sm:text-sm group-hover:text-blue-300 transition-colors truncate">
+                          {step.label}
+                        </div>
+                        <div className="text-slate-400 text-[10px] sm:text-xs">
+                          {step.type === 'prerequisite' ? 'Delivery / Logistics Action' : `Video ${selectedVideoNumber} Sub-Step`}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${step.visualStyles.badge}`}>
+                        {step.visualStyles.badgeText}
+                      </span>
+                      <span className="text-xs text-slate-500 group-hover:text-slate-300 transition-colors">
+                        ➔
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-4 border-t border-slate-800 bg-[#070c18] flex items-center justify-end shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
   const { 
     trackingRecords, 
@@ -2518,6 +3114,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   } | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [detailsRecord, setDetailsRecord] = useState<StatusTrackingRecord | null>(null);
+  const [viewAllModalRecord, setViewAllModalRecord] = useState<StatusTrackingRecord | null>(null);
 
   // Undo Step Modal State
   const [undoModalState, setUndoModalState] = useState<{
@@ -4741,168 +5338,31 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       </div>
                     </div>
 
-                    {/* CENTER SECTION: Contextual Workflow (Delivery Prerequisites -> Selected Video's Sub-Steps) */}
+                    {/* CENTER SECTION: Horizontally Scrollable Contextual Workflow Timeline */}
                     <div className="flex-1 px-1 sm:px-2 xl:px-3 py-1 min-w-0 w-full overflow-hidden">
-                      <div className="flex items-center w-full min-w-0 justify-between">
-                        
-                        {/* 1. PREREQUISITES: For Video 1 with any Re-Dispatch cycle */}
-                        {selectedVideoNumber === 1 && hasRedispatch && prerequisiteSteps.map((pStep, pIdx) => {
-                          const pVisualState = pStep.isCompleted ? 'completed' : pStep.isPending ? 'pending' : 'not_started';
-                          const pVisualStyles = getStepVisualStyles(pVisualState);
-
-                          return (
-                            <React.Fragment key={pStep.id}>
-                              <div 
-                                className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
-                                onClick={() => setActiveModal({
-                                  recordId: record.id,
-                                  stageId: 'delivered',
-                                  mode: pStep.modalMode,
-                                  cycleNumber: pStep.cycleNumber
-                                })}
-                                title={pStep.title}
-                              >
-                                <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${pVisualStyles.circle}`}>
-                                  {pStep.isCompleted ? (
-                                    <Check size={14} strokeWidth={2.5} className="text-white" />
-                                  ) : pStep.isPending ? (
-                                    <AlertTriangle size={13} className="text-amber-400" />
-                                  ) : pStep.type === 'redispatch' ? (
-                                    <RotateCcw size={13} className={`${pVisualStyles.iconClass} transition-colors`} />
-                                  ) : (
-                                    <Package size={13} className={`${pVisualStyles.iconClass} transition-colors`} />
-                                  )}
-                                </div>
-                                <div className="flex flex-col items-center text-center min-w-0 mt-1">
-                                  <span className={`text-[9px] sm:text-[9.5px] xl:text-[10px] text-center leading-tight transition-colors whitespace-nowrap block ${pVisualStyles.label}`}>
-                                    {pStep.label}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Connecting Line after this prerequisite step (Green only if both this and next step are done) */}
-                              {(() => {
-                                let isPrereqLineActive = false;
-                                if (pIdx < prerequisiteSteps.length - 1) {
-                                  const nextPrereq = prerequisiteSteps[pIdx + 1];
-                                  isPrereqLineActive = pStep.isCompleted && nextPrereq.isCompleted;
-                                } else {
-                                  const filteredConfigs = currentVideoData.configs.filter(
-                                    cfg => !(selectedVideoNumber === 1 && hasRedispatch && cfg.id === 'delivered')
-                                  );
-                                  const firstSubStepConfig = filteredConfigs[0];
-                                  if (firstSubStepConfig) {
-                                    const firstSubVisualState = getStepVisualState(record, selectedVideoNumber, firstSubStepConfig.id);
-                                    isPrereqLineActive = pStep.isCompleted && (firstSubVisualState === 'completed' || firstSubVisualState === 'skipped');
-                                  }
-                                }
-
-                                return (
-                                  <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
-                                    <div className={`h-full w-full rounded-full transition-all duration-300 ${
-                                      isPrereqLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'
-                                    }`} />
-                                  </div>
-                                );
-                              })()}
-                            </React.Fragment>
-                          );
-                        })}
-
-                        {/* 2. SUB-STEPS FOR THE SELECTED VIDEO (Dynamically using currentVideoData.configs) */}
-                        {currentVideoData.configs
-                          .filter(cfg => !(selectedVideoNumber === 1 && hasRedispatch && cfg.id === 'delivered'))
-                          .map((cfg, idx, arr) => {
-                          const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
-                          const visualStyles = getStepVisualStyles(visualState);
-
-                          const isCompleted = visualState === 'completed';
-                          const isSkipped = visualState === 'skipped';
-                          const isReDraftReq = cfg.id === 'draft' && currentVideoData.isReDraftRequired;
-                          const StepIcon = cfg.icon;
-
-                          const isCurrentStepDone = isCompleted || isSkipped;
-
-                          return (
-                            <React.Fragment key={`${selectedVideoNumber}-${cfg.id}`}>
-                              <div
-                                className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
-                                onClick={() => {
-                                  if (selectedVideoNumber === 1 && cfg.id === 'delivered') {
-                                    setActiveModal({
-                                      recordId: record.id,
-                                      stageId: 'delivered',
-                                      mode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery'
-                                    });
-                                    return;
-                                  }
-                                  if (!isDelivered) {
-                                    toast.error('Please complete Delivery Confirmation first.');
-                                    setActiveModal({
-                                      recordId: record.id,
-                                      stageId: 'delivered',
-                                      mode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery'
-                                    });
-                                    return;
-                                  }
-                                  handleOpenVideo(record, selectedVideoNumber, cfg.id);
-                                }}
-                                title={
-                                  selectedVideoNumber === 1 && cfg.id === 'delivered'
-                                    ? `Delivery Confirmation: ${isDelivered ? 'Completed' : 'Not Confirmed'}`
-                                    : !isDelivered
-                                    ? 'Requires Delivery Confirmation first'
-                                    : `${cfg.label} (${
-                                        visualState === 'completed'
-                                          ? 'Completed'
-                                          : visualState === 'skipped'
-                                          ? 'Skipped'
-                                          : isReDraftReq
-                                          ? 'Re-Draft Required'
-                                          : visualState === 'pending'
-                                          ? 'Pending Action'
-                                          : visualState === 'in_progress'
-                                          ? 'In Progress'
-                                          : 'Not Started'
-                                      })`
-                                }
-                              >
-                                <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${visualStyles.circle}`}>
-                                  {isCompleted ? (
-                                    <Check size={14} strokeWidth={2.5} className="text-white" />
-                                  ) : isSkipped ? (
-                                    <FastForward size={13} className="text-amber-400" />
-                                  ) : isReDraftReq ? (
-                                    <span className="font-black text-[9px] text-rose-400 tracking-tight">RD</span>
-                                  ) : (
-                                    <StepIcon size={13} className={`${visualStyles.iconClass} transition-colors`} />
-                                  )}
-                                </div>
-                                <div className="flex flex-col items-center text-center min-w-0 mt-1">
-                                  <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${visualStyles.label}`}>
-                                    {cfg.shortLabel || cfg.label}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Connecting Line between Sub-Steps (Green only if both current and next step are done) */}
-                              {idx !== arr.length - 1 && (() => {
-                                const nextCfg = arr[idx + 1];
-                                const nextVisualState = getStepVisualState(record, selectedVideoNumber, nextCfg.id);
-                                const isNextStepDone = nextVisualState === 'completed' || nextVisualState === 'skipped';
-                                const isLineActive = isCurrentStepDone && isNextStepDone;
-
-                                return (
-                                  <div className="flex-1 min-w-[4px] sm:min-w-[8px] xl:min-w-[12px] h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300">
-                                    <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'}`} />
-                                  </div>
-                                );
-                              })()}
-                            </React.Fragment>
-                          );
-                        })}
-
-                      </div>
+                      <RowWorkflowTimeline
+                        record={record}
+                        selectedVideoNumber={selectedVideoNumber}
+                        hasRedispatch={hasRedispatch}
+                        prerequisiteSteps={prerequisiteSteps}
+                        currentVideoData={currentVideoData}
+                        isDelivered={isDelivered}
+                        isPendingReDispatch={isPendingReDispatch}
+                        onOpenDeliveryModal={(pStep) => {
+                          setActiveModal({
+                            recordId: record.id,
+                            stageId: 'delivered',
+                            mode: pStep.modalMode,
+                            cycleNumber: pStep.cycleNumber
+                          });
+                        }}
+                        onOpenVideoModal={(cfgId) => {
+                          handleOpenVideo(record, selectedVideoNumber, cfgId);
+                        }}
+                        onOpenViewAllModal={(rec) => {
+                          setViewAllModalRecord(rec);
+                        }}
+                      />
                     </div>
 
                     {/* RIGHT SECTION: Video Status, Manage Button & Three-Dot Menu */}
@@ -5147,6 +5607,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             >
                               <Video size={14} className="text-purple-400" />
                               <span>Manage Video {selectedVideoNumber}</span>
+                            </button>
+
+                            {/* --- VIEW ALL STEPS ACTION --- */}
+                            <div className="h-[1px] bg-slate-800 my-1" />
+                            <button 
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                setViewAllModalRecord(record);
+                              }}
+                              className="w-full px-3.5 py-2 text-left text-purple-300 hover:bg-purple-500/15 hover:text-purple-200 flex items-center gap-2 transition-colors font-medium cursor-pointer"
+                            >
+                              <Maximize2 size={14} className="text-purple-400" />
+                              <span>View All Steps</span>
                             </button>
 
                             {/* --- UNDO LAST STEP ACTION --- */}
@@ -5496,6 +5969,30 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             </div>
           </div>
         </div>
+      )}
+
+      {/* ========================================================
+          MODAL: VIEW ALL WORKFLOW STEPS EXPANDED MODAL
+      ======================================================== */}
+      {viewAllModalRecord && (
+        <ViewAllWorkflowStepsModal
+          record={viewAllModalRecord}
+          selectedVideoNumber={selectedVideoNumber}
+          onClose={() => setViewAllModalRecord(null)}
+          onOpenDeliveryModal={(pStep) => {
+            setActiveModal({
+              recordId: viewAllModalRecord.id,
+              stageId: 'delivered',
+              mode: pStep.modalMode,
+              cycleNumber: pStep.cycleNumber
+            });
+            setViewAllModalRecord(null);
+          }}
+          onOpenVideoModal={(cfgId) => {
+            handleOpenVideo(viewAllModalRecord, selectedVideoNumber, cfgId);
+            setViewAllModalRecord(null);
+          }}
+        />
       )}
 
       {/* ========================================================
