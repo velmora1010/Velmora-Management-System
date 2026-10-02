@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Campaign, CampaignInfluencer } from '../../types';
-import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus, FileText, Sparkles, Send, RotateCcw } from 'lucide-react';
+import { Search, UserCheck, Archive, RefreshCcw, ArchiveRestore, Edit, Copy, ExternalLink, Trash2, Filter, SlidersHorizontal, Upload, Users, BarChart2, Package, Download, CheckSquare, ChevronDown, UserPlus, FileText, Sparkles, Send, RotateCcw, Eye } from 'lucide-react';
 import { useCampaignInfluencers, compareInfluencerCodesAsc, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -8,6 +8,7 @@ import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPla
 import { ImportPricingInfoModal } from '../../components/marketing/ImportPricingInfoModal';
 import { ImportPostDateModal } from '../../components/marketing/ImportPostDateModal';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
+import { InfluencerQuickViewModal } from './InfluencerQuickViewModal';
 import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType, isInfluencerDispatched, isInfluencerReDispatch } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, calculateDraftDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination, isVideoLabel, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
@@ -72,6 +73,7 @@ const InfluencerCard = ({
   activeTab: parentActiveTab = 'basic',
   currentSection = 'active',
   onTabChange,
+  onView,
   onEdit, 
   onMoveStatus,
   onToggleArchive,
@@ -87,6 +89,7 @@ const InfluencerCard = ({
   activeTab?: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate',
   currentSection?: 'active' | 'other' | 'recycle_bin',
   onTabChange?: (tab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate') => void,
+  onView?: (inf: CampaignInfluencer) => void,
   onEdit?: (inf: CampaignInfluencer) => void,
   onPickList?: (inf: CampaignInfluencer) => void,
   onMoveStatus?: (targetStatus: 'active' | 'other' | 'recycle_bin') => void,
@@ -202,8 +205,25 @@ City: ${influencer.city}`;
               )
             )}
             
+            {onView && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onView(influencer);
+                }}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-purple-950/60 border border-slate-700/60 hover:border-purple-800/50 transition-all cursor-pointer flex items-center justify-center shrink-0 shadow-sm"
+                title="View Full Influencer & Bank Details"
+                aria-label="View Full Details"
+              >
+                <Eye size={15} />
+              </button>
+            )}
+
             <InfluencerActionMenu
               currentSection={currentSection}
+              onView={onView ? () => onView(influencer) : undefined}
               onEdit={() => onEdit?.(influencer)}
               onPickList={() => onPickList?.(influencer)}
               onMoveStatus={onMoveStatus}
@@ -317,7 +337,24 @@ City: ${influencer.city}`;
                   <span className="text-slate-200 font-medium break-all">{influencer.alternative_number || '—'}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Payment</span>
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Payment</span>
+                    {onView && (influencer.payment_method === 'ACCOUNT_DETAILS' || influencer.account_number || influencer.ifsc_code || influencer.upi_number) && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onView(influencer);
+                        }}
+                        className="p-0.5 rounded text-purple-400 hover:text-purple-300 hover:bg-purple-950/60 transition-colors cursor-pointer inline-flex items-center"
+                        title="View Full Payment & Bank Details"
+                        aria-label="View Full Payment Details"
+                      >
+                        <Eye size={13} />
+                      </button>
+                    )}
+                  </div>
                   <span className="text-slate-200 font-medium break-all">
                     {influencer.payment_method === 'ACCOUNT_DETAILS' || influencer.account_number
                       ? `Bank A/C (${influencer.bank_name || 'Details'})`
@@ -836,6 +873,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [afterDispatchRefreshTrigger, setAfterDispatchRefreshTrigger] = useState(0);
   const [targetUploadCode, setTargetUploadCode] = useState<string | undefined>();
   const [activeEditInfluencer, setActiveEditInfluencer] = useState<CampaignInfluencer | null>(null);
+  const [viewInfluencerTarget, setViewInfluencerTarget] = useState<CampaignInfluencer | null>(null);
   const [isUploadDropdownOpen, setIsUploadDropdownOpen] = useState(false);
   const uploadDropdownRef = React.useRef<HTMLDivElement>(null);
 
@@ -1905,6 +1943,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                   activeTab={activeTabForInf}
                   currentSection={filter}
                   onTabChange={(newTab) => handleCardTabChange(inf, newTab)}
+                  onView={(targetInf) => setViewInfluencerTarget(targetInf)}
                   onEdit={handleEditInfluencerClick} 
                   onPickList={(targetInf) => setSelectedPickListInfluencer(targetInf)}
                   onMoveStatus={(targetStatus) => setConfirmMoveModal({ isOpen: true, influencer: inf, targetStatus })}
@@ -2084,6 +2123,22 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {viewInfluencerTarget && (
+        <InfluencerQuickViewModal
+          influencer={viewInfluencerTarget}
+          campaign={campaign}
+          status={
+            isInfluencerDispatched(viewInfluencerTarget) 
+              ? 'Dispatched' 
+              : isInfluencerReDispatch(viewInfluencerTarget) 
+              ? 'Preparing' 
+              : 'Active'
+          }
+          dispatchRecord={(viewInfluencerTarget as any).dispatch || (viewInfluencerTarget as any).dispatches?.[0] || null}
+          onClose={() => setViewInfluencerTarget(null)}
+        />
       )}
     </div>
   );

@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MoreVertical, Edit, Trash2, Ban, ArrowLeftRight, CheckCircle2, Package } from 'lucide-react';
+import { MoreVertical, Edit, Trash2, Ban, ArrowLeftRight, CheckCircle2, Package, Eye } from 'lucide-react';
 import type { InfluencerStatusType } from '../../utils/marketingUtils';
 
 interface InfluencerActionMenuProps {
   currentSection?: InfluencerStatusType;
+  onView?: () => void;
   onEdit: () => void;
   onPickList?: () => void;
   onMoveStatus?: (targetStatus: InfluencerStatusType) => void;
@@ -12,6 +13,7 @@ interface InfluencerActionMenuProps {
 
 export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
   currentSection = 'active',
+  onView,
   onEdit,
   onPickList,
   onMoveStatus,
@@ -55,6 +57,18 @@ export const InfluencerActionMenu: React.FC<InfluencerActionMenuProps> = ({
         <div className="absolute right-0 mt-2 w-52 origin-top-right rounded-xl bg-slate-900 border border-slate-700 shadow-[0_4px_20px_rgba(0,0,0,0.5)] ring-1 ring-black ring-opacity-5 focus:outline-none z-50 overflow-hidden animate-fade-in">
           <div className="py-1">
             
+            {/* 0. View Full Details */}
+            {onView && (
+              <button
+                type="button"
+                onClick={() => handleAction(onView)}
+                className="w-full text-left px-4 py-2.5 flex items-center gap-3 text-xs font-medium text-slate-200 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer border-b border-slate-800"
+              >
+                <Eye size={15} className="text-purple-400" />
+                View Full Details
+              </button>
+            )}
+
             {/* 1. Edit */}
             <button
               type="button"
