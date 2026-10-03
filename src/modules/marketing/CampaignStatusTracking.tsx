@@ -5377,13 +5377,13 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           {/* 2. HORIZONTAL WORKFLOW STEP SUMMARY COUNT BOXES */}
           <div className="flex flex-col gap-2.5 shrink-0">
             {/* Top: Horizontal Workflow Step Summary Boxes in ONE Single Line */}
-            <div className="w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden scroll-smooth pb-1">
-              <div className="grid grid-flow-col auto-cols-[minmax(96px,1fr)] sm:auto-cols-[minmax(105px,1fr)] 2xl:auto-cols-auto 2xl:grid-cols-12 gap-1.5 sm:gap-2 w-full min-w-[1020px] 2xl:min-w-0">
+            <div className="w-full overflow-x-auto pb-1.5 scroll-smooth [scrollbar-width:thin] scrollbar-thumb-slate-800">
+              <div className="flex items-stretch gap-1.5 sm:gap-2 w-full min-w-max">
                 {/* 1. All Box */}
                 <button
                   type="button"
                   onClick={() => setSelectedSummaryStep(null)}
-                  className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 ${
+                  className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm flex-1 min-w-[80px] sm:min-w-[88px] ${
                     selectedSummaryStep === null
                       ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                       : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
@@ -5391,7 +5391,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   title="View All Influencers"
                 >
                   <div className="flex items-center justify-between gap-1 mb-1 w-full">
-                    <span className={`text-[10.5px] sm:text-[11px] font-semibold truncate ${
+                    <span className={`text-[10.5px] sm:text-[11px] font-semibold whitespace-nowrap ${
                       selectedSummaryStep === null ? 'text-purple-200' : 'text-slate-300 group-hover:text-white'
                     }`}>
                       All
@@ -5426,7 +5426,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       onClick={() => {
                         setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
                       }}
-                      className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 cursor-pointer ${
+                      className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm flex-1 min-w-[114px] sm:min-w-[122px] xl:min-w-[126px] cursor-pointer ${
                         isSelected
                           ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                           : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
@@ -5434,7 +5434,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       title={`Filter by ${step.label} (${count})`}
                     >
                       <div className="flex items-center justify-between gap-1 mb-1 w-full">
-                        <span className={`text-[10.5px] sm:text-[11px] font-semibold truncate ${
+                        <span className={`text-[10.5px] sm:text-[11px] font-semibold whitespace-nowrap ${
                           isSelected 
                             ? 'text-purple-200' 
                             : 'text-slate-300 group-hover:text-white'
