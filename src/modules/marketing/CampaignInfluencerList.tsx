@@ -16,6 +16,7 @@ import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookVie
 import { getCanonicalInfluencerPostDates } from '../../utils/influencerDateUtils';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
+import { ImportAutoDmModal } from '../../components/marketing/ImportAutoDmModal';
 import { InfluencerFilterDrawer, InfluencerFilterState, initialFilterState, FOLLOWER_RANGES, normalizeStateName, isAutoDmConnected } from '../../components/marketing/InfluencerFilterDrawer';
 import { areFilterValuesEqual } from '../../utils/filterUtils';
 import { CampaignInfluencerAnalytics } from './CampaignInfluencerAnalytics';
@@ -881,6 +882,7 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [tempFilterState, setTempFilterState] = useState<InfluencerFilterState>(initialFilterState);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isImportAutoDmModalOpen, setIsImportAutoDmModalOpen] = useState(false);
   const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
   const [isImportPricingModalOpen, setIsImportPricingModalOpen] = useState(false);
   const [isImportPostDateModalOpen, setIsImportPostDateModalOpen] = useState(false);
@@ -1561,6 +1563,17 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                 <button 
                   onClick={() => {
                     setIsUploadDropdownOpen(false);
+                    setIsImportAutoDmModalOpen(true);
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-purple-600 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Upload size={13} className="text-purple-400" />
+                  <span>Auto DM</span>
+                </button>
+
+                <button 
+                  onClick={() => {
+                    setIsUploadDropdownOpen(false);
                     setTargetUploadCode(undefined);
                     setIsUploadPlatformModalOpen(true);
                   }}
@@ -2026,6 +2039,19 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
             setFilterState(initialFilterState);
             setFilter('active');
             setSelectedIds(new Set());
+            await refresh();
+          }}
+        />
+      )}
+
+      {isImportAutoDmModalOpen && (
+        <ImportAutoDmModal
+          campaign={campaign}
+          existingInfluencers={influencers}
+          isOpen={isImportAutoDmModalOpen}
+          onClose={() => setIsImportAutoDmModalOpen(false)}
+          onSuccess={async () => {
+            setIsImportAutoDmModalOpen(false);
             await refresh();
           }}
         />
