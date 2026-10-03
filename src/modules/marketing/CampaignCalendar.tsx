@@ -519,7 +519,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
       if (attemptsForInf.length > 0) {
         attemptsForInf.forEach(att => {
-          const dDate = parseDateOnly(att.delivered_date || att.estimated_delivery_date || att.dispatch_date);
+          const dDate = parseDateOnly(att.delivered_date);
           if (dDate) {
             const isReplacement = att.shipment_type === 'RE_DISPATCH' || att.attempt_number > 1;
             list.push({
@@ -542,10 +542,11 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
           }
         });
       } else {
-        // Fallback to record-based delivery milestone
+        // Fallback to record-based delivery milestone ONLY when delivery is genuinely completed
         const isDeliveredCompleted = isDeliveryStepCompleted(r);
-        if (isDeliveredCompleted) {
-          const dDate = parseDateOnly(r.dispatch?.expected_delivery_date || r.dispatch?.dispatch_date);
+        const actualDelDate = r.dispatch?.actual_delivery_date || r.dispatch?.delivered_date;
+        if (isDeliveredCompleted && actualDelDate) {
+          const dDate = parseDateOnly(actualDelDate);
           if (dDate) {
             list.push({
               id: `${r.id}-delivered`,
@@ -602,9 +603,9 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
           let payColor = 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400';
           if (status === 'Paid' && pStatus.status === 'On Time') {
-            payColor = 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'; // Emerald Green
+            payColor = 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
           } else if (pStatus.status === 'Delayed') {
-            payColor = 'bg-red-950/20 border border-red-900/30 text-red-600'; // Dark Red
+            payColor = 'bg-red-950/20 border border-red-900/30 text-red-600';
           }
 
           list.push({
@@ -627,7 +628,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       }
     }
 
-    // 2. Add Post Date & Draft Date events for each ACTIVE influencer in this campaign
+    // 2. Add Post Date & Draft Date events for each ACTIVE influencer in this campaign (STRICTLY DATA-DRIVEN)
     const seenEventKeys = new Set<string>();
 
     for (const inf of activeInfluencers) {
@@ -638,69 +639,79 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       const avatarUrl = inf.profile_file_url || '';
       const infId = String(inf.id);
 
-      // Single source of truth: canonical dates resolved identically to the Post Date card
-      const canonicalDates = getCanonicalInfluencerPostDates(inf, 2026);
-
       // Find matching status tracking record if available
       const matchingRecord = activeTrackingRecords.find(r => 
         String(r.influencer_id) === infId ||
         (r.dispatch?.influencer_code && r.dispatch.influencer_code.toLowerCase() === influencerUsername.toLowerCase())
-      ) || createFallbackRecord(inf, campaign);
+      );
+
+      if (!matchingRecord) continue;
 
       for (let vNum = 1; vNum <= 6; vNum++) {
-        const cd = canonicalDates.find(c => c.video_number === vNum);
         let manualDraftDate = '';
         let manualPostDate = '';
-        let effectiveReDraftDate = '';
+        let draftApprovalStatus = 'Pending Approval';
+        let postPlatforms = '';
+        let isPostConfirmed = false;
 
-        if (matchingRecord) {
-          try {
-            const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
-            const dStep = vWorkflow.steps?.draft;
-            const pdStep = vWorkflow.steps?.post_date;
+        try {
+          const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
+          const dStep = vWorkflow.steps?.draft;
+          const pdStep = vWorkflow.steps?.post_date;
 
-            // Manual Draft Submit Date from draft step attempts or state
-            const rawDraftSubmit = dStep?.data?.draft_submit_date || 
-              (Array.isArray(dStep?.data?.attempts) && dStep.data.attempts[dStep.data.attempts.length - 1]?.draft_submit_date) || 
-              '';
-            if (rawDraftSubmit) {
-              manualDraftDate = parseDateOnly(rawDraftSubmit, 2026);
-            }
+          // Manual Draft Submit Date from draft step attempts or state
+          const rawDraftSubmit = dStep?.data?.draft_submission_date || 
+            dStep?.data?.draft_submit_date || 
+            (Array.isArray(dStep?.data?.attempts) && dStep.data.attempts[dStep.data.attempts.length - 1]?.draft_submission_date) || 
+            (Array.isArray(dStep?.data?.attempts) && dStep.data.attempts[dStep.data.attempts.length - 1]?.draft_submit_date) || 
+            '';
+          if (rawDraftSubmit) {
+            manualDraftDate = parseDateOnly(rawDraftSubmit, 2026);
+          }
 
-            // Manual Post Date from post_date step
-            const rawPostDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date || '';
-            if (rawPostDate) {
-              manualPostDate = parseDateOnly(rawPostDate, 2026);
-            }
+          const activeAttempt = Array.isArray(dStep?.data?.attempts) && dStep.data.attempts.length > 0
+            ? dStep.data.attempts[dStep.data.attempts.length - 1]
+            : null;
+          draftApprovalStatus = (activeAttempt?.approval_status || dStep?.data?.approval_status || '').trim();
 
-            // Re-draft submit date
-            const rawReDraft = dStep?.data?.re_draft_submit_date || dStep?.data?.latest_re_draft_submit_date || '';
-            if (rawReDraft) {
-              effectiveReDraftDate = parseDateOnly(rawReDraft, 2026);
-            }
-          } catch (e) {}
-        }
+          // Manual Post Date from post_date step (ONLY if confirmed!)
+          isPostConfirmed = Boolean(
+            pdStep?.completed === true || 
+            pdStep?.status === 'COMPLETED' || 
+            pdStep?.data?.post_date_confirmed === true
+          );
+          const rawPostDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date || '';
+          if (rawPostDate && isPostConfirmed) {
+            manualPostDate = parseDateOnly(rawPostDate, 2026);
+          }
 
-        // Fallbacks from canonical dates if not found in workflow data
-        if (!manualDraftDate && cd?.draft_date) {
-          manualDraftDate = parseDateOnly(cd.draft_date, 2026);
-        }
-        if (!manualPostDate && cd?.post_date) {
-          manualPostDate = parseDateOnly(cd.post_date, 2026);
-        }
+          // Platforms
+          postPlatforms = pdStep?.data?.platform || 
+            (Array.isArray(pdStep?.data?.selected_platforms) ? pdStep.data.selected_platforms.join(' + ') : '') || 
+            '';
+        } catch (e) {}
 
-        // Push NORMAL Draft milestone ONLY if manually entered date exists
+        // Push Draft milestone ONLY if real saved draft submission date exists
         if (manualDraftDate) {
           const key = `${infId}_v${vNum}_DraftSubmit`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
+            const isApproved = draftApprovalStatus.toLowerCase() === 'approved';
+            const isNotApproved = draftApprovalStatus.toLowerCase() === 'not approved';
+            const statusDot = isApproved ? '🟢' : isNotApproved ? '🔴' : '🟡';
+            const colorClass = isApproved
+              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+              : isNotApproved
+                ? 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+                : 'bg-amber-500/10 border border-amber-500/30 text-amber-400';
+
             list.push({
-              id: `inf-${inf.id}-v${vNum}-draft`,
+              id: `draft-${infId}-v${vNum}`,
               recordId: infId,
               type: 'Draft',
-              label: `Video ${vNum} Draft Submit`,
+              label: `${statusDot} Draft • ${influencerName || influencerCode} • Video ${vNum}`,
               icon: '🎬',
-              colorClass: 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
+              colorClass,
               dateStr: manualDraftDate,
               influencerName,
               influencerUsername,
@@ -715,16 +726,16 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
           }
         }
 
-        // Push NORMAL Post Date milestone ONLY if manually entered date exists
-        if (manualPostDate) {
+        // Push Post Date milestone ONLY if confirmed and real date exists
+        if (manualPostDate && isPostConfirmed) {
           const key = `${infId}_v${vNum}_PostDate`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
             list.push({
-              id: `inf-${inf.id}-v${vNum}-postdate`,
+              id: `post-${infId}-v${vNum}`,
               recordId: infId,
               type: 'Final Post',
-              label: `Video ${vNum} Post Date`,
+              label: `🔵 Post • ${influencerName || influencerCode} • Video ${vNum}${postPlatforms ? ` • ${postPlatforms}` : ''}`,
               icon: '🚀',
               colorClass: 'bg-blue-500/10 border border-blue-500/30 text-blue-400',
               dateStr: manualPostDate,
@@ -737,32 +748,6 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               videoNumber: vNum,
               postDateStr: manualPostDate,
               draftDateStr: manualDraftDate
-            });
-          }
-        }
-
-        // Push legitimate Re-Draft milestone if present and different from normal draft
-        if (effectiveReDraftDate && effectiveReDraftDate !== manualDraftDate) {
-          const reDraftKey = `${infId}_v${vNum}_ReDraft`;
-          if (!seenEventKeys.has(reDraftKey)) {
-            seenEventKeys.add(reDraftKey);
-            list.push({
-              id: `inf-${inf.id}-v${vNum}-redraft`,
-              recordId: infId,
-              type: 'Draft',
-              label: `Video ${vNum} Re-Draft`,
-              icon: '🔄',
-              colorClass: 'bg-rose-500/10 border border-rose-500/30 text-rose-400',
-              dateStr: effectiveReDraftDate,
-              influencerName,
-              influencerUsername,
-              influencerCode,
-              campaignName,
-              avatarUrl,
-              record: matchingRecord,
-              videoNumber: vNum,
-              postDateStr: manualPostDate,
-              draftDateStr: effectiveReDraftDate
             });
           }
         }

@@ -919,12 +919,16 @@ export interface DraftAttempt {
   approval_confirmed?: boolean;
   timing_status?: string;
   corrections?: string;
+  draft_submission_date?: string;
   draft_submit_date?: string;
   re_draft_submit_date?: string;
   expected_submit_date?: string;
   final_product_link?: string;
   final_description?: string;
   uploaded_at: string;
+  submitted_at?: string;
+  approved_at?: string;
+  rejected_at?: string;
   reviewed_at?: string;
   reviewed_by?: string;
 }
@@ -986,13 +990,17 @@ export const syncInfluencerPostDate = async ({
   campaignId,
   videoNumber,
   newPostDate,
-  newDraftDate
+  newDraftDate,
+  platform,
+  selectedPlatforms
 }: {
   influencerId: string | number;
   campaignId?: string;
   videoNumber: number;
   newPostDate: string;
   newDraftDate?: string;
+  platform?: string;
+  selectedPlatforms?: string[];
 }): Promise<{ success: boolean; error?: string }> => {
   const numericInfId = parseInt(String(influencerId), 10);
   if (isNaN(numericInfId)) {
@@ -1020,6 +1028,12 @@ export const syncInfluencerPostDate = async ({
       };
       if (newDraftDate) {
         updateData.draft_date = newDraftDate;
+      }
+      if (platform) {
+        updateData.platform = platform;
+      }
+      if (selectedPlatforms) {
+        updateData.selected_platforms = selectedPlatforms;
       }
       const { error: updatePdErr } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerPostDates)
@@ -1049,7 +1063,9 @@ export const syncInfluencerPostDate = async ({
           campaign_id: campaignId || null,
           video_number: videoNumber,
           post_date: newPostDate,
-          draft_date: newDraftDate || null
+          draft_date: newDraftDate || null,
+          platform: platform || null,
+          selected_platforms: selectedPlatforms || null
         }]);
 
       if (insertPdErr) {
@@ -1096,11 +1112,19 @@ export const syncInfluencerPostDate = async ({
         if (newDraftDate) {
           pdItem.draft_date = newDraftDate;
         }
+        if (platform) {
+          pdItem.platform = platform;
+        }
+        if (selectedPlatforms) {
+          pdItem.selected_platforms = selectedPlatforms;
+        }
       } else {
         viewsJson.post_dates.push({
           video_number: videoNumber,
           post_date: newPostDate,
-          draft_date: newDraftDate || null
+          draft_date: newDraftDate || null,
+          platform: platform || null,
+          selected_platforms: selectedPlatforms || null
         });
       }
 
@@ -6641,6 +6665,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               videoNumber={videoNumber}
               record={record} 
               existingData={activeStepState.data}
+              postDateData={videoData.steps?.post_date?.data}
               onSave={(formData: any, completed?: boolean) => onSaveStep('after_post', formData, completed !== undefined ? completed : true)}
             />
           )}
@@ -9701,10 +9726,20 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [isReDraftMode, setIsReDraftMode] = useState(false);
   const [reDraftFile, setReDraftFile] = useState<File | null>(null);
   const [reDraftUrl, setReDraftUrl] = useState('');
+  const [reDraftSubmissionDate, setReDraftSubmissionDate] = useState<string>('');
 
   // Initial Draft Upload State
   const [initialFile, setInitialFile] = useState<File | null>(null);
   const [initialUrl, setInitialUrl] = useState(activeAttempt?.video_url || existingData.vid || '');
+  const [initialDraftDate, setInitialDraftDate] = useState<string>(
+    activeAttempt?.draft_submission_date || activeAttempt?.draft_submit_date || existingData.draft_submission_date || existingData.draft_submit_date || ''
+  );
+
+  // Refs for visible date pickers
+  const initialDateInputRef = useRef<HTMLInputElement>(null);
+  const reDraftDateInputRef = useRef<HTMLInputElement>(null);
+  const draftSubmitDateInputRef = useRef<HTMLInputElement>(null);
+  const reDraftDueDateInputRef = useRef<HTMLInputElement>(null);
 
   const [isUploading, setIsUploading] = useState(false);
   const [attemptToDelete, setAttemptToDelete] = useState<DraftAttempt | null>(null);
@@ -9768,6 +9803,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
       toast.error('Please upload a draft video first.');
       return;
     }
+    if (!initialDraftDate || !initialDraftDate.trim()) {
+      toast.error('Please enter/select the Draft Submission Date.');
+      return;
+    }
     setIsUploading(true);
     let finalUrl = initialUrl;
 
@@ -9800,22 +9839,42 @@ const DraftForm: React.FC<DraftFormProps> = ({
     const firstAttempt: DraftAttempt = {
       attempt_number: 1,
       video_url: finalUrl,
+      draft_submission_date: initialDraftDate.trim(),
+      draft_submit_date: initialDraftDate.trim(),
+      submitted_at: new Date().toISOString(),
       approval_status: 'Pending Approval',
       timing_status: calculatedTiming,
       uploaded_at: new Date().toISOString()
     };
 
+    // Sync draft date to influencer_post_dates_rows
+    try {
+      await syncInfluencerPostDate({
+        influencerId: record.influencer_id,
+        campaignId: record.campaign_id,
+        videoNumber,
+        newPostDate: '',
+        newDraftDate: initialDraftDate.trim()
+      });
+    } catch (sErr) {
+      console.warn('Sync draft date to post dates error:', sErr);
+    }
+
     await onSave({
       attempts: [firstAttempt],
       active_attempt_number: 1,
       approval_status: 'Pending Approval',
+      draft_submission_date: initialDraftDate.trim(),
+      draft_submit_date: initialDraftDate.trim(),
       vid: finalUrl,
       timing: calculatedTiming
     }, false);
 
     setInitialFile(null);
+    setDraftSubmitDate(initialDraftDate.trim());
+    setAppStat('Pending Approval');
     setIsUploading(false);
-    toast.success('Draft uploaded successfully! Please review and select approval status.');
+    toast.success('Draft submission saved! Status: Pending Approval 🟡');
   };
 
   // Submit Re-Draft (Attempt N + 1) — Creates new attempt, preserving all previous attempts permanently
@@ -9823,6 +9882,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
     if (isUploading) return;
     if (!reDraftFile && !reDraftUrl) {
       toast.error('Please select a new re-draft video file.');
+      return;
+    }
+    if (!reDraftSubmissionDate || !reDraftSubmissionDate.trim()) {
+      toast.error('Please enter/select the Draft Submission Date for this re-draft.');
       return;
     }
     setIsUploading(true);
@@ -9858,6 +9921,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
     const newAttempt: DraftAttempt = {
       attempt_number: nextAttemptNumber,
       video_url: finalUrl,
+      draft_submission_date: reDraftSubmissionDate.trim(),
+      draft_submit_date: reDraftSubmissionDate.trim(),
+      submitted_at: new Date().toISOString(),
       approval_status: 'Pending Approval',
       timing_status: calculatedTiming,
       expected_submit_date: expectedSubmit,
@@ -9867,10 +9933,24 @@ const DraftForm: React.FC<DraftFormProps> = ({
     // Permanently append new attempt
     const updatedAttempts = [...attempts, newAttempt];
 
+    try {
+      await syncInfluencerPostDate({
+        influencerId: record.influencer_id,
+        campaignId: record.campaign_id,
+        videoNumber,
+        newPostDate: '',
+        newDraftDate: reDraftSubmissionDate.trim()
+      });
+    } catch (sErr) {
+      console.warn('Sync re-draft date to post dates error:', sErr);
+    }
+
     await onSave({
       attempts: updatedAttempts,
       active_attempt_number: nextAttemptNumber,
       approval_status: 'Pending Approval',
+      draft_submission_date: reDraftSubmissionDate.trim(),
+      draft_submit_date: reDraftSubmissionDate.trim(),
       vid: finalUrl,
       timing: calculatedTiming,
       corr: ''
@@ -9880,9 +9960,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
     setIsReDraftMode(false);
     setReDraftFile(null);
     setReDraftUrl('');
-    setAppStat('');
+    setReDraftSubmissionDate('');
+    setDraftSubmitDate(reDraftSubmissionDate.trim());
+    setAppStat('Pending Approval');
     setCorr('');
-    toast.success(`Re-Draft Attempt ${nextAttemptNumber} submitted for review!`);
+    toast.success(`Re-Draft Attempt ${nextAttemptNumber} submitted! Status: Pending Approval 🟡`);
   };
 
   // Delete Draft Attempt
@@ -9920,6 +10002,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
           corr: '',
           finalL: '',
           finalD: '',
+          draft_submission_date: '',
+          draft_submit_date: '',
           re_draft_submit_date: '',
           latest_re_draft_submit_date: '',
           is_deleted: true
@@ -9928,6 +10012,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
         setInitialFile(null);
         setInitialUrl('');
+        setInitialDraftDate('');
         setAppStat('');
         setCorr('');
         setFinalL('');
@@ -9951,6 +10036,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
           corr: prevAttempt.corrections || '',
           finalL: prevAttempt.final_product_link || '',
           finalD: prevAttempt.final_description || '',
+          draft_submission_date: prevAttempt.draft_submission_date || prevAttempt.draft_submit_date || '',
+          draft_submit_date: prevAttempt.draft_submit_date || prevAttempt.draft_submission_date || '',
           re_draft_submit_date: prevAttempt.re_draft_submit_date || '',
           latest_re_draft_submit_date: prevAttempt.re_draft_submit_date || ''
         };
@@ -9961,6 +10048,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         setFinalL(prevAttempt.final_product_link || '');
         setFinalD(prevAttempt.final_description || '');
         setCalculatedTiming(prevAttempt.timing_status || 'On Time');
+        setDraftSubmitDate(prevAttempt.draft_submission_date || prevAttempt.draft_submit_date || '');
         setReDraftSubmitDate(prevAttempt.re_draft_submit_date || '');
         setAttemptToDelete(null);
         setPreviewModalAttempt(null);
@@ -10022,6 +10110,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
           approval_status: appStat as any,
           approval_confirmed: isApproved,
           corrections: appStat === 'Not Approved' ? corr : (appStat === 'Approved' ? '' : att.corrections),
+          draft_submission_date: draftSubmitDate || att.draft_submission_date || att.draft_submit_date,
           draft_submit_date: draftSubmitDate || att.draft_submit_date,
           re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : undefined,
           final_product_link: isApproved ? finalL : att.final_product_link,
@@ -10040,6 +10129,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
       approval_status: appStat,
       vid: activeAttempt?.video_url || initialUrl,
       timing: calculatedTiming,
+      draft_submission_date: draftSubmitDate,
       draft_submit_date: draftSubmitDate,
       corr: appStat === 'Not Approved' ? corr : '',
       re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : '',
@@ -10054,17 +10144,33 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
     // Save to Supabase (completed is true ONLY if Approved with valid timing!)
     await onSave(payload, isApproved);
+
+    // Also sync draft date to influencer_post_dates_rows
+    if (draftSubmitDate) {
+      try {
+        await syncInfluencerPostDate({
+          influencerId: record.influencer_id,
+          campaignId: record.campaign_id,
+          videoNumber,
+          newPostDate: '',
+          newDraftDate: draftSubmitDate.trim()
+        });
+      } catch (sErr) {
+        console.warn('Sync draft date to post dates error:', sErr);
+      }
+    }
+
     setIsUploading(false);
 
     if (isApproved) {
-      toast.success('Draft approved! Video workflow moved to Post Date.');
+      toast.success('Draft approved! Video workflow moved to Post Date 🟢');
       if (onNavigateToPostDate) {
         onNavigateToPostDate();
       }
     } else if (appStat === 'Pending Approval') {
-      toast.success('Draft saved as Pending Approval.');
+      toast.success('Draft saved as Pending Approval 🟡');
     } else {
-      toast.error('Draft marked as Not Approved. Re-Draft required.');
+      toast.error('Draft marked as Not Approved. Re-Draft required 🔴');
     }
   };
 
@@ -10074,21 +10180,77 @@ const DraftForm: React.FC<DraftFormProps> = ({
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
       
+      {/* 0. DRAFT STATUS BANNER (When an attempt exists) */}
+      {activeAttempt && !isReDraftMode && (
+        <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in ${
+          activeAttempt.approval_status === 'Approved'
+            ? 'bg-emerald-950/30 border-emerald-700/60 text-emerald-300'
+            : activeAttempt.approval_status === 'Not Approved'
+              ? 'bg-rose-950/30 border-rose-700/60 text-rose-300'
+              : 'bg-amber-950/30 border-amber-700/60 text-amber-300'
+        }`}>
+          <div className="flex items-center gap-3">
+            <span className={`w-3 h-3 rounded-full shrink-0 ${
+              activeAttempt.approval_status === 'Approved'
+                ? 'bg-emerald-400'
+                : activeAttempt.approval_status === 'Not Approved'
+                  ? 'bg-rose-400'
+                  : 'bg-amber-400 animate-pulse'
+            }`} />
+            <div>
+              <h4 className="text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+                <span>
+                  {activeAttempt.approval_status === 'Approved'
+                    ? '🟢 Draft Approved'
+                    : activeAttempt.approval_status === 'Not Approved'
+                      ? '🔴 Re-Draft Submission'
+                      : '🟡 Draft Submission — Pending Approval'}
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-black/40 border border-current/20">
+                  Attempt {activeAttempt.attempt_number}
+                </span>
+              </h4>
+              <p className="text-xs opacity-80 mt-0.5">
+                {activeAttempt.approval_status === 'Approved'
+                  ? 'Draft has been verified and approved. Workflow can now proceed to Post Date.'
+                  : activeAttempt.approval_status === 'Not Approved'
+                    ? 'This draft was not approved. Review correction instructions and submit a re-draft.'
+                    : 'Draft video and submission date saved. Awaiting review and approval confirmation.'}
+              </p>
+            </div>
+          </div>
+          {(activeAttempt.draft_submission_date || activeAttempt.draft_submit_date) && (
+            <div className="flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 pt-2 sm:pt-0 border-current/20">
+              <span className="text-[10px] uppercase font-bold opacity-75">Submission Date</span>
+              <span className="text-xs font-mono font-bold">
+                {formatDisplayDateLocal(activeAttempt.draft_submission_date || activeAttempt.draft_submit_date || '')}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 1. RE-DRAFT UPLOAD PANEL (When user clicked 'Upload Re-Draft') */}
       {isReDraftMode && (
         <div className="p-5 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-4 animate-fade-in shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
-              <h5 className="text-sm font-bold text-white">
+              <h5 className="text-sm font-bold text-white flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
                 Submit Re-Draft (Attempt {(activeAttempt?.attempt_number || 1) + 1})
               </h5>
               <p className="text-xs text-slate-400">
-                Upload revised video addressing the correction feedback. Previous drafts will be permanently preserved in history.
+                Upload revised video and select a new Draft Submission Date. Previous drafts are permanently preserved in history.
               </p>
             </div>
             <button
               type="button"
-              onClick={() => { setIsReDraftMode(false); setReDraftFile(null); setReDraftUrl(''); }}
+              onClick={() => { 
+                setIsReDraftMode(false); 
+                setReDraftFile(null); 
+                setReDraftUrl(''); 
+                setReDraftSubmissionDate('');
+              }}
               className="text-slate-400 hover:text-white text-xs font-semibold px-2.5 py-1 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors"
             >
               Cancel
@@ -10125,12 +10287,61 @@ const DraftForm: React.FC<DraftFormProps> = ({
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+          {/* Re-Draft Submission Date Input */}
+          {(reDraftFile || reDraftUrl) && (
+            <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-2 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                  DRAFT SUBMISSION DATE *
+                </label>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                  Required
+                </span>
+              </div>
+              <div className="relative">
+                <input 
+                  ref={reDraftDateInputRef}
+                  type="date"
+                  value={reDraftSubmissionDate}
+                  onChange={e => setReDraftSubmissionDate(e.target.value)}
+                  style={{ colorScheme: 'dark' }}
+                  className="w-full bg-[#0b1329] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => reDraftDateInputRef.current?.showPicker?.()}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                  title="Open calendar"
+                >
+                  <Calendar size={18} />
+                </button>
+              </div>
+              <span className="text-[11px] text-slate-400 block">
+                Enter the date when this revised re-draft video was submitted.
+              </span>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
             <button
               type="button"
-              disabled={isUploading || (!reDraftFile && !reDraftUrl)}
+              disabled={isUploading}
+              onClick={() => {
+                setIsReDraftMode(false);
+                setReDraftFile(null);
+                setReDraftUrl('');
+                setReDraftSubmissionDate('');
+              }}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isUploading || (!reDraftFile && !reDraftUrl) || !reDraftSubmissionDate.trim()}
               onClick={handleSubmitReDraft}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 shadow-md flex items-center gap-2 cursor-pointer"
+              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-2 cursor-pointer"
             >
               {isUploading ? (
                 <>
@@ -10138,7 +10349,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   <span>Uploading...</span>
                 </>
               ) : (
-                <span>Submit Re-Draft Attempt {(activeAttempt?.attempt_number || 1) + 1}</span>
+                <>
+                  <Check size={14} strokeWidth={2.5} />
+                  <span>Save Draft Submission</span>
+                </>
               )}
             </button>
           </div>
@@ -10169,7 +10383,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                       <Video size={24} className="text-blue-400" />
                     )}
                   </div>
-                  <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialFile?.name}</span>
+                  <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialFile?.name || 'Selected Video'}</span>
                 </div>
               ) : (
                 <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
@@ -10177,34 +10391,73 @@ const DraftForm: React.FC<DraftFormProps> = ({
             </div>
           </div>
 
-          {initialFile && (
-            <div className="flex justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                disabled={isUploading}
-                onClick={() => {
-                  setInitialFile(null);
-                  setInitialUrl('');
-                }}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isUploading}
-                onClick={handleSubmitInitialDraft}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {isUploading ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Uploading...</span>
-                  </>
-                ) : (
-                  <span>Save Uploaded Draft (Attempt 1)</span>
-                )}
-              </button>
+          {/* DRAFT SUBMISSION DATE REQUIRED (Shown when video is selected) */}
+          {(initialFile || initialUrl) && (
+            <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-3 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                  DRAFT SUBMISSION DATE *
+                </label>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                  Required
+                </span>
+              </div>
+
+              <div className="relative">
+                <input 
+                  ref={initialDateInputRef}
+                  type="date"
+                  value={initialDraftDate}
+                  onChange={e => setInitialDraftDate(e.target.value)}
+                  style={{ colorScheme: 'dark' }}
+                  className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => initialDateInputRef.current?.showPicker?.()}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                  title="Open calendar"
+                >
+                  <Calendar size={18} />
+                </button>
+              </div>
+              <span className="text-[11px] text-slate-400 block">
+                Enter the date when this draft video was submitted. This date will be saved to the database and displayed on the Campaign Calendar.
+              </span>
+
+              <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  disabled={isUploading}
+                  onClick={() => {
+                    setInitialFile(null);
+                    setInitialUrl('');
+                    setInitialDraftDate('');
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isUploading || (!initialFile && !initialUrl) || !initialDraftDate.trim()}
+                  onClick={handleSubmitInitialDraft}
+                  className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isUploading ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} strokeWidth={2.5} />
+                      <span>Save Draft Submission</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -10376,12 +10629,24 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 Manual Date
               </span>
             </div>
-            <input 
-              type="date"
-              value={draftSubmitDate}
-              onChange={e => setDraftSubmitDate(e.target.value)}
-              className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors"
-            />
+            <div className="relative">
+              <input 
+                ref={draftSubmitDateInputRef}
+                type="date"
+                value={draftSubmitDate}
+                onChange={e => setDraftSubmitDate(e.target.value)}
+                style={{ colorScheme: 'dark' }}
+                className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+              />
+              <button
+                type="button"
+                onClick={() => draftSubmitDateInputRef.current?.showPicker?.()}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                title="Open calendar"
+              >
+                <Calendar size={18} />
+              </button>
+            </div>
             <span className="text-[11px] text-slate-400 block">
               Enter the date when this draft video was submitted. This date will be saved to the database and displayed on the Campaign Calendar.
             </span>
@@ -10493,13 +10758,25 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     Required
                   </span>
                 </div>
-                <input 
-                  type="date"
-                  value={reDraftSubmitDate}
-                  onChange={e => setReDraftSubmitDate(e.target.value)}
-                  className="w-full bg-[#070c18] border border-rose-700/70 focus:border-rose-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
-                  required
-                />
+                <div className="relative">
+                  <input 
+                    ref={reDraftDueDateInputRef}
+                    type="date"
+                    value={reDraftSubmitDate}
+                    onChange={e => setReDraftSubmitDate(e.target.value)}
+                    style={{ colorScheme: 'dark' }}
+                    className="w-full bg-[#070c18] border border-rose-700/70 focus:border-rose-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors" 
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => reDraftDueDateInputRef.current?.showPicker?.()}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                    title="Open calendar"
+                  >
+                    <Calendar size={18} />
+                  </button>
+                </div>
                 <span className="text-[11px] text-slate-400 block">
                   The expected submission date for Draft Attempt {(activeAttempt?.attempt_number || 1) + 1}. This date will automatically populate the Re-Upload Timeline.
                 </span>
@@ -10733,7 +11010,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
   );
 };
 
-// --- STEP: Post Date (For Any Video 1 to 6 - Manual Post Date Only) ---
+// --- STEP: Post Date (For Any Video 1 to 6 - Manual Post Date & Multi-Platform Selection) ---
 const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvanceStep }: any) => {
   // Strict match for Video N from record.postDates or existingData
   const scheduleEntry = (record.postDates || []).find(
@@ -10750,6 +11027,21 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   );
   const [isSavingDate, setIsSavingDate] = useState<boolean>(false);
 
+  // Multi-Platform selection (Instagram, YouTube, Facebook - supports any combination)
+  const availablePlatforms = ['Instagram', 'YouTube', 'Facebook'];
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(() => {
+    if (Array.isArray(existingData.selected_platforms) && existingData.selected_platforms.length > 0) {
+      return existingData.selected_platforms;
+    }
+    if (existingData.platform) {
+      const parts = existingData.platform.split(' + ').map((s: string) => s.trim()).filter(Boolean);
+      if (parts.length > 0) return parts;
+    }
+    return ['Instagram'];
+  });
+
+  const postDateInputRef = useRef<HTMLInputElement>(null);
+
   // History list
   const historyList: PostDateHistoryEntry[] = Array.isArray(existingData.history) ? existingData.history : [];
 
@@ -10761,7 +11053,23 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     if (!eff || !isStepConfirmed) {
       setIsEditingDate(true);
     }
-  }, [videoNumber, record.id, existingData.scheduled_post_date, existingData.post_date, scheduleEntry?.post_date, isStepConfirmed]);
+    if (Array.isArray(existingData.selected_platforms) && existingData.selected_platforms.length > 0) {
+      setSelectedPlatforms(existingData.selected_platforms);
+    } else if (existingData.platform) {
+      const parts = existingData.platform.split(' + ').map((s: string) => s.trim()).filter(Boolean);
+      if (parts.length > 0) setSelectedPlatforms(parts);
+    }
+  }, [videoNumber, record.id, existingData.scheduled_post_date, existingData.post_date, scheduleEntry?.post_date, isStepConfirmed, existingData.platform, existingData.selected_platforms]);
+
+  const handleTogglePlatform = (platform: string) => {
+    setSelectedPlatforms(prev => {
+      if (prev.includes(platform)) {
+        return prev.filter(p => p !== platform);
+      } else {
+        return [...prev, platform];
+      }
+    });
+  };
 
   const handleStartEditDate = () => {
     setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
@@ -10776,6 +11084,11 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   };
 
   const handleSavePostDate = async () => {
+    if (selectedPlatforms.length === 0) {
+      toast.error('Please select at least one platform (Instagram, YouTube, or Facebook).');
+      return;
+    }
+
     if (!tempPostDate || !tempPostDate.trim()) {
       toast.error('Please pick a valid Post Date.');
       return;
@@ -10784,11 +11097,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     const normalizedNewYmd = parseToYMD(tempPostDate, 2026) || tempPostDate;
     const previousDateFormatted = formatDisplayDateLocal(effectivePostDate);
     const newDateFormatted = formatDisplayDateLocal(normalizedNewYmd);
-
-    if (previousDateFormatted === newDateFormatted && effectivePostDate && isStepConfirmed) {
-      setIsEditingDate(false);
-      return;
-    }
+    const platformString = selectedPlatforms.join(' + ');
 
     setIsSavingDate(true);
     try {
@@ -10799,7 +11108,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         new_date: newDateFormatted,
         changed_by: userName,
         changed_at: new Date().toISOString(),
-        reason: effectivePostDate ? 'Post Date edited in Status Tracking' : 'Manual Post Date assigned'
+        reason: effectivePostDate ? `Post Date edited (${platformString})` : `Manual Post Date assigned (${platformString})`
       };
 
       const updatedHistory = [changeEntry, ...historyList];
@@ -10809,7 +11118,9 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         influencerId: record.influencer_id,
         campaignId: record.campaign_id,
         videoNumber,
-        newPostDate: normalizedNewYmd
+        newPostDate: normalizedNewYmd,
+        platform: platformString,
+        selectedPlatforms
       });
 
       if (!syncRes.success) {
@@ -10818,13 +11129,16 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         return;
       }
 
-      // 2. Save to Status Tracking workflow step (COMPLETED = true when post date is set!)
+      // 2. Save to Status Tracking workflow step (COMPLETED = true when post date and platform are set!)
       const saveRes = await onSave({
         ...existingData,
+        selected_platforms: selectedPlatforms,
+        platform: platformString,
         scheduled_post_date: normalizedNewYmd,
         post_date: normalizedNewYmd,
         history: updatedHistory,
         post_date_confirmed: true,
+        completed: true,
         is_modified: true,
         suppressDefaultToast: true
       }, true);
@@ -10839,13 +11153,13 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       logActivity({
         department: 'Marketing',
         action: 'Post Date Saved',
-        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date saved as ${newDateFormatted}`,
-        metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date saved as ${newDateFormatted} (${platformString})`,
+        metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted, platform: platformString, selected_platforms: selectedPlatforms }
       });
 
       setEffectivePostDate(normalizedNewYmd);
       setIsEditingDate(false);
-      toast.success(`Video ${videoNumber} Post Date saved successfully: ${newDateFormatted}!`);
+      toast.success(`Video ${videoNumber} Post Date saved successfully: ${newDateFormatted} (${platformString})!`);
 
       if (onAdvanceStep) {
         onAdvanceStep();
@@ -10858,24 +11172,36 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     }
   };
 
+  const isFormValid = selectedPlatforms.length > 0 && Boolean(tempPostDate && tempPostDate.trim());
+
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
       {/* 1. MANUAL POST DATE CARD */}
       <div>
         <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
-          POST DATE (Video {videoNumber})
+          POST DATE & PLATFORM (Video {videoNumber})
         </label>
 
         {!isEditingDate && effectivePostDate && isStepConfirmed ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b1329] border border-slate-800 rounded-xl gap-3">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-base sm:text-lg font-bold font-mono tracking-wide text-white">
-                {formatDisplayDateLocal(effectivePostDate)}
-              </span>
-              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2.5 py-0.5 rounded-md flex items-center gap-1">
-                <Check size={12} strokeWidth={2.5} />
-                Post Date Set
-              </span>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-base sm:text-lg font-bold font-mono tracking-wide text-white">
+                  {formatDisplayDateLocal(effectivePostDate)}
+                </span>
+                <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2.5 py-0.5 rounded-md flex items-center gap-1">
+                  <Check size={12} strokeWidth={2.5} />
+                  Post Date Set
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Platform:</span>
+                {selectedPlatforms.map(p => (
+                  <span key={p} className="text-[11px] font-bold px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60">
+                    {p}
+                  </span>
+                ))}
+              </div>
             </div>
 
             <button
@@ -10884,11 +11210,11 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
             >
               <Edit3 size={13} />
-              Change Date
+              Change Date & Platform
             </button>
           </div>
         ) : (
-          <div className="p-4 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-3 animate-fade-in">
+          <div className="p-4 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-4 animate-fade-in">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
                 {effectivePostDate ? `Change Post Date (Video ${videoNumber})` : `Set Post Date (Video ${videoNumber}) *`}
@@ -10897,46 +11223,106 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
                 Manual Selection
               </span>
             </div>
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              <input 
-                type="date" 
-                value={tempPostDate} 
-                onChange={e => setTempPostDate(e.target.value)} 
-                className="flex-1 bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none" 
-              />
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSavePostDate}
-                  disabled={isSavingDate}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-                >
-                  {isSavingDate ? (
-                    <>
-                      <Loader2 size={13} className="animate-spin" />
-                      <span>Saving...</span>
-                    </>
+
+            {/* Platform Selector (Required before saving) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  SELECT PLATFORM *
+                </label>
+                <span className="text-[11px] font-semibold">
+                  {selectedPlatforms.length > 0 ? (
+                    <span className="text-blue-400 font-bold">Selected: {selectedPlatforms.join(' + ')}</span>
                   ) : (
-                    <>
-                      <Check size={14} strokeWidth={2.5} />
-                      <span>Save Post Date</span>
-                    </>
+                    <span className="text-rose-400 font-bold">At least 1 platform required</span>
                   )}
-                </button>
-                {effectivePostDate && (
-                  <button
-                    type="button"
-                    onClick={handleCancelEditDate}
-                    disabled={isSavingDate}
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                )}
+                </span>
+              </div>
+              <div className="flex gap-2.5 flex-wrap">
+                {availablePlatforms.map(p => {
+                  const isSelected = selectedPlatforms.includes(p);
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => handleTogglePlatform(p)}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-500/20'
+                          : 'bg-[#070c18] border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'
+                      }`}
+                    >
+                      <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-[10px] ${
+                        isSelected ? 'bg-white border-white text-blue-600 font-black' : 'border-slate-500'
+                      }`}>
+                        {isSelected && '✓'}
+                      </span>
+                      <span>{p}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
+
+            {/* Post Date Picker with Visible Calendar Icon */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                POST DATE *
+              </label>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="relative flex-1">
+                  <input 
+                    ref={postDateInputRef}
+                    type="date" 
+                    value={tempPostDate} 
+                    onChange={e => setTempPostDate(e.target.value)} 
+                    style={{ colorScheme: 'dark' }}
+                    className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors" 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => postDateInputRef.current?.showPicker?.()}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                    title="Open calendar"
+                  >
+                    <Calendar size={18} />
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSavePostDate}
+                    disabled={isSavingDate || !isFormValid}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {isSavingDate ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={14} strokeWidth={2.5} />
+                        <span>Save Post Date</span>
+                      </>
+                    )}
+                  </button>
+                  {effectivePostDate && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditDate}
+                      disabled={isSavingDate}
+                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <p className="text-[11px] text-slate-400">
-              Manual date entry only. This date will be stored for this influencer's Video {videoNumber} and shown in the Campaign Calendar.
+              Select one or multiple platforms and pick the post date. This date and platform will be stored for this influencer's Video {videoNumber} and shown in the Campaign Calendar.
             </p>
           </div>
         )}
@@ -10983,11 +11369,12 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   );
 };
 
-// --- STEP: After Post (Final Step for Video 1 to 6) ---
+// --- STEP: After Post (Final Step for Video 1 to 6 - Platform Auto-Reflected from Post Date) ---
 interface AfterPostFormProps {
   videoNumber: number;
   record: StatusTrackingRecord;
   existingData?: any;
+  postDateData?: any;
   onSave: (data: any, completed?: boolean) => Promise<any> | void;
 }
 
@@ -10995,10 +11382,32 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
   videoNumber,
   record,
   existingData = {},
+  postDateData,
   onSave
 }) => {
-  const platforms = ['Instagram', 'YouTube', 'Facebook'];
-  const [platform, setPlatform] = useState(existingData.platform || 'Instagram');
+  // Automatically inherit and reflect platform from Post Date step
+  const inheritedPlatform = useMemo(() => {
+    if (existingData.platform && existingData.platform !== 'Instagram') {
+      return existingData.platform;
+    }
+    if (postDateData?.platform) {
+      return postDateData.platform;
+    }
+    if (Array.isArray(postDateData?.selected_platforms) && postDateData.selected_platforms.length > 0) {
+      return postDateData.selected_platforms.join(' + ');
+    }
+    // Also check workflow steps directly from record
+    try {
+      const vWorkflow = getVideoWorkflow(record, videoNumber);
+      const pdData = vWorkflow?.steps?.post_date?.data;
+      if (pdData?.platform) return pdData.platform;
+      if (Array.isArray(pdData?.selected_platforms) && pdData.selected_platforms.length > 0) {
+        return pdData.selected_platforms.join(' + ');
+      }
+    } catch (e) {}
+    return existingData.platform || 'Instagram';
+  }, [existingData.platform, postDateData?.platform, postDateData?.selected_platforms, record, videoNumber]);
+
   const [postLink, setPostLink] = useState(
     existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : '')
   );
@@ -11036,7 +11445,7 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
     try {
       const payload = {
         ...existingData,
-        platform,
+        platform: inheritedPlatform,
         link: postLink.trim(),
         postedAt: postedAt.trim(),
         confirmed_live: true,
@@ -11056,8 +11465,8 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
       logActivity({
         department: 'Marketing',
         action: 'After Post Completed',
-        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} marked live with link: ${postLink.trim()}`,
-        metadata: { video_number: videoNumber, platform, link: postLink.trim(), posted_at: postedAt.trim() }
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} marked live on ${inheritedPlatform} with link: ${postLink.trim()}`,
+        metadata: { video_number: videoNumber, platform: inheritedPlatform, link: postLink.trim(), posted_at: postedAt.trim() }
       });
 
       toast.success(`Video ${videoNumber} marked as Live & Completed! Workflow finished.`);
@@ -11091,27 +11500,25 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
       </div>
 
       <div className="space-y-5">
-        {/* 1. Platform Selector */}
-        <div>
-          <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
-            Select Platform *
-          </label>
-          <div className="flex gap-3 max-w-md">
-            {platforms.map(p => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setPlatform(p)}
-                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
-                  platform === p 
-                    ? 'bg-blue-600 border-blue-500 text-white shadow-md' 
-                    : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
+        {/* 1. Auto-Reflected Platform Card (Read-only, inherited from Post Date) */}
+        <div className="p-4 bg-[#0b1329] border border-slate-800 rounded-xl space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+              Platform (Inherited from Post Date)
+            </label>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+              Auto-Reflected
+            </span>
           </div>
+          <div className="flex items-center gap-2 pt-1">
+            <Globe size={16} className="text-blue-400" />
+            <span className="text-sm font-bold text-white">
+              {inheritedPlatform}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            Automatically inherited from Video {videoNumber} Post Date setup.
+          </p>
         </div>
 
         {/* 2. Live Post URL / Link with 'Open Live Video' button */}
@@ -11124,7 +11531,7 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
               type="text" 
               value={postLink} 
               onChange={e => setPostLink(e.target.value)} 
-              placeholder={`https://www.${platform.toLowerCase()}.com/...`}
+              placeholder={`https://www.${inheritedPlatform.split(' ')[0]?.toLowerCase() || 'instagram'}.com/...`}
               className="flex-1 bg-[#0b1329] border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
             />
             <button
@@ -11149,6 +11556,7 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
             type="datetime-local" 
             value={postedAt} 
             onChange={e => setPostedAt(e.target.value)} 
+            style={{ colorScheme: 'dark' }}
             className="w-full max-w-md bg-[#0b1329] border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
           />
         </div>
