@@ -5712,12 +5712,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         } else if (workflowState === 'delivered') {
                           // Delivered is confirmed, next step is Share Script
                           if (isScriptLoaded && !isShareScriptDone) {
-                            return (
-                              <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
-                                <span>In Progress</span>
-                              </span>
-                            );
+                            return null;
                           } else if (hasMatchingScript && !isShareScriptDone) {
                             return (
                               <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-purple-950/80 text-purple-300 border border-purple-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
@@ -5772,19 +5767,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             </span>
                           );
                         } else if (currentVideoData.status === 'IN_PROGRESS') {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping"></span>
-                              <span>In Progress</span>
-                            </span>
-                          );
+                          // In Progress badge removed from influencer row per requirements
+                          return null;
                         } else {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-slate-900/90 text-slate-400 border border-slate-800 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
-                              <span>Not Started</span>
-                            </span>
-                          );
+                          // Not Started badge removed from influencer row per requirements
+                          return null;
                         }
                       })()}
 
