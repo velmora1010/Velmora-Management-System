@@ -1377,11 +1377,11 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
       } else if (cfg.id === 'post_date') {
         const postData = st.data || {};
         const effPostDate = postData.scheduled_post_date || postData.post_date || scheduledPostDate || '';
-        const isPostDone = Boolean(st.completed || (effPostDate && String(effPostDate).trim().length > 0));
+        const isPostDone = Boolean(st.completed === true || st.status === 'COMPLETED' || postData.post_date_confirmed === true);
         steps[cfg.id] = {
           ...st,
           completed: isPostDone,
-          status: isPostDone ? 'COMPLETED' : 'NOT_STARTED',
+          status: isPostDone ? 'COMPLETED' : (st.status === 'IN_PROGRESS' ? 'IN_PROGRESS' : 'NOT_STARTED'),
           data: {
             ...postData,
             scheduled_post_date: effPostDate,
@@ -1580,7 +1580,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           approval_status: legacyApp
         };
       } else if (cfg.id === 'post_date') {
-        completed = Boolean(scheduledPostDate && String(scheduledPostDate).trim().length > 0);
+        completed = false;
         data = {
           scheduled_post_date: scheduledPostDate || '',
           history: []
@@ -1650,7 +1650,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           approval_status: ''
         };
       } else if (cfg.id === 'post_date') {
-        completed = Boolean(scheduledPostDate && String(scheduledPostDate).trim().length > 0);
+        completed = false;
         data = {
           scheduled_post_date: scheduledPostDate || '',
           history: []
@@ -2082,7 +2082,8 @@ export const isInfluencerDraftStage = (record: StatusTrackingRecord, videoNumber
 
 /**
  * Checks if Post Date step has actually been completed/confirmed.
- * Manual Date Entry only: completed when a post date is entered.
+ * Completed ONLY when the user explicitly completes/confirms the Post Date step through workflow action.
+ * Does NOT infer completion from presence of a date alone.
  */
 export const isInfluencerPostDateCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
@@ -2091,8 +2092,7 @@ export const isInfluencerPostDateCompleted = (record: StatusTrackingRecord, vide
 
   const vData = getVideoWorkflow(record, videoNumber);
   const pdStep = vData.steps['post_date'];
-  const pDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date;
-  return Boolean(pdStep?.completed || (pDate && String(pDate).trim().length > 0));
+  return Boolean(pdStep?.completed === true || pdStep?.status === 'COMPLETED' || pdStep?.data?.post_date_confirmed === true);
 };
 
 /**
@@ -2460,8 +2460,8 @@ export const getStepVisualState = (
   }
 
   if (stepId === 'post_date') {
-    if (stepData.scheduled_post_date || stepData.post_date) {
-      return 'completed';
+    if (vData.activeStepId === 'post_date' || stepObj?.status === 'IN_PROGRESS') {
+      return 'in_progress';
     }
     return 'not_started';
   }
@@ -6610,7 +6610,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               videoNumber={videoNumber}
               record={record} 
               existingData={activeStepState.data}
-              onSave={(formData: any, completed?: boolean) => onSaveStep('post_date', formData, completed !== undefined ? completed : Boolean(formData.scheduled_post_date))}
+              onSave={(formData: any, completed?: boolean) => onSaveStep('post_date', formData, completed !== undefined ? completed : true)}
               onAdvanceStep={() => {
                 const nextStep = videoNumber === 1 ? 'after_post' : 'payment';
                 setSelectedVideoStepId(nextStep);
@@ -10741,8 +10741,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   );
   let initialPostDate = existingData.scheduled_post_date || existingData.post_date || scheduleEntry?.post_date || '';
 
+  const isStepConfirmed = Boolean(existingData.post_date_confirmed === true || existingData.completed === true);
+
   const [effectivePostDate, setEffectivePostDate] = useState<string>(initialPostDate);
-  const [isEditingDate, setIsEditingDate] = useState<boolean>(!initialPostDate);
+  const [isEditingDate, setIsEditingDate] = useState<boolean>(!initialPostDate || !isStepConfirmed);
   const [tempPostDate, setTempPostDate] = useState<string>(
     parseToYMD(initialPostDate, 2026) || initialPostDate || ''
   );
@@ -10756,10 +10758,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     const eff = existingData.scheduled_post_date || existingData.post_date || scheduleEntry?.post_date || '';
     setEffectivePostDate(eff);
     setTempPostDate(parseToYMD(eff, 2026) || eff || '');
-    if (!eff) {
+    if (!eff || !isStepConfirmed) {
       setIsEditingDate(true);
     }
-  }, [videoNumber, record.id, existingData.scheduled_post_date, existingData.post_date, scheduleEntry?.post_date]);
+  }, [videoNumber, record.id, existingData.scheduled_post_date, existingData.post_date, scheduleEntry?.post_date, isStepConfirmed]);
 
   const handleStartEditDate = () => {
     setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
@@ -10767,7 +10769,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   };
 
   const handleCancelEditDate = () => {
-    if (effectivePostDate) {
+    if (effectivePostDate && isStepConfirmed) {
       setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
       setIsEditingDate(false);
     }
@@ -10783,7 +10785,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     const previousDateFormatted = formatDisplayDateLocal(effectivePostDate);
     const newDateFormatted = formatDisplayDateLocal(normalizedNewYmd);
 
-    if (previousDateFormatted === newDateFormatted && effectivePostDate) {
+    if (previousDateFormatted === newDateFormatted && effectivePostDate && isStepConfirmed) {
       setIsEditingDate(false);
       return;
     }
@@ -10822,6 +10824,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         scheduled_post_date: normalizedNewYmd,
         post_date: normalizedNewYmd,
         history: updatedHistory,
+        post_date_confirmed: true,
         is_modified: true,
         suppressDefaultToast: true
       }, true);
@@ -10863,7 +10866,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
           POST DATE (Video {videoNumber})
         </label>
 
-        {!isEditingDate && effectivePostDate ? (
+        {!isEditingDate && effectivePostDate && isStepConfirmed ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b1329] border border-slate-800 rounded-xl gap-3">
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-base sm:text-lg font-bold font-mono tracking-wide text-white">
