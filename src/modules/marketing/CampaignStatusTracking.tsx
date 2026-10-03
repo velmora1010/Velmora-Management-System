@@ -154,6 +154,7 @@ export const VIDEO_1_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: CreditCard },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
+  { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Pending', icon: Clock },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 're_dispatch', label: 'Re-Dispatch', shortLabel: 'Re-Dispatch', icon: RotateCcw },
 ];
@@ -165,6 +166,7 @@ export const VIDEO_N_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
   { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
+  { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Pending', icon: Clock },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
 ];
@@ -1986,11 +1988,61 @@ export const getInfluencerDraftStatus = (record: StatusTrackingRecord, videoNumb
   return 'not_started';
 };
 
+/**
+ * Checks if influencer's latest/current draft has been uploaded and is awaiting approval.
+ * Meaning:
+ * - A draft/video file exists
+ * - The draft has NOT been marked Approved
+ * - The draft has NOT been marked Not Approved
+ * - Approval is still pending
+ */
 export const isInfluencerDraftApprovalPending = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
-  return getInfluencerDraftStatus(record, videoNumber) === 'pending_approval';
+  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const dStep = vData.steps['draft'];
+  if (!dStep) return false;
+
+  const data = dStep.data || {};
+  const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+  const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+  // 1. A draft/video file MUST exist
+  const hasVideo = Boolean(
+    activeAttempt?.video_url || 
+    data.vid || 
+    data.video_url || 
+    (videoNumber === 1 && record.draft_video_url)
+  );
+  if (!hasVideo) return false;
+
+  // 2. Draft approval status
+  const approvalStatus = activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
+
+  // Must NOT be marked Approved
+  if (approvalStatus === 'Approved') return false;
+
+  // Must NOT be marked Not Approved
+  if (approvalStatus === 'Not Approved' || vData.isReDraftRequired) return false;
+
+  // Approval is still pending
+  return true;
+};
+
+/**
+ * Checks if influencer is currently at the Draft workflow stage.
+ */
+export const isInfluencerDraftStage = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  return vData.activeStepId === 'draft';
 };
 
 /**
@@ -2163,7 +2215,9 @@ export const isStepFilterMatch = (
     case 'timeline':
       return isInfluencerTimelineCompleted(record, videoNumber);
     case 'draft':
-      return isInfluencerDraftPendingReview(record, videoNumber);
+      return isInfluencerDraftStage(record, videoNumber);
+    case 'draft_approval_pending':
+      return isInfluencerDraftApprovalPending(record, videoNumber);
     case 'post_date':
       return isInfluencerDraftCompleted(record, videoNumber);
     case 'payment':
@@ -2947,19 +3001,6 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
           title="Scroll right to view subsequent steps"
         >
           <ChevronRight size={14} />
-        </button>
-      )}
-
-      {/* "View All Steps" Expand Button when workflow overflows */}
-      {isOverflowing && (
-        <button
-          type="button"
-          onClick={() => onOpenViewAllModal(record)}
-          className="ml-2 px-2 py-1 rounded-lg bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/40 hover:border-purple-400 text-purple-300 hover:text-white text-[10px] font-semibold flex items-center gap-1 transition-all shrink-0 cursor-pointer shadow-sm whitespace-nowrap"
-          title="Open complete chronological workflow sequence in modal"
-        >
-          <Maximize2 size={11} className="text-purple-400" />
-          <span>All ({totalStepsCount})</span>
         </button>
       )}
     </div>
@@ -4034,10 +4075,23 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       isInfluencerDraftApprovalPending(r, selectedVideoNumber)
     ).length;
 
+    const draftIndex = base.findIndex(b => b.id === 'draft');
+    const result = [...base];
+    const pendingItem = {
+      id: 'draft_approval_pending',
+      label: 'Draft Approval Pending',
+      count: draftApprovalPendingCount,
+      icon: Clock
+    };
+    if (draftIndex >= 0) {
+      result.splice(draftIndex + 1, 0, pendingItem);
+    } else {
+      result.push(pendingItem);
+    }
+
     return [
       { id: 'all', label: 'All Steps', count: baseFilteredRecords.length },
-      ...base,
-      { id: 'draft_approval_pending', label: 'Draft Approval Pending', count: draftApprovalPendingCount }
+      ...result
     ];
   }, [selectedWorkflowStep, selectedVideoNumber, baseFilteredRecords]);
 
@@ -5608,14 +5662,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           return (
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-amber-950/80 text-amber-300 border border-amber-600/60 animate-pulse flex items-center gap-1.5 whitespace-nowrap shadow-sm">
                               <AlertTriangle size={13} className="text-amber-400" />
-                              <span>Re-Dispatch Required</span>
-                            </span>
-                          );
-                        } else if (overallStatus.key === 'RE_DISPATCH_ACTIVE' || (hasRedispatch && !isDelivered)) {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-300 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <RotateCcw size={13} className="text-blue-400" />
-                              <span>Active — Re-Dispatch</span>
+                              <span>Re-Dispatch</span>
                             </span>
                           );
                         } else if (overallStatus.key === 'ON_HOLD') {
@@ -5723,52 +5770,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       })()}
 
                       {/* Manage Video Action Button */}
-                      {!isDelivered ? (
-                        isPendingReDispatch ? (
-                          <button
-                            onClick={() => {
-                              setActiveModal({ recordId: record.id, stageId: 'delivered', mode: 'review_issue' });
-                            }}
-                            className="px-2.5 sm:px-3 py-1.5 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 hover:text-amber-200 border border-amber-600/50 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
-                            title="Review Reported Issue / Delivery Details"
-                          >
-                            <AlertTriangle size={12} className="text-amber-400" />
-                            <span>Review Issue</span>
-                          </button>
-                        ) : hasRedispatch ? (
-                          <button
-                            onClick={() => {
-                              setActiveModal({ recordId: record.id, stageId: 'delivered', mode: 'confirm_delivery' });
-                            }}
-                            className="px-2.5 sm:px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 hover:text-white border border-blue-500/40 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
-                            title="Confirm Replacement Delivery"
-                          >
-                            <Package size={12} className="text-blue-400" />
-                            <span>Confirm Delivery</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              toast.error('Please complete Delivery Confirmation first.');
-                              setActiveModal({ recordId: record.id, stageId: 'delivered', mode: 'confirm_delivery' });
-                            }}
-                            className="px-2.5 sm:px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700/80 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
-                            title="Delivery confirmation is required before managing video"
-                          >
-                            <Lock size={12} />
-                            <span>Requires Delivery</span>
-                          </button>
-                        )
-                      ) : (
-                        <button
-                          onClick={() => handleOpenVideo(record, selectedVideoNumber)}
-                          className="px-3 sm:px-3.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 hover:text-white border border-blue-500/40 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
-                          title={`Manage Video ${selectedVideoNumber}`}
-                        >
-                          <Video size={13} />
-                          <span>Manage Video {selectedVideoNumber}</span>
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleOpenVideo(record, selectedVideoNumber)}
+                        className="px-3 sm:px-3.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 hover:text-white border border-blue-500/40 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
+                        title={`Manage Video ${selectedVideoNumber}`}
+                      >
+                        <Video size={13} />
+                        <span>Manage Video {selectedVideoNumber}</span>
+                      </button>
 
                       {/* Three-Dot Menu */}
                       <div className="relative three-dot-menu-container shrink-0">
