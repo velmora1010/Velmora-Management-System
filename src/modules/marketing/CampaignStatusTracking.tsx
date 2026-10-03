@@ -1335,11 +1335,13 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         // Backward compatibility if attempts is empty but draft video was stored
         if (!draftData.is_deleted && attempts.length === 0 && (draftData.vid || draftData.video_url || (videoNum === 1 && record.draft_video_url && !draftData.attempts))) {
           const legacyVid = draftData.vid || draftData.video_url || record.draft_video_url || '';
-          const legacyApp = draftData.appStat || draftData.approval_status || record.draft_approval_status || (st.completed ? 'Approved' : '');
+          const legacyApp = draftData.appStat || draftData.approval_status || record.draft_approval_status || '';
+          const isLegacyApproved = String(legacyApp).trim().toLowerCase() === 'approved';
+          const isLegacyNotApproved = String(legacyApp).trim().toLowerCase() === 'not approved';
           attempts.push({
             attempt_number: 1,
             video_url: legacyVid,
-            approval_status: legacyApp === 'Approved' ? 'Approved' : (legacyApp === 'Not Approved' ? 'Not Approved' : 'Pending Approval'),
+            approval_status: isLegacyApproved ? 'Approved' : (isLegacyNotApproved ? 'Not Approved' : 'Pending Approval'),
             timing_status: draftData.timing || record.draft_timing_status || '',
             corrections: draftData.corr || record.draft_corrections_required || '',
             final_product_link: draftData.finalL || record.draft_final_product_link || '',
@@ -1356,15 +1358,14 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         const hasVid = Boolean(latestAttempt?.video_url || draftData.vid || draftData.video_url || (videoNum === 1 && record.draft_video_url));
         const isApproved = Boolean(
           hasVid && 
-          activeApprovalStatus === 'Approved' && 
+          String(activeApprovalStatus).trim().toLowerCase() === 'approved' && 
           activeTiming && 
-          activeTiming !== 'Not Submit' && 
-          st.completed
+          String(activeTiming).trim().toLowerCase() !== 'not submit'
         );
 
         steps[cfg.id] = {
           ...st,
-          completed: isApproved, // STRICTLY ONLY COMPLETED IF APPROVED + VALID TIMING + CONFIRMED
+          completed: isApproved, // STRICTLY ONLY COMPLETED IF EXPLICITLY APPROVED + VALID TIMING
           status: isApproved ? 'COMPLETED' : (hasVid ? 'IN_PROGRESS' : 'NOT_STARTED'),
           data: {
             ...draftData,
@@ -1900,7 +1901,7 @@ export const isInfluencerTimelineCompleted = (record: StatusTrackingRecord, vide
  * Strict Rule: UPLOAD SUCCESS != STEP COMPLETED.
  * Requires: Video exists + Approval is 'Approved' + Timing status is selected and != 'Not Submit' + Saved confirmed.
  */
-export const isInfluencerDraftCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+export const isInfluencerDraftApproved = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
@@ -1923,16 +1924,17 @@ export const isInfluencerDraftCompleted = (record: StatusTrackingRecord, videoNu
   if (!hasVideo) return false;
 
   // 2. Approval decision must be explicitly 'Approved'
-  const approvalStatus = activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
-  if (approvalStatus !== 'Approved') return false;
+  const approvalStatus = (activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '') || '').toLowerCase().trim();
+  if (approvalStatus !== 'approved') return false;
 
-  // 3. Timing status must be chosen and NOT 'Not Submit'
+  // 3. Timing status must NOT be 'Not Submit'
   const timingStatus = activeAttempt?.timing_status || data.timing || (videoNumber === 1 ? record.draft_timing_status : '');
   if (!timingStatus || timingStatus === 'Not Submit') return false;
 
-  // 4. Must be marked completed
-  return Boolean(dStep.completed || (videoNumber === 1 && record.draft_received && record.draft_approval_status === 'Approved'));
+  return true;
 };
+
+export const isInfluencerDraftCompleted = isInfluencerDraftApproved;
 
 /**
  * Checks if Draft step is currently in progress (video uploaded, pending review or re-draft required).
@@ -1941,7 +1943,7 @@ export const isInfluencerDraftInProgress = (record: StatusTrackingRecord, videoN
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
-  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
+  if (isInfluencerDraftApproved(record, videoNumber)) return false;
 
   const vData = getVideoWorkflow(record, videoNumber);
   const dStep = vData.steps['draft'];
@@ -1958,13 +1960,17 @@ export const isInfluencerDraftInProgress = (record: StatusTrackingRecord, videoN
     (videoNumber === 1 && record.draft_video_url)
   );
 
-  const approvalStatus = activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
+  const approvalStatus = (activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '') || '').toLowerCase().trim();
 
   return Boolean(
     hasVideo || 
     dStep.status === 'IN_PROGRESS' || 
-    approvalStatus === 'Pending Approval' || 
-    approvalStatus === 'Not Approved' || 
+    approvalStatus === 'pending approval' || 
+    approvalStatus === 'pending_reapproval' || 
+    approvalStatus === 'pending' || 
+    approvalStatus === 'not approved' || 
+    approvalStatus === 'not_approved' || 
+    approvalStatus === 'rejected' || 
     vData.isReDraftRequired
   );
 };
@@ -1972,20 +1978,30 @@ export const isInfluencerDraftInProgress = (record: StatusTrackingRecord, videoN
 export type DraftStatusKind = 'not_started' | 'pending_approval' | 'not_approved' | 'completed';
 
 export const getInfluencerDraftStatus = (record: StatusTrackingRecord, videoNumber: number): DraftStatusKind => {
-  if (isInfluencerDraftCompleted(record, videoNumber)) return 'completed';
-  if (isInfluencerDraftInProgress(record, videoNumber)) {
-    const vData = getVideoWorkflow(record, videoNumber);
-    const dStep = vData.steps['draft'];
-    const data = dStep?.data || {};
-    const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
-    const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
-    const approvalStatus = activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
-    if (approvalStatus === 'Not Approved' || vData.isReDraftRequired) {
-      return 'not_approved';
-    }
-    return 'pending_approval';
+  if (isInfluencerDraftApproved(record, videoNumber)) return 'completed';
+  if (isInfluencerDraftApprovalPending(record, videoNumber)) return 'pending_approval';
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const dStep = vData.steps['draft'];
+  if (!dStep) return 'not_started';
+
+  const data = dStep.data || {};
+  const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+  const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+  const hasVideo = Boolean(
+    activeAttempt?.video_url || 
+    data.vid || 
+    data.video_url || 
+    (videoNumber === 1 && record.draft_video_url)
+  );
+  if (!hasVideo) return 'not_started';
+
+  const approvalStatus = (activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '') || '').toLowerCase().trim();
+  if (approvalStatus === 'not approved' || approvalStatus === 'not_approved' || approvalStatus === 'rejected' || vData.isReDraftRequired) {
+    return 'not_approved';
   }
-  return 'not_started';
+  return 'pending_approval';
 };
 
 /**
@@ -1994,13 +2010,13 @@ export const getInfluencerDraftStatus = (record: StatusTrackingRecord, videoNumb
  * - A draft/video file exists
  * - The draft has NOT been marked Approved
  * - The draft has NOT been marked Not Approved
- * - Approval is still pending
+ * - Approval is still pending (pending, pending_reapproval, etc.)
  */
 export const isInfluencerDraftApprovalPending = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
-  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
+  if (isInfluencerDraftApproved(record, videoNumber)) return false;
 
   const vData = getVideoWorkflow(record, videoNumber);
   const dStep = vData.steps['draft'];
@@ -2020,13 +2036,13 @@ export const isInfluencerDraftApprovalPending = (record: StatusTrackingRecord, v
   if (!hasVideo) return false;
 
   // 2. Draft approval status
-  const approvalStatus = activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '');
+  const approvalStatus = (activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '') || '').toLowerCase().trim();
 
   // Must NOT be marked Approved
-  if (approvalStatus === 'Approved') return false;
+  if (approvalStatus === 'approved') return false;
 
   // Must NOT be marked Not Approved
-  if (approvalStatus === 'Not Approved' || vData.isReDraftRequired) return false;
+  if (approvalStatus === 'not approved' || approvalStatus === 'not_approved' || approvalStatus === 'rejected' || vData.isReDraftRequired) return false;
 
   // Approval is still pending
   return true;
@@ -2039,7 +2055,7 @@ export const isInfluencerDraftStage = (record: StatusTrackingRecord, videoNumber
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
-  if (isInfluencerDraftCompleted(record, videoNumber)) return false;
+  if (isInfluencerDraftApproved(record, videoNumber)) return false;
 
   const vData = getVideoWorkflow(record, videoNumber);
   return vData.activeStepId === 'draft';
@@ -2215,11 +2231,11 @@ export const isStepFilterMatch = (
     case 'timeline':
       return isInfluencerTimelineCompleted(record, videoNumber);
     case 'draft':
-      return isInfluencerDraftStage(record, videoNumber);
+      return isInfluencerDraftApproved(record, videoNumber);
     case 'draft_approval_pending':
       return isInfluencerDraftApprovalPending(record, videoNumber);
     case 'post_date':
-      return isInfluencerDraftCompleted(record, videoNumber);
+      return isInfluencerPostDateCompleted(record, videoNumber);
     case 'payment':
       return videoNumber >= 2 && isInfluencerPaymentCompleted(record, videoNumber);
     case 're_dispatch':
@@ -2954,7 +2970,7 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                   }
                 >
                   <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${visualStyles.circle}`}>
-                    {visualState === 'review_required' ? (
+                    {visualState === 'review_required' || (cfg.id === 'draft' && visualState === 'pending') ? (
                       <StepIcon size={13} className="text-amber-400" />
                     ) : isCompleted ? (
                       <Check size={14} strokeWidth={2.5} className="text-white" />
@@ -2968,7 +2984,9 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                   </div>
                   <div className="flex flex-col items-center text-center min-w-0 mt-1">
                     <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${visualStyles.label}`}>
-                      {cfg.shortLabel || cfg.label}
+                      {cfg.id === 'draft' && (visualState === 'pending' || visualState === 'review_required')
+                        ? 'Draft Pending Approval'
+                        : (cfg.shortLabel || cfg.label)}
                     </span>
                   </div>
                 </div>
@@ -3080,17 +3098,19 @@ export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps>
   visibleSubSteps.forEach(cfg => {
     const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
     const visualStyles = getStepVisualStyles(visualState);
+    const isDraftPending = cfg.id === 'draft' && (visualState === 'pending' || visualState === 'review_required');
+    const stepLabel = isDraftPending ? 'Draft Pending Approval' : cfg.label;
     allOrderedSteps.push({
       id: cfg.id,
       stepNumber: stepCounter++,
-      label: cfg.label,
+      label: stepLabel,
       type: 'video_step',
       visualState,
       visualStyles,
-      isCompleted: visualState === 'completed' || visualState === 'review_required',
+      isCompleted: visualState === 'completed',
       isSkipped: visualState === 'skipped',
-      isPending: visualState === 'pending',
-      title: cfg.label,
+      isPending: visualState === 'pending' || visualState === 'review_required',
+      title: stepLabel,
       cfgId: cfg.id,
       icon: cfg.icon
     });
@@ -3736,6 +3756,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             const norm = normalizeWorkflowStepId(st);
             if (norm === 'draft_approval_pending') {
               return isInfluencerDraftApprovalPending(record, selectedVideoNumber);
+            }
+            if (norm === 'draft') {
+              return isInfluencerDraftApproved(record, selectedVideoNumber);
             }
             if (norm === activeStepId) return true;
             if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
@@ -9678,21 +9701,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
   const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
 
+  const resolveInitialApprovalStatus = (): 'Approved' | 'Not Approved' | 'Pending Approval' | '' => {
+    const raw = (activeAttempt?.approval_status || existingData.approval_status || '').trim().toLowerCase();
+    if (raw === 'approved') return 'Approved';
+    if (raw === 'not approved') return 'Not Approved';
+    if (activeAttempt?.video_url || raw === 'pending approval' || raw === 'pending_reapproval' || raw === 'pending') return 'Pending Approval';
+    return '';
+  };
+
   // Form State
   const [appStat, setAppStat] = useState<'Approved' | 'Not Approved' | 'Pending Approval' | ''>(
-    activeAttempt?.approval_status 
-      ? activeAttempt.approval_status 
-      : (existingData.approval_status || (activeAttempt?.video_url ? 'Pending Approval' : ''))
+    resolveInitialApprovalStatus()
   );
 
   useEffect(() => {
-    if (activeAttempt?.approval_status) {
-      setAppStat(activeAttempt.approval_status);
-    } else if (existingData.approval_status) {
-      setAppStat(existingData.approval_status);
-    } else if (activeAttempt?.video_url) {
-      setAppStat('Pending Approval');
-    }
+    setAppStat(resolveInitialApprovalStatus());
   }, [activeAttempt?.approval_status, existingData.approval_status, activeAttempt?.video_url]);
   const [corr, setCorr] = useState(activeAttempt?.corrections || existingData.corr || '');
   const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
