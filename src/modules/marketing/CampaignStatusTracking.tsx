@@ -5755,12 +5755,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             </span>
                           );
                         } else if (workflowState === 'draft') {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-                              <span>Draft</span>
-                            </span>
-                          );
+                          // Draft status badge removed from influencer row per requirements
+                          return null;
                         } else if (workflowState === 'post_date') {
                           return (
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
@@ -5791,16 +5787,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           );
                         }
                       })()}
-
-                      {/* Manage Video Action Button */}
-                      <button
-                        onClick={() => handleOpenVideo(record, selectedVideoNumber)}
-                        className="px-3 sm:px-3.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 hover:text-white border border-blue-500/40 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shadow-sm"
-                        title={`Manage Video ${selectedVideoNumber}`}
-                      >
-                        <Video size={13} />
-                        <span>Manage Video {selectedVideoNumber}</span>
-                      </button>
 
                       {/* Three-Dot Menu */}
                       <div className="relative three-dot-menu-container shrink-0">
