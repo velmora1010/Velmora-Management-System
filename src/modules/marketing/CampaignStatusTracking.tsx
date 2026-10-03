@@ -580,17 +580,35 @@ export const matchesPriceRange = (price: number, rangeId: string): boolean => {
   }
 };
 
+export const getAutoDmCategory = (val: any): 'yes' | 'no' | 'blank' => {
+  if (val === null || val === undefined) return 'blank';
+  if (val === true || val === 1 || val === '1') return 'yes';
+  if (val === false || val === 0 || val === '0') return 'no';
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    if (s === '' || s === 'null' || s === 'undefined' || s === 'blank') return 'blank';
+    if (s === 'true' || s === 'enabled' || s === 'connected' || s === 'yes' || s === '1' || s === 'on') return 'yes';
+    if (s === 'false' || s === 'disabled' || s === 'not_connected' || s === 'not connected' || s === 'no' || s === '0' || s === 'off') return 'no';
+    return 'blank';
+  }
+  return 'blank';
+};
+
 export const getInfluencerAutoDmValue = (record: StatusTrackingRecord): any => {
-  return record.influencer?.auto_dm ?? 
-         record.influencer?.auto_dm_tool ?? 
-         record.dispatch?.auto_dm ?? 
-         (record as any)?.auto_dm ?? 
-         (record as any)?.auto_dm_tool;
+  if (!record) return null;
+  if (record.influencer?.auto_dm !== undefined) return record.influencer.auto_dm;
+  if (record.dispatch?.auto_dm !== undefined) return record.dispatch.auto_dm;
+  if ((record as any).auto_dm !== undefined) return (record as any).auto_dm;
+  if (record.influencer?.auto_dm_tool !== undefined) return record.influencer.auto_dm_tool;
+  return null;
+};
+
+export const getRecordAutoDmCategory = (record: StatusTrackingRecord): 'yes' | 'no' | 'blank' => {
+  return getAutoDmCategory(getInfluencerAutoDmValue(record));
 };
 
 export const isRecordAutoDmEnabled = (record: StatusTrackingRecord): boolean => {
-  const val = getInfluencerAutoDmValue(record);
-  return isAutoDmConnected(val);
+  return getRecordAutoDmCategory(record) === 'yes';
 };
 
 export const getInfluencerCategories = (record: StatusTrackingRecord): string[] => {
@@ -896,6 +914,7 @@ export interface DraftAttempt {
   attempt_number: number;
   video_url: string;
   approval_status: 'Approved' | 'Not Approved' | 'Pending Approval';
+  approval_confirmed?: boolean;
   timing_status?: string;
   corrections?: string;
   re_draft_submit_date?: string;
@@ -2209,12 +2228,12 @@ export const getInfluencerActiveSummaryStep = (record: StatusTrackingRecord, vid
   return getInfluencerCurrentWorkflowState(record, videoNumber);
 };
 
-export type StepVisualState = 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started' | 'rejected';
+export type StepVisualState = 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started' | 'rejected' | 'review_required';
 
 /**
  * Single authoritative visual-state calculation for any workflow step.
- * Returns: 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started' | 'rejected'
- * Priority: COMPLETED (Green) > REJECTED (Red) > PENDING (Amber) > IN_PROGRESS (Blue) > NOT_STARTED (Dim)
+ * Returns: 'completed' | 'pending' | 'in_progress' | 'skipped' | 'not_started' | 'rejected' | 'review_required'
+ * Priority: COMPLETED (Green) > REJECTED (Red) > REVIEW REQUIRED (Yellow) > PENDING (Amber) > IN_PROGRESS (Blue) > NOT_STARTED (Dim)
  * NOTE: "Not Started" must NEVER be blue.
  */
 export const getStepVisualState = (
@@ -2263,6 +2282,23 @@ export const getStepVisualState = (
   );
 
   if (isDone) {
+    if (stepId === 'draft') {
+      const vData = getVideoWorkflow(record, videoNumber);
+      const dStep = vData.steps['draft'];
+      const data = dStep?.data || {};
+      const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+      const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+      const isReconfirmed = Boolean(
+        data.review_confirmed === true || 
+        activeAttempt?.approval_confirmed === true ||
+        data.approval_reconfirmed === true
+      );
+
+      if (!isReconfirmed) {
+        return 'review_required';
+      }
+    }
     return 'completed';
   }
 
@@ -2355,6 +2391,15 @@ export const getStepVisualStyles = (state: StepVisualState) => {
         badge: "bg-emerald-950/80 text-emerald-400 border-emerald-700/60",
         badgeDot: "bg-emerald-400",
         badgeText: "Completed"
+      };
+    case 'review_required':
+      return {
+        circle: "bg-amber-500/20 text-amber-400 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.3)] hover:scale-105",
+        iconClass: "text-amber-400",
+        label: "text-amber-400 font-semibold",
+        badge: "bg-amber-950/80 text-amber-400 border-amber-700/60",
+        badgeDot: "bg-amber-400",
+        badgeText: "Review Required"
       };
     case 'rejected':
       return {
@@ -2796,7 +2841,7 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
             const isReDraftReq = cfg.id === 'draft' && currentVideoData.isReDraftRequired;
             const StepIcon = cfg.icon;
 
-            const isCurrentStepDone = isCompleted || isSkipped;
+            const isCurrentStepDone = isCompleted || isSkipped || visualState === 'review_required';
             const isActiveStep = cfg.id === activeStepKey;
 
             return (
@@ -2840,6 +2885,8 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                       : `${cfg.label} (${
                           visualState === 'completed'
                             ? 'Completed'
+                            : visualState === 'review_required'
+                            ? 'Draft Completed – Review Required'
                             : visualState === 'skipped'
                             ? 'Skipped'
                             : isReDraftReq
@@ -2853,7 +2900,9 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                   }
                 >
                   <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${visualStyles.circle}`}>
-                    {isCompleted ? (
+                    {visualState === 'review_required' ? (
+                      <StepIcon size={13} className="text-amber-400" />
+                    ) : isCompleted ? (
                       <Check size={14} strokeWidth={2.5} className="text-white" />
                     ) : isSkipped ? (
                       <FastForward size={13} className="text-amber-400" />
@@ -2874,7 +2923,7 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                 {idx !== arr.length - 1 && (() => {
                   const nextCfg = arr[idx + 1];
                   const nextVisualState = getStepVisualState(record, selectedVideoNumber, nextCfg.id);
-                  const isNextStepDone = nextVisualState === 'completed' || nextVisualState === 'skipped';
+                  const isNextStepDone = nextVisualState === 'completed' || nextVisualState === 'skipped' || nextVisualState === 'review_required';
                   const isLineActive = isCurrentStepDone && isNextStepDone;
 
                   return (
@@ -2997,7 +3046,7 @@ export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps>
       type: 'video_step',
       visualState,
       visualStyles,
-      isCompleted: visualState === 'completed',
+      isCompleted: visualState === 'completed' || visualState === 'review_required',
       isSkipped: visualState === 'skipped',
       isPending: visualState === 'pending',
       title: cfg.label,
@@ -3067,7 +3116,9 @@ export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps>
                   <React.Fragment key={`h-${step.id}`}>
                     <div className="flex flex-col items-center">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${step.visualStyles.circle}`}>
-                        {step.isCompleted ? (
+                        {step.visualState === 'review_required' ? (
+                          <StepIcon size={13} className="text-amber-400" />
+                        ) : step.isCompleted ? (
                           <Check size={14} strokeWidth={2.5} className="text-white" />
                         ) : step.isSkipped ? (
                           <FastForward size={13} className="text-amber-400" />
@@ -3677,11 +3728,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matchesDelivery) return false;
       }
 
-      // 8. Auto DM filter (all, enabled, disabled)
+      // 8. Auto DM filter (all, blank, yes, no)
       if (activeFilters.autoDmStatus && activeFilters.autoDmStatus !== 'all') {
-        const isEnabled = isRecordAutoDmEnabled(record);
-        if (activeFilters.autoDmStatus === 'enabled' && !isEnabled) return false;
-        if (activeFilters.autoDmStatus === 'disabled' && isEnabled) return false;
+        const cat = getRecordAutoDmCategory(record);
+        if (activeFilters.autoDmStatus === 'yes' && cat !== 'yes') return false;
+        if (activeFilters.autoDmStatus === 'no' && cat !== 'no') return false;
+        if (activeFilters.autoDmStatus === 'blank' && cat !== 'blank') return false;
       }
 
       // 9. Search query (AND with all filters)
@@ -3942,6 +3994,13 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     }));
   };
 
+  const removeFilterAutoDm = () => {
+    setActiveFilters(prev => ({
+      ...prev,
+      autoDmStatus: 'all'
+    }));
+  };
+
   // Dynamic step options for Workflow Step dropdown
   const workflowStepOptions = useMemo(() => {
     if ((selectedWorkflowStep as any) === 'delivery') {
@@ -3984,18 +4043,22 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
   // Dynamic Auto DM counts for current video context
   const autoDmCounts = useMemo(() => {
-    let enabled = 0;
-    let disabled = 0;
+    let yes = 0;
+    let no = 0;
+    let blank = 0;
     // Calculate from records participating in selectedVideoNumber
     const videoAssigned = activeTrackingRecords.filter(r => getInfluencerAssignedVideos(r).includes(selectedVideoNumber));
     videoAssigned.forEach(r => {
-      if (isRecordAutoDmEnabled(r)) enabled++;
-      else disabled++;
+      const cat = getRecordAutoDmCategory(r);
+      if (cat === 'yes') yes++;
+      else if (cat === 'no') no++;
+      else blank++;
     });
     return {
       all: videoAssigned.length,
-      enabled,
-      disabled
+      blank,
+      yes,
+      no
     };
   }, [activeTrackingRecords, selectedVideoNumber]);
 
@@ -5344,9 +5407,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     <span className="text-slate-500 text-xs">({filteredRecords.length} matching)</span>
                   </div>
                 ) : (
-                  <span className="text-xs text-slate-400 font-medium">
-                    Showing {filteredRecords.length} {filteredRecords.length === 1 ? 'Influencer' : 'Influencers'}
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-slate-400 font-medium">
+                      Showing {filteredRecords.length} {filteredRecords.length === 1 ? 'Influencer' : 'Influencers'}
+                    </span>
+                    {activeFilters.autoDmStatus && activeFilters.autoDmStatus !== 'all' && (
+                      <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 font-medium text-[11px]">
+                        Auto DM: {activeFilters.autoDmStatus === 'yes' ? 'Yes' : activeFilters.autoDmStatus === 'no' ? 'No' : 'Blank'}
+                        <button onClick={removeFilterAutoDm} className="hover:text-white text-slate-400 cursor-pointer ml-0.5">&times;</button>
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -9952,6 +10023,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         return {
           ...att,
           approval_status: appStat as any,
+          approval_confirmed: isApproved,
           corrections: appStat === 'Not Approved' ? corr : (appStat === 'Approved' ? '' : att.corrections),
           re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : undefined,
           final_product_link: isApproved ? finalL : att.final_product_link,
@@ -9974,7 +10046,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
       re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : '',
       latest_re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : (existingData.latest_re_draft_submit_date || ''),
       finalL: isApproved ? finalL : '',
-      finalD: isApproved ? finalD : ''
+      finalD: isApproved ? finalD : '',
+      review_confirmed: isApproved,
+      approval_confirmed: isApproved,
+      approval_reconfirmed: isApproved,
+      reviewed_at: nowIso
     };
 
     // Save to Supabase (completed is true ONLY if Approved with valid timing!)

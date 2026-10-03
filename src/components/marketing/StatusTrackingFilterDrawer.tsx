@@ -13,7 +13,7 @@ export interface StatusTrackingFilterState {
   workflowStatuses: string[];
   platforms: string[];
   deliveryStatuses: string[];
-  autoDmStatus: 'all' | 'enabled' | 'disabled';
+  autoDmStatus: 'all' | 'blank' | 'yes' | 'no';
 }
 
 export const initialStatusTrackingFilterState: StatusTrackingFilterState = {
@@ -74,7 +74,7 @@ export interface StatusTrackingFilterAvailableOptions {
   deliveryStatuses?: string[];
   workflowSteps?: { id: string; label: string; count?: number }[];
   deliveryStatusCounts?: Record<string, number>;
-  autoDmCounts?: { all: number; enabled: number; disabled: number };
+  autoDmCounts?: { all: number; blank: number; yes: number; no: number };
   totalCount?: number;
 }
 
@@ -412,7 +412,7 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'all' }))}
@@ -424,7 +424,7 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
               >
                 <div className="flex items-center gap-1.5">
                   {(draft.autoDmStatus === 'all' || !draft.autoDmStatus) && <Check size={12} />}
-                  <span>All Auto DM</span>
+                  <span>All</span>
                 </div>
                 {availableOptions.autoDmCounts && (
                   <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.all})</span>
@@ -433,37 +433,55 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
 
               <button
                 type="button"
-                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'enabled' }))}
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'blank' }))}
                 className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between cursor-pointer ${
-                  draft.autoDmStatus === 'enabled'
+                  draft.autoDmStatus === 'blank'
                     ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
                 }`}
               >
                 <div className="flex items-center gap-1.5">
-                  {draft.autoDmStatus === 'enabled' && <Check size={12} />}
-                  <span>Auto DM Enabled</span>
+                  {draft.autoDmStatus === 'blank' && <Check size={12} />}
+                  <span>Blank</span>
                 </div>
                 {availableOptions.autoDmCounts && (
-                  <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.enabled})</span>
+                  <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.blank})</span>
                 )}
               </button>
 
               <button
                 type="button"
-                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'disabled' }))}
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'yes' }))}
                 className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between cursor-pointer ${
-                  draft.autoDmStatus === 'disabled'
+                  draft.autoDmStatus === 'yes'
                     ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
                     : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
                 }`}
               >
                 <div className="flex items-center gap-1.5">
-                  {draft.autoDmStatus === 'disabled' && <Check size={12} />}
-                  <span>Auto DM Disabled</span>
+                  {draft.autoDmStatus === 'yes' && <Check size={12} />}
+                  <span>Yes</span>
                 </div>
                 {availableOptions.autoDmCounts && (
-                  <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.disabled})</span>
+                  <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.yes})</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'no' }))}
+                className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between cursor-pointer ${
+                  draft.autoDmStatus === 'no'
+                    ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  {draft.autoDmStatus === 'no' && <Check size={12} />}
+                  <span>No</span>
+                </div>
+                {availableOptions.autoDmCounts && (
+                  <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.no})</span>
                 )}
               </button>
             </div>

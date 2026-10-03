@@ -83,6 +83,7 @@ export interface StatusTrackingRecord {
     influencer_code: string;
     influencer_avatar: string;
     is_archived?: any;
+    auto_dm?: any;
     platforms?: string[];
     languages?: string[];
     payment_method?: 'UPI' | 'ACCOUNT_DETAILS' | string | null;
@@ -143,7 +144,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
       // 1. Fetch all campaign influencers first - they are the single source of truth!
       const { data: rawInfoData, error: infoError } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencersInfo)
-        .select('id, name, influencer_name, profile_file_url, code, phone_number, state, complete_address, is_archived, languages, payment_method, upi_number, account_holder_name, account_number, ifsc_code, bank_name, pan_number')
+        .select('*')
         .eq('campaign_id', campQuery);
 
       if (infoError) throw infoError;
@@ -355,6 +356,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
 
         const fullInfluencer = {
           ...info,
+          auto_dm: info.auto_dm,
           pricing: pricingMap[info.id] || {},
           products: productsByInfluencer[String(info.id)] || []
         };
@@ -439,6 +441,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
             username: cleanUser,
             influencer_avatar: info.profile_file_url,
             is_archived: info.is_archived,
+            auto_dm: info.auto_dm,
             platforms: userPlatforms as string[],
             languages: Array.from(new Set(cleanLangs)) as string[],
             payment_method: info.payment_method || (info.upi_number ? 'UPI' : (info.account_number ? 'ACCOUNT_DETAILS' : null)),
