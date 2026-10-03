@@ -3,6 +3,7 @@ import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, Influencer
 import { Save, X, Plus, Upload, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
 import { useCampaignInfluencers, notifyInfluencerChange, notifyPostDateChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
+import { ImportAutoDmModal } from '../../components/marketing/ImportAutoDmModal';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
@@ -475,8 +476,11 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     saveDepartmentNavigation('marketing', '/marketing', { activeTab: tabId });
   };
 
-  const { influencers, addInfluencer, updateInfluencer, deleteInfluencer, isSaving } = useCampaignInfluencers(campaign.id);
+  const { influencers, addInfluencer, updateInfluencer, deleteInfluencer, isSaving, refresh } = useCampaignInfluencers(campaign.id);
   const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
+  const [isAutoDmModalOpen, setIsAutoDmModalOpen] = useState(false);
+  const [selectedAutoDmFile, setSelectedAutoDmFile] = useState<File | null>(null);
+  const autoDmFileInputRef = useRef<HTMLInputElement>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRemoveImageModalOpen, setIsRemoveImageModalOpen] = useState(false);
@@ -690,7 +694,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
             return [];
           })(initialData.languages),
           profile_file_url: initialData.profile_file_url || '',
-          auto_dm: initialData.auto_dm || false,
+          auto_dm: initialData.auto_dm !== undefined ? initialData.auto_dm : null,
           code: initialData.code || '',
           instagram_view_code: initialData.instagram_view_code || getInstagramViewCode(mappedPlatforms) || '',
           facebook_view_code: initialData.facebook_view_code || getFacebookViewCode(mappedPlatforms) || '',
@@ -879,6 +883,33 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
     } finally {
       setIsUploadingImage(false);
     }
+  };
+
+  const handleAutoDmFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedAutoDmFile(file);
+      setIsAutoDmModalOpen(true);
+    }
+  };
+
+  const handleAutoDmSuccess = (updatedMap: Map<string, boolean | null>) => {
+    // If the currently open influencer was matched, update formState live
+    if (basicInfo.code) {
+      const norm = basicInfo.code.trim().toUpperCase();
+      if (updatedMap.has(norm)) {
+        const newStatus = updatedMap.get(norm);
+        setFormState(prev => ({
+          ...prev,
+          basicInfo: {
+            ...prev.basicInfo,
+            auto_dm: newStatus !== undefined ? newStatus : null
+          }
+        }));
+      }
+    }
+    // Refresh campaign influencers from DB
+    refresh();
   };
 
   const handleBasicChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -1653,48 +1684,85 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                 </div>
               </div>
               <div className="flex items-center justify-between p-4 bg-slate-900 rounded-lg border border-slate-700">
-                <span className="text-sm text-slate-300">Auto DM Tool</span>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-sm text-slate-300 font-medium">Auto DM Tool</span>
+                  {basicInfo.auto_dm === true ? (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/50">
+                      ON
+                    </span>
+                  ) : basicInfo.auto_dm === false ? (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                      OFF
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800/50 text-slate-500 border border-slate-700/50 italic">
+                      Unset
+                    </span>
+                  )}
+                </div>
                 <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" name="auto_dm" checked={basicInfo.auto_dm} onChange={handleBasicChange} className="sr-only peer" />
+                  <input type="checkbox" name="auto_dm" checked={Boolean(basicInfo.auto_dm)} onChange={handleBasicChange} className="sr-only peer" />
                   <div className="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                 </label>
               </div>
               
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Influencer Profile Image</label>
-                <div className="flex items-center gap-3">
-                  <label className="cursor-pointer px-4 py-2 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-lg text-sm transition-colors">
-                    {isUploadingImage ? 'Uploading...' : 'Choose File'}
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      onChange={handleImageUpload} 
-                      className="hidden" 
-                      disabled={isUploadingImage}
-                    />
-                  </label>
-                  {uploadedFileName ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-emerald-400 truncate max-w-[150px]" title={uploadedFileName}>
-                        {uploadedFileName}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Influencer Profile Image</label>
+                  <div className="flex items-center gap-3">
+                    <label className="cursor-pointer px-4 py-2 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-lg text-sm transition-colors">
+                      {isUploadingImage ? 'Uploading...' : 'Choose File'}
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={handleImageUpload} 
+                        className="hidden" 
+                        disabled={isUploadingImage}
+                      />
+                    </label>
+                    {uploadedFileName ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-emerald-400 truncate max-w-[150px]" title={uploadedFileName}>
+                          {uploadedFileName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsRemoveImageModalOpen(true)}
+                          className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/40 text-red-300 hover:text-red-200 rounded text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                          title="Remove profile image"
+                        >
+                          <Trash2 size={12} /> Remove Image
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-slate-500 italic">No image selected</span>
+                    )}
+                    {uploadError && (
+                      <span className="text-sm text-red-400 truncate max-w-[150px]" title={uploadError}>
+                        {uploadError}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => setIsRemoveImageModalOpen(true)}
-                        className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/40 text-red-300 hover:text-red-200 rounded text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-                        title="Remove profile image"
-                      >
-                        <Trash2 size={12} /> Remove Image
-                      </button>
-                    </div>
-                  ) : (
-                    <span className="text-sm text-slate-500 italic">No image selected</span>
-                  )}
-                  {uploadError && (
-                    <span className="text-sm text-red-400 truncate max-w-[150px]" title={uploadError}>
-                      {uploadError}
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Auto DM Excel Import</label>
+                  <div className="flex items-center gap-3">
+                    <label className="cursor-pointer px-4 py-2 bg-purple-950/50 hover:bg-purple-900/60 border border-purple-800/50 hover:border-purple-700 text-purple-300 hover:text-purple-200 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm">
+                      <Upload size={15} />
+                      <span>Auto DM</span>
+                      <input 
+                        ref={autoDmFileInputRef}
+                        type="file" 
+                        accept=".xlsx, .xls" 
+                        onChange={handleAutoDmFileSelect} 
+                        className="hidden" 
+                      />
+                    </label>
+                    <span className="text-xs text-slate-500">
+                      Import .xlsx / .xls file to update Auto DM statuses
                     </span>
-                  )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -2555,6 +2623,23 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
             </div>
           </div>
         </div>
+      )}
+
+      {isAutoDmModalOpen && (
+        <ImportAutoDmModal
+          campaign={campaign}
+          existingInfluencers={influencers}
+          isOpen={isAutoDmModalOpen}
+          onClose={() => {
+            setIsAutoDmModalOpen(false);
+            setSelectedAutoDmFile(null);
+            if (autoDmFileInputRef.current) {
+              autoDmFileInputRef.current.value = '';
+            }
+          }}
+          onSuccess={handleAutoDmSuccess}
+          initialFile={selectedAutoDmFile}
+        />
       )}
     </div>
   );

@@ -16,7 +16,8 @@ import {
   History,
   AlertTriangle,
   Eye,
-  Loader2
+  Loader2,
+  Bot
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { 
@@ -504,6 +505,37 @@ export const InfluencerQuickViewModal: React.FC<InfluencerQuickViewModalProps> =
                   <div className="text-[11px] font-medium text-slate-400">Languages</div>
                   <div className="text-xs sm:text-sm font-semibold text-slate-200 truncate">
                     {languagesStr}
+                  </div>
+                </div>
+              </div>
+
+              {/* Auto DM Tool */}
+              <div className="bg-[#0b101c] border border-slate-800/60 rounded-xl p-3 flex items-start gap-3">
+                <div className={`p-2 rounded-lg shrink-0 ${
+                  influencer.auto_dm === true 
+                    ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/30' 
+                    : influencer.auto_dm === false 
+                      ? 'bg-slate-900 text-slate-400 border border-slate-800' 
+                      : 'bg-slate-900/60 text-slate-500 border border-slate-800/60'
+                }`}>
+                  <Bot size={14} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium text-slate-400">Auto DM Tool</div>
+                  <div className="text-xs sm:text-sm font-semibold truncate flex items-center gap-1.5 mt-0.5">
+                    {influencer.auto_dm === true ? (
+                      <span className="px-2 py-0.5 bg-emerald-950/80 border border-emerald-800/50 text-emerald-300 rounded font-bold text-xs">
+                        ON
+                      </span>
+                    ) : influencer.auto_dm === false ? (
+                      <span className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-400 rounded font-semibold text-xs">
+                        OFF
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 italic">
+                        Unset
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

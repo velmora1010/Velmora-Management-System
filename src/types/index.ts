@@ -344,7 +344,7 @@ export interface CampaignInfluencer {
   state: string;
   languages: string[];
   profile_file_url: string;
-  auto_dm: boolean;
+  auto_dm?: boolean | null;
   status?: string;
   is_archived?: boolean | string;
   instagram_view_code?: string | null;

@@ -388,7 +388,15 @@ City: ${influencer.city}`;
                 </div>
                 <div>
                   <span className="text-slate-500 block text-xs font-semibold uppercase tracking-wider mb-0.5">Auto DM Tool</span>
-                  <span className="text-slate-200 font-medium">{isAutoDmConnected(influencer.auto_dm) ? 'Yes' : 'No'}</span>
+                  <span className="text-slate-200 font-medium">
+                    {influencer.auto_dm === true ? (
+                      <span className="text-emerald-400 font-semibold">ON</span>
+                    ) : influencer.auto_dm === false ? (
+                      <span className="text-slate-400">OFF</span>
+                    ) : (
+                      <span className="text-slate-500 italic">—</span>
+                    )}
+                  </span>
                 </div>
 
                 <div className="col-span-1 sm:col-span-1 md:col-span-2">
