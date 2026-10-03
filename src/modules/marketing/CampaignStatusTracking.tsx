@@ -77,7 +77,7 @@ export const normalizeWorkflowStepId = (val: string): string => {
   if (s.includes('sharescript') || s === 'script') return 'share_script';
   if (s.includes('callexplain') || s.includes('call') || s.includes('explain')) return 'call_explain';
   if (s.includes('advance') || s.includes('payadvance')) return 'pay_advance';
-  if (s.includes('timeline')) return 'timeline';
+  if (s.includes('afterpost')) return 'after_post';
   if (s.includes('draft')) return 'draft';
   if (s.includes('postdate') || s.includes('post')) return 'post_date';
   if (s.includes('payment') || s.includes('finalpayment')) return 'payment';
@@ -94,10 +94,10 @@ export const normalizeWorkflowStepLabel = (val: string): string => {
     case 'share_script': return 'Share Script';
     case 'call_explain': return 'Call & Explain';
     case 'pay_advance': return 'Pay Advance';
-    case 'timeline': return 'Timeline';
     case 'draft': return 'Draft';
     case 'post_date': return 'Post Date';
     case 'payment': return 'Payment';
+    case 'after_post': return 'After Post';
     default: return val;
   }
 };
@@ -109,25 +109,25 @@ export interface VideoStepConfig {
   icon: any;
 }
 
-// VIDEO 1 WORKFLOW STEPS: Delivered -> Share Script -> Call & Explain -> Pay Advance -> Time Line -> Draft -> Post Date (7 steps, NO Payment)
+// VIDEO 1 WORKFLOW STEPS: Delivered -> Share Script -> Call & Explain -> Pay Advance -> Draft -> Post Date -> After Post (7 steps, NO Time Line, NO Payment)
 export const VIDEO_1_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
   { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: CreditCard },
-  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
+  { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
 ];
 
-// VIDEOS 2 TO 6 WORKFLOW STEPS: Share Script -> Call & Explain -> Time Line -> Draft -> Post Date -> Payment (6 steps, NO Delivered, NO Pay Advance)
+// VIDEOS 2 TO 6 WORKFLOW STEPS: Share Script -> Call & Explain -> Draft -> Post Date -> Payment -> After Post (6 steps, NO Delivered, NO Pay Advance, NO Time Line)
 export const VIDEO_N_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
-  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
+  { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
 ];
 
 export const getVideoWorkflowConfigs = (videoNumber: number): VideoStepConfig[] => {
@@ -152,10 +152,10 @@ export const VIDEO_1_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain', icon: PhoneCall },
   { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
   { id: 'pay_advance', label: 'Pay Advance', shortLabel: 'Pay Advance', icon: CreditCard },
-  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Pending', icon: Clock },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
+  { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
   { id: 're_dispatch', label: 'Re-Dispatch', shortLabel: 'Re-Dispatch', icon: RotateCcw },
 ];
 
@@ -164,11 +164,11 @@ export const VIDEO_N_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain', icon: PhoneCall },
   { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
-  { id: 'timeline', label: 'Time Line', shortLabel: 'Time Line', icon: Clock },
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Pending', icon: Clock },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
+  { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
 ];
 
 export const getVideoSummaryBoxConfigs = (videoNumber: number): WorkflowSummaryBoxConfig[] => {
@@ -919,6 +919,7 @@ export interface DraftAttempt {
   approval_confirmed?: boolean;
   timing_status?: string;
   corrections?: string;
+  draft_submit_date?: string;
   re_draft_submit_date?: string;
   expected_submit_date?: string;
   final_product_link?: string;
@@ -1197,19 +1198,12 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         }
         if (found?.draft_date && !scheduledDraftDate) {
           scheduledDraftDate = parseToYMD(found.draft_date, 2026);
-        } else if (found?.post_date && !scheduledDraftDate) {
-          scheduledDraftDate = calculateDraftDate(found.post_date, 2026);
         }
       } catch (e) {}
     }
   }
 
-  // Load-time derivation if one date exists but the other is missing
-  if (!scheduledPostDate && scheduledDraftDate) {
-    scheduledPostDate = calculatePostDateFromDraft(scheduledDraftDate, 2026);
-  } else if (!scheduledDraftDate && scheduledPostDate) {
-    scheduledDraftDate = calculateDraftDate(scheduledPostDate, 2026);
-  }
+  // Pure manual dates - no automatic derivation between post date and draft date.
 
   // Initialize steps record
   const steps: Record<string, { completed: boolean; skipped?: boolean; status?: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' | 'SKIPPED'; data: any; updated_at?: string }> = {};
@@ -1376,23 +1370,40 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
             timing: activeTiming || '',
             corr: latestAttempt?.corrections || draftData.corr || '',
             finalL: latestAttempt?.final_product_link || draftData.finalL || '',
-            finalD: latestAttempt?.final_description || draftData.finalD || ''
+            finalD: latestAttempt?.final_description || draftData.finalD || '',
+            draft_submit_date: latestAttempt?.draft_submit_date || draftData.draft_submit_date || ''
           }
         };
       } else if (cfg.id === 'post_date') {
         const postData = st.data || {};
-        const timelineDate = storedVideo?.steps?.timeline?.data?.date;
-        const derivedFromTimeline = timelineDate ? calculatePostDateFromDraft(timelineDate, 2026) : '';
-        const isPostOver = postData.manualOverride === true;
-        const effPostDate = isPostOver 
-          ? (postData.scheduled_post_date || scheduledPostDate || '') 
-          : (scheduledPostDate || postData.scheduled_post_date || derivedFromTimeline || '');
+        const effPostDate = postData.scheduled_post_date || postData.post_date || scheduledPostDate || '';
+        const isPostDone = Boolean(st.completed || (effPostDate && String(effPostDate).trim().length > 0));
         steps[cfg.id] = {
           ...st,
+          completed: isPostDone,
+          status: isPostDone ? 'COMPLETED' : 'NOT_STARTED',
           data: {
             ...postData,
             scheduled_post_date: effPostDate,
             history: Array.isArray(postData.history) ? postData.history : []
+          }
+        };
+      } else if (cfg.id === 'after_post') {
+        const afterPostData = st.data || {};
+        const link = afterPostData.link || (videoNum === 1 ? record.final_post_link : '') || '';
+        const postedAt = afterPostData.postedAt || (videoNum === 1 ? record.final_post_actual_datetime : '') || '';
+        const platform = afterPostData.platform || 'Instagram';
+        const isLiveDone = Boolean(st.completed || afterPostData.confirmed_live || afterPostData.confirmed || (videoNum === 1 && record.final_post_completed));
+        steps[cfg.id] = {
+          ...st,
+          completed: isLiveDone,
+          status: isLiveDone ? 'COMPLETED' : (link ? 'IN_PROGRESS' : 'NOT_STARTED'),
+          data: {
+            ...afterPostData,
+            platform,
+            link,
+            postedAt,
+            confirmed_live: isLiveDone
           }
         };
       } else if (cfg.id === 'pay_advance') {
@@ -1569,14 +1580,18 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           approval_status: legacyApp
         };
       } else if (cfg.id === 'post_date') {
-        completed = !!record.final_post_completed || (!!record.final_post_link && !isFakeUrl(record.final_post_link)) || !!metadata.video1_confirmed;
+        completed = Boolean(scheduledPostDate && String(scheduledPostDate).trim().length > 0);
         data = {
           scheduled_post_date: scheduledPostDate || '',
-          history: [],
+          history: []
+        };
+      } else if (cfg.id === 'after_post') {
+        completed = !!record.final_post_completed || (!!record.final_post_link && !isFakeUrl(record.final_post_link)) || !!metadata.video1_confirmed;
+        data = {
           link: record.final_post_link || metadata.video1_final_post_link || '',
           postedAt: record.final_post_actual_datetime || metadata.video1_posted_at || '',
           platform: metadata.video1_platform || 'Instagram',
-          confirmed: completed
+          confirmed_live: completed
         };
       } else if (cfg.id === 'payment') {
         const vPrice = getInfluencerVideoPrice(record.influencer, 1);
@@ -1635,16 +1650,20 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           approval_status: ''
         };
       } else if (cfg.id === 'post_date') {
+        completed = Boolean(scheduledPostDate && String(scheduledPostDate).trim().length > 0);
+        data = {
+          scheduled_post_date: scheduledPostDate || '',
+          history: []
+        };
+      } else if (cfg.id === 'after_post') {
         if (videoNum === 2 && metadata.video2_final_post_link && !isFakeUrl(metadata.video2_final_post_link)) {
           completed = !!metadata.video2_confirmed;
         }
         data = {
-          scheduled_post_date: scheduledPostDate || '',
-          history: [],
           link: (videoNum === 2 ? metadata.video2_final_post_link : '') || '',
           postedAt: (videoNum === 2 ? metadata.video2_posted_at : '') || '',
           platform: (videoNum === 2 ? metadata.video2_platform : 'Instagram') || 'Instagram',
-          confirmed: completed
+          confirmed_live: completed
         };
       } else if (cfg.id === 'payment') {
         const vPrice = getInfluencerVideoPrice(record.influencer, videoNum);
@@ -2063,6 +2082,7 @@ export const isInfluencerDraftStage = (record: StatusTrackingRecord, videoNumber
 
 /**
  * Checks if Post Date step has actually been completed/confirmed.
+ * Manual Date Entry only: completed when a post date is entered.
  */
 export const isInfluencerPostDateCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
@@ -2071,8 +2091,29 @@ export const isInfluencerPostDateCompleted = (record: StatusTrackingRecord, vide
 
   const vData = getVideoWorkflow(record, videoNumber);
   const pdStep = vData.steps['post_date'];
-  const hasLink = Boolean(pdStep?.data?.link && !isFakeUrl(pdStep.data.link));
-  return Boolean(pdStep?.completed || pdStep?.data?.confirmed || hasLink);
+  const pDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date;
+  return Boolean(pdStep?.completed || (pDate && String(pDate).trim().length > 0));
+};
+
+/**
+ * Checks if After Post step has actually been completed/confirmed.
+ * Completed when live post details are recorded and marked live/completed.
+ */
+export const isInfluencerAfterPostCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const apStep = vData.steps['after_post'];
+  const hasLink = Boolean(apStep?.data?.link && !isFakeUrl(apStep.data.link));
+  return Boolean(
+    apStep?.completed || 
+    apStep?.data?.confirmed_live || 
+    apStep?.data?.confirmed || 
+    (hasLink && apStep?.data?.postedAt) ||
+    (videoNumber === 1 && (record.final_post_completed || (record.final_post_link && !isFakeUrl(record.final_post_link) && record.final_post_actual_datetime)))
+  );
 };
 
 /**
@@ -2175,19 +2216,19 @@ export const isInfluencerVideoNotStarted = (record: StatusTrackingRecord, videoN
     if (isInfluencerShareScriptCompleted(record, 1) || isInfluencerShareScriptInProgress(record, 1)) return false;
     if (isInfluencerCallCompleted(record, 1) || isInfluencerCallSkipped(record, 1)) return false;
     if (isInfluencerPayAdvanceCompleted(record, 1) || isInfluencerPayAdvanceInProgress(record, 1)) return false;
-    if (isInfluencerTimelineCompleted(record, 1)) return false;
     if (isInfluencerDraftCompleted(record, 1) || getInfluencerDraftStatus(record, 1) !== 'not_started') return false;
     if (isInfluencerPostDateCompleted(record, 1)) return false;
+    if (isInfluencerAfterPostCompleted(record, 1)) return false;
     return true;
   }
 
   // Videos 2 to 6
   if (isInfluencerShareScriptCompleted(record, videoNumber) || isInfluencerShareScriptInProgress(record, videoNumber)) return false;
   if (isInfluencerCallCompleted(record, videoNumber) || isInfluencerCallSkipped(record, videoNumber)) return false;
-  if (isInfluencerTimelineCompleted(record, videoNumber)) return false;
   if (isInfluencerDraftCompleted(record, videoNumber) || getInfluencerDraftStatus(record, videoNumber) !== 'not_started') return false;
   if (isInfluencerPostDateCompleted(record, videoNumber)) return false;
   if (isInfluencerPaymentCompleted(record, videoNumber)) return false;
+  if (isInfluencerAfterPostCompleted(record, videoNumber)) return false;
   return true;
 };
 
@@ -2228,8 +2269,6 @@ export const isStepFilterMatch = (
       return isInfluencerCallSkipped(record, videoNumber);
     case 'pay_advance':
       return videoNumber === 1 && isInfluencerPayAdvanceCompleted(record, 1);
-    case 'timeline':
-      return isInfluencerTimelineCompleted(record, videoNumber);
     case 'draft':
       return isInfluencerDraftApproved(record, videoNumber);
     case 'draft_approval_pending':
@@ -2238,6 +2277,8 @@ export const isStepFilterMatch = (
       return isInfluencerPostDateCompleted(record, videoNumber);
     case 'payment':
       return videoNumber >= 2 && isInfluencerPaymentCompleted(record, videoNumber);
+    case 'after_post':
+      return isInfluencerAfterPostCompleted(record, videoNumber);
     case 're_dispatch':
       return videoNumber === 1 && (isInfluencerInReDispatch(record) || isInfluencerReDispatchActive(record) || getInfluencerReDispatchCycles(record).length > 0);
     default:
@@ -2273,7 +2314,7 @@ export const validateFilterCounts = (
 /**
  * ONE CENTRALIZED WORKFLOW-STATE CALCULATION
  * Returns the exact current active workflow step for an influencer in a given video number:
- * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment' | 'completed'
+ * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'draft' | 'post_date' | 'payment' | 'after_post' | 'completed'
  */
 export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, videoNumber: number): string => {
   return getCurrentWorkflowState(record, videoNumber, {
@@ -2282,10 +2323,10 @@ export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, 
     isCallCompleted: isInfluencerCallCompleted,
     isCallSkipped: isInfluencerCallSkipped,
     isPayAdvanceCompleted: isInfluencerPayAdvanceCompleted,
-    isTimelineCompleted: isInfluencerTimelineCompleted,
     isDraftCompleted: isInfluencerDraftCompleted,
     isPostDateCompleted: isInfluencerPostDateCompleted,
     isPaymentCompleted: isInfluencerPaymentCompleted,
+    isAfterPostCompleted: isInfluencerAfterPostCompleted,
     getDeliveryStatus: getInfluencerDeliveryStatus,
     isVideoStarted: isInfluencerVideoStarted
   });
@@ -2344,10 +2385,10 @@ export const getStepVisualState = (
     stepId === 'call_explain' ? isInfluencerCallCompleted(record, videoNumber) :
     stepId === 'call_skipped' ? isInfluencerCallSkipped(record, videoNumber) :
     stepId === 'pay_advance' ? (videoNumber === 1 && isInfluencerPayAdvanceCompleted(record, 1)) :
-    stepId === 'timeline' ? isInfluencerTimelineCompleted(record, videoNumber) :
     stepId === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
     stepId === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
     stepId === 'payment' ? (videoNumber >= 2 && isInfluencerPaymentCompleted(record, videoNumber)) :
+    stepId === 'after_post' ? isInfluencerAfterPostCompleted(record, videoNumber) :
     false
   );
 
@@ -2418,19 +2459,9 @@ export const getStepVisualState = (
     return 'not_started';
   }
 
-  if (stepId === 'timeline') {
-    // A pre-scheduled date from the campaign does NOT make Timeline in_progress!
-    // Timeline must remain NOT STARTED (dim) unless actively modified or confirmed!
-    if (stepObj?.status === 'IN_PROGRESS' || stepData.manualOverride === true || (Array.isArray(stepData.history) && stepData.history.length > 0)) {
-      return 'in_progress';
-    }
-    return 'not_started';
-  }
-
   if (stepId === 'post_date') {
-    const hasPostLink = Boolean(stepData.link || (videoNumber === 1 ? record.final_post_link : ''));
-    if (hasPostLink) {
-      return 'in_progress';
+    if (stepData.scheduled_post_date || stepData.post_date) {
+      return 'completed';
     }
     return 'not_started';
   }
@@ -2441,6 +2472,14 @@ export const getStepVisualState = (
       if (videoPayment && (videoPayment.payment_status === 'initiated' || videoPayment.payment_status === 'processing')) {
         return 'in_progress';
       }
+    }
+    return 'not_started';
+  }
+
+  if (stepId === 'after_post') {
+    const hasPostLink = Boolean(stepData.link || (videoNumber === 1 ? record.final_post_link : ''));
+    if (hasPostLink) {
+      return 'in_progress';
     }
     return 'not_started';
   }
@@ -2542,7 +2581,7 @@ export const getInfluencerLatestReversibleStep = (
   const cycles = getInfluencerReDispatchCycles(record);
   const configs = getVideoWorkflowConfigs(videoNumber);
 
-  // 1. Inspect Video sub-steps in reverse order (e.g. post_date -> draft -> timeline -> pay_advance / payment -> call_explain -> share_script)
+  // 1. Inspect Video sub-steps in reverse order (e.g. after_post -> payment -> post_date -> draft -> pay_advance -> call_explain -> share_script)
   const subStepConfigs = configs.filter(c => c.id !== 'delivered');
 
   for (let idx = subStepConfigs.length - 1; idx >= 0; idx--) {
@@ -2551,10 +2590,10 @@ export const getInfluencerLatestReversibleStep = (
       cfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, videoNumber) :
       cfg.id === 'call_explain' ? isInfluencerCallCompleted(record, videoNumber) :
       cfg.id === 'pay_advance' ? (isV1 && isInfluencerPayAdvanceCompleted(record, 1)) :
-      cfg.id === 'timeline' ? isInfluencerTimelineCompleted(record, videoNumber) :
       cfg.id === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
       cfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
       cfg.id === 'payment' ? (!isV1 && isInfluencerPaymentCompleted(record, videoNumber)) :
+      cfg.id === 'after_post' ? isInfluencerAfterPostCompleted(record, videoNumber) :
       false
     );
     const isSkipped = cfg.id === 'call_explain' && isInfluencerCallSkipped(record, videoNumber);
@@ -2589,10 +2628,10 @@ export const getInfluencerLatestReversibleStep = (
           dCfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, videoNumber) :
           dCfg.id === 'call_explain' ? (isInfluencerCallCompleted(record, videoNumber) || isInfluencerCallSkipped(record, videoNumber)) :
           dCfg.id === 'pay_advance' ? (isV1 && isInfluencerPayAdvanceCompleted(record, 1)) :
-          dCfg.id === 'timeline' ? isInfluencerTimelineCompleted(record, videoNumber) :
           dCfg.id === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
           dCfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
           dCfg.id === 'payment' ? (!isV1 && isInfluencerPaymentCompleted(record, videoNumber)) :
+          dCfg.id === 'after_post' ? isInfluencerAfterPostCompleted(record, videoNumber) :
           false
         );
         if (dDone) {
@@ -2625,9 +2664,9 @@ export const getInfluencerLatestReversibleStep = (
           c.id === 'share_script' ? isInfluencerShareScriptCompleted(record, 1) :
           c.id === 'call_explain' ? (isInfluencerCallCompleted(record, 1) || isInfluencerCallSkipped(record, 1)) :
           c.id === 'pay_advance' ? isInfluencerPayAdvanceCompleted(record, 1) :
-          c.id === 'timeline' ? isInfluencerTimelineCompleted(record, 1) :
           c.id === 'draft' ? isInfluencerDraftCompleted(record, 1) :
           c.id === 'post_date' ? isInfluencerPostDateCompleted(record, 1) :
+          c.id === 'after_post' ? isInfluencerAfterPostCompleted(record, 1) :
           false
         );
         if (isDone) affectedVideo1Steps.push(c.label);
@@ -2673,9 +2712,9 @@ export const getInfluencerLatestReversibleStep = (
             c.id === 'share_script' ? isInfluencerShareScriptCompleted(record, 1) :
             c.id === 'call_explain' ? (isInfluencerCallCompleted(record, 1) || isInfluencerCallSkipped(record, 1)) :
             c.id === 'pay_advance' ? isInfluencerPayAdvanceCompleted(record, 1) :
-            c.id === 'timeline' ? isInfluencerTimelineCompleted(record, 1) :
             c.id === 'draft' ? isInfluencerDraftCompleted(record, 1) :
             c.id === 'post_date' ? isInfluencerPostDateCompleted(record, 1) :
+            c.id === 'after_post' ? isInfluencerAfterPostCompleted(record, 1) :
             false
           );
           if (isDone) affectedVideo1Steps.push(c.label);
@@ -2995,12 +3034,22 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                 {idx !== arr.length - 1 && (() => {
                   const nextCfg = arr[idx + 1];
                   const nextVisualState = getStepVisualState(record, selectedVideoNumber, nextCfg.id);
-                  const isNextStepDone = nextVisualState === 'completed' || nextVisualState === 'skipped' || nextVisualState === 'review_required';
-                  const isLineActive = isCurrentStepDone && isNextStepDone;
+                  const isNextStepDone = nextVisualState === 'completed' || nextVisualState === 'skipped';
+                  const isNextPending = nextVisualState === 'review_required' || nextVisualState === 'pending';
+                  const isNextInProgress = nextVisualState === 'in_progress';
+
+                  let lineColor = 'bg-slate-700/60';
+                  if (isCurrentStepDone && isNextStepDone) {
+                    lineColor = 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]';
+                  } else if (isCurrentStepDone && isNextPending) {
+                    lineColor = 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]';
+                  } else if ((isCurrentStepDone && isNextInProgress) || visualState === 'in_progress') {
+                    lineColor = 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]';
+                  }
 
                   return (
                     <div className="w-4 sm:w-6 xl:w-8 h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300 shrink-0">
-                      <div className={`h-full w-full rounded-full transition-all duration-300 ${isLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'}`} />
+                      <div className={`h-full w-full rounded-full transition-all duration-300 ${lineColor}`} />
                     </div>
                   );
                 })()}
@@ -4637,96 +4686,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       }
     }
 
-    // =========================================================================
-    // AUTOMATIC DRAFT DATE -> POST DATE SYNC (+3 CALENDAR DAYS) & HISTORY
-    // Business Rule: For every video, Post Date = Draft Date + 3 Calendar Days
-    // =========================================================================
-    let targetDraftDate: string | null = null;
-    if (stepId === 'timeline' && cleanStepData?.date) {
-      targetDraftDate = parseToYMD(cleanStepData.date, 2026) || cleanStepData.date;
-    } else if (stepId === 'draft' && cleanStepData?.approval_status === 'Not Approved' && cleanStepData?.re_draft_submit_date) {
-      targetDraftDate = parseToYMD(cleanStepData.re_draft_submit_date, 2026) || cleanStepData.re_draft_submit_date;
-    }
-
-    if (targetDraftDate) {
-      const calculatedPostDate = calculatePostDateFromDraft(targetDraftDate, 2026);
-      if (calculatedPostDate) {
-        const postStep = videoObj.steps.post_date || { completed: false, data: {} };
-        const postStepData = postStep.data || {};
-
-        // Find previous post date strictly for this videoNumber
-        let prevPostDate = postStepData.scheduled_post_date || '';
-        if (!prevPostDate) {
-          const scheduleEntry = (record.postDates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
-          prevPostDate = scheduleEntry?.post_date || '';
-        }
-        if (!prevPostDate && Array.isArray((record.dispatch as any)?.languages)) {
-          const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
-          if (matchViews) {
-            try {
-              const vJson = JSON.parse(matchViews.substring('views_data:'.length));
-              const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
-              if (found?.post_date) {
-                prevPostDate = parseToYMD(found.post_date, 2026) || found.post_date;
-              }
-            } catch (e) {}
-          }
-        }
-        const normalizedPrevPostDate = parseToYMD(prevPostDate, 2026) || prevPostDate;
-
-        // ONLY record history and update if Post Date actually changed
-        if (calculatedPostDate !== normalizedPrevPostDate) {
-          const currentUserName = await getCurrentUserName();
-          const prevDisplay = normalizedPrevPostDate ? formatDisplayDateLocal(normalizedPrevPostDate) : 'Not Scheduled';
-          const newDisplay = formatDisplayDateLocal(calculatedPostDate);
-          const postHistoryList: PostDateHistoryEntry[] = Array.isArray(postStepData.history) ? [...postStepData.history] : [];
-
-          const autoHistoryEntry: PostDateHistoryEntry = {
-            id: `pdh-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            old_date: prevDisplay,
-            new_date: newDisplay,
-            changed_by: currentUserName || 'Admin',
-            changed_at: new Date().toISOString(),
-            reason: 'Automatically updated from Draft Date (+3 days)'
-          };
-
-          videoObj.steps.post_date = {
-            ...postStep,
-            completed: postStep.completed || false,
-            data: {
-              ...postStepData,
-              scheduled_post_date: calculatedPostDate,
-              history: [autoHistoryEntry, ...postHistoryList],
-              is_modified: false // Auto-synced with Draft Date (+3 days)
-            },
-            updated_at: new Date().toISOString()
-          };
-
-          // Persist both post_date and draft_date to influencer_post_dates_rows & influencers_info_rows
-          await syncInfluencerPostDate({
-            influencerId: record.influencer_id,
-            campaignId: record.campaign_id,
-            videoNumber,
-            newPostDate: calculatedPostDate,
-            newDraftDate: targetDraftDate
-          });
-
-          // Log activity
-          logActivity({
-            department: 'Marketing',
-            action: 'Post Date Auto-Synced',
-            description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date auto-updated to ${newDisplay} from Draft Date ${formatDisplayDateLocal(targetDraftDate)} (+3 days)`,
-            metadata: { 
-              video_number: videoNumber, 
-              draft_date: targetDraftDate, 
-              post_date: calculatedPostDate, 
-              old_post_date: normalizedPrevPostDate,
-              reason: 'Automatically updated from Draft Date (+3 days)'
-            }
-          });
-        }
-      }
-    }
+    // Automatic Draft Date -> Post Date sync removed per specification. Both dates are purely manual.
 
     // Calculate video completion status
     const configs = videoNumber === 1 ? VIDEO_1_STEP_CONFIGS : VIDEO_N_STEP_CONFIGS;
@@ -4818,9 +4778,13 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           if (stepData.finalD !== undefined) updates.draft_final_description = stepData.finalD;
         }
       } else if (stepId === 'post_date') {
-        updates.final_post_completed = isStepCompleted;
-        if (stepData.link) updates.final_post_link = stepData.link;
-        if (stepData.postedAt) updates.final_post_actual_datetime = stepData.postedAt;
+        // Post date is manual date only
+      } else if (stepId === 'after_post') {
+        if (videoNumber === 1) {
+          updates.final_post_completed = isStepCompleted;
+          if (stepData.link) updates.final_post_link = stepData.link;
+          if (stepData.postedAt) updates.final_post_actual_datetime = stepData.postedAt;
+        }
       }
       updates.notes = JSON.stringify(metadata);
     }
@@ -6626,16 +6590,6 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {activeStepConfig?.id === 'timeline' && (
-            <ExpectedTimelineForm 
-              record={record} 
-              videoNumber={videoNumber}
-              stepNumber={videoData.configs.findIndex(c => c.id === 'timeline') + 1}
-              existingData={activeStepState.data}
-              onSave={async (formData: any) => { await onSaveStep('timeline', formData, formData.expected_delivery_completed); }} 
-            />
-          )}
-
           {activeStepConfig?.id === 'draft' && (
             <DraftForm 
               key={`v-${videoNumber}-draft-form-${record.id}`}
@@ -6656,7 +6610,12 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               videoNumber={videoNumber}
               record={record} 
               existingData={activeStepState.data}
-              onSave={(formData: any, completed?: boolean) => onSaveStep('post_date', formData, completed !== undefined ? completed : formData.confirmed_live)}
+              onSave={(formData: any, completed?: boolean) => onSaveStep('post_date', formData, completed !== undefined ? completed : Boolean(formData.scheduled_post_date))}
+              onAdvanceStep={() => {
+                const nextStep = videoNumber === 1 ? 'after_post' : 'payment';
+                setSelectedVideoStepId(nextStep);
+                onStepChange?.(nextStep);
+              }}
             />
           )}
 
@@ -6666,7 +6625,23 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               videoNumber={videoNumber}
               record={record} 
               existingData={activeStepState.data}
-              onSave={(formData: any) => onSaveStep('payment', formData, formData.payment_completed)}
+              onSave={async (formData: any) => {
+                await onSaveStep('payment', formData, formData.payment_completed);
+                if (formData.payment_completed) {
+                  setSelectedVideoStepId('after_post');
+                  onStepChange?.('after_post');
+                }
+              }}
+            />
+          )}
+
+          {activeStepConfig?.id === 'after_post' && (
+            <AfterPostForm 
+              key={`v-${videoNumber}-after-post-${record.id}`}
+              videoNumber={videoNumber}
+              record={record} 
+              existingData={activeStepState.data}
+              onSave={(formData: any, completed?: boolean) => onSaveStep('after_post', formData, completed !== undefined ? completed : true)}
             />
           )}
         </div>
@@ -9694,6 +9669,19 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
   const [finalD, setFinalD] = useState(activeAttempt?.final_description || existingData.finalD || '');
 
+  // Manual Draft Submit Date (Required for approval)
+  const [draftSubmitDate, setDraftSubmitDate] = useState<string>(
+    activeAttempt?.draft_submit_date || existingData.draft_submit_date || ''
+  );
+
+  useEffect(() => {
+    if (activeAttempt?.draft_submit_date) {
+      setDraftSubmitDate(activeAttempt.draft_submit_date);
+    } else if (existingData.draft_submit_date) {
+      setDraftSubmitDate(existingData.draft_submit_date);
+    }
+  }, [activeAttempt?.draft_submit_date, existingData.draft_submit_date]);
+
   // Re-Draft Submit Date for Not Approved
   const [reDraftSubmitDate, setReDraftSubmitDate] = useState<string>(
     activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date || ''
@@ -9999,6 +9987,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
     }
 
     if (appStat === 'Approved') {
+      if (!draftSubmitDate || draftSubmitDate.trim() === '') {
+        toast.error('Please enter the Draft Submit Date before approving the draft.');
+        return;
+      }
       if (!calculatedTiming || calculatedTiming === 'Not Submit') {
         toast.error('Please select a valid timing status (Advance, On Time, or Late) before approving the draft.');
         return;
@@ -10020,7 +10012,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     const userName = await getCurrentUserName();
     const nowIso = new Date().toISOString();
 
-    const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit';
+    const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit' && !!draftSubmitDate;
 
     // Update active attempt in attempts array while preserving video_url and all history
     const updatedAttempts = attempts.map((att, idx) => {
@@ -10030,6 +10022,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
           approval_status: appStat as any,
           approval_confirmed: isApproved,
           corrections: appStat === 'Not Approved' ? corr : (appStat === 'Approved' ? '' : att.corrections),
+          draft_submit_date: draftSubmitDate || att.draft_submit_date,
           re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : undefined,
           final_product_link: isApproved ? finalL : att.final_product_link,
           final_description: isApproved ? finalD : att.final_description,
@@ -10047,6 +10040,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
       approval_status: appStat,
       vid: activeAttempt?.video_url || initialUrl,
       timing: calculatedTiming,
+      draft_submit_date: draftSubmitDate,
       corr: appStat === 'Not Approved' ? corr : '',
       re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : '',
       latest_re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : (existingData.latest_re_draft_submit_date || ''),
@@ -10310,6 +10304,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
                         <span>
                           Uploaded: {formatHistoryTimestamp(att.uploaded_at)}
                         </span>
+                        {att.draft_submit_date && (
+                          <span className="text-emerald-300 font-semibold bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded">
+                            Submitted: {formatDisplayDateLocal(att.draft_submit_date)}
+                          </span>
+                        )}
                         {att.expected_submit_date && (
                           <span className="text-blue-300 font-medium">
                             • Expected: {formatDisplayDateLocal(att.expected_submit_date)}
@@ -10367,6 +10366,27 @@ const DraftForm: React.FC<DraftFormProps> = ({
       {/* 4. APPROVAL & TIMING CONTROLS */}
       {!isReDraftMode && activeAttempt && (
         <div className="space-y-6 pt-2 border-t border-slate-800 animate-fade-in">
+          {/* Manual Draft Submit Date Picker */}
+          <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                DRAFT SUBMIT DATE *
+              </label>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                Manual Date
+              </span>
+            </div>
+            <input 
+              type="date"
+              value={draftSubmitDate}
+              onChange={e => setDraftSubmitDate(e.target.value)}
+              className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors"
+            />
+            <span className="text-[11px] text-slate-400 block">
+              Enter the date when this draft video was submitted. This date will be saved to the database and displayed on the Campaign Calendar.
+            </span>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-2">
             
             {/* Approval Status Selector */}
@@ -10713,75 +10733,33 @@ const DraftForm: React.FC<DraftFormProps> = ({
   );
 };
 
-// --- STEP: Post Date (For Any Video 1 to 6) ---
-const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) => {
-  // 1. Strict 1-to-1 match for Video N from record.postDates
+// --- STEP: Post Date (For Any Video 1 to 6 - Manual Post Date Only) ---
+const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvanceStep }: any) => {
+  // Strict match for Video N from record.postDates or existingData
   const scheduleEntry = (record.postDates || []).find(
     (pd: any) => Number(pd.video_number) === Number(videoNumber)
   );
-  let scheduledPostDate = scheduleEntry?.post_date || '';
+  let initialPostDate = existingData.scheduled_post_date || existingData.post_date || scheduleEntry?.post_date || '';
 
-  // Fallback to views_data inside dispatch.languages
-  if (!scheduledPostDate && Array.isArray((record.dispatch as any)?.languages)) {
-    const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
-    if (matchViews) {
-      try {
-        const vJson = JSON.parse(matchViews.substring('views_data:'.length));
-        const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
-        if (found?.post_date) {
-          scheduledPostDate = parseToYMD(found.post_date, 2026) || found.post_date;
-        }
-      } catch (e) {}
-    }
-  }
-
-  if (!scheduledPostDate && scheduleEntry?.draft_date) {
-    scheduledPostDate = calculatePostDateFromDraft(scheduleEntry.draft_date, 2026);
-  }
-
-  const isDateModified = existingData.is_modified === true;
-  const initialEffectivePostDate = existingData.scheduled_post_date || scheduledPostDate || '';
-
-  const [effectivePostDate, setEffectivePostDate] = useState<string>(initialEffectivePostDate);
-  const [isEditingDate, setIsEditingDate] = useState<boolean>(false);
+  const [effectivePostDate, setEffectivePostDate] = useState<string>(initialPostDate);
+  const [isEditingDate, setIsEditingDate] = useState<boolean>(!initialPostDate);
   const [tempPostDate, setTempPostDate] = useState<string>(
-    parseToYMD(initialEffectivePostDate, 2026) || initialEffectivePostDate || ''
+    parseToYMD(initialPostDate, 2026) || initialPostDate || ''
   );
   const [isSavingDate, setIsSavingDate] = useState<boolean>(false);
-  const [isSavingLiveDetails, setIsSavingLiveDetails] = useState<boolean>(false);
 
   // History list
   const historyList: PostDateHistoryEntry[] = Array.isArray(existingData.history) ? existingData.history : [];
 
-  // Live post state
-  const [platform, setPlatform] = useState(existingData.platform || 'Instagram');
-  const [postLink, setPostLink] = useState(existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''));
-  const [postedAt, setPostedAt] = useState(
-    existingData.postedAt ? formatForDateTimeInput(existingData.postedAt) : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
-  );
-  const [confirmedLive, setConfirmedLive] = useState(
-    existingData.confirmed_live !== undefined
-      ? !!existingData.confirmed_live
-      : (existingData.confirmed !== undefined ? !!existingData.confirmed : (videoNumber === 1 ? !!record.final_post_completed : false))
-  );
-
   // Synchronize state if props change
   useEffect(() => {
-    const eff = existingData.scheduled_post_date || scheduledPostDate || '';
+    const eff = existingData.scheduled_post_date || existingData.post_date || scheduleEntry?.post_date || '';
     setEffectivePostDate(eff);
     setTempPostDate(parseToYMD(eff, 2026) || eff || '');
-    setPlatform(existingData.platform || 'Instagram');
-    setPostLink(existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''));
-    setPostedAt(
-      existingData.postedAt ? formatForDateTimeInput(existingData.postedAt) : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
-    );
-    const isLive = existingData.confirmed_live !== undefined
-      ? existingData.confirmed_live
-      : (existingData.confirmed !== undefined ? existingData.confirmed : (videoNumber === 1 ? record.final_post_completed : false));
-    setConfirmedLive(!!isLive);
-  }, [videoNumber, record.id, scheduledPostDate, existingData.scheduled_post_date, existingData.link, existingData.postedAt, existingData.confirmed_live, existingData.confirmed, existingData.platform, record.final_post_link, record.final_post_actual_datetime, record.final_post_completed]);
-
-  const platforms = ['Instagram', 'YouTube', 'Facebook'];
+    if (!eff) {
+      setIsEditingDate(true);
+    }
+  }, [videoNumber, record.id, existingData.scheduled_post_date, existingData.post_date, scheduleEntry?.post_date]);
 
   const handleStartEditDate = () => {
     setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
@@ -10789,12 +10767,14 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
   };
 
   const handleCancelEditDate = () => {
-    setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
-    setIsEditingDate(false);
+    if (effectivePostDate) {
+      setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
+      setIsEditingDate(false);
+    }
   };
 
   const handleSavePostDate = async () => {
-    if (!tempPostDate) {
+    if (!tempPostDate || !tempPostDate.trim()) {
       toast.error('Please pick a valid Post Date.');
       return;
     }
@@ -10813,11 +10793,11 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
       const userName = await getCurrentUserName();
       const changeEntry: PostDateHistoryEntry = {
         id: `pdh-${Date.now()}`,
-        old_date: previousDateFormatted,
+        old_date: previousDateFormatted !== 'Not Assigned' ? previousDateFormatted : 'None',
         new_date: newDateFormatted,
         changed_by: userName,
         changed_at: new Date().toISOString(),
-        reason: 'Post Date edited in Status Tracking'
+        reason: effectivePostDate ? 'Post Date edited in Status Tracking' : 'Manual Post Date assigned'
       };
 
       const updatedHistory = [changeEntry, ...historyList];
@@ -10836,19 +10816,15 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
         return;
       }
 
-      // 2. Save to Status Tracking workflow step
+      // 2. Save to Status Tracking workflow step (COMPLETED = true when post date is set!)
       const saveRes = await onSave({
         ...existingData,
         scheduled_post_date: normalizedNewYmd,
+        post_date: normalizedNewYmd,
         history: updatedHistory,
         is_modified: true,
-        platform,
-        link: postLink ? postLink.trim() : '',
-        postedAt: postedAt ? postedAt.trim() : (existingData.postedAt || ''),
-        confirmed_live: confirmedLive,
-        confirmed: confirmedLive,
         suppressDefaultToast: true
-      }, confirmedLive);
+      }, true);
 
       if (saveRes && saveRes.success === false) {
         toast.error('Failed to save Status Tracking: ' + (saveRes.error || 'Unknown error'));
@@ -10859,15 +10835,18 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
       // 3. Log activity
       logActivity({
         department: 'Marketing',
-        action: 'Post Date Edited',
-        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date changed from ${previousDateFormatted} to ${newDateFormatted}`,
+        action: 'Post Date Saved',
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date saved as ${newDateFormatted}`,
         metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted }
       });
 
-      // 4. Update UI only on full success
       setEffectivePostDate(normalizedNewYmd);
       setIsEditingDate(false);
-      toast.success(`Video ${videoNumber} Post Date updated to ${newDateFormatted} and synchronized!`);
+      toast.success(`Video ${videoNumber} Post Date saved successfully: ${newDateFormatted}!`);
+
+      if (onAdvanceStep) {
+        onAdvanceStep();
+      }
     } catch (err: any) {
       console.error('Error updating post date:', err);
       toast.error('Failed to update post date: ' + (err.message || 'Unknown error'));
@@ -10876,272 +10855,110 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
     }
   };
 
-  const handleResetToScheduledDate = async () => {
-    if (!scheduledPostDate) {
-      toast.error('No initial post date found in Influencer schedule.');
-      return;
-    }
-    const normalizedScheduled = parseToYMD(scheduledPostDate, 2026) || scheduledPostDate;
-    const previousDateFormatted = formatDisplayDateLocal(effectivePostDate);
-    const newDateFormatted = formatDisplayDateLocal(normalizedScheduled);
-
-    setIsSavingDate(true);
-    try {
-      const userName = await getCurrentUserName();
-      const resetEntry: PostDateHistoryEntry = {
-        id: `pdh-${Date.now()}`,
-        old_date: previousDateFormatted,
-        new_date: newDateFormatted,
-        changed_by: userName,
-        changed_at: new Date().toISOString(),
-        reason: 'Reset to original Influencer Schedule'
-      };
-
-      const updatedHistory = [resetEntry, ...historyList];
-
-      const syncRes = await syncInfluencerPostDate({
-        influencerId: record.influencer_id,
-        campaignId: record.campaign_id,
-        videoNumber,
-        newPostDate: normalizedScheduled
-      });
-
-      if (!syncRes.success) {
-        toast.error('Failed to sync Post Date: ' + (syncRes.error || 'Database error'));
-        setIsSavingDate(false);
-        return;
-      }
-
-      const saveRes = await onSave({
-        ...existingData,
-        scheduled_post_date: normalizedScheduled,
-        history: updatedHistory,
-        is_modified: false,
-        platform,
-        link: postLink ? postLink.trim() : '',
-        postedAt: postedAt ? postedAt.trim() : (existingData.postedAt || ''),
-        confirmed_live: confirmedLive,
-        confirmed: confirmedLive,
-        suppressDefaultToast: true
-      }, confirmedLive);
-
-      if (saveRes && saveRes.success === false) {
-        toast.error('Failed to save Status Tracking: ' + (saveRes.error || 'Unknown error'));
-        setIsSavingDate(false);
-        return;
-      }
-
-      setEffectivePostDate(normalizedScheduled);
-      setTempPostDate(normalizedScheduled);
-      setIsEditingDate(false);
-      toast.success(`Reset to original schedule: ${newDateFormatted}`);
-    } catch (err: any) {
-      toast.error('Failed to reset: ' + (err.message || 'Unknown error'));
-    } finally {
-      setIsSavingDate(false);
-    }
-  };
-
-  const handleSaveLiveDetails = async () => {
-    if (!postLink || !postLink.trim() || isFakeUrl(postLink)) {
-      toast.error(`Please enter the Video ${videoNumber} live post link.`);
-      return;
-    }
-    if (!postedAt || !postedAt.trim()) {
-      toast.error('Please select the posting date and time.');
-      return;
-    }
-    if (!confirmedLive) {
-      toast.error('Please check the Confirmed Live checkbox.');
-      return;
-    }
-
-    setIsSavingLiveDetails(true);
-    try {
-      // 1. Sync scheduled post date across Supabase tables if an effectivePostDate exists
-      if (effectivePostDate) {
-        const normalizedPostDate = parseToYMD(effectivePostDate, 2026) || effectivePostDate;
-        const syncRes = await syncInfluencerPostDate({
-          influencerId: record.influencer_id,
-          campaignId: record.campaign_id,
-          videoNumber,
-          newPostDate: normalizedPostDate
-        });
-        if (!syncRes.success) {
-          toast.error('Failed to sync scheduled post date: ' + (syncRes.error || 'Database error'));
-          setIsSavingLiveDetails(false);
-          return;
-        }
-      }
-
-      // 2. Prepare payload preserving local date/time without UTC conversion drift
-      const payload = {
-        ...existingData,
-        scheduled_post_date: effectivePostDate ? (parseToYMD(effectivePostDate, 2026) || effectivePostDate) : '',
-        history: historyList,
-        is_modified: isDateModified,
-        platform,
-        link: postLink.trim(),
-        postedAt: postedAt.trim(),
-        confirmed_live: confirmedLive,
-        confirmed: confirmedLive,
-        suppressDefaultToast: true
-      };
-
-      const saveRes = await onSave(payload, confirmedLive);
-
-      if (saveRes && saveRes.success === false) {
-        toast.error('Failed to save Video ' + videoNumber + ' Post Date: ' + (saveRes.error || 'Unknown error'));
-        setIsSavingLiveDetails(false);
-        return;
-      }
-
-      // 3. Activity logging
-      logActivity({
-        department: 'Marketing',
-        action: 'Post Live Confirmed',
-        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} marked live with link: ${postLink.trim()}`,
-        metadata: { video_number: videoNumber, platform, link: postLink.trim(), posted_at: postedAt.trim() }
-      });
-
-      // 4. Success feedback ONLY after all operations succeed
-      toast.success(`Video ${videoNumber} Post Date saved successfully!`);
-    } catch (err: any) {
-      console.error('Error saving live details:', err);
-      toast.error('Failed to save Video ' + videoNumber + ' Post Date: ' + (err.message || 'Unknown error'));
-    } finally {
-      setIsSavingLiveDetails(false);
-    }
-  };
-
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      
-      {/* 1. SCHEDULED POST DATE CARD (AUTO-FILLED + EDITABLE) */}
+      {/* 1. MANUAL POST DATE CARD */}
       <div>
         <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
-          Scheduled Post Date (Video {videoNumber})
+          POST DATE (Video {videoNumber})
         </label>
 
-        {!isEditingDate ? (
+        {!isEditingDate && effectivePostDate ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b1329] border border-slate-800 rounded-xl gap-3">
             <div className="flex items-center gap-3 flex-wrap">
-              <span className={`text-base sm:text-lg font-bold font-mono tracking-wide ${effectivePostDate ? 'text-white' : 'text-slate-500 italic'}`}>
-                {effectivePostDate ? formatDisplayDateLocal(effectivePostDate) : 'Not Assigned'}
+              <span className="text-base sm:text-lg font-bold font-mono tracking-wide text-white">
+                {formatDisplayDateLocal(effectivePostDate)}
               </span>
-
-              {isDateModified ? (
-                <span className="text-[11px] font-bold text-amber-400 bg-amber-950/70 border border-amber-800/60 px-2.5 py-0.5 rounded-md">
-                  Modified (Manual Edit)
-                </span>
-              ) : (historyList.length > 0 && historyList[0]?.reason?.includes('Draft')) ? (
-                <span className="text-[11px] font-bold text-blue-300 bg-blue-950/70 border border-blue-800/60 px-2.5 py-0.5 rounded-md">
-                  Auto-synced (+3 days from Draft Date)
-                </span>
-              ) : scheduledPostDate ? (
-                <span className="text-[11px] font-bold text-blue-300 bg-blue-950/70 border border-blue-800/60 px-2.5 py-0.5 rounded-md">
-                  Auto-filled from Post Date (Video {videoNumber})
-                </span>
-              ) : null}
+              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2.5 py-0.5 rounded-md flex items-center gap-1">
+                <Check size={12} strokeWidth={2.5} />
+                Post Date Set
+              </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleStartEditDate}
-                className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5"
-              >
-                <Edit3 size={13} />
-                Edit
-              </button>
-
-              {isDateModified && scheduledPostDate && (
-                <button
-                  type="button"
-                  onClick={handleResetToScheduledDate}
-                  disabled={isSavingDate}
-                  className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-rose-400 hover:text-rose-300 rounded-lg text-xs font-bold transition-colors shadow-sm"
-                  title="Restore original scheduled Post Date"
-                >
-                  Reset to Schedule
-                </button>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={handleStartEditDate}
+              className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+            >
+              <Edit3 size={13} />
+              Change Date
+            </button>
           </div>
         ) : (
           <div className="p-4 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-3 animate-fade-in">
-            <span className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
-              Edit Scheduled Post Date (Video {videoNumber})
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
+                {effectivePostDate ? `Change Post Date (Video ${videoNumber})` : `Set Post Date (Video ${videoNumber}) *`}
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                Manual Selection
+              </span>
+            </div>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <input 
                 type="date" 
                 value={tempPostDate} 
                 onChange={e => setTempPostDate(e.target.value)} 
-                className="flex-1 bg-[#070c18] border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+                className="flex-1 bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none" 
               />
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleSavePostDate}
                   disabled={isSavingDate}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 flex items-center gap-1.5"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
                 >
-                  {isSavingDate ? 'Saving...' : 'Save Date'}
+                  {isSavingDate ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} strokeWidth={2.5} />
+                      <span>Save Post Date</span>
+                    </>
+                  )}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleCancelEditDate}
-                  disabled={isSavingDate}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors"
-                >
-                  Cancel
-                </button>
+                {effectivePostDate && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditDate}
+                    disabled={isSavingDate}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
             </div>
+            <p className="text-[11px] text-slate-400">
+              Manual date entry only. This date will be stored for this influencer's Video {videoNumber} and shown in the Campaign Calendar.
+            </p>
           </div>
         )}
       </div>
 
       {/* 2. POST DATE HISTORY SECTION */}
-      <div className="pt-2 border-t border-slate-800/80 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <History size={16} className="text-blue-400" />
-            <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-              Post Date History
-            </h5>
-          </div>
-          <span className="text-[11px] text-slate-500 font-medium">
-            {historyList.length} change{historyList.length === 1 ? '' : 's'} recorded
-          </span>
-        </div>
-
-        <div className="space-y-2">
-          {/* Base initial schedule reference */}
-          <div className="p-3 rounded-xl bg-[#0b1329] border border-slate-800 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-              <span className="text-slate-400">Initial date from Influencer Info (Video {videoNumber}):</span>
-              <span className="font-bold text-white">
-                {scheduledPostDate ? formatDisplayDateLocal(scheduledPostDate) : 'Not Scheduled'}
-              </span>
+      {historyList.length > 0 && (
+        <div className="pt-2 border-t border-slate-800/80 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <History size={16} className="text-blue-400" />
+              <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Post Date History
+              </h5>
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-800/50 shrink-0">
-              Source Schedule
+            <span className="text-[11px] text-slate-500 font-medium">
+              {historyList.length} change{historyList.length === 1 ? '' : 's'} recorded
             </span>
           </div>
 
-          {/* Chronological History entries */}
-          {historyList.length > 0 ? (
-            historyList.map((entry, hIdx) => (
+          <div className="space-y-2">
+            {historyList.map((entry, hIdx) => (
               <div key={entry.id || hIdx} className="p-3 rounded-xl bg-[#0b1329] border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`w-2 h-2 rounded-full ${
-                    entry.reason?.includes('Reset') 
-                      ? 'bg-rose-400' 
-                      : (entry.reason?.includes('Draft') ? 'bg-blue-400' : 'bg-amber-400')
-                  }`}></span>
+                  <span className="w-2 h-2 rounded-full bg-blue-400"></span>
                   <span className="text-slate-400 font-medium">{entry.old_date}</span>
                   <span className="text-slate-500">→</span>
                   <span className="font-bold text-white">{entry.new_date}</span>
@@ -11150,105 +10967,211 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave }: any) 
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-slate-500 text-[11px]">{formatHistoryTimestamp(entry.changed_at)}</span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                    entry.reason?.includes('Reset') 
-                      ? 'bg-rose-950/60 text-rose-300 border-rose-800/50' 
-                      : (entry.reason?.includes('Draft') 
-                          ? 'bg-blue-950/60 text-blue-300 border-blue-800/50' 
-                          : 'bg-amber-950/60 text-amber-300 border-amber-800/50')
-                  }`}>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-blue-950/60 text-blue-300 border-blue-800/50">
                     {entry.reason || 'Edited'}
                   </span>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="p-3 rounded-xl bg-[#0b1329]/50 border border-slate-800/50 text-center">
-              <p className="text-slate-500 text-xs italic">No date changes yet.</p>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
+      )}
+    </div>
+  );
+};
+
+// --- STEP: After Post (Final Step for Video 1 to 6) ---
+interface AfterPostFormProps {
+  videoNumber: number;
+  record: StatusTrackingRecord;
+  existingData?: any;
+  onSave: (data: any, completed?: boolean) => Promise<any> | void;
+}
+
+const AfterPostForm: React.FC<AfterPostFormProps> = ({
+  videoNumber,
+  record,
+  existingData = {},
+  onSave
+}) => {
+  const platforms = ['Instagram', 'YouTube', 'Facebook'];
+  const [platform, setPlatform] = useState(existingData.platform || 'Instagram');
+  const [postLink, setPostLink] = useState(
+    existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : '')
+  );
+  const [postedAt, setPostedAt] = useState(
+    existingData.postedAt 
+      ? formatForDateTimeInput(existingData.postedAt) 
+      : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const isAlreadyCompleted = existingData.confirmed_live === true || existingData.completed === true;
+
+  const handleOpenLiveVideo = () => {
+    if (!postLink || !postLink.trim()) {
+      toast.error('Please enter a live post URL first.');
+      return;
+    }
+    let url = postLink.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `https://${url}`;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleSaveAfterPost = async () => {
+    if (!postLink || !postLink.trim() || isFakeUrl(postLink)) {
+      toast.error(`Please enter a valid Video ${videoNumber} live post link.`);
+      return;
+    }
+    if (!postedAt || !postedAt.trim()) {
+      toast.error('Please select the posting date and time.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const payload = {
+        ...existingData,
+        platform,
+        link: postLink.trim(),
+        postedAt: postedAt.trim(),
+        confirmed_live: true,
+        confirmed: true,
+        completed: true,
+        completed_at: new Date().toISOString(),
+        suppressDefaultToast: true
+      };
+
+      const saveRes = await onSave(payload, true);
+      if (saveRes && saveRes.success === false) {
+        toast.error('Failed to save After Post details: ' + (saveRes.error || 'Unknown error'));
+        setIsSaving(false);
+        return;
+      }
+
+      logActivity({
+        department: 'Marketing',
+        action: 'After Post Completed',
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} marked live with link: ${postLink.trim()}`,
+        metadata: { video_number: videoNumber, platform, link: postLink.trim(), posted_at: postedAt.trim() }
+      });
+
+      toast.success(`Video ${videoNumber} marked as Live & Completed! Workflow finished.`);
+    } catch (err: any) {
+      console.error('Error saving after post details:', err);
+      toast.error('Failed to save After Post details: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
+      {/* Header Info */}
+      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h5 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <Radio size={16} className="text-emerald-400" />
+            Live Post Management (Video {videoNumber})
+          </h5>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Record the live social media post details to complete the workflow.
+          </p>
+        </div>
+        {isAlreadyCompleted && (
+          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5">
+            <Check size={13} strokeWidth={2.5} />
+            Completed
+          </span>
+        )}
       </div>
 
-      {/* 3. LIVE POST CONFIRMATION & DETAILS */}
-      <div className="pt-4 border-t border-slate-800 space-y-5">
-        <div className="flex items-center gap-3 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
-          <input 
-            type="checkbox" 
-            id={`post-live-video-${videoNumber}`}
-            checked={confirmedLive}
-            onChange={(e) => setConfirmedLive(e.target.checked)}
-            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
-          />
-          <label htmlFor={`post-live-video-${videoNumber}`} className="text-sm font-medium text-slate-200 cursor-pointer">
-            Video {videoNumber} is confirmed live and active on the platform.
+      <div className="space-y-5">
+        {/* 1. Platform Selector */}
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
+            Select Platform *
           </label>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Select Platform</label>
-            <div className="flex gap-3 max-w-md">
-              {platforms.map(p => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPlatform(p)}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-colors ${
-                    platform === p ? 'bg-blue-600 border-blue-500 text-white shadow-md' : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:border-slate-700'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Final Post Link</label>
-              <input 
-                type="text" 
-                value={postLink} 
-                onChange={e => setPostLink(e.target.value)} 
-                placeholder="https://www.instagram.com/reel/..."
-                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Posting Date & Time</label>
-              <input 
-                type="datetime-local" 
-                value={postedAt} 
-                onChange={e => setPostedAt(e.target.value)} 
-                className="w-full bg-[#0b1329] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
-              />
-            </div>
+          <div className="flex gap-3 max-w-md">
+            {platforms.map(p => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPlatform(p)}
+                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                  platform === p 
+                    ? 'bg-blue-600 border-blue-500 text-white shadow-md' 
+                    : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="flex justify-end pt-2 border-t border-slate-800">
-          <button 
-            type="button"
-            onClick={handleSaveLiveDetails} 
-            disabled={isSavingLiveDetails}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer"
-          >
-            {isSavingLiveDetails ? (
-              <>
-                <Loader2 size={16} className="animate-spin text-white" />
-                <span>Confirming Video {videoNumber} Post Date...</span>
-              </>
-            ) : (
-              <>
-                <Check size={16} strokeWidth={2.5} />
-                <span>CONFIRM POST DATE</span>
-              </>
-            )}
-          </button>
+        {/* 2. Live Post URL / Link with 'Open Live Video' button */}
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
+            Live Post URL / Link *
+          </label>
+          <div className="flex items-center gap-2">
+            <input 
+              type="text" 
+              value={postLink} 
+              onChange={e => setPostLink(e.target.value)} 
+              placeholder={`https://www.${platform.toLowerCase()}.com/...`}
+              className="flex-1 bg-[#0b1329] border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
+            />
+            <button
+              type="button"
+              onClick={handleOpenLiveVideo}
+              disabled={!postLink.trim()}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-blue-400 hover:text-blue-300 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+              title="Open link in new tab"
+            >
+              <ExternalLink size={14} />
+              <span>Open Live Video</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3. Posted Date & Time */}
+        <div>
+          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
+            Posted Date & Time *
+          </label>
+          <input 
+            type="datetime-local" 
+            value={postedAt} 
+            onChange={e => setPostedAt(e.target.value)} 
+            className="w-full max-w-md bg-[#0b1329] border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
+          />
         </div>
       </div>
 
+      {/* 4. Action Button */}
+      <div className="flex justify-end pt-3 border-t border-slate-800">
+        <button 
+          type="button"
+          onClick={handleSaveAfterPost} 
+          disabled={isSaving}
+          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer"
+        >
+          {isSaving ? (
+            <>
+              <Loader2 size={16} className="animate-spin text-white" />
+              <span>Saving...</span>
+            </>
+          ) : (
+            <>
+              <Check size={16} strokeWidth={2.5} />
+              <span>Mark as Live / Completed</span>
+            </>
+          )}
+        </button>
+      </div>
     </div>
   );
 };

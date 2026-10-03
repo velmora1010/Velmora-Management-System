@@ -647,56 +647,61 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         (r.dispatch?.influencer_code && r.dispatch.influencer_code.toLowerCase() === influencerUsername.toLowerCase())
       ) || createFallbackRecord(inf, campaign);
 
-      for (const cd of canonicalDates) {
-        const vNum = cd.video_number;
-        const drDate = cd.draft_date;
-        const fpDate = cd.post_date;
-
-        // Check for legitimate Re-Draft timeline in matching status tracking record without overriding normal dates
+      for (let vNum = 1; vNum <= 6; vNum++) {
+        const cd = canonicalDates.find(c => c.video_number === vNum);
+        let manualDraftDate = '';
+        let manualPostDate = '';
         let effectiveReDraftDate = '';
+
         if (matchingRecord) {
           try {
             const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
-            const tlStep = vWorkflow.steps?.timeline;
-            if (tlStep?.data?.is_re_upload_timeline === true || !!tlStep?.data?.re_draft_submit_date || vWorkflow.isReDraftRequired) {
-              const rdDate = tlStep?.data?.date || tlStep?.data?.re_draft_submit_date;
-              if (rdDate) {
-                effectiveReDraftDate = parseDateOnly(rdDate, 2026);
-              }
+            const dStep = vWorkflow.steps?.draft;
+            const pdStep = vWorkflow.steps?.post_date;
+
+            // Manual Draft Submit Date from draft step attempts or state
+            const rawDraftSubmit = dStep?.data?.draft_submit_date || 
+              (Array.isArray(dStep?.data?.attempts) && dStep.data.attempts[dStep.data.attempts.length - 1]?.draft_submit_date) || 
+              '';
+            if (rawDraftSubmit) {
+              manualDraftDate = parseDateOnly(rawDraftSubmit, 2026);
+            }
+
+            // Manual Post Date from post_date step
+            const rawPostDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date || '';
+            if (rawPostDate) {
+              manualPostDate = parseDateOnly(rawPostDate, 2026);
+            }
+
+            // Re-draft submit date
+            const rawReDraft = dStep?.data?.re_draft_submit_date || dStep?.data?.latest_re_draft_submit_date || '';
+            if (rawReDraft) {
+              effectiveReDraftDate = parseDateOnly(rawReDraft, 2026);
             }
           } catch (e) {}
         }
 
-        // Development logging for HIS1 (Requirement 20 & 23)
-        const codeUpper = String(inf.code || influencerUsername || '').toUpperCase();
-        if (codeUpper === 'HIS1' || codeUpper.includes('HIS1') || String(influencerName).toUpperCase().includes('KHANA_HI_KHANA')) {
-          console.log('[CalendarDateResolver]', {
-            campaignId: campaign.id,
-            influencerCode: inf.code || influencerUsername,
-            videoNumber: vNum,
-            canonicalDraftDate: drDate,
-            canonicalPostDate: fpDate,
-            workflowDraftDate: effectiveReDraftDate || null,
-            workflowPostDate: null,
-            finalResolvedDraftDate: drDate,
-            finalResolvedPostDate: fpDate,
-            source: 'Campaign Influencer Basic Info / Post Date'
-          });
+        // Fallbacks from canonical dates if not found in workflow data
+        if (!manualDraftDate && cd?.draft_date) {
+          manualDraftDate = parseDateOnly(cd.draft_date, 2026);
+        }
+        if (!manualPostDate && cd?.post_date) {
+          manualPostDate = parseDateOnly(cd.post_date, 2026);
         }
 
-        // Push NORMAL Draft milestone
-        if (drDate) {
-          const key = `${infId}_v${vNum}_Timeline`;
+        // Push NORMAL Draft milestone ONLY if manually entered date exists
+        if (manualDraftDate) {
+          const key = `${infId}_v${vNum}_DraftSubmit`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
             list.push({
               id: `inf-${inf.id}-v${vNum}-draft`,
               recordId: infId,
               type: 'Draft',
-              label: `Video ${vNum} Draft`,
+              label: `Video ${vNum} Draft Submit`,
               icon: '🎬',
               colorClass: 'bg-purple-500/10 border border-purple-500/30 text-purple-400',
-              dateStr: drDate,
+              dateStr: manualDraftDate,
               influencerName,
               influencerUsername,
               influencerCode,
@@ -704,25 +709,25 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               avatarUrl,
               record: matchingRecord,
               videoNumber: vNum,
-              postDateStr: fpDate,
-              draftDateStr: drDate
+              postDateStr: manualPostDate,
+              draftDateStr: manualDraftDate
             });
           }
         }
 
-        // Push NORMAL Final Post milestone
-        if (fpDate) {
-          const key = `${infId}_v${vNum}_FinalPost`;
+        // Push NORMAL Post Date milestone ONLY if manually entered date exists
+        if (manualPostDate) {
+          const key = `${infId}_v${vNum}_PostDate`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
             list.push({
-              id: `inf-${inf.id}-v${vNum}-finalpost`,
+              id: `inf-${inf.id}-v${vNum}-postdate`,
               recordId: infId,
               type: 'Final Post',
-              label: `Video ${vNum} Final Post`,
+              label: `Video ${vNum} Post Date`,
               icon: '🚀',
               colorClass: 'bg-blue-500/10 border border-blue-500/30 text-blue-400',
-              dateStr: fpDate,
+              dateStr: manualPostDate,
               influencerName,
               influencerUsername,
               influencerCode,
@@ -730,14 +735,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               avatarUrl,
               record: matchingRecord,
               videoNumber: vNum,
-              postDateStr: fpDate,
-              draftDateStr: drDate
+              postDateStr: manualPostDate,
+              draftDateStr: manualDraftDate
             });
           }
         }
 
         // Push legitimate Re-Draft milestone if present and different from normal draft
-        if (effectiveReDraftDate && effectiveReDraftDate !== drDate) {
+        if (effectiveReDraftDate && effectiveReDraftDate !== manualDraftDate) {
           const reDraftKey = `${infId}_v${vNum}_ReDraft`;
           if (!seenEventKeys.has(reDraftKey)) {
             seenEventKeys.add(reDraftKey);
@@ -756,7 +761,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               avatarUrl,
               record: matchingRecord,
               videoNumber: vNum,
-              postDateStr: fpDate,
+              postDateStr: manualPostDate,
               draftDateStr: effectiveReDraftDate
             });
           }

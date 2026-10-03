@@ -118,42 +118,18 @@ export const formatDisplayDateLocal = (dateStr: string | null | undefined, defau
  *      20 Sep 2026 -> 23 Sep 2026
  *      21 Sep 2026 -> 24 Sep 2026
  */
-export const calculatePostDateFromDraft = (draftDateStr: string | null | undefined, defaultYear = 2026): string => {
-  const ymd = parseToYMD(draftDateStr, defaultYear);
-  if (!ymd) return '';
-  const parts = ymd.split('-');
-  if (parts.length !== 3) return '';
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  const d = parseInt(parts[2], 10);
-  if (isNaN(y) || isNaN(m) || isNaN(d)) return '';
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + 3);
-  const resY = dt.getUTCFullYear();
-  const resM = String(dt.getUTCMonth() + 1).padStart(2, '0');
-  const resD = String(dt.getUTCDate()).padStart(2, '0');
-  return `${resY}-${resM}-${resD}`;
+/**
+ * Manual dates only - automatic Post Date calculation from Draft Date (+3 days) disabled per specification.
+ */
+export const calculatePostDateFromDraft = (_draftDateStr: string | null | undefined, _defaultYear = 2026): string => {
+  return '';
 };
 
 /**
- * Calculates Draft Date from Post Date using calendar-safe date arithmetic:
- * Draft Date = Post Date - 3 CALENDAR DAYS
+ * Manual dates only - automatic Draft Date calculation from Post Date (-3 days) disabled per specification.
  */
-export const calculateDraftDate = (postDateStr: string | null | undefined, defaultYear = 2026): string => {
-  const ymd = parseToYMD(postDateStr, defaultYear);
-  if (!ymd) return '';
-  const parts = ymd.split('-');
-  if (parts.length !== 3) return '';
-  const y = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  const d = parseInt(parts[2], 10);
-  if (isNaN(y) || isNaN(m) || isNaN(d)) return '';
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() - 3);
-  const resY = dt.getUTCFullYear();
-  const resM = String(dt.getUTCMonth() + 1).padStart(2, '0');
-  const resD = String(dt.getUTCDate()).padStart(2, '0');
-  return `${resY}-${resM}-${resD}`;
+export const calculateDraftDate = (_postDateStr: string | null | undefined, _defaultYear = 2026): string => {
+  return '';
 };
 
 /**
@@ -205,9 +181,7 @@ export const getCanonicalInfluencerPostDates = (
   return dates.map((d, i) => {
     const vNum = Number(d.video_number) || (i + 1);
     const postDateYmd = parseToYMD(d.post_date, defaultYear);
-    const draftDateYmd = d.draft_date 
-      ? parseToYMD(d.draft_date, defaultYear) 
-      : (postDateYmd ? calculateDraftDate(postDateYmd, defaultYear) : '');
+    const draftDateYmd = d.draft_date ? parseToYMD(d.draft_date, defaultYear) : '';
 
     return {
       video_number: vNum,

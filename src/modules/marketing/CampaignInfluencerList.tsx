@@ -6,14 +6,12 @@ import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { ImportPricingInfoModal } from '../../components/marketing/ImportPricingInfoModal';
-import { ImportPostDateModal } from '../../components/marketing/ImportPostDateModal';
 import { InfluencerActionMenu } from '../../components/marketing/InfluencerActionMenu';
 import { InfluencerQuickViewModal } from './InfluencerQuickViewModal';
 import { resolvePaymentMethodType } from '../../utils/influencerPaymentUtils';
 import { isArchived, isOtherStatus, isActiveStatus, InfluencerStatusType, isInfluencerDispatched, isInfluencerReDispatch } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 import { AddCampaignInfluencer, calculateInstagramViewCode, calculateFacebookViewCode, calculateYoutubeViewCode, formatDisplayDate, calculateDraftDate, parseProductsFromCombination, formatDisplayProductName, formatDisplayCombination, isVideoLabel, getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
-import { getCanonicalInfluencerPostDates } from '../../utils/influencerDateUtils';
 import { logActivity } from '../../services/activityService';
 import { BulkInfluencerImportModal } from '../../components/marketing/BulkInfluencerImportModal';
 import { ImportAutoDmModal } from '../../components/marketing/ImportAutoDmModal';
@@ -88,9 +86,9 @@ const InfluencerCard = ({
   onToggleSelect
 }: { 
   influencer: CampaignInfluencer, 
-  activeTab?: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate',
+  activeTab?: 'basic' | 'platform' | 'pricing' | 'products' | 'performance',
   currentSection?: 'active' | 'other' | 'recycle_bin',
-  onTabChange?: (tab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate') => void,
+  onTabChange?: (tab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance') => void,
   onView?: (inf: CampaignInfluencer) => void,
   onEdit?: (inf: CampaignInfluencer) => void,
   onPickList?: (inf: CampaignInfluencer) => void,
@@ -103,7 +101,7 @@ const InfluencerCard = ({
   isSelected?: boolean,
   onToggleSelect?: () => void
 }) => {
-  const [localActiveTab, setLocalActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>(parentActiveTab);
+  const [localActiveTab, setLocalActiveTab] = useState<'basic' | 'platform' | 'pricing' | 'products' | 'performance'>(parentActiveTab || 'basic');
 
   useEffect(() => {
     if (parentActiveTab) {
@@ -241,8 +239,7 @@ City: ${influencer.city}`;
             { id: 'platform', label: 'Platform Details' },
             { id: 'pricing', label: 'Pricing Info' },
             { id: 'products', label: 'Products' },
-            { id: 'performance', label: 'Brand Performance' },
-            { id: 'postdate', label: 'Post Date' }
+            { id: 'performance', label: 'Brand Performance' }
           ].map(tab => (
             <button
               key={tab.id}
@@ -643,48 +640,7 @@ City: ${influencer.city}`;
                 );
                })()}
              </div>
-          )}
-
-          {activeTab === 'postdate' && (() => {
-            const canonicalDates = getCanonicalInfluencerPostDates(influencer, 2026);
-
-            if (canonicalDates.length === 0) {
-              return (
-                <div className="text-slate-400 py-3 text-sm italic">
-                  No post dates scheduled.
-                </div>
-              );
-            }
-
-            return (
-              <div className="space-y-3">
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">POST DATE SCHEDULE</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {canonicalDates.map((d) => {
-                    return (
-                      <div key={d.video_number} className="bg-slate-950/60 border border-slate-800 rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="px-2 py-0.5 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-[11px] font-bold rounded">
-                            VIDEO {d.video_number}
-                          </span>
-                        </div>
-                        <div className="space-y-1.5 text-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-400">Post Date:</span>
-                            <span className="text-slate-200 font-medium font-mono">{d.formatted_post_date}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-400">Draft Date:</span>
-                            <span className="text-purple-300 font-medium font-mono">{d.formatted_draft_date}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
+           )}
         </div>
      </div>
   );
@@ -844,11 +800,11 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
     }
   };
 
-  const [cardActiveTabs, setCardActiveTabs] = useState<Record<string, 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'>>({});
+  const [cardActiveTabs, setCardActiveTabs] = useState<Record<string, 'basic' | 'platform' | 'pricing' | 'products' | 'performance'>>({});
 
   const handleCardTabChange = (
     influencer: CampaignInfluencer, 
-    newTab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance' | 'postdate'
+    newTab: 'basic' | 'platform' | 'pricing' | 'products' | 'performance'
   ) => {
     const codeKey = (influencer.code || (influencer as any).influencer_code || '').trim().toUpperCase();
     const idKey = String(influencer.id || '').trim();
@@ -901,7 +857,6 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
   const [isImportAutoDmModalOpen, setIsImportAutoDmModalOpen] = useState(false);
   const [isUploadPlatformModalOpen, setIsUploadPlatformModalOpen] = useState(false);
   const [isImportPricingModalOpen, setIsImportPricingModalOpen] = useState(false);
-  const [isImportPostDateModalOpen, setIsImportPostDateModalOpen] = useState(false);
   const [isImportMailAcceptanceModalOpen, setIsImportMailAcceptanceModalOpen] = useState(false);
   const [offerAgreementRefreshTrigger, setOfferAgreementRefreshTrigger] = useState(0);
   const [afterDispatchRefreshTrigger, setAfterDispatchRefreshTrigger] = useState(0);
@@ -1610,17 +1565,6 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
                   <span>Pricing Info</span>
                 </button>
 
-                <button 
-                  onClick={() => {
-                    setIsUploadDropdownOpen(false);
-                    setIsImportPostDateModalOpen(true);
-                  }}
-                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-200 hover:bg-purple-600 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
-                >
-                  <Upload size={13} className="text-purple-400" />
-                  <span>Post Date</span>
-                </button>
-
                 {mainViewMode === 'offer_agreement' && (
                   <button 
                     onClick={() => {
@@ -2093,18 +2037,6 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           onClose={() => setIsImportPricingModalOpen(false)}
           onSuccess={async () => {
             setIsImportPricingModalOpen(false);
-            await refresh();
-          }}
-        />
-      )}
-
-      {isImportPostDateModalOpen && (
-        <ImportPostDateModal
-          campaign={campaign}
-          existingInfluencers={influencers}
-          onClose={() => setIsImportPostDateModalOpen(false)}
-          onSuccess={async () => {
-            setIsImportPostDateModalOpen(false);
             await refresh();
           }}
         />

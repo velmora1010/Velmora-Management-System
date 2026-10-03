@@ -20,6 +20,7 @@ export type WorkflowStateKey =
   | 'draft'
   | 'post_date'
   | 'payment'
+  | 'after_post'
   | 'completed';
 
 export interface WorkflowStepHelpers {
@@ -32,6 +33,7 @@ export interface WorkflowStepHelpers {
   isDraftCompleted?: (r: any, v: number) => boolean;
   isPostDateCompleted?: (r: any, v: number) => boolean;
   isPaymentCompleted?: (r: any, v: number) => boolean;
+  isAfterPostCompleted?: (r: any, v: number) => boolean;
   getDeliveryStatus?: (r: any) => string;
   isVideoStarted?: (r: any, v: number) => boolean;
 }
@@ -260,6 +262,10 @@ export function getCurrentWorkflowState(
     ? helpers.isPaymentCompleted(record, videoNumber)
     : false;
 
+  const isAfterPostCompleted = helpers?.isAfterPostCompleted
+    ? helpers.isAfterPostCompleted(record, videoNumber)
+    : false;
+
   // True NOT STARTED: NO workflow step has been completed for this influencer/video
   const hasAnyStepCompleted = Boolean(
     isDelivered || 
@@ -270,14 +276,15 @@ export function getCurrentWorkflowState(
     isTimelineCompleted || 
     isDraftCompleted || 
     isPostDateCompleted || 
-    isPaymentCompleted
+    isPaymentCompleted ||
+    isAfterPostCompleted
   );
 
   if (!hasAnyStepCompleted) {
     return 'not_started';
   }
 
-  if (!isDelivered) {
+  if (videoNumber === 1 && !isDelivered) {
     return 'not_started';
   }
 
@@ -288,54 +295,51 @@ export function getCurrentWorkflowState(
     }
   }
 
-  // 4. Share Script step
-  // Delivered completed, but Share Script NOT yet confirmed/completed:
-  // Belongs to 'delivered', MUST NOT appear in 'share_script'
-  if (!isScriptCompleted) {
-    return 'delivered';
+  // VIDEO 1 WORKFLOW:
+  // 1. Delivered -> 2. Share Script -> 3. Call Explain -> 4. Pay Advance -> 5. Draft -> 6. Post Date -> 7. After Post
+  if (videoNumber === 1) {
+    if (!isScriptCompleted) {
+      return 'delivered';
+    }
+    if (!isCallCompleted && !isCallSkipped) {
+      return 'share_script';
+    }
+    if (!isPayAdvanceCompleted) {
+      return isCallSkipped ? 'call_skipped' : 'call_explain';
+    }
+    if (!isDraftCompleted) {
+      return 'pay_advance';
+    }
+    if (!isPostDateCompleted) {
+      return 'draft';
+    }
+    if (!isAfterPostCompleted) {
+      return 'post_date';
+    }
+    return 'after_post';
   }
 
-  // 5. Call & Explain / Call Skipped
-  // Share Script completed, but Call Explain not completed or skipped:
+  // VIDEOS 2 TO 6 WORKFLOW:
+  // 1. Share Script -> 2. Call Explain -> 3. Draft -> 4. Post Date -> 5. Payment -> 6. After Post
+  if (!isScriptCompleted) {
+    return 'not_started';
+  }
   if (!isCallCompleted && !isCallSkipped) {
     return 'share_script';
   }
-
-  // 6. Pay Advance step
-  // Call completed or skipped, but Pay Advance not completed (and subsequent steps not completed):
-  if (!isPayAdvanceCompleted && !isTimelineCompleted && !isDraftCompleted && !isPostDateCompleted && !isPaymentCompleted) {
-    if (isCallSkipped) {
-      return 'call_skipped';
-    }
-    return 'call_explain';
+  if (!isDraftCompleted) {
+    return isCallSkipped ? 'call_skipped' : 'call_explain';
   }
-
-  // 7. Timeline step
-  // Pay Advance completed, but Timeline not completed (and subsequent steps not completed):
-  if (!isTimelineCompleted && !isDraftCompleted && !isPostDateCompleted && !isPaymentCompleted) {
-    return 'pay_advance';
-  }
-
-  // 8. Draft step
-  // Timeline completed, Draft not completed (and subsequent steps not completed):
-  if (!isDraftCompleted && !isPostDateCompleted && !isPaymentCompleted) {
+  if (!isPostDateCompleted) {
     return 'draft';
   }
-
-  // 9. Post Date step
-  // Draft completed, Post Date not completed (and subsequent steps not completed):
-  if (!isPostDateCompleted && !isPaymentCompleted) {
+  if (!isPaymentCompleted) {
     return 'post_date';
   }
-
-  // 10. Payment step (Video >= 2)
-  // Post Date completed, Payment not completed:
-  if (!isPaymentCompleted) {
-    return videoNumber >= 2 ? 'payment' : 'post_date';
+  if (!isAfterPostCompleted) {
+    return 'payment';
   }
-
-  // All completed (including Payment)
-  return 'payment';
+  return 'after_post';
 }
 
 /**
@@ -357,6 +361,7 @@ export function getStepCompletion(
   if (stepId === 'draft') return helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false;
   if (stepId === 'post_date') return helpers?.isPostDateCompleted ? helpers.isPostDateCompleted(record, videoNumber) : false;
   if (stepId === 'payment') return helpers?.isPaymentCompleted ? helpers.isPaymentCompleted(record, videoNumber) : false;
+  if (stepId === 'after_post') return helpers?.isAfterPostCompleted ? helpers.isAfterPostCompleted(record, videoNumber) : false;
   return false;
 }
 
