@@ -116,6 +116,7 @@ export const getUniqueFilterOptions = (values: (string | null | undefined)[]): s
 export const normalizeWorkflowStepId = (val: string): string => {
   if (!val) return '';
   const s = val.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.includes('draftapproval') || s === 'draftapprovalpending' || s === 'draft_approval_pending') return 'draft_approval_pending';
   if (s.includes('sharescript') || s === 'script') return 'share_script';
   if (s.includes('callexplain') || s.includes('call') || s.includes('explain')) return 'call_explain';
   if (s.includes('advance') || s.includes('payadvance')) return 'pay_advance';

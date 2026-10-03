@@ -40,6 +40,8 @@ import {
   STATUS_TRACKING_WORKFLOW_STATUSES,
   STATUS_TRACKING_DELIVERY_STATUSES
 } from '../../components/marketing/StatusTrackingFilterDrawer';
+import { getSingleVideoPrices, cleanPriceNumber } from './CampaignInfluencerList';
+import { isAutoDmConnected } from '../../components/marketing/InfluencerFilterDrawer';
 import { areFilterValuesEqual, getUniqueFilterOptions } from '../../utils/filterUtils';
 import { 
   shipmentAttemptService, 
@@ -71,6 +73,7 @@ export type WorkflowStepKey = 'delivery' | 'video1' | 'video2' | 'video3' | 'vid
 export const normalizeWorkflowStepId = (val: string): string => {
   if (!val) return '';
   const s = val.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.includes('draftapproval') || s === 'draftapprovalpending' || s === 'draft_approval_pending') return 'draft_approval_pending';
   if (s.includes('sharescript') || s === 'script') return 'share_script';
   if (s.includes('callexplain') || s.includes('call') || s.includes('explain')) return 'call_explain';
   if (s.includes('advance') || s.includes('payadvance')) return 'pay_advance';
@@ -87,6 +90,7 @@ export const normalizeWorkflowStepId = (val: string): string => {
 export const normalizeWorkflowStepLabel = (val: string): string => {
   const id = normalizeWorkflowStepId(val);
   switch (id) {
+    case 'draft_approval_pending': return 'Draft Approval Pending';
     case 'share_script': return 'Share Script';
     case 'call_explain': return 'Call & Explain';
     case 'pay_advance': return 'Pay Advance';
@@ -514,6 +518,79 @@ export const getInfluencerAssignedVideos = (record: StatusTrackingRecord): numbe
     assignedVideosCache.set(record, result);
   }
   return result;
+};
+
+export const getStatusTrackingInfluencerPrices = (record: StatusTrackingRecord): number[] => {
+  const prices: number[] = [];
+  
+  if (record.influencer) {
+    const infPrices = getSingleVideoPrices(record.influencer);
+    infPrices.forEach(p => {
+      if (!prices.includes(p)) prices.push(p);
+    });
+  }
+
+  if (record.pricing) {
+    const pseudoInf = { pricing: record.pricing } as any;
+    const recPrices = getSingleVideoPrices(pseudoInf);
+    recPrices.forEach(p => {
+      if (!prices.includes(p)) prices.push(p);
+    });
+  }
+
+  // Also check if any per-video price was resolved
+  const assigned = getInfluencerAssignedVideos(record);
+  for (const vNum of assigned) {
+    const vPrice = getInfluencerVideoPrice(record.influencer, vNum);
+    if (vPrice !== null && !prices.includes(vPrice)) {
+      prices.push(vPrice);
+    }
+  }
+
+  return prices;
+};
+
+export const matchesPriceRange = (price: number, rangeId: string): boolean => {
+  if (price === null || price === undefined || isNaN(price)) return false;
+  switch (rangeId) {
+    case 'below_1000':
+      return price >= 0 && price < 1000;
+    case '1000_2000':
+      return price >= 1000 && price <= 2000;
+    case '2000_3000':
+      return price > 2000 && price <= 3000;
+    case '3000_4000':
+      return price > 3000 && price <= 4000;
+    case '4000_5000':
+      return price > 4000 && price <= 5000;
+    case '5000_6000':
+      return price > 5000 && price <= 6000;
+    case '6000_7000':
+      return price > 6000 && price <= 7000;
+    case '7000_8000':
+      return price > 7000 && price <= 8000;
+    case '8000_9000':
+      return price > 8000 && price <= 9000;
+    case '9000_10000':
+      return price > 9000 && price <= 10000;
+    case 'above_10000':
+      return price > 10000;
+    default:
+      return false;
+  }
+};
+
+export const getInfluencerAutoDmValue = (record: StatusTrackingRecord): any => {
+  return record.influencer?.auto_dm ?? 
+         record.influencer?.auto_dm_tool ?? 
+         record.dispatch?.auto_dm ?? 
+         (record as any)?.auto_dm ?? 
+         (record as any)?.auto_dm_tool;
+};
+
+export const isRecordAutoDmEnabled = (record: StatusTrackingRecord): boolean => {
+  const val = getInfluencerAutoDmValue(record);
+  return isAutoDmConnected(val);
 };
 
 export const getInfluencerCategories = (record: StatusTrackingRecord): string[] => {
@@ -1890,6 +1967,13 @@ export const getInfluencerDraftStatus = (record: StatusTrackingRecord, videoNumb
   return 'not_started';
 };
 
+export const isInfluencerDraftApprovalPending = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+  return getInfluencerDraftStatus(record, videoNumber) === 'pending_approval';
+};
+
 /**
  * Checks if Post Date step has actually been completed/confirmed.
  */
@@ -3136,6 +3220,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     count += activeFilters.workflowStatuses.length;
     count += activeFilters.platforms.length;
     count += activeFilters.deliveryStatuses.length;
+    if (activeFilters.autoDmStatus && activeFilters.autoDmStatus !== 'all') count += 1;
     if (selectedSummaryStep) count += 1;
     return count;
   }, [activeFilters, selectedSummaryStep]);
@@ -3499,8 +3584,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     return Array.from(statuses);
   }, [activeTrackingRecords]);
 
-  // Filtered influencers based on user selections across 7 sections + search
-  const filteredRecords = useMemo(() => {
+  // 1. Base filtered records: activeFilters across 8 sections + search (excludes top summary step box for dynamic counts)
+  const baseFilteredRecords = useMemo(() => {
     return activeTrackingRecords.filter(record => {
       const dispatch = record.dispatch || ({} as any);
 
@@ -3523,16 +3608,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matchesLanguage) return false;
       }
 
-      // 3. Price filter (OR within section)
+      // 3. Price filter (Checks if AT LEAST ONE individual video price falls in range, using exact same source as Campaign Influencer)
       if (activeFilters.priceRanges.length > 0) {
-        const price = getInfluencerCampaignTotalPrice(record.influencer, record.pricing);
-        if (price === null || isNaN(price)) {
+        const prices = getStatusTrackingInfluencerPrices(record);
+        if (prices.length === 0) {
           return false;
         }
         const matchesPrice = activeFilters.priceRanges.some(rangeId => {
-          const range = STATUS_TRACKING_PRICE_RANGES.find(r => r.id === rangeId);
-          if (!range) return false;
-          return price >= range.min && price <= range.max;
+          return prices.some(price => matchesPriceRange(price, rangeId));
         });
         if (!matchesPrice) return false;
       }
@@ -3559,6 +3642,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           const activeStepId = vData.activeStepId;
           const matches = activeFilters.workflowStatuses.some(st => {
             const norm = normalizeWorkflowStepId(st);
+            if (norm === 'draft_approval_pending') {
+              return isInfluencerDraftApprovalPending(record, selectedVideoNumber);
+            }
             if (norm === activeStepId) return true;
             if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
             if (norm === 'pay_advance' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
@@ -3591,7 +3677,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matchesDelivery) return false;
       }
 
-      // 8. Search query (AND with all filters)
+      // 8. Auto DM filter (all, enabled, disabled)
+      if (activeFilters.autoDmStatus && activeFilters.autoDmStatus !== 'all') {
+        const isEnabled = isRecordAutoDmEnabled(record);
+        if (activeFilters.autoDmStatus === 'enabled' && !isEnabled) return false;
+        if (activeFilters.autoDmStatus === 'disabled' && isEnabled) return false;
+      }
+
+      // 9. Search query (AND with all filters)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const name = (dispatch.influencer_name || '').toLowerCase();
@@ -3603,21 +3696,20 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matches) return false;
       }
 
-      // 9. Top summary step box filter (All, Delivered, Not Started, Share Script, Call Explain, Call Skipped, Time Line, Draft, Post Date, Re-Dispatch, Payment)
-      if (selectedSummaryStep) {
-        if (!isStepFilterMatch(selectedSummaryStep, record, selectedVideoNumber)) {
-          return false;
-        }
-      }
-
       return true;
     });
-  }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber, selectedSummaryStep]);
+  }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber]);
 
-  // Dynamic workflow step counts for horizontal summary boxes based on CURRENTLY SELECTED VIDEO
+  // 2. Final filtered records: incorporates top horizontal summary step box selection
+  const filteredRecords = useMemo(() => {
+    if (!selectedSummaryStep) return baseFilteredRecords;
+    return baseFilteredRecords.filter(record => isStepFilterMatch(selectedSummaryStep, record, selectedVideoNumber));
+  }, [baseFilteredRecords, selectedSummaryStep, selectedVideoNumber]);
+
+  // Dynamic workflow step counts for horizontal summary boxes based on CURRENTLY SELECTED VIDEO & active filters
   const workflowStepCounts = useMemo(() => {
-    return validateFilterCounts(activeTrackingRecords, selectedVideoNumber);
-  }, [activeTrackingRecords, selectedVideoNumber]);
+    return validateFilterCounts(baseFilteredRecords, selectedVideoNumber);
+  }, [baseFilteredRecords, selectedVideoNumber]);
 
   // Bulk Sync New Scripts across all active influencers safely without overwriting manual customizations
   const [isSyncingScripts, setIsSyncingScripts] = useState<boolean>(false);
@@ -3854,16 +3946,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const workflowStepOptions = useMemo(() => {
     if ((selectedWorkflowStep as any) === 'delivery') {
       return [
-        { id: 'all', label: 'All Steps', count: activeTrackingRecords.length },
-        { id: 'not_delivered', label: 'Not Delivered', count: activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Not Delivered').length },
-        { id: 'delivered', label: 'Delivered', count: activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivered').length },
-        { id: 'delivery_confirmed', label: 'Delivery Confirmed', count: activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivery Confirmed').length },
+        { id: 'all', label: 'All Steps', count: baseFilteredRecords.length },
+        { id: 'not_delivered', label: 'Not Delivered', count: baseFilteredRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Not Delivered').length },
+        { id: 'delivered', label: 'Delivered', count: baseFilteredRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivered').length },
+        { id: 'delivery_confirmed', label: 'Delivery Confirmed', count: baseFilteredRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivery Confirmed').length },
       ];
     }
     const configs = getVideoWorkflowConfigs(selectedVideoNumber);
     const activeStepCounts: Record<string, number> = {};
-    for (let i = 0; i < activeTrackingRecords.length; i++) {
-      const vData = getVideoWorkflow(activeTrackingRecords[i], selectedVideoNumber);
+    for (let i = 0; i < baseFilteredRecords.length; i++) {
+      const vData = getVideoWorkflow(baseFilteredRecords[i], selectedVideoNumber);
       if (vData.activeStepId) {
         activeStepCounts[vData.activeStepId] = (activeStepCounts[vData.activeStepId] || 0) + 1;
       }
@@ -3879,11 +3971,33 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     });
 
+    const draftApprovalPendingCount = baseFilteredRecords.filter(r => 
+      isInfluencerDraftApprovalPending(r, selectedVideoNumber)
+    ).length;
+
     return [
-      { id: 'all', label: 'All Steps', count: activeTrackingRecords.length },
-      ...base
+      { id: 'all', label: 'All Steps', count: baseFilteredRecords.length },
+      ...base,
+      { id: 'draft_approval_pending', label: 'Draft Approval Pending', count: draftApprovalPendingCount }
     ];
-  }, [selectedWorkflowStep, selectedVideoNumber, activeTrackingRecords]);
+  }, [selectedWorkflowStep, selectedVideoNumber, baseFilteredRecords]);
+
+  // Dynamic Auto DM counts for current video context
+  const autoDmCounts = useMemo(() => {
+    let enabled = 0;
+    let disabled = 0;
+    // Calculate from records participating in selectedVideoNumber
+    const videoAssigned = activeTrackingRecords.filter(r => getInfluencerAssignedVideos(r).includes(selectedVideoNumber));
+    videoAssigned.forEach(r => {
+      if (isRecordAutoDmEnabled(r)) enabled++;
+      else disabled++;
+    });
+    return {
+      all: videoAssigned.length,
+      enabled,
+      disabled
+    };
+  }, [activeTrackingRecords, selectedVideoNumber]);
 
   // Matching counts for toolbar badge indicators
   const matchingWorkflowCount = useMemo(() => {
@@ -3899,6 +4013,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         const activeStepId = vData.activeStepId;
         return activeFilters.workflowStatuses.some(st => {
           const norm = normalizeWorkflowStepId(st);
+          if (norm === 'draft_approval_pending') {
+            return isInfluencerDraftApprovalPending(record, selectedVideoNumber);
+          }
           if (norm === activeStepId) return true;
           if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
           if (norm === 'pay_advance' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
@@ -6051,11 +6168,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           deliveryStatuses: availableFilterDeliveryStatuses,
           workflowSteps: workflowStepOptions,
           deliveryStatusCounts: {
-            'Not Delivered': activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Not Delivered').length,
-            'Delivered': activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivered').length,
-            'Delivery Confirmed': activeTrackingRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivery Confirmed').length,
+            'Not Delivered': baseFilteredRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Not Delivered').length,
+            'Delivered': baseFilteredRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivered').length,
+            'Delivery Confirmed': baseFilteredRecords.filter(r => getInfluencerDeliveryStatus(r) === 'Delivery Confirmed').length,
           },
-          totalCount: activeTrackingRecords.length
+          autoDmCounts,
+          totalCount: baseFilteredRecords.length
         }}
       />
 
@@ -6277,6 +6395,37 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             {videoStatusBadge}
           </div>
         </div>
+      </div>
+
+      {/* Step Stepper Tabs - Allows clicking ANY step at any time for this video */}
+      <div className="flex items-center gap-2 p-2 bg-[#0b1329] border border-slate-800 rounded-xl overflow-x-auto shrink-0 [scrollbar-width:thin]">
+        {videoData.configs.map((cfg) => {
+          const isSelected = cfg.id === selectedVideoStepId;
+          const vState = getStepVisualState(record, videoNumber, cfg.id);
+          const vStyles = getStepVisualStyles(vState);
+          const StepIcon = cfg.icon;
+
+          return (
+            <button
+              key={cfg.id}
+              type="button"
+              onClick={() => {
+                setSelectedVideoStepId(cfg.id);
+                onStepChange?.(cfg.id);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                isSelected 
+                  ? 'bg-blue-600 text-white shadow-md' 
+                  : 'bg-[#070c18] text-slate-400 hover:text-slate-200 hover:bg-slate-800/80 border border-slate-800'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : vStyles.badgeDot}`} />
+              <StepIcon size={13} />
+              <span>{cfg.shortLabel || cfg.label}</span>
+              {vState === 'completed' && <Check size={12} strokeWidth={2.5} className={isSelected ? 'text-white' : 'text-emerald-400'} />}
+            </button>
+          );
+        })}
       </div>
 
       {/* 2. ACTIVE STEP FOCUSED WORKFLOW PANEL - Exclusively renders ONLY the selected step */}
@@ -9450,11 +9599,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
 
   // Form State
-  const [appStat, setAppStat] = useState<'Approved' | 'Not Approved' | ''>(
-    (activeAttempt?.approval_status === 'Approved' || activeAttempt?.approval_status === 'Not Approved') 
+  const [appStat, setAppStat] = useState<'Approved' | 'Not Approved' | 'Pending Approval' | ''>(
+    activeAttempt?.approval_status 
       ? activeAttempt.approval_status 
-      : (existingData.approval_status || '')
+      : (existingData.approval_status || (activeAttempt?.video_url ? 'Pending Approval' : ''))
   );
+
+  useEffect(() => {
+    if (activeAttempt?.approval_status) {
+      setAppStat(activeAttempt.approval_status);
+    } else if (existingData.approval_status) {
+      setAppStat(existingData.approval_status);
+    } else if (activeAttempt?.video_url) {
+      setAppStat('Pending Approval');
+    }
+  }, [activeAttempt?.approval_status, existingData.approval_status, activeAttempt?.video_url]);
   const [corr, setCorr] = useState(activeAttempt?.corrections || existingData.corr || '');
   const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
   const [finalD, setFinalD] = useState(activeAttempt?.final_description || existingData.finalD || '');
@@ -9751,7 +9910,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     }
   };
 
-  // Save Approval Details (Approved or Not Approved)
+  // Save Approval Details (Approved, Pending Approval, or Not Approved)
   const handleSaveApproval = async () => {
     if (!activeAttempt && !initialUrl) {
       toast.error('No draft video submitted yet. Please upload a draft video first.');
@@ -9759,7 +9918,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     }
 
     if (!appStat) {
-      toast.error('Please select either "Approved" or "Not Approved".');
+      toast.error('Please select an approval status (Approved, Pending Approval, or Not Approved).');
       return;
     }
 
@@ -9792,8 +9951,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
       if (idx === attempts.length - 1) {
         return {
           ...att,
-          approval_status: appStat,
-          corrections: appStat === 'Not Approved' ? corr : '',
+          approval_status: appStat as any,
+          corrections: appStat === 'Not Approved' ? corr : (appStat === 'Approved' ? '' : att.corrections),
           re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : undefined,
           final_product_link: isApproved ? finalL : att.final_product_link,
           final_description: isApproved ? finalD : att.final_description,
@@ -9823,10 +9982,12 @@ const DraftForm: React.FC<DraftFormProps> = ({
     setIsUploading(false);
 
     if (isApproved) {
-      toast.success('Draft approved! Video workflow unlocked and moved to Post Date.');
+      toast.success('Draft approved! Video workflow moved to Post Date.');
       if (onNavigateToPostDate) {
         onNavigateToPostDate();
       }
+    } else if (appStat === 'Pending Approval') {
+      toast.success('Draft saved as Pending Approval.');
     } else {
       toast.error('Draft marked as Not Approved. Re-Draft required.');
     }
@@ -10132,29 +10293,41 @@ const DraftForm: React.FC<DraftFormProps> = ({
               <label className="block text-[11px] font-bold text-slate-400 mb-2 uppercase tracking-wider">
                 Approval Status (Draft Attempt {activeAttempt?.attempt_number || 1})
               </label>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <button 
                   type="button"
                   onClick={() => setAppStat('Approved')}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 cursor-pointer ${
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
                     appStat === 'Approved' 
                       ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/30' 
-                      : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
+                      : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
                   }`}
                 >
-                  <Check size={15} />
+                  <Check size={14} />
                   <span>Approved</span>
                 </button>
                 <button 
                   type="button"
-                  onClick={() => setAppStat('Not Approved')}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 cursor-pointer ${
-                    appStat === 'Not Approved' 
-                      ? 'bg-rose-600 border-rose-500 text-white shadow-lg shadow-rose-600/30' 
-                      : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700'
+                  onClick={() => setAppStat('Pending Approval')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                    appStat === 'Pending Approval' || (!appStat && activeAttempt?.video_url)
+                      ? 'bg-amber-600 border-amber-500 text-white shadow-lg shadow-amber-600/30' 
+                      : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
                   }`}
                 >
-                  <XCircle size={15} />
+                  <Clock size={14} />
+                  <span>Pending Approval</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setAppStat('Not Approved')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                    appStat === 'Not Approved' 
+                      ? 'bg-rose-600 border-rose-500 text-white shadow-lg shadow-rose-600/30' 
+                      : 'bg-[#0b1329] text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                  }`}
+                >
+                  <XCircle size={14} />
                   <span>Not Approved</span>
                 </button>
               </div>

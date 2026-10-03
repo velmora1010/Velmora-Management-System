@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   SlidersHorizontal, X, RotateCcw, Check, Video, Globe, 
-  IndianRupee, Tag, Activity, Share2, Truck, GitBranch 
+  IndianRupee, Tag, Activity, Share2, Truck, GitBranch, Sparkles 
 } from 'lucide-react';
 import { areFilterValuesEqual, normalizeWorkflowStepId } from '../../utils/filterUtils';
 
@@ -13,6 +13,7 @@ export interface StatusTrackingFilterState {
   workflowStatuses: string[];
   platforms: string[];
   deliveryStatuses: string[];
+  autoDmStatus: 'all' | 'enabled' | 'disabled';
 }
 
 export const initialStatusTrackingFilterState: StatusTrackingFilterState = {
@@ -22,11 +23,12 @@ export const initialStatusTrackingFilterState: StatusTrackingFilterState = {
   categories: [],
   workflowStatuses: [],
   platforms: [],
-  deliveryStatuses: []
+  deliveryStatuses: [],
+  autoDmStatus: 'all'
 };
 
 export const STATUS_TRACKING_PRICE_RANGES = [
-  { id: 'below_1000', label: 'Below ₹1,000', min: 0, max: 999 },
+  { id: 'below_1000', label: 'Below ₹1,000', min: 0, max: 1000 },
   { id: '1000_2000', label: '₹1,000 – ₹2,000', min: 1000, max: 2000 },
   { id: '2000_3000', label: '₹2,000 – ₹3,000', min: 2000, max: 3000 },
   { id: '3000_4000', label: '₹3,000 – ₹4,000', min: 3000, max: 4000 },
@@ -36,7 +38,7 @@ export const STATUS_TRACKING_PRICE_RANGES = [
   { id: '7000_8000', label: '₹7,000 – ₹8,000', min: 7000, max: 8000 },
   { id: '8000_9000', label: '₹8,000 – ₹9,000', min: 8000, max: 9000 },
   { id: '9000_10000', label: '₹9,000 – ₹10,000', min: 9000, max: 10000 },
-  { id: 'above_10000', label: 'Above ₹10,000', min: 10001, max: Infinity }
+  { id: 'above_10000', label: 'Above ₹10,000', min: 10000, max: Infinity }
 ];
 
 export const STATUS_TRACKING_WORKFLOW_STATUSES = [
@@ -52,6 +54,7 @@ export const STATUS_TRACKING_WORKFLOW_STEPS: { id: string; label: string; count?
   { id: 'call_explain', label: 'Call & Explain' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'draft', label: 'Draft' },
+  { id: 'draft_approval_pending', label: 'Draft Approval Pending' },
   { id: 'pay_advance', label: 'Advance Payment' },
   { id: 'payment', label: 'Payment' },
   { id: 'post_date', label: 'Post Date' }
@@ -71,6 +74,7 @@ export interface StatusTrackingFilterAvailableOptions {
   deliveryStatuses?: string[];
   workflowSteps?: { id: string; label: string; count?: number }[];
   deliveryStatusCounts?: Record<string, number>;
+  autoDmCounts?: { all: number; enabled: number; disabled: number };
   totalCount?: number;
 }
 
@@ -109,7 +113,8 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
       draft.categories.length > 0 ||
       draft.workflowStatuses.length > 0 ||
       draft.platforms.length > 0 ||
-      draft.deliveryStatuses.length > 0
+      draft.deliveryStatuses.length > 0 ||
+      (draft.autoDmStatus && draft.autoDmStatus !== 'all')
     );
   }, [draft]);
 
@@ -389,6 +394,78 @@ export const StatusTrackingFilterDrawer: React.FC<StatusTrackingFilterDrawerProp
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          <hr className="border-slate-800" />
+
+          {/* 3. AUTO DM */}
+          <div className="space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles size={14} />
+                <span>AUTO DM</span>
+              </div>
+              {draft.autoDmStatus && draft.autoDmStatus !== 'all' && (
+                <span className="text-[10px] text-purple-300 font-semibold bg-purple-900/40 px-2 py-0.5 rounded-full border border-purple-800/40">
+                  1 selected
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'all' }))}
+                className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between cursor-pointer ${
+                  draft.autoDmStatus === 'all' || !draft.autoDmStatus
+                    ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  {(draft.autoDmStatus === 'all' || !draft.autoDmStatus) && <Check size={12} />}
+                  <span>All Auto DM</span>
+                </div>
+                {availableOptions.autoDmCounts && (
+                  <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.all})</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'enabled' }))}
+                className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between cursor-pointer ${
+                  draft.autoDmStatus === 'enabled'
+                    ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  {draft.autoDmStatus === 'enabled' && <Check size={12} />}
+                  <span>Auto DM Enabled</span>
+                </div>
+                {availableOptions.autoDmCounts && (
+                  <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.enabled})</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDraft(prev => ({ ...prev, autoDmStatus: 'disabled' }))}
+                className={`p-2.5 text-xs rounded-lg border text-left transition-colors flex items-center justify-between cursor-pointer ${
+                  draft.autoDmStatus === 'disabled'
+                    ? 'bg-purple-600/25 border-purple-500 text-purple-300 font-semibold shadow-sm'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  {draft.autoDmStatus === 'disabled' && <Check size={12} />}
+                  <span>Auto DM Disabled</span>
+                </div>
+                {availableOptions.autoDmCounts && (
+                  <span className="text-[10px] text-slate-400">({availableOptions.autoDmCounts.disabled})</span>
+                )}
+              </button>
             </div>
           </div>
 

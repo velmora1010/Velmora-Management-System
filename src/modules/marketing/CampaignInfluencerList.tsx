@@ -690,6 +690,22 @@ City: ${influencer.city}`;
   );
 };
 
+export const cleanPriceNumber = (val: any): number | null => {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'number') {
+    return isNaN(val) ? null : val;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+    const cleaned = trimmed.replace(/[^0-9.]/g, '');
+    if (!cleaned) return null;
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? null : num;
+  }
+  return null;
+};
+
 export const getSingleVideoPrices = (influencer: CampaignInfluencer): number[] => {
   const prices: number[] = [];
   const p = influencer.pricing;
@@ -698,8 +714,9 @@ export const getSingleVideoPrices = (influencer: CampaignInfluencer): number[] =
   // 1. Check videos array in product_pricing
   if (Array.isArray(p.product_pricing?.videos) && p.product_pricing.videos.length > 0) {
     p.product_pricing.videos.forEach((v: any) => {
-      const amt = (v && typeof v === 'object') ? (v.amount !== undefined && v.amount !== null ? Number(v.amount) : 0) : (Number(v) || 0);
-      if (!isNaN(amt) && amt > 0) {
+      const raw = (v && typeof v === 'object') ? v.amount : v;
+      const amt = cleanPriceNumber(raw);
+      if (amt !== null && amt > 0) {
         prices.push(amt);
       }
     });
@@ -708,28 +725,27 @@ export const getSingleVideoPrices = (influencer: CampaignInfluencer): number[] =
   // 2. Check legacy video1_price & video2_price & product_pricing map
   if (prices.length === 0) {
     if (p.video1_price) {
-      const v1 = Number(p.video1_price);
-      if (!isNaN(v1) && v1 > 0) prices.push(v1);
+      const v1 = cleanPriceNumber(p.video1_price);
+      if (v1 !== null && v1 > 0) prices.push(v1);
     }
     if (p.video2_price) {
-      const v2 = Number(p.video2_price);
-      if (!isNaN(v2) && v2 > 0) prices.push(v2);
+      const v2 = cleanPriceNumber(p.video2_price);
+      if (v2 !== null && v2 > 0) prices.push(v2);
     }
     if (p.product_pricing && typeof p.product_pricing === 'object') {
       Object.entries(p.product_pricing).forEach(([key, val]: [string, any]) => {
         if (key !== 'videos' && val && typeof val === 'object' && val.price) {
-          const amt = Number(val.price);
-          if (!isNaN(amt) && amt > 0) prices.push(amt);
+          const amt = cleanPriceNumber(val.price);
+          if (amt !== null && amt > 0) prices.push(amt);
         }
-      }
-      );
+      });
     }
   }
 
   // 3. Fallback: if no individual video breakdown exists, fallback to final_price / commercial_quote
   if (prices.length === 0) {
-    const finalP = Number(p.final_price || (p as any)?.commercial_quote || 0);
-    if (!isNaN(finalP) && finalP > 0) {
+    const finalP = cleanPriceNumber(p.final_price ?? (p as any)?.commercial_quote);
+    if (finalP !== null && finalP > 0) {
       prices.push(finalP);
     }
   }
