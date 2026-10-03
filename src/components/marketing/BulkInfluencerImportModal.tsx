@@ -9,13 +9,21 @@ import {
   Loader2,
   FileCheck,
   AlertCircle,
-  HelpCircle
+  HelpCircle,
+  ArrowRight,
+  UserPlus,
+  RefreshCw,
+  Archive,
+  Sparkles,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { useCampaignInfluencers, notifyInfluencerChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { supabase } from '../../lib/supabase';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
+import { campaignInfluencerImportService, type CampaignInfluencerImportRowAudit } from '../../services/campaignInfluencerImportService';
 import toast from 'react-hot-toast';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { 
@@ -90,16 +98,29 @@ export const normalizeCode = (code: any): string => {
   return String(code || '').trim().toUpperCase();
 };
 
+export interface ImportSummaryData {
+  totalRows: number;
+  validRows: number;
+  newCount: number;
+  updatedCount: number;
+  archivedCount: number;
+  invalidCount: number;
+  invalidRows: ParsedRow[];
+}
+
 export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps> = ({
   campaign,
   existingInfluencers,
   onClose,
   onSuccess
 }) => {
-  const [step, setStep] = useState<'upload' | 'mapping' | 'preview' | 'importing'>('upload');
+  const [step, setStep] = useState<'upload' | 'mapping' | 'preview' | 'importing' | 'summary'>('upload');
   const [file, setFile] = useState<File | null>(null);
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
   const [rawRows, setRawRows] = useState<Record<string, any>[]>([]);
+  const [importSummary, setImportSummary] = useState<ImportSummaryData | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [showInvalidDetails, setShowInvalidDetails] = useState(false);
   const [mapping, setMapping] = useState<ColumnMapping>({
     codeCol: '',
     nameCol: '',
@@ -365,8 +386,6 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       }
     });
 
-    const seenCodesInFile = new Set<string>();
-
     // 1. Filter out completely blank rows, empty codes, and repeated header rows
     const cleanedRows = rows.filter((row) => {
       const rawCode = map.codeCol ? row[map.codeCol] : '';
@@ -398,17 +417,10 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       map.panNumberCol
     );
 
-    // 2. De-duplicate inside the file (keep first occurrence, ignore subsequent duplicates)
-    const uniqueFileRows: Record<string, any>[] = [];
-    cleanedRows.forEach((row) => {
-      const normCode = normalizeCode(row[map.codeCol]);
-      if (!seenCodesInFile.has(normCode)) {
-        seenCodesInFile.add(normCode);
-        uniqueFileRows.push(row);
-      }
-    });
+    // 2. Map all rows and flag duplicate codes in file as Invalid
+    const seenCodesInFile = new Set<string>();
 
-    const parsed: ParsedRow[] = uniqueFileRows.map((row) => {
+    const parsed: ParsedRow[] = cleanedRows.map((row) => {
       const normCode = normalizeCode(row[map.codeCol]);
       const code = normCode;
       const name = normalize(row[map.nameCol]);
@@ -563,6 +575,36 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           reason: 'Missing required Influencer Code'
         };
       }
+
+      if (seenCodesInFile.has(normCode)) {
+        return {
+          code: normCode,
+          name: name || '—',
+          userId: userId || '—',
+          phone,
+          altPhone,
+          email,
+          pincode,
+          upi,
+          city,
+          state,
+          address,
+          languages,
+          autoDm,
+          profileImg,
+          paymentMethod: parsedPayment.payment_method,
+          upiNumber: parsedPayment.upi_number,
+          accountHolderName: parsedPayment.account_holder_name,
+          accountNumber: parsedPayment.account_number,
+          ifscCode: parsedPayment.ifsc_code,
+          bankName: parsedPayment.bank_name,
+          panNumber: parsedPayment.pan_number,
+          hasExcelPaymentData,
+          status: 'Invalid',
+          reason: `Duplicate code in file (${normCode})`
+        };
+      }
+      seenCodesInFile.add(normCode);
 
       const existingRecord = existingCodeMap.get(normCode);
 
@@ -850,9 +892,10 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
   };
 
   const handleImport = async () => {
-    const validRows = parsedRows.filter(r => r.status === 'New');
-    const existingRows = parsedRows.filter(r => r.status === 'Existing');
-    const invalidCount = parsedRows.filter(r => r.status === 'Invalid').length;
+    let validRows = parsedRows.filter(r => r.status === 'New');
+    let existingRows = parsedRows.filter(r => r.status === 'Existing');
+    const invalidRows = parsedRows.filter(r => r.status === 'Invalid');
+    const invalidCount = invalidRows.length;
 
     const expectedExisting = existingRows.length;
     const expectedNew = validRows.length;
@@ -863,20 +906,60 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
       return;
     }
 
-    // Safety Assertion: If preview showed New = 0, validRows MUST be exactly 0
-    if (expectedNew === 0 && validRows.length > 0) {
-      toast.error('Safety violation: Preview indicated 0 new influencers, but detected rows to insert. Aborting to prevent duplicate creation.');
-      return;
-    }
-
     setStep('importing');
     setIsProcessing(true);
+    setImportError(null);
 
     let insertedCount = 0;
     let updatedCount = 0;
+    let archivedCount = 0;
+    let importId: string | null = null;
 
     try {
-      // 1. Insert New Influencers (ONLY if expectedNew > 0)
+      // 0. Initialize Import Record in Supabase
+      importId = await campaignInfluencerImportService.createImport({
+        campaignId: campaign.id,
+        fileName: file?.name || 'influencers_upload.xlsx',
+        fileType: file?.name.split('.').pop()?.toLowerCase() || 'excel',
+        totalRows: parsedRows.length,
+        validRows: expectedValid,
+        invalidRows: invalidCount
+      });
+
+      // Fetch fresh records from database directly to protect against any race conditions / duplicate insertions
+      const { data: dbExistingData, error: dbFetchErr } = await supabase
+        .from(SUPABASE_TABLES.influencersInfo)
+        .select('id, code, is_archived')
+        .eq('campaign_id', campaign.id);
+
+      if (dbFetchErr) {
+        console.warn('Could not fetch existing DB influencers during import verification:', dbFetchErr);
+      }
+
+      const dbCodeMap = new Map<string, any>();
+      (dbExistingData || []).forEach(r => {
+        const norm = normalizeCode(r.code);
+        if (norm) dbCodeMap.set(norm, r);
+      });
+
+      // Safety check: If any 'New' row actually exists in DB, promote it to existingRows so we NEVER insert duplicate codes
+      const safeValidRows: ParsedRow[] = [];
+      validRows.forEach(row => {
+        const norm = normalizeCode(row.code);
+        const match = dbCodeMap.get(norm);
+        if (match) {
+          existingRows.push({
+            ...row,
+            status: 'Existing',
+            existingId: match.id
+          });
+        } else {
+          safeValidRows.push(row);
+        }
+      });
+      validRows = safeValidRows;
+
+      // 1. Batch Insert New Influencers in chunks of 50
       if (validRows.length > 0) {
         let nextIdVal = await getMaxId(SUPABASE_TABLES.influencersInfo);
 
@@ -913,103 +996,100 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           };
         });
 
-        const { error: insertErr } = await supabase
-          .from(SUPABASE_TABLES.influencersInfo)
-          .insert(newRecords);
+        const INSERT_CHUNK = 50;
+        for (let i = 0; i < newRecords.length; i += INSERT_CHUNK) {
+          const chunk = newRecords.slice(i, i + INSERT_CHUNK);
+          const { error: insertErr } = await supabase
+            .from(SUPABASE_TABLES.influencersInfo)
+            .insert(chunk);
 
-        if (insertErr) {
-          console.error('Failed inserting bulk influencers:', insertErr);
-          throw new Error(`Failed to insert influencers: ${insertErr.message || JSON.stringify(insertErr)}`);
+          if (insertErr) {
+            console.error('Failed inserting bulk influencers chunk:', insertErr);
+            throw new Error(`Failed to insert influencers: ${insertErr.message || JSON.stringify(insertErr)}`);
+          }
         }
 
         insertedCount = newRecords.length;
       }
 
-      // 2. Safe Update for Existing Influencers (Never overwrite non-empty DB value with empty Excel cell!)
-      for (const row of existingRows) {
-        if (row.existingId) {
-          const updates: Record<string, any> = {};
+      // 2. Fast Concurrent Updates for Existing Influencers in batches of 20
+      const hasPaymentColumnsInFile = Boolean(
+        mapping.paymentModeCol || 
+        mapping.upiCol || 
+        mapping.paymentsCol || 
+        mapping.detailsCol || 
+        mapping.accountHolderCol || 
+        mapping.accountNumberCol || 
+        mapping.ifscCol || 
+        mapping.bankNameCol || 
+        mapping.panNumberCol
+      );
 
-          if (row.name && row.name.trim() !== '' && row.name !== '—') updates.influencer_name = row.name;
-          if (row.userId && row.userId.trim() !== '' && row.userId !== '—') updates.name = row.userId;
-          if (row.phone && row.phone.trim() !== '' && row.phone !== '—') updates.phone_number = row.phone;
-          if (row.altPhone && row.altPhone.trim() !== '' && row.altPhone !== '—') updates.alternative_number = row.altPhone;
-          if (row.email && row.email.trim() !== '' && row.email !== '—') updates.email = row.email.trim();
-          if (row.pincode && row.pincode.trim() !== '' && row.pincode !== '—') updates.pincode = row.pincode.trim();
-          if (row.city && row.city.trim() !== '' && row.city !== '—') updates.city = row.city;
+      const BATCH_SIZE = 20;
+      for (let i = 0; i < existingRows.length; i += BATCH_SIZE) {
+        const batch = existingRows.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (row) => {
+            if (!row.existingId) return;
 
-          const normStateVal = normalizeState(row.state);
-          if (normStateVal && normStateVal.trim() !== '') updates.state = normStateVal;
+            const updates: Record<string, any> = {};
 
-          if (row.address && row.address.trim() !== '' && row.address !== '—') updates.complete_address = row.address;
+            if (row.name && row.name.trim() !== '' && row.name !== '—') updates.influencer_name = row.name;
+            if (row.userId && row.userId.trim() !== '' && row.userId !== '—') updates.name = row.userId;
+            if (row.phone && row.phone.trim() !== '' && row.phone !== '—') updates.phone_number = row.phone;
+            if (row.altPhone && row.altPhone.trim() !== '' && row.altPhone !== '—') updates.alternative_number = row.altPhone;
+            if (row.email && row.email.trim() !== '' && row.email !== '—') updates.email = row.email.trim();
+            if (row.pincode && row.pincode.trim() !== '' && row.pincode !== '—') updates.pincode = row.pincode.trim();
+            if (row.city && row.city.trim() !== '' && row.city !== '—') updates.city = row.city;
 
-          const normLangs = normalizeLanguages(row.languages);
-          if (normLangs.length > 0) updates.languages = normLangs;
+            const normStateVal = normalizeState(row.state);
+            if (normStateVal && normStateVal.trim() !== '') updates.state = normStateVal;
 
-          if (row.autoDm !== null && row.autoDm !== undefined) updates.auto_dm = row.autoDm;
-          if (row.profileImg && row.profileImg.trim() !== '' && row.profileImg !== '—') updates.profile_file_url = row.profileImg;
+            if (row.address && row.address.trim() !== '' && row.address !== '—') updates.complete_address = row.address;
 
-          // Safe Payment Updates: Only update payment info if the file contained payment columns!
-          const hasPaymentColumnsInFile = Boolean(
-            mapping.paymentModeCol || 
-            mapping.upiCol || 
-            mapping.paymentsCol || 
-            mapping.detailsCol || 
-            mapping.accountHolderCol || 
-            mapping.accountNumberCol || 
-            mapping.ifscCol || 
-            mapping.bankNameCol || 
-            mapping.panNumberCol
-          );
+            const normLangs = normalizeLanguages(row.languages);
+            if (normLangs.length > 0) updates.languages = normLangs;
 
-          if (hasPaymentColumnsInFile) {
-            if (row.hasExcelPaymentData) {
-              if (row.paymentMethod) {
-                updates.payment_method = row.paymentMethod;
+            if (row.autoDm !== null && row.autoDm !== undefined) updates.auto_dm = row.autoDm;
+            if (row.profileImg && row.profileImg.trim() !== '' && row.profileImg !== '—') updates.profile_file_url = row.profileImg;
+
+            if (hasPaymentColumnsInFile) {
+              if (row.hasExcelPaymentData) {
+                updates.payment_method = row.paymentMethod || null;
+                updates.upi_number = (row.upiNumber && row.upiNumber.trim() !== '' && row.upiNumber !== '—') ? row.upiNumber.trim() : null;
+                updates.account_holder_name = (row.accountHolderName && row.accountHolderName.trim() !== '' && row.accountHolderName !== '—') ? row.accountHolderName.trim() : null;
+                updates.account_number = (row.accountNumber && row.accountNumber !== '—') ? row.accountNumber.trim() : null;
+                updates.ifsc_code = (row.ifscCode && row.ifscCode !== '—') ? row.ifscCode.trim().toUpperCase() : null;
+                updates.bank_name = (row.bankName && row.bankName !== '—') ? row.bankName.trim() : null;
+                updates.pan_number = (row.panNumber && row.panNumber !== '—') ? row.panNumber.trim().toUpperCase() : null;
               } else {
                 updates.payment_method = null;
+                updates.upi_number = null;
+                updates.account_holder_name = null;
+                updates.account_number = null;
+                updates.ifsc_code = null;
+                updates.bank_name = null;
+                updates.pan_number = null;
               }
-              updates.upi_number = (row.upiNumber && row.upiNumber.trim() !== '' && row.upiNumber !== '—') ? row.upiNumber.trim() : null;
-              updates.account_holder_name = (row.accountHolderName && row.accountHolderName.trim() !== '' && row.accountHolderName !== '—') ? row.accountHolderName.trim() : null;
-              updates.account_number = (row.accountNumber && row.accountNumber !== '—') ? row.accountNumber.trim() : null;
-              updates.ifsc_code = (row.ifscCode && row.ifscCode !== '—') ? row.ifscCode.trim().toUpperCase() : null;
-              updates.bank_name = (row.bankName && row.bankName !== '—') ? row.bankName.trim() : null;
-              updates.pan_number = (row.panNumber && row.panNumber !== '—') ? row.panNumber.trim().toUpperCase() : null;
-            } else {
-              // The uploaded file explicitly mapped payment columns, but this row has no payment details.
-              // Clear payment fields to match the file.
-              updates.payment_method = null;
-              updates.upi_number = null;
-              updates.account_holder_name = null;
-              updates.account_number = null;
-              updates.ifsc_code = null;
-              updates.bank_name = null;
-              updates.pan_number = null;
             }
-          }
 
-          // Ensure active status for all valid imported records
-          updates.is_archived = 'false';
+            // Ensure active status for all valid imported records
+            updates.is_archived = 'false';
 
-          if (Object.keys(updates).length > 0) {
-            const { error: updateErr } = await supabase
-              .from(SUPABASE_TABLES.influencersInfo)
-              .update(updates)
-              .eq('id', row.existingId);
+            if (Object.keys(updates).length > 0) {
+              const { error: updateErr } = await supabase
+                .from(SUPABASE_TABLES.influencersInfo)
+                .update(updates)
+                .eq('id', row.existingId);
 
-            if (updateErr) {
-              console.error('Error updating existing influencer:', updateErr);
-              throw new Error(`Failed to update influencer ${row.code}: ${updateErr.message || JSON.stringify(updateErr)}`);
+              if (updateErr) {
+                console.error('Error updating existing influencer:', updateErr);
+                throw new Error(`Failed to update influencer ${row.code}: ${updateErr.message || JSON.stringify(updateErr)}`);
+              }
             }
-          }
-          updatedCount++;
-        }
-      }
-
-      // Verification check: Processed count must equal expected valid count
-      const processedCount = updatedCount + insertedCount;
-      if (processedCount !== expectedValid) {
-        throw new Error(`Import count verification failed: processed ${processedCount} records, but expected ${expectedValid}.`);
+            updatedCount++;
+          })
+        );
       }
 
       // 3. Reconcile against Current Imported Source File:
@@ -1021,26 +1101,84 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           .map(r => normalizeCode(r.code))
       );
 
-      const staleActiveInfluencers = (existingInfluencers || []).filter(inf =>
+      const staleActiveInfluencers = (dbExistingData || []).filter(inf =>
         isActiveStatus(inf.is_archived) && !importedCodeSet.has(normalizeCode(inf.code))
       );
 
       if (staleActiveInfluencers.length > 0) {
         const staleIds = staleActiveInfluencers.map(inf => inf.id);
-        const { error: staleErr } = await supabase
-          .from(SUPABASE_TABLES.influencersInfo)
-          .update({ is_archived: 'other' })
-          .in('id', staleIds);
+        const RECONCILE_CHUNK = 50;
+        for (let i = 0; i < staleIds.length; i += RECONCILE_CHUNK) {
+          const chunkIds = staleIds.slice(i, i + RECONCILE_CHUNK);
+          const { error: staleErr } = await supabase
+            .from(SUPABASE_TABLES.influencersInfo)
+            .update({ is_archived: 'other' })
+            .in('id', chunkIds);
 
-        if (staleErr) {
-          console.warn('Warning: Failed to reconcile some inactive records:', staleErr);
+          if (staleErr) {
+            console.warn('Warning: Failed to reconcile some inactive records:', staleErr);
+          }
         }
+        archivedCount = staleIds.length;
       }
 
-      // Prepare concise activity and toast messages
+      // 4. Record Audit Rows in campaign_influencer_import_rows
+      const auditRows: CampaignInfluencerImportRowAudit[] = [];
+      validRows.forEach((r, idx) => {
+        auditRows.push({
+          influencer_code: r.code,
+          influencer_name: r.name || r.userId,
+          row_number: idx + 1,
+          action: 'new',
+          status: 'Success'
+        });
+      });
+      existingRows.forEach((r, idx) => {
+        auditRows.push({
+          influencer_code: r.code,
+          influencer_name: r.name || r.userId,
+          row_number: idx + 1,
+          action: 'updated',
+          status: 'Success'
+        });
+      });
+      staleActiveInfluencers.forEach((inf, idx) => {
+        auditRows.push({
+          influencer_code: inf.code,
+          influencer_name: '',
+          row_number: idx + 1,
+          action: 'archived',
+          status: 'Eliminated (Reconciled)'
+        });
+      });
+      invalidRows.forEach((r, idx) => {
+        auditRows.push({
+          influencer_code: r.code,
+          influencer_name: r.name || r.userId,
+          row_number: idx + 1,
+          action: 'invalid',
+          status: 'Rejected',
+          error_message: r.reason
+        });
+      });
+
+      await campaignInfluencerImportService.recordAuditRows(importId, campaign.id, auditRows);
+
+      // 5. Complete Import Record
+      await campaignInfluencerImportService.completeImport(importId, {
+        newCount: insertedCount,
+        updatedCount,
+        archivedCount,
+        totalRows: parsedRows.length,
+        validRows: expectedValid,
+        invalidRows: invalidCount
+      });
+
+      // Prepare concise activity log
       const summaryParts = [];
       if (insertedCount > 0) summaryParts.push(`${insertedCount} new influencer${insertedCount !== 1 ? 's' : ''} imported`);
       if (updatedCount > 0) summaryParts.push(`${updatedCount} existing influencer${updatedCount !== 1 ? 's' : ''} updated`);
+      if (archivedCount > 0) summaryParts.push(`${archivedCount} eliminated (not in uploaded file)`);
       if (insertedCount === 0 && updatedCount === 0 && existingRows.length > 0) summaryParts.push(`${existingRows.length} existing influencers verified (up to date)`);
       const summaryText = summaryParts.length > 0 ? summaryParts.join(', ') : 'No influencers changed';
       const invalidText = invalidCount > 0 ? ` (${invalidCount} invalid rows skipped)` : '';
@@ -1051,15 +1189,28 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
         `Completed import for ${campaign.campaign_name}: ${summaryText}${invalidText}.`
       );
 
-      toast.success(
-        `Import completed: ${summaryText}${invalidText}.`
-      );
+      toast.success(`Import completed: ${summaryText}${invalidText}.`);
 
+      // Dispatch real-time updates to all connected tabs
       notifyInfluencerChange(campaign.id);
-      onSuccess();
-      onClose();
+
+      // Save summary and display completion view to the user
+      setImportSummary({
+        totalRows: parsedRows.length,
+        validRows: expectedValid,
+        newCount: insertedCount,
+        updatedCount,
+        archivedCount,
+        invalidCount,
+        invalidRows
+      });
+      setStep('summary');
     } catch (err: any) {
       console.error('Bulk import error:', err);
+      if (importId) {
+        await campaignInfluencerImportService.failImport(importId, err.message || String(err));
+      }
+      setImportError(err.message || 'Failed to complete bulk import.');
       toast.error(err.message || 'Failed to complete bulk import.');
       setStep('preview');
     } finally {
@@ -1087,7 +1238,12 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              if (step === 'summary') {
+                onSuccess();
+              }
+              onClose();
+            }}
             className="p-1.5 text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 rounded-lg transition-colors"
           >
             <X size={18} />
@@ -1452,8 +1608,17 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
           )}
 
           {/* STEP 3: PREVIEW & CONFIRM */}
-          {(step === 'preview' || step === 'importing') && (
+          {step === 'preview' && (
             <div className="space-y-6">
+              {importError && (
+                <div className="bg-red-950/40 border border-red-800/50 rounded-xl p-3.5 flex items-center gap-3 text-xs text-red-200">
+                  <AlertCircle size={16} className="text-red-400 shrink-0" />
+                  <div className="flex-1">
+                    <span className="font-bold text-red-300">Import failed: </span>
+                    <span>{importError}</span>
+                  </div>
+                </div>
+              )}
               
               {/* Summary Badges */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1643,6 +1808,135 @@ export const BulkInfluencerImportModal: React.FC<BulkInfluencerImportModalProps>
             </div>
           )}
 
+          {/* STEP 4: IMPORTING PROGRESS */}
+          {step === 'importing' && (
+            <div className="py-20 flex flex-col items-center justify-center text-center space-y-5 animate-in fade-in duration-200">
+              <div className="w-16 h-16 rounded-2xl bg-purple-600/10 border border-purple-500/20 text-purple-400 flex items-center justify-center animate-pulse">
+                <Loader2 size={36} className="animate-spin text-purple-400" />
+              </div>
+              <div className="space-y-1.5 max-w-md">
+                <h4 className="text-base font-bold text-white">Importing Influencers to Campaign...</h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Saving influencer records to Supabase, reconciling campaign list, and updating status tracking in real-time. Please keep this modal open.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 5: IMPORT RESULT SUMMARY */}
+          {step === 'summary' && importSummary && (
+            <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+              {/* Completion Banner */}
+              <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-2xl p-5 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                  <CheckCircle2 size={26} />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-white">Campaign Influencers Updated Successfully</h4>
+                  <p className="text-xs text-emerald-300/80">
+                    All valid records from your file have been processed and synchronized with the database.
+                  </p>
+                </div>
+              </div>
+
+              {/* Statistics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 flex flex-col">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Rows</span>
+                  <span className="text-xl font-bold text-white mt-1">{importSummary.totalRows}</span>
+                  <span className="text-[10px] text-slate-500 mt-0.5">Rows in uploaded file</span>
+                </div>
+
+                <div className="bg-blue-950/20 border border-blue-800/30 rounded-xl p-3.5 flex flex-col">
+                  <span className="text-[11px] font-semibold text-blue-400 uppercase tracking-wider">Valid Rows</span>
+                  <span className="text-xl font-bold text-blue-300 mt-1">{importSummary.validRows}</span>
+                  <span className="text-[10px] text-blue-400/60 mt-0.5">Validated & processed</span>
+                </div>
+
+                <div className="bg-emerald-950/20 border border-emerald-800/30 rounded-xl p-3.5 flex flex-col">
+                  <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider">New Influencers</span>
+                  <span className="text-xl font-bold text-emerald-300 mt-1">{importSummary.newCount}</span>
+                  <span className="text-[10px] text-emerald-400/60 mt-0.5">Added to campaign</span>
+                </div>
+
+                <div className="bg-purple-950/20 border border-purple-800/30 rounded-xl p-3.5 flex flex-col">
+                  <span className="text-[11px] font-semibold text-purple-400 uppercase tracking-wider">Matched / Updated</span>
+                  <span className="text-xl font-bold text-purple-300 mt-1">{importSummary.updatedCount}</span>
+                  <span className="text-[10px] text-purple-400/60 mt-0.5">Existing updated</span>
+                </div>
+
+                <div className="bg-amber-950/20 border border-amber-800/30 rounded-xl p-3.5 flex flex-col">
+                  <span className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider">Eliminated</span>
+                  <span className="text-xl font-bold text-amber-300 mt-1">{importSummary.archivedCount}</span>
+                  <span className="text-[10px] text-amber-400/60 mt-0.5">Not in uploaded file</span>
+                </div>
+              </div>
+
+              {/* Invalid Rows Accordion (if any invalid / duplicate rows exist) */}
+              {importSummary.invalidCount > 0 && (
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setShowInvalidDetails(prev => !prev)}
+                    className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-900/50 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        <AlertTriangle size={15} />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-amber-300">
+                          {importSummary.invalidCount} Invalid / Duplicate Row{importSummary.invalidCount !== 1 ? 's' : ''} Skipped
+                        </span>
+                        <p className="text-[11px] text-slate-400">These rows were skipped to protect against duplicates and data corruption.</p>
+                      </div>
+                    </div>
+                    {showInvalidDetails ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
+                  </button>
+
+                  {showInvalidDetails && (
+                    <div className="border-t border-slate-800 p-3 max-h-[220px] overflow-y-auto custom-scrollbar">
+                      <table className="w-full text-left text-xs">
+                        <thead className="text-[10px] font-bold uppercase text-slate-400 border-b border-slate-800">
+                          <tr>
+                            <th className="pb-2">Code</th>
+                            <th className="pb-2">Influencer Name</th>
+                            <th className="pb-2">User ID</th>
+                            <th className="pb-2">Reason Skipped</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/40 text-slate-300 font-mono">
+                          {importSummary.invalidRows.map((inv, idx) => (
+                            <tr key={idx} className="hover:bg-slate-900/30">
+                              <td className="py-2 text-purple-300 font-semibold">{inv.code}</td>
+                              <td className="py-2 font-sans text-slate-200">{inv.name || '—'}</td>
+                              <td className="py-2 font-sans text-slate-400">{inv.userId ? `@${inv.userId}` : '—'}</td>
+                              <td className="py-2 text-amber-400 text-[11px]">{inv.reason || 'Invalid data'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSuccess();
+                    onClose();
+                  }}
+                  className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-900/30 transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <CheckCircle2 size={15} />
+                  <span>Done / View Influencers</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

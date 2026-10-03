@@ -40,4 +40,6 @@ export const SUPABASE_TABLES = {
   rawMaterialBarcodes: "raw_material_barcodes",
   redispatchRecords: "redispatch_records",
   campaignScripts: "campaign_scripts",
+  campaignInfluencerImports: "campaign_influencer_imports",
+  campaignInfluencerImportRows: "campaign_influencer_import_rows",
 };

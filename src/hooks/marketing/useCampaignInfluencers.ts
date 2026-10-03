@@ -403,12 +403,15 @@ export const useCampaignInfluencers = (campaignId?: string) => {
       if (fetchIdRef.current === currentFetchId) {
         const sortedData = (combinedData as any[]).sort(compareInfluencerCodesAsc);
         setInfluencers(sortedData);
+        return sortedData;
       }
+      return [];
     } catch (err: any) {
       if (fetchIdRef.current === currentFetchId) {
         console.error('Error loading campaign influencers:', err);
         setError(err instanceof Error ? err : new Error(err?.message || String(err)));
       }
+      return [];
     } finally {
       if (fetchIdRef.current === currentFetchId) {
         setIsLoading(false);

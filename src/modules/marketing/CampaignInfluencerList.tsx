@@ -2022,6 +2022,10 @@ export const CampaignInfluencerList: React.FC<CampaignInfluencerListProps> = ({
           onClose={() => setIsImportModalOpen(false)}
           onSuccess={async () => {
             setIsImportModalOpen(false);
+            setSearchTerm('');
+            setFilterState(initialFilterState);
+            setFilter('active');
+            setSelectedIds(new Set());
             await refresh();
           }}
         />
