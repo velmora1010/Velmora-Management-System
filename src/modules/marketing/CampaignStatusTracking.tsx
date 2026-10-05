@@ -10235,13 +10235,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const handleSubmitInitialDraft = async () => {
     if (isUploading) return;
 
-    // Validation
+    // Validation — Only Original Video & Draft Submission Date are required
     if (!initialOriginalFile && !initialOriginalUrl) {
       toast.error('Please upload the Original Video first.');
-      return;
-    }
-    if (!isTamil && (!initialTamilFile && !initialTamilUrl)) {
-      toast.error('Please upload the Tamil Translated Video. Both versions are required for non-Tamil influencers.');
       return;
     }
     if (!initialDraftDate || !initialDraftDate.trim()) {
@@ -10258,7 +10254,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         finalOriginalUrl = await uploadVideoFile(initialOriginalFile, 1, 'original');
         setInitialOriginalUrl(finalOriginalUrl);
       }
-      if (!isTamil && initialTamilFile) {
+      if (initialTamilFile) {
         finalTamilUrl = await uploadVideoFile(initialTamilFile, 1, 'tamil_translation');
         setInitialTamilUrl(finalTamilUrl);
       }
@@ -10273,8 +10269,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
       attempt_number: 1,
       video_url: finalOriginalUrl,
       original_file_name: initialOriginalFile?.name || finalOriginalUrl.split('/').pop()?.split('?')[0] || 'original_video.mp4',
-      tamil_video_url: isTamil ? undefined : finalTamilUrl,
-      tamil_file_name: isTamil ? undefined : (initialTamilFile?.name || finalTamilUrl?.split('/').pop()?.split('?')[0] || 'tamil_translation.mp4'),
+      tamil_video_url: finalTamilUrl || undefined,
+      tamil_file_name: finalTamilUrl ? (initialTamilFile?.name || finalTamilUrl?.split('/').pop()?.split('?')[0] || 'tamil_translation.mp4') : undefined,
       draft_submission_date: initialDraftDate.trim(),
       draft_submit_date: initialDraftDate.trim(),
       submitted_at: new Date().toISOString(),
@@ -10295,7 +10291,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
           fileUrl: finalOriginalUrl,
           fileName: initialOriginalFile?.name || null
         });
-        if (!isTamil && finalTamilUrl) {
+        if (finalTamilUrl) {
           await upsertDraftVideoAsset({
             campaignId: record.campaign_id,
             influencerId: record.influencer_id,
@@ -10352,12 +10348,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const handleSubmitReDraft = async () => {
     if (isUploading) return;
 
+    // Validation — Only Original Video & Draft Submission Date are required
     if (!reDraftOriginalFile && !reDraftOriginalUrl) {
       toast.error('Please select the new revised Original Video.');
-      return;
-    }
-    if (!isTamil && (!reDraftTamilFile && !reDraftTamilUrl)) {
-      toast.error('Please select the revised Tamil Translated Video. Both are required for non-Tamil creators.');
       return;
     }
     if (!reDraftSubmissionDate || !reDraftSubmissionDate.trim()) {
@@ -10375,7 +10368,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         finalOriginalUrl = await uploadVideoFile(reDraftOriginalFile, nextAttemptNumber, 'original');
         setReDraftOriginalUrl(finalOriginalUrl);
       }
-      if (!isTamil && reDraftTamilFile) {
+      if (reDraftTamilFile) {
         finalTamilUrl = await uploadVideoFile(reDraftTamilFile, nextAttemptNumber, 'tamil_translation');
         setReDraftTamilUrl(finalTamilUrl);
       }
@@ -10391,8 +10384,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
       attempt_number: nextAttemptNumber,
       video_url: finalOriginalUrl,
       original_file_name: reDraftOriginalFile?.name || finalOriginalUrl.split('/').pop()?.split('?')[0] || 'original_video.mp4',
-      tamil_video_url: isTamil ? undefined : finalTamilUrl,
-      tamil_file_name: isTamil ? undefined : (reDraftTamilFile?.name || finalTamilUrl?.split('/').pop()?.split('?')[0] || 'tamil_translation.mp4'),
+      tamil_video_url: finalTamilUrl || undefined,
+      tamil_file_name: finalTamilUrl ? (reDraftTamilFile?.name || finalTamilUrl.split('/').pop()?.split('?')[0] || 'tamil_translation.mp4') : undefined,
       draft_submission_date: reDraftSubmissionDate.trim(),
       draft_submit_date: reDraftSubmissionDate.trim(),
       submitted_at: new Date().toISOString(),
@@ -10414,7 +10407,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
           fileUrl: finalOriginalUrl,
           fileName: reDraftOriginalFile?.name || null
         });
-        if (!isTamil && finalTamilUrl) {
+        if (finalTamilUrl) {
           await upsertDraftVideoAsset({
             campaignId: record.campaign_id,
             influencerId: record.influencer_id,
@@ -10657,10 +10650,6 @@ const DraftForm: React.FC<DraftFormProps> = ({
         toast.error('Original Video must be uploaded before approving.');
         return;
       }
-      if (!isTamil && !activeAttempt?.tamil_video_url) {
-        toast.error('Tamil Translated Video is required for non-Tamil creators before approving.');
-        return;
-      }
       if (!draftSubmitDate || draftSubmitDate.trim() === '') {
         toast.error('Please enter the Draft Submit Date before approving the draft.');
         return;
@@ -10686,7 +10675,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     const userName = await getCurrentUserName();
     const nowIso = new Date().toISOString();
 
-    const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit' && !!draftSubmitDate && (isTamil || !!activeAttempt?.tamil_video_url);
+    const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit' && !!draftSubmitDate;
 
     // Update active attempt in attempts array while preserving all history
     const updatedAttempts = attempts.map((att, idx) => {
@@ -10765,15 +10754,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
   const isCurrentDraftNotApproved = activeAttempt?.approval_status === 'Not Approved';
 
-  // Can submit first-time draft?
-  const canSubmitInitialDraft = isTamil
-    ? Boolean((initialOriginalFile || initialOriginalUrl) && initialDraftDate.trim())
-    : Boolean((initialOriginalFile || initialOriginalUrl) && (initialTamilFile || initialTamilUrl) && initialDraftDate.trim());
+  // Can submit first-time draft? (Only Original Video & Date required; Tamil video is optional)
+  const canSubmitInitialDraft = Boolean((initialOriginalFile || initialOriginalUrl) && initialDraftDate.trim());
 
-  // Can submit re-draft?
-  const canSubmitReDraft = isTamil
-    ? Boolean((reDraftOriginalFile || reDraftOriginalUrl) && reDraftSubmissionDate.trim())
-    : Boolean((reDraftOriginalFile || reDraftOriginalUrl) && (reDraftTamilFile || reDraftTamilUrl) && reDraftSubmissionDate.trim());
+  // Can submit re-draft? (Only Original Video & Date required; Tamil video is optional)
+  const canSubmitReDraft = Boolean((reDraftOriginalFile || reDraftOriginalUrl) && reDraftSubmissionDate.trim());
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
@@ -10956,15 +10941,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                     <Video size={14} className="text-purple-400" />
                     <span>Tamil Translated Video</span>
-                    <span className="text-rose-400">*</span>
                   </span>
                   {activeAttempt.tamil_video_url ? (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60 flex items-center gap-1">
                       <Check size={10} strokeWidth={3} /> Uploaded
                     </span>
                   ) : (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800/60">
-                      Required
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 uppercase">
+                      Optional
                     </span>
                   )}
                 </div>
@@ -11001,7 +10985,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     >
                       <UploadCloud className="text-purple-400 mb-1" size={24} />
                       <span className="text-xs text-purple-300 font-semibold">Upload Tamil Translated Video</span>
-                      <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                      <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video (Optional)</span>
                     </div>
                   )}
                 </div>
@@ -11009,7 +10993,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 {/* File Info & Action Buttons */}
                 <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
                   <span className="text-[11px] text-slate-400 truncate font-mono max-w-[170px]" title={activeAttempt.tamil_file_name || activeAttempt.tamil_video_url}>
-                    {activeAttempt.tamil_file_name || activeAttempt.tamil_video_url?.split('/').pop()?.split('?')[0] || (activeAttempt.tamil_video_url ? 'tamil_translation.mp4' : 'Missing')}
+                    {activeAttempt.tamil_file_name || activeAttempt.tamil_video_url?.split('/').pop()?.split('?')[0] || (activeAttempt.tamil_video_url ? 'tamil_translation.mp4' : 'Not Uploaded')}
                   </span>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {activeAttempt.tamil_video_url ? (
@@ -11165,10 +11149,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   <label className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
                     <Video size={14} className="text-purple-400" />
                     <span>Tamil Translated Video</span>
-                    <span className="text-rose-400">*</span>
                   </label>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800/60">
-                    Required
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase">
+                    Optional
                   </span>
                 </div>
 
@@ -11302,8 +11285,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
             </h5>
             <p className="text-xs text-slate-400 mt-0.5">
               {isTamil 
-                ? 'Upload the original draft video for review.' 
-                : 'Upload both required versions of the draft video.'}
+                ? 'Upload original draft video for review (Tamil translated version is optional).' 
+                : 'Upload draft video (Tamil translated version is optional).'}
             </p>
           </div>
 
@@ -11368,10 +11351,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   <label className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
                     <Video size={14} className="text-purple-400" />
                     <span>Tamil Translated Video</span>
-                    <span className="text-rose-400">*</span>
                   </label>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800/60 uppercase">
-                    Required
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase">
+                    Optional
                   </span>
                 </div>
 
@@ -11608,11 +11590,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
                         <div className="flex items-center gap-1.5">
                           <span className="text-slate-400">Tamil Translation:</span>
-                          {isTamil ? (
-                            <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-purple-950/70 text-purple-300 border border-purple-800/60">
-                              Not Required — Tamil Influencer
-                            </span>
-                          ) : att.tamil_video_url ? (
+                          {att.tamil_video_url ? (
                             <>
                               <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-950/70 text-emerald-400 border border-emerald-800/60">
                                 ✓ Uploaded
@@ -11632,8 +11610,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
                               </button>
                             </>
                           ) : (
-                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-950/70 text-rose-400 border border-rose-800/60">
-                              ✕ Missing
+                            <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60">
+                              {isTamil ? 'Not Required — Tamil Influencer' : 'Not Uploaded'}
                             </span>
                           )}
                         </div>
