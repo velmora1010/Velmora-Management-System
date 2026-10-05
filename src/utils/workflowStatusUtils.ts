@@ -284,45 +284,14 @@ export function getCurrentWorkflowState(
     return 'not_started';
   }
 
-  if (videoNumber === 1 && !isDelivered) {
+  if (!isDelivered) {
     return 'not_started';
   }
 
-  // 3. For Video > 1: Has this video started?
-  if (videoNumber > 1 && helpers?.isVideoStarted) {
-    if (!helpers.isVideoStarted(record, videoNumber)) {
-      return 'not_started';
-    }
-  }
-
-  // VIDEO 1 WORKFLOW:
-  // 1. Delivered -> 2. Share Script -> 3. Call Explain -> 4. Pay Advance -> 5. Draft -> 6. Post Date -> 7. After Post
-  if (videoNumber === 1) {
-    if (!isScriptCompleted) {
-      return 'delivered';
-    }
-    if (!isCallCompleted && !isCallSkipped) {
-      return 'share_script';
-    }
-    if (!isPayAdvanceCompleted) {
-      return isCallSkipped ? 'call_skipped' : 'call_explain';
-    }
-    if (!isDraftCompleted) {
-      return 'pay_advance';
-    }
-    if (!isPostDateCompleted) {
-      return 'draft';
-    }
-    if (!isAfterPostCompleted) {
-      return 'post_date';
-    }
-    return 'after_post';
-  }
-
-  // VIDEOS 2 TO 6 WORKFLOW:
-  // 1. Share Script -> 2. Call Explain -> 3. Draft -> 4. Post Date -> 5. Payment -> 6. After Post
+  // ALL VIDEOS (1 TO 6) UNIFIED WORKFLOW:
+  // 1. Delivered -> 2. Share Script -> 3. Call Explain -> 4. Draft -> 5. Payment -> 6. Post Date -> 7. After Post
   if (!isScriptCompleted) {
-    return 'not_started';
+    return 'delivered';
   }
   if (!isCallCompleted && !isCallSkipped) {
     return 'share_script';
@@ -330,14 +299,14 @@ export function getCurrentWorkflowState(
   if (!isDraftCompleted) {
     return isCallSkipped ? 'call_skipped' : 'call_explain';
   }
-  if (!isPostDateCompleted) {
+  if (!isPaymentCompleted) {
     return 'draft';
   }
-  if (!isPaymentCompleted) {
-    return 'post_date';
+  if (!isPostDateCompleted) {
+    return 'payment';
   }
   if (!isAfterPostCompleted) {
-    return 'payment';
+    return 'post_date';
   }
   return 'after_post';
 }
