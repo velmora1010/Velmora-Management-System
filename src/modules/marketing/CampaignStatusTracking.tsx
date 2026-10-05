@@ -1403,7 +1403,8 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         if (pData && Array.isArray(sPlatforms) && sPlatforms.length > 0) {
           isMultiPlatformDone = sPlatforms.every((p: string) => {
             const entry = pData[p];
-            return Boolean(entry?.link && !isFakeUrl(entry.link) && entry?.postedAt);
+            const hasDate = Boolean(entry?.posted_date || entry?.postedAt);
+            return Boolean(entry?.link && !isFakeUrl(entry.link) && hasDate);
           });
         }
         const link = afterPostData.link || (videoNum === 1 ? record.final_post_link : '') || '';
@@ -2127,17 +2128,19 @@ export const isInfluencerAfterPostCompleted = (record: StatusTrackingRecord, vid
   if (pData && Array.isArray(sPlatforms) && sPlatforms.length > 0) {
     const allPlatformsValid = sPlatforms.every((p: string) => {
       const entry = pData[p];
-      return Boolean(entry?.link && !isFakeUrl(entry.link) && entry?.postedAt);
+      const hasDate = Boolean(entry?.posted_date || entry?.postedAt);
+      return Boolean(entry?.link && !isFakeUrl(entry.link) && hasDate);
     });
     return allPlatformsValid && Boolean(apStep.completed || apStep.data?.confirmed_live || apStep.data?.confirmed);
   }
 
   const hasLink = Boolean(apStep?.data?.link && !isFakeUrl(apStep.data.link));
+  const hasDate = Boolean(apStep?.data?.posted_date || apStep?.data?.postedAt);
   return Boolean(
     apStep?.completed || 
     apStep?.data?.confirmed_live || 
     apStep?.data?.confirmed || 
-    (hasLink && apStep?.data?.postedAt) ||
+    (hasLink && hasDate) ||
     (videoNumber === 1 && (record.final_post_completed || (record.final_post_link && !isFakeUrl(record.final_post_link) && record.final_post_actual_datetime)))
   );
 };
@@ -6581,6 +6584,55 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Auto DM Tool Highlighted Card - Specifically for Draft Step */}
+        {activeStepConfig?.id === 'draft' && (() => {
+          const hasAutoDm = isAutoDmConnected(record.influencer?.auto_dm ?? (record.dispatch as any)?.auto_dm);
+          return (
+            <div className={`p-4 sm:p-5 mb-5 rounded-xl border transition-all ${
+              hasAutoDm 
+                ? 'bg-emerald-950/20 border-emerald-500/40 shadow-sm shadow-emerald-950/20' 
+                : 'bg-slate-900/40 border-slate-700/60 shadow-sm'
+            }`}>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
+                    AUTO DM TOOL
+                  </span>
+                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                    hasAutoDm 
+                      ? 'bg-emerald-950 text-emerald-400 border-emerald-700/60' 
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}>
+                    {hasAutoDm ? 'ENABLED' : 'NOT ENABLED'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-base sm:text-lg font-black tracking-wide flex items-center gap-1.5 ${
+                    hasAutoDm ? 'text-emerald-400' : 'text-slate-300'
+                  }`}>
+                    {hasAutoDm ? (
+                      <>
+                        <Check size={18} strokeWidth={3} className="text-emerald-400" />
+                        AVAILABLE
+                      </>
+                    ) : (
+                      <>
+                        <X size={18} strokeWidth={3} className="text-rose-400" />
+                        NOT AVAILABLE
+                      </>
+                    )}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  {hasAutoDm 
+                    ? 'This influencer has the Auto DM tool enabled.' 
+                    : 'This influencer does not have the Auto DM tool.'}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Step Component Form - Exclusively renders the active step */}
         <div>
@@ -11462,6 +11514,13 @@ interface AfterPostFormProps {
   onSave: (data: any, completed?: boolean) => Promise<any> | void;
 }
 
+interface PlatformEntryState {
+  link: string;
+  posted_date: string;
+  posted_time: string;
+  is_custom_date: boolean;
+}
+
 const AfterPostForm: React.FC<AfterPostFormProps> = ({
   videoNumber,
   record,
@@ -11504,28 +11563,73 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
     return ['Instagram'];
   }, [existingData.platforms_data, existingData.selected_platforms, existingData.platform, postDateData?.selected_platforms, postDateData?.platform, record, videoNumber]);
 
-  // Per-platform entries state { link, postedAt }
-  const [platformEntries, setPlatformEntries] = useState<Record<string, { link: string; postedAt: string }>>(() => {
-    const initial: Record<string, { link: string; postedAt: string }> = {};
-    const existingMap = existingData.platforms_data || {};
+  // Extract planned Post Date from Post Date step
+  const plannedPostDate = useMemo(() => {
+    if (postDateData?.scheduled_post_date) return String(postDateData.scheduled_post_date).split('T')[0];
+    if (postDateData?.post_date) return String(postDateData.post_date).split('T')[0];
+    try {
+      const vWorkflow = getVideoWorkflow(record, videoNumber);
+      const pd = vWorkflow?.steps?.post_date?.data;
+      if (pd?.scheduled_post_date) return String(pd.scheduled_post_date).split('T')[0];
+      if (pd?.post_date) return String(pd.post_date).split('T')[0];
+    } catch (e) {}
+    if (videoNumber === 1 && (record.post_date || record.scheduled_post_date)) {
+      return String(record.post_date || record.scheduled_post_date).split('T')[0];
+    }
+    return '';
+  }, [postDateData, record, videoNumber]);
 
-    targetPlatforms.forEach((p, idx) => {
-      if (existingMap[p]) {
-        initial[p] = {
-          link: existingMap[p].link || '',
-          postedAt: existingMap[p].postedAt ? formatForDateTimeInput(existingMap[p].postedAt) : ''
-        };
-      } else if (idx === 0) {
-        // Fallback for primary/first platform from legacy fields
-        initial[p] = {
-          link: existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''),
-          postedAt: existingData.postedAt 
-            ? formatForDateTimeInput(existingData.postedAt) 
-            : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
-        };
-      } else {
-        initial[p] = { link: '', postedAt: '' };
+  // Resolver for each platform's initial state
+  const resolveInitialPlatformEntry = useCallback((platform: string, idx: number, existingMap: any): PlatformEntryState => {
+    const existingEntry = existingMap?.[platform];
+    let link = '';
+    let posted_date = '';
+    let posted_time = '';
+    let is_custom_date = false;
+
+    if (existingEntry) {
+      link = existingEntry.link || '';
+      if (existingEntry.posted_date) {
+        posted_date = existingEntry.posted_date;
+        posted_time = existingEntry.posted_time || '';
+        is_custom_date = Boolean(existingEntry.is_custom_date);
+      } else if (existingEntry.postedAt) {
+        const parts = String(existingEntry.postedAt).split('T');
+        posted_date = parts[0] || '';
+        posted_time = parts[1]?.slice(0, 5) || '';
+        is_custom_date = Boolean(existingEntry.is_custom_date);
       }
+    } else if (idx === 0) {
+      link = existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : '');
+      const legacyDateTime = existingData.postedAt || (videoNumber === 1 ? record.final_post_actual_datetime : '');
+      if (legacyDateTime) {
+        const parts = String(legacyDateTime).split('T');
+        posted_date = parts[0] || '';
+        posted_time = parts[1]?.slice(0, 5) || '';
+        is_custom_date = Boolean(existingData.is_custom_date);
+      }
+    }
+
+    // Auto-fill from planned Post Date if no actual date previously saved
+    if (!posted_date && plannedPostDate) {
+      posted_date = plannedPostDate;
+      is_custom_date = false; // Inherited/default
+    }
+
+    return {
+      link,
+      posted_date,
+      posted_time,
+      is_custom_date
+    };
+  }, [existingData, plannedPostDate, record, videoNumber]);
+
+  // Per-platform entries state { link, posted_date, posted_time, is_custom_date }
+  const [platformEntries, setPlatformEntries] = useState<Record<string, PlatformEntryState>>(() => {
+    const initial: Record<string, PlatformEntryState> = {};
+    const existingMap = existingData.platforms_data || {};
+    targetPlatforms.forEach((p, idx) => {
+      initial[p] = resolveInitialPlatformEntry(p, idx, existingMap);
     });
     return initial;
   });
@@ -11534,41 +11638,69 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
   useEffect(() => {
     setPlatformEntries(prev => {
       let changed = false;
-      const updated = { ...prev };
+      const next = { ...prev };
       const existingMap = existingData.platforms_data || {};
-
       targetPlatforms.forEach((p, idx) => {
-        if (!updated[p]) {
+        if (!next[p]) {
+          next[p] = resolveInitialPlatformEntry(p, idx, existingMap);
           changed = true;
-          if (existingMap[p]) {
-            updated[p] = {
-              link: existingMap[p].link || '',
-              postedAt: existingMap[p].postedAt ? formatForDateTimeInput(existingMap[p].postedAt) : ''
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [targetPlatforms, existingData, resolveInitialPlatformEntry]);
+
+  // If plannedPostDate updates and the platform's date was NOT manually overridden, sync the inherited date
+  useEffect(() => {
+    if (!plannedPostDate) return;
+    setPlatformEntries(prev => {
+      let changed = false;
+      const next = { ...prev };
+      targetPlatforms.forEach(p => {
+        const curr = next[p];
+        if (curr && !curr.is_custom_date) {
+          if (curr.posted_date !== plannedPostDate) {
+            next[p] = {
+              ...curr,
+              posted_date: plannedPostDate
             };
-          } else if (idx === 0 && (existingData.link || record.final_post_link)) {
-            updated[p] = {
-              link: existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''),
-              postedAt: existingData.postedAt 
-                ? formatForDateTimeInput(existingData.postedAt) 
-                : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
-            };
-          } else {
-            updated[p] = { link: '', postedAt: '' };
+            changed = true;
           }
         }
       });
-      return changed ? updated : prev;
+      return changed ? next : prev;
     });
-  }, [targetPlatforms, existingData, record, videoNumber]);
+  }, [plannedPostDate, targetPlatforms]);
 
   const [isSaving, setIsSaving] = useState(false);
 
-  const handleUpdatePlatformField = (platform: string, field: 'link' | 'postedAt', value: string) => {
+  const handleUpdatePlatformLink = (platform: string, link: string) => {
     setPlatformEntries(prev => ({
       ...prev,
       [platform]: {
-        ...(prev[platform] || { link: '', postedAt: '' }),
-        [field]: value
+        ...(prev[platform] || { link: '', posted_date: '', posted_time: '', is_custom_date: false }),
+        link
+      }
+    }));
+  };
+
+  const handleUpdatePlatformDate = (platform: string, newDate: string) => {
+    setPlatformEntries(prev => ({
+      ...prev,
+      [platform]: {
+        ...(prev[platform] || { link: '', posted_date: '', posted_time: '', is_custom_date: false }),
+        posted_date: newDate,
+        is_custom_date: true // User manually edited
+      }
+    }));
+  };
+
+  const handleUpdatePlatformTime = (platform: string, newTime: string) => {
+    setPlatformEntries(prev => ({
+      ...prev,
+      [platform]: {
+        ...(prev[platform] || { link: '', posted_date: '', posted_time: '', is_custom_date: false }),
+        posted_time: newTime
       }
     }));
   };
@@ -11586,36 +11718,45 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
+  // Completion check: required = valid live link + filled posted_date; posted_time is OPTIONAL
   const isPlatformComplete = (platform: string) => {
     const entry = platformEntries[platform];
-    return Boolean(entry?.link?.trim() && !isFakeUrl(entry.link) && entry?.postedAt?.trim());
+    const hasValidLink = Boolean(entry?.link?.trim() && !isFakeUrl(entry.link));
+    const hasPostedDate = Boolean(entry?.posted_date?.trim());
+    return hasValidLink && hasPostedDate;
   };
 
   const allPlatformsCompleted = targetPlatforms.length > 0 && targetPlatforms.every(p => isPlatformComplete(p));
   const isAlreadyCompleted = Boolean(existingData.confirmed_live === true || existingData.completed === true) && allPlatformsCompleted;
 
   const handleSaveAfterPost = async () => {
-    // Validate each platform
+    // Validate each platform: date is required, time is optional
     for (const p of targetPlatforms) {
       const entry = platformEntries[p];
       if (!entry?.link || !entry.link.trim() || isFakeUrl(entry.link)) {
         toast.error(`Please enter a valid Video ${videoNumber} live post link for ${p}.`);
         return;
       }
-      if (!entry?.postedAt || !entry.postedAt.trim()) {
-        toast.error(`Please select the posting date and time for ${p}.`);
+      if (!entry?.posted_date || !entry.posted_date.trim()) {
+        toast.error(`Please enter the posted date for ${p}.`);
         return;
       }
     }
 
     setIsSaving(true);
     try {
-      const platforms_data: Record<string, { link: string; postedAt: string; completed: boolean }> = {};
+      const platforms_data: Record<string, any> = {};
       targetPlatforms.forEach(p => {
         const entry = platformEntries[p];
+        const trimmedDate = entry.posted_date.trim();
+        const trimmedTime = entry.posted_time?.trim() || '';
+        const combinedDateTime = trimmedTime ? `${trimmedDate}T${trimmedTime}` : trimmedDate;
         platforms_data[p] = {
           link: entry.link.trim(),
-          postedAt: entry.postedAt.trim(),
+          posted_date: trimmedDate,
+          posted_time: trimmedTime,
+          postedAt: combinedDateTime,
+          is_custom_date: Boolean(entry.is_custom_date),
           completed: true
         };
       });
@@ -11629,7 +11770,10 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
         platform: targetPlatforms.join(' + '),
         platforms_data,
         link: primaryEntry.link,
+        posted_date: primaryEntry.posted_date,
+        posted_time: primaryEntry.posted_time,
         postedAt: primaryEntry.postedAt,
+        is_custom_date: primaryEntry.is_custom_date,
         confirmed_live: true,
         confirmed: true,
         completed: true,
@@ -11710,7 +11854,7 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
       {/* Platform Cards */}
       <div className="space-y-4">
         {targetPlatforms.map((platform, idx) => {
-          const entry = platformEntries[platform] || { link: '', postedAt: '' };
+          const entry = platformEntries[platform] || { link: '', posted_date: '', posted_time: '', is_custom_date: false };
           const isComplete = isPlatformComplete(platform);
           const hasLink = Boolean(entry.link?.trim());
 
@@ -11753,56 +11897,93 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Live Post URL / Link */}
+              {/* Row 1: Live Post URL / Link */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Live Post URL / Link *
+                </label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="text" 
+                    value={entry.link} 
+                    onChange={e => handleUpdatePlatformLink(platform, e.target.value)} 
+                    placeholder={`https://www.${platform.toLowerCase().replace(/[^a-z0-9]/g, '') || 'instagram'}.com/...`}
+                    className="flex-1 bg-[#070c18] border border-slate-700/80 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleOpenLiveVideo(platform)}
+                    disabled={!hasLink}
+                    className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-blue-400 hover:text-blue-300 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                    title={`Open ${platform} link in new tab`}
+                  >
+                    <ExternalLink size={14} />
+                    <span className="hidden sm:inline">Open Live Video</span>
+                    <span className="sm:hidden">Open</span>
+                  </button>
+                </div>
+                {!hasLink && (
+                  <span className="text-[10px] text-slate-500">
+                    Enter the published {platform} post link to enable preview.
+                  </span>
+                )}
+              </div>
+
+              {/* Row 2: Split POSTED DATE * and POSTED TIME */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                {/* Field 1: POSTED DATE * */}
                 <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    Live Post URL / Link *
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="text" 
-                      value={entry.link} 
-                      onChange={e => handleUpdatePlatformField(platform, 'link', e.target.value)} 
-                      placeholder={`https://www.${platform.toLowerCase().replace(/[^a-z0-9]/g, '') || 'instagram'}.com/...`}
-                      className="flex-1 bg-[#070c18] border border-slate-700/80 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleOpenLiveVideo(platform)}
-                      disabled={!hasLink}
-                      className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-blue-400 hover:text-blue-300 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
-                      title={`Open ${platform} link in new tab`}
-                    >
-                      <ExternalLink size={14} />
-                      <span className="hidden sm:inline">Open Live Video</span>
-                      <span className="sm:hidden">Open</span>
-                    </button>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      POSTED DATE *
+                    </label>
+                    {!entry.is_custom_date && plannedPostDate && entry.posted_date === plannedPostDate && (
+                      <span className="text-[10px] font-semibold text-blue-400 bg-blue-950/80 border border-blue-800/60 px-2 py-0.5 rounded">
+                        Auto-Filled from Post Date
+                      </span>
+                    )}
+                    {entry.is_custom_date && (
+                      <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-800/60 px-2 py-0.5 rounded">
+                        Custom Actual Date
+                      </span>
+                    )}
                   </div>
-                  {!hasLink && (
-                    <span className="text-[10px] text-slate-500">
-                      Enter the published {platform} post link to enable preview.
-                    </span>
-                  )}
+                  <div className="relative">
+                    <input 
+                      type="date" 
+                      value={entry.posted_date} 
+                      onChange={e => handleUpdatePlatformDate(platform, e.target.value)} 
+                      style={{ colorScheme: 'dark' }}
+                      className="w-full bg-[#070c18] border border-slate-700/80 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    Actual date the video went live on {platform}.
+                  </span>
                 </div>
 
-                {/* Posted Date & Time */}
+                {/* Field 2: POSTED TIME */}
                 <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    Posted Date & Time *
-                  </label>
-                  <input 
-                    type="datetime-local" 
-                    value={entry.postedAt} 
-                    onChange={e => handleUpdatePlatformField(platform, 'postedAt', e.target.value)} 
-                    style={{ colorScheme: 'dark' }}
-                    className="w-full bg-[#070c18] border border-slate-700/80 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
-                  />
-                  {!entry.postedAt && (
-                    <span className="text-[10px] text-slate-500">
-                      Select when this video went live on {platform}.
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      POSTED TIME
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      Optional
                     </span>
-                  )}
+                  </div>
+                  <div className="relative">
+                    <input 
+                      type="time" 
+                      value={entry.posted_time} 
+                      onChange={e => handleUpdatePlatformTime(platform, e.target.value)} 
+                      style={{ colorScheme: 'dark' }}
+                      className="w-full bg-[#070c18] border border-slate-700/80 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    Optional time of posting (e.g. 10:30 AM).
+                  </span>
                 </div>
               </div>
             </div>
@@ -11815,7 +11996,7 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
         <div>
           {!allPlatformsCompleted ? (
             <p className="text-xs text-amber-400 font-medium flex items-center gap-1.5">
-              <span>⚠️ Enter valid live post URLs and posted date/time for all {targetPlatforms.length} platform(s) to complete.</span>
+              <span>⚠️ Enter valid live post URLs and posted date for all {targetPlatforms.length} platform(s) to complete.</span>
             </p>
           ) : (
             <p className="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
