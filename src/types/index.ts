@@ -261,6 +261,14 @@ export interface InfluencerTrackingLink {
   influencer_name?: string;
   influencer_code?: string;
   product: string;
+  platform?: string;
+  platform_category?: 'WEBSITE' | 'MARKETPLACE' | string;
+  video_number?: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_content?: string;
+  creator_code?: string;
+  base_product_url?: string;
   tracking_url: string;
   notes?: string;
   created_at?: string;

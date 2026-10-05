@@ -7,11 +7,15 @@ import {
   Edit3, 
   Trash2, 
   User, 
-  AlertTriangle,
-  MoreVertical,
-  Calendar
+  AlertTriangle, 
+  MoreVertical, 
+  Calendar,
+  Globe,
+  ShoppingBag,
+  Video
 } from 'lucide-react';
 import type { InfluencerTrackingLink } from '../../types';
+import { TRACKING_PLATFORMS } from '../../services/influencerTrackingLinkService';
 
 interface CampaignTrackingLinkCardProps {
   link: InfluencerTrackingLink;
@@ -75,30 +79,40 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
       })
     : '';
 
+  const matchedPlatform = TRACKING_PLATFORMS.find(
+    p => p.name.toLowerCase() === (link.platform || '').toLowerCase() ||
+         p.utmSource.toLowerCase() === (link.utm_source || '').toLowerCase()
+  );
+
+  const platformName = link.platform || matchedPlatform?.name || 'Instagram';
+  const platformColor = matchedPlatform?.brandColor || '#A855F7';
+  const isMarketplace = link.platform_category === 'MARKETPLACE' || matchedPlatform?.category === 'MARKETPLACE';
+  const videoName = link.video_number || 'Video 1';
+
   return (
-    <div className="bg-[#0b1329] border border-slate-800 hover:border-purple-500/40 rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 shadow-md hover:shadow-purple-950/20 group relative">
+    <div className="bg-[#0b1329] border border-slate-800 hover:border-purple-500/40 rounded-2xl p-4 sm:p-5 flex flex-col justify-between transition-all duration-200 shadow-md hover:shadow-purple-950/20 group relative">
       <div>
         {/* Top Header */}
         <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-xl bg-purple-600/20 border border-purple-500/30 text-purple-400 flex items-center justify-center shrink-0">
               <Link2 size={16} />
             </div>
-            <div>
-              <h4 className="text-sm font-bold text-white uppercase tracking-wider leading-tight">
+            <div className="min-w-0">
+              <h4 className="text-sm font-bold text-white uppercase tracking-wider leading-tight truncate">
                 {link.product}
               </h4>
               {formattedDate && (
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
                   <Calendar size={12} className="text-slate-500" />
-                  <span>Created: {formattedDate}</span>
+                  <span>{formattedDate}</span>
                 </div>
               )}
             </div>
           </div>
 
           {/* Quick Menu */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               type="button"
               onClick={() => setShowMenu(!showMenu)}
@@ -137,33 +151,60 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
           </div>
         </div>
 
-        {/* Influencer Tag */}
-        <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 mb-3">
-          <div className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0">
-            <User size={12} />
-          </div>
-          <div className="flex items-center gap-1.5 min-w-0">
+        {/* Influencer & Code Banner */}
+        <div className="flex items-center justify-between gap-2 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 mb-2.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center shrink-0">
+              <User size={12} />
+            </div>
             <span className="text-xs font-semibold text-slate-200 truncate">
               {link.influencer_name || 'Assigned Influencer'}
             </span>
-            {link.influencer_code && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-medium">
-                {link.influencer_code}
-              </span>
-            )}
+          </div>
+          {link.influencer_code && (
+            <span className="text-[11px] px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 font-mono font-bold shrink-0 border border-purple-500/30">
+              {link.influencer_code}
+            </span>
+          )}
+        </div>
+
+        {/* Platform & Video Badges */}
+        <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
+          {/* Platform Badge */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-800 font-semibold text-slate-300">
+            <div
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: platformColor }}
+            />
+            <span>{platformName}</span>
+            <span className="text-[10px] text-slate-500 font-normal">
+              ({isMarketplace ? 'Marketplace' : 'Website'})
+            </span>
+          </div>
+
+          {/* Video Badge */}
+          <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-950/30 border border-purple-500/30 text-purple-300 font-bold">
+            <Video size={12} className="text-purple-400" />
+            <span>{videoName}</span>
           </div>
         </div>
 
-        {/* Tracking URL Box: no horizontal page overflow, break-all */}
-        <div className="bg-[#070c18] border border-slate-800/80 rounded-xl p-3 my-2">
-          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-            Tracking Link
+        {/* Tracking URL Box */}
+        <div className="bg-[#070c18] border border-slate-800/80 rounded-xl p-3 my-2 space-y-1">
+          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+            <span>Tracking Link</span>
+            <span className="text-purple-400/80 lowercase font-mono text-[10px]">
+              utm_campaign={link.creator_code || (link.influencer_code || '').replace(/^#+/, '').toLowerCase()}
+            </span>
           </div>
-          <p className="text-xs text-purple-300 font-mono break-all select-all leading-relaxed bg-purple-950/20 p-2 rounded-lg border border-purple-500/20">
+          <p
+            className="text-xs text-purple-300 font-mono break-all select-all leading-relaxed bg-purple-950/20 p-2 rounded-lg border border-purple-500/20"
+            title={link.tracking_url}
+          >
             {link.tracking_url}
           </p>
           {link.notes && (
-            <p className="text-xs text-slate-400 mt-2 italic leading-relaxed border-t border-slate-800/60 pt-2">
+            <p className="text-[11px] text-slate-400 italic pt-1 border-t border-slate-800/60 truncate">
               Note: {link.notes}
             </p>
           )}
@@ -172,7 +213,7 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
 
       {/* Footer Actions */}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-3 mt-2 border-t border-slate-800/80">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={handleCopy}
@@ -181,10 +222,10 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
                 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                 : 'bg-purple-600/10 hover:bg-purple-600/20 text-purple-300 border-purple-500/30'
             }`}
-            title="Copy Link"
+            title="Copy Tracking Link"
           >
             {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-            <span>{copied ? 'Copied Link' : 'Copy Link'}</span>
+            <span>{copied ? 'Copied!' : 'Copy'}</span>
           </button>
 
           <button
@@ -194,7 +235,7 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
             title="Open in new tab"
           >
             <ExternalLink size={13} />
-            <span>Open Link</span>
+            <span>Open</span>
           </button>
         </div>
 

@@ -1,10 +1,29 @@
-import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, Loader2, Link2, Check, Sparkles, User } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  X, 
+  AlertCircle, 
+  Loader2, 
+  Link2, 
+  Check, 
+  Sparkles, 
+  Globe, 
+  ShoppingBag, 
+  CheckCircle2, 
+  RefreshCw,
+  Info,
+  ExternalLink
+} from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
 import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
 import { 
-  createInfluencerTrackingLink, 
-  updateInfluencerTrackingLink 
+  TRACKING_PLATFORMS, 
+  TRACKING_VIDEOS, 
+  buildInfluencerTrackingUrl, 
+  extractBaseProductUrl, 
+  batchGenerateInfluencerTrackingLinks,
+  updateInfluencerTrackingLink,
+  type TrackingPlatformConfig,
+  type TrackingVideoConfig
 } from '../../services/influencerTrackingLinkService';
 import toast from 'react-hot-toast';
 
@@ -14,7 +33,7 @@ interface CampaignTrackingLinkModalProps {
   campaign: Campaign;
   influencers: CampaignInfluencer[];
   linkToEdit?: InfluencerTrackingLink | null;
-  onSuccess: (savedLink: InfluencerTrackingLink) => void;
+  onSuccess: (savedLinks: InfluencerTrackingLink[]) => void;
 }
 
 export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps> = ({
@@ -25,286 +44,662 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   linkToEdit,
   onSuccess
 }) => {
-  const [selectedInfluencerId, setSelectedInfluencerId] = useState<string>('');
-  const [product, setProduct] = useState<string>('');
-  const [trackingUrl, setTrackingUrl] = useState<string>('');
-  const [notes, setNotes] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errors, setErrors] = useState<{ influencer?: string; product?: string; trackingUrl?: string }>({});
-
+  // Modal State
   const isEditMode = Boolean(linkToEdit);
 
+  // Form Fields
+  const [selectedProduct, setSelectedProduct] = useState<string>('Kitchen Cleaner');
+  const [productUrl, setProductUrl] = useState<string>('');
+  const [selectedPlatformId, setSelectedPlatformId] = useState<string>('instagram');
+  const [selectedVideoId, setSelectedVideoId] = useState<string>('Video 1');
+
+  // Edit Mode Specific Field
+  const [editTrackingUrl, setEditTrackingUrl] = useState<string>('');
+  const [editNotes, setEditNotes] = useState<string>('');
+
+  // Generation / Progress State
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<{
+    current: number;
+    total: number;
+    percentage: number;
+  }>({ current: 0, total: 0, percentage: 0 });
+  const [generationResult, setGenerationResult] = useState<{
+    success: boolean;
+    successCount: number;
+    failedCount: number;
+    failedIds: (string | number)[];
+  } | null>(null);
+
+  // Errors
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Reset or initialize state on open
   useEffect(() => {
     if (isOpen) {
+      setValidationError(null);
+      setGenerationResult(null);
+      setIsGenerating(false);
+
       if (linkToEdit) {
-        setSelectedInfluencerId(String(linkToEdit.influencer_id || ''));
-        setProduct(linkToEdit.product || '');
-        setTrackingUrl(linkToEdit.tracking_url || '');
-        setNotes(linkToEdit.notes || '');
+        setSelectedProduct(linkToEdit.product || 'Kitchen Cleaner');
+        setEditTrackingUrl(linkToEdit.tracking_url || '');
+        setEditNotes(linkToEdit.notes || '');
+        const matchedPlat = TRACKING_PLATFORMS.find(
+          p => p.name.toLowerCase() === (linkToEdit.platform || '').toLowerCase() ||
+               p.utmSource.toLowerCase() === (linkToEdit.utm_source || '').toLowerCase()
+        );
+        setSelectedPlatformId(matchedPlat ? matchedPlat.id : 'instagram');
+        setSelectedVideoId(linkToEdit.video_number || 'Video 1');
       } else {
-        setSelectedInfluencerId('');
-        setProduct('');
-        setTrackingUrl('');
-        setNotes('');
+        // Defaults for batch generation
+        const defaultProduct = SCRIPT_PRODUCTS.includes('Kitchen Cleaner' as any)
+          ? 'Kitchen Cleaner'
+          : SCRIPT_PRODUCTS[0] || 'Kitchen Cleaner';
+        setSelectedProduct(defaultProduct);
+        setProductUrl('https://www.justmixx.com/products/kitchen-cleaner');
+        setSelectedPlatformId('instagram');
+        setSelectedVideoId('Video 1');
+        setEditTrackingUrl('');
+        setEditNotes('');
       }
-      setErrors({});
     }
   }, [isOpen, linkToEdit]);
 
+  // Active configurations
+  const currentPlatform: TrackingPlatformConfig = useMemo(() => {
+    return (
+      TRACKING_PLATFORMS.find(p => p.id === selectedPlatformId) ||
+      TRACKING_PLATFORMS[0]
+    );
+  }, [selectedPlatformId]);
+
+  const currentVideo: TrackingVideoConfig = useMemo(() => {
+    return (
+      TRACKING_VIDEOS.find(v => v.id === selectedVideoId) ||
+      TRACKING_VIDEOS[0]
+    );
+  }, [selectedVideoId]);
+
+  // Clean base URL preview
+  const cleanBaseUrl = useMemo(() => {
+    return extractBaseProductUrl(productUrl);
+  }, [productUrl]);
+
+  // Sample sample influencer for preview
+  const sampleInfluencer = useMemo(() => {
+    return influencers.length > 0 ? influencers[0] : null;
+  }, [influencers]);
+
+  // Live Sample Preview URL
+  const samplePreviewUrl = useMemo(() => {
+    if (!productUrl.trim()) return '';
+    const code = sampleInfluencer?.code || (sampleInfluencer as any)?.influencer_code || 'HIS1';
+    return buildInfluencerTrackingUrl(
+      productUrl,
+      currentPlatform.utmSource,
+      currentVideo.utmContent,
+      code
+    );
+  }, [productUrl, currentPlatform, currentVideo, sampleInfluencer]);
+
   if (!isOpen) return null;
 
-  // Auto-generate standard tracking URL helper
-  const handleGenerateLink = () => {
-    const selectedInf = influencers.find(i => String(i.id) === selectedInfluencerId);
-    const infIdentifier = selectedInf?.code || selectedInf?.name || selectedInf?.influencer_name || 'influencer';
-    const cleanInf = infIdentifier.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const cleanProd = (product || 'product').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const campSlug = (campaign.campaign_name || 'camp').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    
-    const generated = `https://velmora.com/ref?camp=${campSlug}&inf=${cleanInf}&p=${cleanProd}`;
-    setTrackingUrl(generated);
-    if (errors.trackingUrl) setErrors(prev => ({ ...prev, trackingUrl: '' }));
+  // Validate form before batch generation
+  const validateForm = (): boolean => {
+    if (!selectedProduct.trim()) {
+      setValidationError('Please select a product.');
+      return false;
+    }
+    if (!productUrl.trim()) {
+      setValidationError('Please enter a valid product link.');
+      return false;
+    }
+    try {
+      const test = productUrl.startsWith('http') ? productUrl : `https://${productUrl}`;
+      new URL(test);
+    } catch {
+      setValidationError('Please enter a valid URL (e.g. https://www.justmixx.com/products/kitchen-cleaner).');
+      return false;
+    }
+    if (influencers.length === 0) {
+      setValidationError('No influencers found in this campaign. Please add influencers to the campaign first.');
+      return false;
+    }
+    setValidationError(null);
+    return true;
   };
 
-  const validate = (): boolean => {
-    const newErrors: { influencer?: string; product?: string; trackingUrl?: string } = {};
-
-    if (!selectedInfluencerId) {
-      newErrors.influencer = 'Please select an influencer.';
-    }
-
-    if (!product || !product.trim()) {
-      newErrors.product = 'Please select a product title.';
-    }
-
-    if (!trackingUrl || !trackingUrl.trim()) {
-      newErrors.trackingUrl = 'Please enter or generate a tracking link.';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Handle Edit Submit
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (!linkToEdit) return;
 
-    setIsSubmitting(true);
-    const toastId = toast.loading(isEditMode ? 'Updating tracking link...' : 'Saving tracking link...');
+    if (!editTrackingUrl.trim()) {
+      setValidationError('Tracking URL is required.');
+      return;
+    }
 
-    const matchedInf = influencers.find(i => String(i.id) === selectedInfluencerId);
-    const infName = matchedInf?.influencer_name || matchedInf?.name || linkToEdit?.influencer_name || '';
-    const infCode = matchedInf?.code || linkToEdit?.influencer_code || '';
+    setIsGenerating(true);
+    const toastId = toast.loading('Updating tracking link...');
 
     try {
-      let saved: InfluencerTrackingLink;
-      if (isEditMode && linkToEdit) {
-        saved = await updateInfluencerTrackingLink(linkToEdit.id, campaign.id, {
-          influencer_id: selectedInfluencerId,
-          influencer_name: infName,
-          influencer_code: infCode,
-          product,
-          tracking_url: trackingUrl,
-          notes
-        });
-        toast.success('Tracking link updated successfully', { id: toastId });
-      } else {
-        saved = await createInfluencerTrackingLink({
-          campaign_id: campaign.id,
-          influencer_id: selectedInfluencerId,
-          influencer_name: infName,
-          influencer_code: infCode,
-          product,
-          tracking_url: trackingUrl,
-          notes
-        });
-        toast.success('Tracking link saved successfully', { id: toastId });
-      }
+      const updated = await updateInfluencerTrackingLink(linkToEdit.id, campaign.id, {
+        influencer_id: linkToEdit.influencer_id,
+        influencer_name: linkToEdit.influencer_name,
+        influencer_code: linkToEdit.influencer_code,
+        product: selectedProduct,
+        platform: currentPlatform.name,
+        platform_category: currentPlatform.category,
+        video_number: currentVideo.name,
+        utm_source: currentPlatform.utmSource,
+        utm_content: currentVideo.utmContent,
+        tracking_url: editTrackingUrl.trim(),
+        notes: editNotes.trim()
+      });
 
-      onSuccess(saved);
+      toast.success('Tracking link updated successfully', { id: toastId });
+      onSuccess([updated]);
       onClose();
     } catch (err: any) {
-      console.error('Error saving tracking link:', err);
-      toast.error(err?.message || 'Failed to save tracking link', { id: toastId });
+      console.error('Failed to update tracking link:', err);
+      toast.error(err?.message || 'Failed to update tracking link', { id: toastId });
     } finally {
-      setIsSubmitting(false);
+      setIsGenerating(false);
     }
   };
 
-  const isFormValid = selectedInfluencerId && product.trim().length > 0 && trackingUrl.trim().length > 0;
+  // Handle Batch Generation
+  const handleConfirmAndGenerate = async (influencersToProcess = influencers) => {
+    if (!validateForm()) return;
+
+    setIsGenerating(true);
+    setGenerationResult(null);
+    setGenerationProgress({ current: 0, total: influencersToProcess.length, percentage: 0 });
+
+    try {
+      const result = await batchGenerateInfluencerTrackingLinks({
+        campaign_id: campaign.id,
+        product: selectedProduct,
+        base_product_url: productUrl,
+        platform: currentPlatform.name,
+        platform_category: currentPlatform.category,
+        utm_source: currentPlatform.utmSource,
+        video_number: currentVideo.name,
+        utm_content: currentVideo.utmContent,
+        influencers: influencersToProcess,
+        onProgress: (current, total, percentage) => {
+          setGenerationProgress({ current, total, percentage });
+        }
+      });
+
+      if (result.failedCount === 0) {
+        setGenerationResult({
+          success: true,
+          successCount: result.successCount,
+          failedCount: 0,
+          failedIds: []
+        });
+        toast.success(`✓ ${result.successCount} tracking links generated successfully!`);
+        onSuccess(result.links);
+        // Delay close slightly so user sees the 100% completion
+        setTimeout(() => {
+          onClose();
+        }, 1200);
+      } else {
+        setGenerationResult({
+          success: false,
+          successCount: result.successCount,
+          failedCount: result.failedCount,
+          failedIds: result.failedInfluencerIds
+        });
+        toast.error(`${result.successCount} generated, ${result.failedCount} failed.`);
+        if (result.links.length > 0) {
+          onSuccess(result.links);
+        }
+      }
+    } catch (err: any) {
+      console.error('Batch generation failed:', err);
+      toast.error(err?.message || 'An error occurred during link generation.');
+      setGenerationResult({
+        success: false,
+        successCount: 0,
+        failedCount: influencersToProcess.length,
+        failedIds: influencersToProcess.map(i => i.id)
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // Retry failed records
+  const handleRetryFailed = () => {
+    if (!generationResult || generationResult.failedIds.length === 0) return;
+    const failedInfluencers = influencers.filter(i =>
+      generationResult.failedIds.includes(i.id)
+    );
+    handleConfirmAndGenerate(failedInfluencers);
+  };
+
+  const websitePlatforms = TRACKING_PLATFORMS.filter(p => p.category === 'WEBSITE');
+  const marketplacePlatforms = TRACKING_PLATFORMS.filter(p => p.category === 'MARKETPLACE');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
-      <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-5 my-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+      <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-5 my-6 text-slate-200">
+        
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-purple-600/20 border border-purple-500/30 text-purple-400 flex items-center justify-center">
-              <Link2 size={18} />
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-400 flex items-center justify-center shadow-inner">
+              <Link2 size={20} />
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-bold text-white uppercase tracking-wider">
-                {isEditMode ? 'Edit Tracking Link' : 'Create Influencer Tracking Link'}
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide uppercase">
+                {isEditMode ? 'EDIT INFLUENCER TRACKING LINK' : 'CREATE INFLUENCER TRACKING LINKS'}
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">{campaign.campaign_name}</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {campaign.campaign_name}
+                {!isEditMode && (
+                  <span className="text-purple-400 ml-2 font-semibold">
+                    • {influencers.length} Total Influencers
+                  </span>
+                )}
+              </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            disabled={isGenerating}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-40"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Influencer Dropdown */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Influencer <span className="text-purple-400">*</span>
-            </label>
-            <select
-              value={selectedInfluencerId}
-              onChange={(e) => {
-                setSelectedInfluencerId(e.target.value);
-                if (errors.influencer) setErrors(prev => ({ ...prev, influencer: '' }));
-              }}
-              className={`w-full bg-[#070c18] border ${
-                errors.influencer ? 'border-red-500' : 'border-slate-700/80 focus:border-purple-500'
-              } rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer`}
-            >
-              <option value="" disabled>Select Influencer</option>
-              {influencers.map((inf) => {
-                const displayName = inf.influencer_name || inf.name || `Influencer #${inf.id}`;
-                const codeSuffix = inf.code ? ` (${inf.code})` : '';
-                return (
-                  <option key={inf.id} value={String(inf.id)}>
-                    {displayName}{codeSuffix}
-                  </option>
-                );
-              })}
-            </select>
-            {errors.influencer && (
-              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                <AlertCircle size={12} /> {errors.influencer}
-              </p>
-            )}
+        {/* Validation Error Banner */}
+        {validationError && (
+          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+            <AlertCircle size={15} className="text-rose-400 shrink-0" />
+            <span>{validationError}</span>
           </div>
+        )}
 
-          {/* Product Title Dropdown */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Product Title <span className="text-purple-400">*</span>
-            </label>
-            <select
-              value={product}
-              onChange={(e) => {
-                setProduct(e.target.value);
-                if (errors.product) setErrors(prev => ({ ...prev, product: '' }));
-              }}
-              className={`w-full bg-[#070c18] border ${
-                errors.product ? 'border-red-500' : 'border-slate-700/80 focus:border-purple-500'
-              } rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer`}
-            >
-              <option value="" disabled>Select Product</option>
-              {SCRIPT_PRODUCTS.map((prod) => (
-                <option key={prod} value={prod}>
-                  {prod}
-                </option>
-              ))}
-            </select>
-            {errors.product && (
-              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                <AlertCircle size={12} /> {errors.product}
-              </p>
-            )}
-          </div>
-
-          {/* Tracking Link Input */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Tracking Link <span className="text-purple-400">*</span>
+        {/* Edit Mode Content */}
+        {isEditMode && linkToEdit ? (
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Influencer
               </label>
+              <div className="bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 flex items-center justify-between">
+                <span className="font-medium text-white">{linkToEdit.influencer_name || 'Influencer'}</span>
+                <span className="font-mono text-purple-400 font-bold">{linkToEdit.influencer_code}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Product *
+              </label>
+              <select
+                value={selectedProduct}
+                onChange={(e) => setSelectedProduct(e.target.value)}
+                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer"
+              >
+                {SCRIPT_PRODUCTS.map((prod) => (
+                  <option key={prod} value={prod}>
+                    {prod}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Tracking URL *
+              </label>
+              <input
+                type="text"
+                value={editTrackingUrl}
+                onChange={(e) => setEditTrackingUrl(e.target.value)}
+                placeholder="https://..."
+                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Notes
+              </label>
+              <input
+                type="text"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                placeholder="Notes or comments"
+                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
               <button
                 type="button"
-                onClick={handleGenerateLink}
-                disabled={!selectedInfluencerId}
-                className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1 font-medium transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Generate standard tracking link based on selected influencer & product"
+                onClick={onClose}
+                disabled={isGenerating}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
               >
-                <Sparkles size={12} />
-                <span>Auto-Generate Link</span>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isGenerating}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white shadow-md shadow-purple-900/25 transition-all cursor-pointer"
+              >
+                {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                <span>Save Changes</span>
               </button>
             </div>
-            <input
-              type="text"
-              value={trackingUrl}
-              onChange={(e) => {
-                setTrackingUrl(e.target.value);
-                if (errors.trackingUrl) setErrors(prev => ({ ...prev, trackingUrl: '' }));
-              }}
-              placeholder="https://example.com/ref/..."
-              className={`w-full bg-[#070c18] border ${
-                errors.trackingUrl ? 'border-red-500' : 'border-slate-700/80 focus:border-purple-500'
-              } rounded-xl px-3.5 py-2.5 text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors`}
-            />
-            {errors.trackingUrl && (
-              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                <AlertCircle size={12} /> {errors.trackingUrl}
-              </p>
-            )}
-          </div>
+          </form>
+        ) : (
+          /* Batch Generation Form */
+          <div className="space-y-4">
+            {/* 1. PRODUCT * */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Product <span className="text-purple-400">*</span>
+              </label>
+              <select
+                value={selectedProduct}
+                onChange={(e) => {
+                  setSelectedProduct(e.target.value);
+                  setValidationError(null);
+                }}
+                disabled={isGenerating}
+                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {SCRIPT_PRODUCTS.map((prod) => (
+                  <option key={prod} value={prod}>
+                    {prod}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* Notes (Optional) */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Notes <span className="text-slate-500 text-[10px] font-normal lowercase">(optional)</span>
-            </label>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g., Campaign promo code, affiliate tag, custom UTM parameters"
-              className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
-            />
-          </div>
-
-          {/* Footer Action Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!isFormValid || isSubmitting}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${
-                isFormValid && !isSubmitting
-                  ? 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white shadow-purple-900/25'
-                  : 'bg-purple-600/50 text-purple-200/50 cursor-not-allowed shadow-none'
-              }`}
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  <Check size={16} />
-                  <span>{isEditMode ? 'Update Tracking Link' : 'Save Tracking Link'}</span>
-                </>
+            {/* 2. PRODUCT LINK * */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  Product Link <span className="text-purple-400">*</span>
+                </label>
+                <span className="text-[11px] text-slate-400">
+                  UTMs will be auto-replaced
+                </span>
+              </div>
+              <input
+                type="text"
+                value={productUrl}
+                onChange={(e) => {
+                  setProductUrl(e.target.value);
+                  setValidationError(null);
+                }}
+                disabled={isGenerating}
+                placeholder="https://www.justmixx.com/products/kitchen-cleaner"
+                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors disabled:opacity-50"
+              />
+              {cleanBaseUrl && (
+                <div className="mt-1.5 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-400 truncate flex items-center gap-1.5">
+                  <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Base URL:</span>
+                  <span className="text-slate-300 font-mono truncate">{cleanBaseUrl}</span>
+                </div>
               )}
-            </button>
+            </div>
+
+            {/* 3. PLATFORM * */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                Platform <span className="text-purple-400">*</span>
+              </label>
+              
+              <div className="space-y-3 bg-[#070c18] border border-slate-800 rounded-2xl p-3.5">
+                {/* Category 1: WEBSITE */}
+                <div>
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                    <Globe size={13} className="text-purple-400" />
+                    <span>Website</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {websitePlatforms.map((plat) => {
+                      const isSelected = selectedPlatformId === plat.id;
+                      return (
+                        <button
+                          key={plat.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPlatformId(plat.id);
+                            setValidationError(null);
+                          }}
+                          disabled={isGenerating}
+                          className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                            isSelected
+                              ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                              : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                          }`}
+                        >
+                          <div
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: plat.brandColor }}
+                          />
+                          <span>{plat.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Divider */}
+                <div className="h-[1px] bg-slate-800/80" />
+
+                {/* Category 2: MARKETPLACE */}
+                <div>
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                    <ShoppingBag size={13} className="text-purple-400" />
+                    <span>Marketplace</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {marketplacePlatforms.map((plat) => {
+                      const isSelected = selectedPlatformId === plat.id;
+                      return (
+                        <button
+                          key={plat.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPlatformId(plat.id);
+                            setValidationError(null);
+                          }}
+                          disabled={isGenerating}
+                          className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                            isSelected
+                              ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                              : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                          }`}
+                        >
+                          <div
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: plat.brandColor }}
+                          />
+                          <span>{plat.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. VIDEO * */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  Video <span className="text-purple-400">*</span>
+                </label>
+                <span className="text-[11px] text-purple-400 font-mono">
+                  utm_content={currentVideo.utmContent}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {TRACKING_VIDEOS.map((vid) => {
+                  const isSelected = selectedVideoId === vid.id;
+                  return (
+                    <button
+                      key={vid.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedVideoId(vid.id);
+                        setValidationError(null);
+                      }}
+                      disabled={isGenerating}
+                      className={`py-2 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer border text-center ${
+                        isSelected
+                          ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                          : 'bg-[#070c18] border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                      }`}
+                    >
+                      {vid.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 5. CONFIRMATION SUMMARY & SAMPLE PREVIEW */}
+            <div className="bg-slate-900/70 border border-purple-500/30 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-800">
+                <span className="font-semibold text-slate-300 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+                  <Sparkles size={13} className="text-purple-400" />
+                  Generation Summary
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold text-[11px]">
+                  {influencers.length} Links to Generate
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
+                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Product</span>
+                  <span className="text-slate-200 font-semibold truncate block mt-0.5">{selectedProduct}</span>
+                </div>
+                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
+                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Platform</span>
+                  <span className="text-purple-300 font-semibold truncate block mt-0.5">{currentPlatform.name}</span>
+                </div>
+                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
+                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Video</span>
+                  <span className="text-slate-200 font-semibold truncate block mt-0.5">{currentVideo.name}</span>
+                </div>
+                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
+                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Total Creators</span>
+                  <span className="text-emerald-400 font-bold truncate block mt-0.5">{influencers.length}</span>
+                </div>
+              </div>
+
+              {/* Sample Preview Link */}
+              {samplePreviewUrl && (
+                <div className="bg-[#070c18] p-2.5 rounded-xl border border-slate-800 space-y-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span className="font-medium">
+                      Sample Link Preview ({sampleInfluencer?.code || '#HIS1'}):
+                    </span>
+                    <span className="text-purple-400 text-[10px] font-mono">
+                      utm_campaign={(sampleInfluencer?.code || 'his1').replace(/^#+/, '').toLowerCase()}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-mono text-purple-300/90 break-all select-all leading-relaxed bg-purple-950/20 p-2 rounded-lg border border-purple-500/20">
+                    {samplePreviewUrl}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* 6. PROGRESS BAR / RESULT DISPLAY */}
+            {isGenerating && (
+              <div className="bg-[#070c18] border border-purple-500/40 rounded-2xl p-4 space-y-2 animate-fade-in">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-300 font-semibold flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin text-purple-400" />
+                    Generating influencer tracking links...
+                  </span>
+                  <span className="font-mono text-purple-400 font-bold">
+                    {generationProgress.current} / {generationProgress.total} links ({generationProgress.percentage}%)
+                  </span>
+                </div>
+                <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-purple-600 to-indigo-500 transition-all duration-300 ease-out rounded-full"
+                    style={{ width: `${generationProgress.percentage}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Failure Feedback & Retry Option */}
+            {generationResult && !generationResult.success && (
+              <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs animate-fade-in">
+                <div className="space-y-0.5">
+                  <div className="font-bold text-rose-300 flex items-center gap-1.5">
+                    <AlertCircle size={15} />
+                    <span>Generation Partially Failed</span>
+                  </div>
+                  <p className="text-slate-400">
+                    {generationResult.successCount} links generated, {generationResult.failedCount} failed.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRetryFailed}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
+                >
+                  <RefreshCw size={13} />
+                  <span>Retry Failed Records</span>
+                </button>
+              </div>
+            )}
+
+            {/* Footer Actions */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isGenerating}
+                className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmAndGenerate(influencers)}
+                disabled={isGenerating || influencers.length === 0}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${
+                  !isGenerating && influencers.length > 0
+                    ? 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white shadow-purple-900/25'
+                    : 'bg-purple-600/50 text-purple-200/50 cursor-not-allowed shadow-none'
+                }`}
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Generating Links...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} />
+                    <span>Confirm & Generate</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-        </form>
+        )}
       </div>
     </div>
   );
