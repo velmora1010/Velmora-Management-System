@@ -8,28 +8,32 @@ import {
   SearchX, 
   AlertCircle,
   RefreshCw,
-  User,
-  Copy,
-  Check,
-  ExternalLink,
-  Globe,
-  ShoppingBag,
-  Video,
-  LayoutGrid,
-  Table as TableIcon,
-  Search,
-  Trash2,
-  Edit3,
-  AlertTriangle
+  Copy, 
+  Check, 
+  ExternalLink, 
+  Globe, 
+  ShoppingBag, 
+  ShoppingCart,
+  Store,
+  Video, 
+  LayoutGrid, 
+  Table as TableIcon, 
+  Search, 
+  Trash2, 
+  Edit3, 
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  ChevronsUpDown
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
 import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
 import { 
   fetchInfluencerTrackingLinks, 
   deleteInfluencerTrackingLink,
-  TRACKING_PLATFORMS,
-  TRACKING_VIDEOS,
-  compareTrackingLinksByCodeAsc
+  TRACKING_PLATFORMS, 
+  TRACKING_VIDEOS, 
+  compareTrackingLinksByCodeAsc 
 } from '../../services/influencerTrackingLinkService';
 import { CampaignTrackingLinkModal } from './CampaignTrackingLinkModal';
 import { CampaignTrackingLinkCard } from './CampaignTrackingLinkCard';
@@ -42,6 +46,87 @@ interface CampaignTrackingLinkSectionProps {
   onBack: () => void;
 }
 
+// Data structures for hierarchical grouping: Product -> Category -> Platform -> Links
+interface PlatformGroup {
+  platformName: string;
+  category: 'WEBSITE' | 'MARKETPLACE' | string;
+  brandColor: string;
+  links: InfluencerTrackingLink[];
+}
+
+interface CategoryGroup {
+  category: 'WEBSITE' | 'MARKETPLACE' | string;
+  platforms: PlatformGroup[];
+  totalLinks: number;
+}
+
+interface ProductGroup {
+  product: string;
+  totalLinks: number;
+  categories: CategoryGroup[];
+}
+
+// Platform Icon with recognizable brand styling
+const PlatformBrandIcon: React.FC<{ platform: string; color?: string }> = ({ platform, color }) => {
+  const norm = platform.toLowerCase();
+  if (norm.includes('instagram')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-xs">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect width="20" height="20" x="2" y="2" rx="5" ry="5"/>
+          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+          <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>
+        </svg>
+      </span>
+    );
+  }
+  if (norm.includes('youtube')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-red-600 flex items-center justify-center text-white shrink-0 shadow-xs">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/>
+        </svg>
+      </span>
+    );
+  }
+  if (norm.includes('facebook')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-[#1877F2] flex items-center justify-center text-white shrink-0 font-bold text-[13px] leading-none shadow-xs">
+        f
+      </span>
+    );
+  }
+  if (norm.includes('flipkart')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-[#2874F0] flex items-center justify-center text-amber-300 shrink-0 shadow-xs">
+        <ShoppingCart size={12} />
+      </span>
+    );
+  }
+  if (norm.includes('amazon')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-[#FF9900] flex items-center justify-center text-slate-950 shrink-0 shadow-xs">
+        <ShoppingBag size={12} />
+      </span>
+    );
+  }
+  if (norm.includes('meesho')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-[#F43397] flex items-center justify-center text-white shrink-0 shadow-xs">
+        <Store size={12} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="w-5 h-5 rounded-md flex items-center justify-center text-white shrink-0 shadow-xs"
+      style={{ backgroundColor: color || '#A855F7' }}
+    >
+      <Globe size={12} />
+    </span>
+  );
+};
+
 export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionProps> = ({ 
   campaign, 
   onBack 
@@ -50,7 +135,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // 3 Primary Filters: Product, Platform, Video (Influencer filter completely removed)
+  // Filters: Product, Platform, Video
   const [selectedProduct, setSelectedProduct] = useState<string>('All');
   const [selectedPlatform, setSelectedPlatform] = useState<string>('All');
   const [selectedVideo, setSelectedVideo] = useState<string>('All');
@@ -62,12 +147,19 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [linkToEdit, setLinkToEdit] = useState<InfluencerTrackingLink | null>(null);
+  const [createProductDefault, setCreateProductDefault] = useState<string | undefined>(undefined);
 
   // Delete modal state
   const [linkToDelete, setLinkToDelete] = useState<InfluencerTrackingLink | null>(null);
 
-  // Copy tracking state for table rows
+  // Copy tracking state for feedback
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Accordion expansion state:
+  // expandedProducts: { [productName: string]: boolean }
+  // expandedPlatforms: { [`${productName}::${platformName}`]: boolean }
+  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
+  const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
 
   // Fetch campaign influencers
   const { influencers, refresh: refreshInfluencers } = useCampaignInfluencers(campaign.id);
@@ -105,14 +197,16 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   }, [loadLinks]);
 
   // Open Create Modal
-  const handleOpenCreate = () => {
+  const handleOpenCreate = (preselectedProduct?: string) => {
     setLinkToEdit(null);
+    setCreateProductDefault(preselectedProduct);
     setIsModalOpen(true);
   };
 
   // Open Edit Modal
   const handleOpenEdit = (link: InfluencerTrackingLink) => {
     setLinkToEdit(link);
+    setCreateProductDefault(link.product);
     setIsModalOpen(true);
   };
 
@@ -179,7 +273,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     window.open(clean, '_blank', 'noopener,noreferrer');
   };
 
-  // Filtered links list: Excludes eliminated influencers and sorts numerically ascending
+  // Filtered links list: Excludes eliminated influencers
   const filteredLinks = useMemo(() => {
     // 1. Exclude records belonging to eliminated influencers
     const activeEligibleLinks = links.filter(
@@ -215,9 +309,192 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       return matchProduct && matchPlatform && matchVideo && matchSearch;
     });
 
-    // 3. Sort by Creator Code in ASCENDING NUMERICAL order (e.g. HIS1, HIS2, ... HIS186)
     return filtered.sort(compareTrackingLinksByCodeAsc);
   }, [links, eliminatedInfluencerIds, selectedProduct, selectedPlatform, selectedVideo, searchQuery]);
+
+  // Hierarchical Grouping: PRODUCT -> PLATFORM CATEGORY (WEBSITE / MARKETPLACE) -> PLATFORM -> LINKS
+  const productGroups: ProductGroup[] = useMemo(() => {
+    // Group filtered links by product
+    const prodMap = new Map<string, InfluencerTrackingLink[]>();
+
+    filteredLinks.forEach(link => {
+      const prodName = link.product || 'Unassigned Product';
+      if (!prodMap.has(prodName)) {
+        prodMap.set(prodName, []);
+      }
+      prodMap.get(prodName)!.push(link);
+    });
+
+    const groups: ProductGroup[] = [];
+
+    prodMap.forEach((pLinks, prodName) => {
+      // Within this product, categorize by category: WEBSITE and MARKETPLACE
+      const catMap = new Map<string, Map<string, InfluencerTrackingLink[]>>();
+      catMap.set('WEBSITE', new Map());
+      catMap.set('MARKETPLACE', new Map());
+
+      pLinks.forEach(link => {
+        const platName = (link.platform || link.utm_source || 'Instagram').trim();
+        const matched = TRACKING_PLATFORMS.find(
+          p => p.name.toLowerCase() === platName.toLowerCase() ||
+               p.utmSource.toLowerCase() === platName.toLowerCase() ||
+               p.id.toLowerCase() === platName.toLowerCase()
+        );
+
+        const canonicalName = matched?.name || platName;
+        const category: 'WEBSITE' | 'MARKETPLACE' =
+          link.platform_category === 'MARKETPLACE' || matched?.category === 'MARKETPLACE'
+            ? 'MARKETPLACE'
+            : 'WEBSITE';
+
+        if (!catMap.has(category)) {
+          catMap.set(category, new Map());
+        }
+        const platformMap = catMap.get(category)!;
+        if (!platformMap.has(canonicalName)) {
+          platformMap.set(canonicalName, []);
+        }
+        platformMap.get(canonicalName)!.push(link);
+      });
+
+      const categories: CategoryGroup[] = [];
+      const categoryOrder = ['WEBSITE', 'MARKETPLACE'];
+
+      categoryOrder.forEach(catName => {
+        const platformMap = catMap.get(catName);
+        if (!platformMap || platformMap.size === 0) return;
+
+        const platforms: PlatformGroup[] = [];
+
+        // Preferred canonical platform order
+        const preferredPlatforms = catName === 'WEBSITE'
+          ? ['Instagram', 'YouTube', 'Facebook']
+          : ['Flipkart', 'Amazon', 'Meesho'];
+
+        // Add preferred platforms first if present
+        preferredPlatforms.forEach(pName => {
+          if (platformMap.has(pName)) {
+            const linksForPlat = platformMap.get(pName)!;
+            if (linksForPlat.length > 0) {
+              const matched = TRACKING_PLATFORMS.find(p => p.name.toLowerCase() === pName.toLowerCase());
+              platforms.push({
+                platformName: pName,
+                category: catName,
+                brandColor: matched?.brandColor || '#A855F7',
+                links: linksForPlat.sort(compareTrackingLinksByCodeAsc)
+              });
+              platformMap.delete(pName);
+            }
+          }
+        });
+
+        // Add any remaining platforms under this category
+        platformMap.forEach((linksForPlat, pName) => {
+          if (linksForPlat.length > 0) {
+            const matched = TRACKING_PLATFORMS.find(p => p.name.toLowerCase() === pName.toLowerCase());
+            platforms.push({
+              platformName: pName,
+              category: catName,
+              brandColor: matched?.brandColor || '#A855F7',
+              links: linksForPlat.sort(compareTrackingLinksByCodeAsc)
+            });
+          }
+        });
+
+        if (platforms.length > 0) {
+          const catTotal = platforms.reduce((acc, p) => acc + p.links.length, 0);
+          categories.push({
+            category: catName,
+            platforms,
+            totalLinks: catTotal
+          });
+        }
+      });
+
+      // Include any other non-standard categories if present
+      catMap.forEach((platformMap, catName) => {
+        if (!categoryOrder.includes(catName) && platformMap.size > 0) {
+          const platforms: PlatformGroup[] = [];
+          platformMap.forEach((linksForPlat, pName) => {
+            if (linksForPlat.length > 0) {
+              platforms.push({
+                platformName: pName,
+                category: catName,
+                brandColor: '#A855F7',
+                links: linksForPlat.sort(compareTrackingLinksByCodeAsc)
+              });
+            }
+          });
+          if (platforms.length > 0) {
+            const catTotal = platforms.reduce((acc, p) => acc + p.links.length, 0);
+            categories.push({
+              category: catName,
+              platforms,
+              totalLinks: catTotal
+            });
+          }
+        }
+      });
+
+      if (categories.length > 0) {
+        groups.push({
+          product: prodName,
+          totalLinks: pLinks.length,
+          categories
+        });
+      }
+    });
+
+    return groups;
+  }, [filteredLinks]);
+
+  // Toggle handlers for collapsible sections
+  const toggleProduct = (prodName: string) => {
+    setExpandedProducts(prev => {
+      const current = prev[prodName];
+      // If undefined, default was true only for 1st product; toggling flips it
+      const isCurrentlyExpanded = current !== undefined ? current : false;
+      return { ...prev, [prodName]: !isCurrentlyExpanded };
+    });
+  };
+
+  const togglePlatform = (prodName: string, platName: string) => {
+    const key = `${prodName}::${platName}`;
+    setExpandedPlatforms(prev => {
+      const current = prev[key];
+      const isCurrentlyExpanded = current !== undefined ? current : false;
+      return { ...prev, [key]: !isCurrentlyExpanded };
+    });
+  };
+
+  // Helper: Are all products expanded?
+  const allExpanded = useMemo(() => {
+    if (productGroups.length === 0) return false;
+    return productGroups.every((p, idx) => {
+      const isPExp = expandedProducts[p.product] ?? (idx === 0);
+      return isPExp;
+    });
+  }, [productGroups, expandedProducts]);
+
+  const handleToggleAll = () => {
+    const nextState = !allExpanded;
+    const newProducts: Record<string, boolean> = {};
+    const newPlatforms: Record<string, boolean> = {};
+
+    productGroups.forEach(p => {
+      newProducts[p.product] = nextState;
+      p.categories.forEach(c => {
+        c.platforms.forEach(plat => {
+          newPlatforms[`${p.product}::${plat.platformName}`] = nextState;
+        });
+      });
+    });
+
+    setExpandedProducts(newProducts);
+    setExpandedPlatforms(newPlatforms);
+  };
+
+  const isSearching = searchQuery.trim().length > 0;
 
   return (
     <div className="w-full space-y-5 animate-fade-in text-slate-200">
@@ -247,7 +524,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={handleOpenCreate}
+            onClick={() => handleOpenCreate(selectedProduct !== 'All' ? selectedProduct : undefined)}
             className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md shadow-purple-900/25 cursor-pointer"
           >
             <Plus size={16} />
@@ -256,7 +533,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         </div>
       </div>
 
-      {/* Filters Bar & Controls (INFLUENCER FILTER REMOVED) */}
+      {/* Filters Bar & Controls */}
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 space-y-3.5 shadow-sm">
         {/* Row 1: PRODUCT, PLATFORM, VIDEO Filters in clean 3-column layout */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -321,7 +598,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           </div>
         </div>
 
-        {/* Row 2: Search, Count & View Mode Toggle */}
+        {/* Row 2: Search, Count, Expand All, & View Mode Toggle */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
           {/* Quick Search */}
           <div className="relative flex-1 max-w-sm">
@@ -335,12 +612,25 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
             />
           </div>
 
-          {/* Right Controls: Count, View Mode, Refresh */}
+          {/* Right Controls: Count, Expand/Collapse All, View Mode, Refresh */}
           <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-400">
             <span className="font-medium text-slate-300">
               Showing <span className="text-purple-400 font-bold">{filteredLinks.length}</span>{' '}
               {filteredLinks.length === 1 ? 'Link' : 'Links'}
             </span>
+
+            {/* Expand / Collapse All Toggle Button */}
+            {productGroups.length > 0 && (
+              <button
+                type="button"
+                onClick={handleToggleAll}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#070c18] hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold"
+                title={allExpanded ? 'Collapse all sections' : 'Expand all sections'}
+              >
+                <ChevronsUpDown size={13} className="text-purple-400" />
+                <span>{allExpanded ? 'Collapse All' : 'Expand All'}</span>
+              </button>
+            )}
 
             {/* View Mode Toggle */}
             <div className="flex items-center bg-[#070c18] border border-slate-800 rounded-xl p-0.5">
@@ -410,176 +700,296 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           </button>
         </div>
       ) : filteredLinks.length === 0 ? (
-        /* Empty State */
+        /* Empty States: Distinct for specific filtered product vs general empty */
         <div className="bg-[#0b1329]/60 border border-slate-800/90 rounded-2xl p-12 sm:p-16 flex flex-col items-center justify-center text-center shadow-sm">
           <div className="w-16 h-16 rounded-2xl bg-purple-600/10 border border-purple-500/30 text-purple-400 flex items-center justify-center mb-4 shadow-inner">
             {links.length === 0 ? <Link2 size={32} /> : <SearchX size={32} />}
           </div>
           <h4 className="text-base sm:text-lg font-bold text-white mb-1.5">
-            {links.length === 0 ? 'No tracking links created yet' : 'No matching tracking links found'}
+            {selectedProduct !== 'All'
+              ? `No tracking links created for ${selectedProduct} yet`
+              : links.length === 0
+                ? 'No tracking links created yet'
+                : 'No matching tracking links found'}
           </h4>
           <p className="text-xs sm:text-sm text-slate-400 max-w-md mb-6 leading-relaxed">
-            {links.length === 0
-              ? `Get started by clicking Create Tracking Link to automatically generate unique UTM tracking links for all eligible influencers in ${campaign.campaign_name}.`
-              : 'No tracking links match the selected filters or search query. Try adjusting filters or create a new link.'}
+            {selectedProduct !== 'All'
+              ? `Click below to generate UTM tracking links for ${selectedProduct} across eligible campaign influencers.`
+              : links.length === 0
+                ? `Get started by clicking Create Tracking Link to automatically generate unique UTM tracking links for all eligible influencers in ${campaign.campaign_name}.`
+                : 'No tracking links match the selected filters or search query. Try adjusting filters or create a new link.'}
           </p>
           <button
             type="button"
-            onClick={handleOpenCreate}
+            onClick={() => handleOpenCreate(selectedProduct !== 'All' ? selectedProduct : undefined)}
             className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md shadow-purple-900/25 cursor-pointer"
           >
             <Plus size={16} />
             <span>Create Tracking Link</span>
           </button>
         </div>
-      ) : viewMode === 'table' ? (
-        /* Table View (Sorted Numerically ASCENDING by Creator Code) */
-        <div className="bg-[#0b1329] border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-[#070c18] border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                <tr>
-                  <th scope="col" className="px-4 py-3.5">Influencer</th>
-                  <th scope="col" className="px-4 py-3.5">Creator Code</th>
-                  <th scope="col" className="px-4 py-3.5">Product</th>
-                  <th scope="col" className="px-4 py-3.5">Platform</th>
-                  <th scope="col" className="px-4 py-3.5">Video</th>
-                  <th scope="col" className="px-4 py-3.5 min-w-[260px]">Tracking Link</th>
-                  <th scope="col" className="px-4 py-3.5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/80">
-                {filteredLinks.map((link) => {
-                  const isCopied = copiedId === link.id;
-                  const matchedPlat = TRACKING_PLATFORMS.find(
-                    p => p.name.toLowerCase() === (link.platform || '').toLowerCase() ||
-                         p.utmSource.toLowerCase() === (link.utm_source || '').toLowerCase()
-                  );
-                  const platColor = matchedPlat?.brandColor || '#A855F7';
-                  const platName = link.platform || matchedPlat?.name || 'Instagram';
-                  const videoText = link.video_number || 'Video 1';
+      ) : (
+        /* Hierarchical Grouped View: PRODUCT -> PLATFORM CATEGORY -> PLATFORM -> INFLUENCER TABLE */
+        <div className="space-y-6">
+          {productGroups.map((productGroup, prodIndex) => {
+            // Collapsible state: first product is expanded by default (index === 0)
+            // or if user searched, auto-expand
+            const isProductExpanded = isSearching
+              ? true
+              : (expandedProducts[productGroup.product] !== undefined
+                  ? expandedProducts[productGroup.product]
+                  : prodIndex === 0);
 
-                  return (
-                    <tr
-                      key={link.id}
-                      className="hover:bg-slate-900/50 transition-colors group"
-                    >
-                      {/* Influencer Name */}
-                      <td className="px-4 py-3 font-semibold text-white whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
-                            {(link.influencer_name || 'U').charAt(0).toUpperCase()}
+            return (
+              <div 
+                key={productGroup.product}
+                className="bg-[#0b1329] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl overflow-hidden shadow-sm transition-all duration-200"
+              >
+                {/* 1. PRODUCT HEADER BAR (Collapsible) */}
+                <button
+                  type="button"
+                  onClick={() => toggleProduct(productGroup.product)}
+                  className="w-full flex items-center justify-between p-4 sm:p-5 bg-gradient-to-r from-[#0e1733] to-[#0b1329] hover:from-[#121d42] hover:to-[#0e1935] transition-all cursor-pointer text-left border-b border-slate-800/80"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-purple-600/15 border border-purple-500/30 text-purple-300 flex items-center justify-center text-xl shrink-0 shadow-sm">
+                      🧴
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h4 className="text-base sm:text-lg font-bold text-white tracking-wide uppercase truncate">
+                          {productGroup.product}
+                        </h4>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+                          {productGroup.totalLinks} {productGroup.totalLinks === 1 ? 'Link' : 'Links'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">Product Tracking Links</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 text-slate-400 shrink-0 ml-3">
+                    <span className="text-xs font-medium hidden md:inline text-slate-500">
+                      {isProductExpanded ? 'Click to collapse' : 'Click to expand'}
+                    </span>
+                    <div className="w-8 h-8 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-center text-slate-300">
+                      {isProductExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                    </div>
+                  </div>
+                </button>
+
+                {/* 2. PRODUCT BODY: PLATFORM CATEGORIES (Shown when product is expanded) */}
+                {isProductExpanded && (
+                  <div className="p-4 sm:p-5 space-y-6 bg-[#080d1c]/40">
+                    {productGroup.categories.map((catGroup, catIdx) => (
+                      <div key={catGroup.category} className="space-y-3">
+                        {/* Category Label with Divider */}
+                        <div className="flex items-center gap-2.5 pb-1">
+                          <div className="flex items-center gap-1.5 text-xs font-bold tracking-wider uppercase text-slate-400">
+                            {catGroup.category === 'WEBSITE' ? (
+                              <Globe size={13} className="text-purple-400" />
+                            ) : (
+                              <ShoppingBag size={13} className="text-amber-400" />
+                            )}
+                            <span className="text-slate-300">{catGroup.category}</span>
                           </div>
-                          <span className="truncate max-w-[150px]">
-                            {link.influencer_name || 'Influencer'}
+                          <div className="h-[1px] flex-1 bg-slate-800/80" />
+                          <span className="text-[11px] font-semibold text-slate-500">
+                            {catGroup.totalLinks} {catGroup.totalLinks === 1 ? 'Link' : 'Links'}
                           </span>
                         </div>
-                      </td>
 
-                      {/* Creator Code (e.g. #HIS1, #HIS2, #HIS186) */}
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 font-mono font-bold text-[11px] border border-purple-500/30">
-                          {link.influencer_code || link.creator_code ? `#${(link.creator_code || link.influencer_code || '').replace(/^#+/, '').toUpperCase()}` : '-'}
-                        </span>
-                      </td>
+                        {/* Platform Cards */}
+                        <div className="space-y-3">
+                          {catGroup.platforms.map((platformGroup, platIdx) => {
+                            const platformKey = `${productGroup.product}::${platformGroup.platformName}`;
+                            // Platform collapsible state:
+                            // By default, first platform in first category is expanded, or auto-expand if searching
+                            const isPlatformExpanded = isSearching
+                              ? true
+                              : (expandedPlatforms[platformKey] !== undefined
+                                  ? expandedPlatforms[platformKey]
+                                  : (catIdx === 0 && platIdx === 0));
 
-                      {/* Product */}
-                      <td className="px-4 py-3 whitespace-nowrap text-slate-200">
-                        {link.product}
-                      </td>
+                            return (
+                              <div
+                                key={platformGroup.platformName}
+                                className="border border-slate-800 rounded-xl overflow-hidden bg-[#070c18] shadow-sm transition-all"
+                              >
+                                {/* Platform Header Bar (Collapsible) */}
+                                <button
+                                  type="button"
+                                  onClick={() => togglePlatform(productGroup.product, platformGroup.platformName)}
+                                  className="w-full flex items-center justify-between px-4 py-3 bg-[#0a1124] hover:bg-[#0f1730] transition-colors cursor-pointer text-left"
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <PlatformBrandIcon
+                                      platform={platformGroup.platformName}
+                                      color={platformGroup.brandColor}
+                                    />
+                                    <span className="text-sm font-bold text-white tracking-wide truncate">
+                                      {platformGroup.platformName.toUpperCase()}
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-800/90 text-slate-300 border border-slate-700/60 shrink-0">
+                                      {platformGroup.links.length}{' '}
+                                      {platformGroup.links.length === 1 ? 'Link' : 'Links'}
+                                    </span>
+                                  </div>
 
-                      {/* Platform */}
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-medium text-slate-300">
-                          <span
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: platColor }}
-                          />
-                          <span>{platName}</span>
-                        </span>
-                      </td>
+                                  <div className="flex items-center gap-2 text-slate-400 shrink-0 ml-2">
+                                    <div className="w-6 h-6 rounded-md bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white">
+                                      {isPlatformExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                    </div>
+                                  </div>
+                                </button>
 
-                      {/* Video */}
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-lg bg-purple-950/40 border border-purple-500/30 text-purple-300 font-bold text-[11px]">
-                          {videoText}
-                        </span>
-                      </td>
+                                {/* Platform Content (Table or Grid) when platform is expanded */}
+                                {isPlatformExpanded && (
+                                  <div className="border-t border-slate-800/80 bg-[#070c18]">
+                                    {viewMode === 'table' ? (
+                                      /* 5-Column Clean Table: Influencer, Creator Code, Video, Tracking Link, Actions */
+                                      /* (Product and Platform are NOT repeated to avoid clutter!) */
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-xs text-slate-300">
+                                          <thead className="bg-[#050914] border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                                            <tr>
+                                              <th scope="col" className="px-4 py-3 min-w-[170px]">Influencer</th>
+                                              <th scope="col" className="px-4 py-3 min-w-[110px]">Creator Code</th>
+                                              <th scope="col" className="px-4 py-3 min-w-[90px]">Video</th>
+                                              <th scope="col" className="px-4 py-3 min-w-[280px]">Tracking Link</th>
+                                              <th scope="col" className="px-4 py-3 text-right min-w-[140px]">Actions</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-800/60">
+                                            {platformGroup.links.map((link) => {
+                                              const isCopied = copiedId === link.id;
+                                              const videoText = link.video_number || 'Video 1';
 
-                      {/* Tracking Link (Truncated visual, break-all safe) */}
-                      <td className="px-4 py-3 font-mono text-[11px]">
-                        <div
-                          className="max-w-xs truncate text-purple-300 bg-purple-950/20 px-2 py-1 rounded-lg border border-purple-500/20 select-all cursor-pointer hover:text-purple-200"
-                          title={link.tracking_url}
-                          onClick={() => handleCopyLink(link)}
-                        >
-                          {link.tracking_url}
+                                              return (
+                                                <tr
+                                                  key={link.id}
+                                                  className="hover:bg-slate-900/50 transition-colors group"
+                                                >
+                                                  {/* 1. Influencer */}
+                                                  <td className="px-4 py-2.5 font-semibold text-white whitespace-nowrap">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
+                                                        {(link.influencer_name || 'U').charAt(0).toUpperCase()}
+                                                      </div>
+                                                      <span className="truncate max-w-[170px]">
+                                                        {link.influencer_name || 'Influencer'}
+                                                      </span>
+                                                    </div>
+                                                  </td>
+
+                                                  {/* 2. Creator Code (Ascending Numerical Order preserved) */}
+                                                  <td className="px-4 py-2.5 whitespace-nowrap">
+                                                    <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 font-mono font-bold text-[11px] border border-purple-500/30">
+                                                      {link.influencer_code || link.creator_code
+                                                        ? `#${(link.creator_code || link.influencer_code || '').replace(/^#+/, '').toUpperCase()}`
+                                                        : '-'}
+                                                    </span>
+                                                  </td>
+
+                                                  {/* 3. Video */}
+                                                  <td className="px-4 py-2.5 whitespace-nowrap">
+                                                    <span className="px-2 py-0.5 rounded-lg bg-purple-950/40 border border-purple-500/30 text-purple-300 font-bold text-[11px]">
+                                                      {videoText}
+                                                    </span>
+                                                  </td>
+
+                                                  {/* 4. Tracking Link */}
+                                                  <td className="px-4 py-2.5 font-mono text-[11px]">
+                                                    <div
+                                                      className="max-w-md truncate text-purple-300 bg-purple-950/20 px-2 py-1 rounded-lg border border-purple-500/20 select-all cursor-pointer hover:text-purple-200 transition-colors"
+                                                      title={link.tracking_url}
+                                                      onClick={() => handleCopyLink(link)}
+                                                    >
+                                                      {link.tracking_url}
+                                                    </div>
+                                                  </td>
+
+                                                  {/* 5. Actions (Copy, Open, Edit, Delete) */}
+                                                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                                                    <div className="flex items-center justify-end gap-1.5">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleCopyLink(link)}
+                                                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                                                          isCopied
+                                                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                                            : 'bg-purple-600/10 hover:bg-purple-600/20 text-purple-300 border-purple-500/30'
+                                                        }`}
+                                                        title="Copy complete tracking link"
+                                                      >
+                                                        {isCopied ? (
+                                                          <Check size={12} className="text-emerald-400" />
+                                                        ) : (
+                                                          <Copy size={12} />
+                                                        )}
+                                                        <span>{isCopied ? 'Copied!' : 'Copy'}</span>
+                                                      </button>
+
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleOpenLink(link.tracking_url)}
+                                                        className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
+                                                        title="Open tracking URL in new tab"
+                                                      >
+                                                        <ExternalLink size={13} />
+                                                      </button>
+
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleOpenEdit(link)}
+                                                        className="p-1 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
+                                                        title="Edit tracking link"
+                                                      >
+                                                        <Edit3 size={13} />
+                                                      </button>
+
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => setLinkToDelete(link)}
+                                                        className="p-1 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-slate-800 transition-colors cursor-pointer"
+                                                        title="Delete tracking link"
+                                                      >
+                                                        <Trash2 size={13} />
+                                                      </button>
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    ) : (
+                                      /* Grid View inside platform */
+                                      <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+                                        {platformGroup.links.map((link) => (
+                                          <CampaignTrackingLinkCard
+                                            key={link.id}
+                                            link={link}
+                                            onEdit={handleOpenEdit}
+                                            onDelete={(l) => setLinkToDelete(l)}
+                                          />
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="px-4 py-3 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleCopyLink(link)}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                              isCopied
-                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                                : 'bg-purple-600/10 hover:bg-purple-600/20 text-purple-300 border-purple-500/30'
-                            }`}
-                            title="Copy link"
-                          >
-                            {isCopied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-                            <span>{isCopied ? 'Copied!' : 'Copy'}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenLink(link.tracking_url)}
-                            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
-                            title="Open link"
-                          >
-                            <ExternalLink size={13} />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEdit(link)}
-                            className="p-1 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
-                            title="Edit"
-                          >
-                            <Edit3 size={13} />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setLinkToDelete(link)}
-                            className="p-1 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-slate-800 transition-colors cursor-pointer"
-                            title="Delete"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        /* Grid / Cards View */
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
-          {filteredLinks.map((link) => (
-            <CampaignTrackingLinkCard
-              key={link.id}
-              link={link}
-              onEdit={handleOpenEdit}
-              onDelete={(l) => setLinkToDelete(l)}
-            />
-          ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -626,10 +1036,12 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         onClose={() => {
           setIsModalOpen(false);
           setLinkToEdit(null);
+          setCreateProductDefault(undefined);
         }}
         campaign={campaign}
         influencers={influencers}
         linkToEdit={linkToEdit}
+        defaultProduct={createProductDefault}
         onSuccess={handleModalSuccess}
       />
     </div>

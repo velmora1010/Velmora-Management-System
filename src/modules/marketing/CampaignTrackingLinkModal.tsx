@@ -37,6 +37,7 @@ interface CampaignTrackingLinkModalProps {
   campaign: Campaign;
   influencers: CampaignInfluencer[];
   linkToEdit?: InfluencerTrackingLink | null;
+  defaultProduct?: string;
   onSuccess: (savedLinks: InfluencerTrackingLink[]) => void;
 }
 
@@ -46,6 +47,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   campaign,
   influencers,
   linkToEdit,
+  defaultProduct,
   onSuccess
 }) => {
   // Modal State
@@ -116,18 +118,20 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         setSelectedVideoId(linkToEdit.video_number || 'Video 1');
       } else {
         // Defaults for batch generation
-        const defaultProduct = SCRIPT_PRODUCTS.includes('Kitchen Cleaner' as any)
-          ? 'Kitchen Cleaner'
-          : SCRIPT_PRODUCTS[0] || 'Kitchen Cleaner';
-        setSelectedProduct(defaultProduct);
-        setProductUrl('https://www.justmixx.com/products/kitchen-cleaner');
+        const initialProd = (defaultProduct && defaultProduct !== 'All')
+          ? defaultProduct
+          : (SCRIPT_PRODUCTS.includes('Kitchen Cleaner' as any)
+            ? 'Kitchen Cleaner'
+            : SCRIPT_PRODUCTS[0] || 'Kitchen Cleaner');
+        setSelectedProduct(initialProd);
+        setProductUrl(extractBaseProductUrl(initialProd));
         setSelectedPlatformId('instagram');
         setSelectedVideoId('Video 1');
         setEditTrackingUrl('');
         setEditNotes('');
       }
     }
-  }, [isOpen, linkToEdit]);
+  }, [isOpen, linkToEdit, defaultProduct]);
 
   // Active configurations
   const currentPlatform: TrackingPlatformConfig = useMemo(() => {
