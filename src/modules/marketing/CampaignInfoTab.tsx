@@ -1,13 +1,20 @@
 import React from 'react';
 import type { Campaign } from '../../types';
-import { DollarSign, Target, Globe, Info, Edit } from 'lucide-react';
+import { DollarSign, Target, Globe, Info, Edit, AlertTriangle, Trash2, ArchiveRestore } from 'lucide-react';
 
 interface CampaignInfoTabProps {
   campaign: Campaign;
   onEditCampaign?: () => void;
+  onDeleteCampaign?: () => void;
+  onRestoreCampaign?: () => void;
 }
 
-export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ campaign, onEditCampaign }) => {
+export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ 
+  campaign, 
+  onEditCampaign,
+  onDeleteCampaign,
+  onRestoreCampaign
+}) => {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -131,6 +138,49 @@ export const CampaignInfoTab: React.FC<CampaignInfoTabProps> = ({ campaign, onEd
           </div>
         </div>
 
+      </div>
+
+      {/* Danger Zone */}
+      <div className="bg-[#1e2536] p-6 rounded-xl border border-rose-500/30 space-y-4">
+        <div className="flex items-center gap-2 border-b border-slate-700/50 pb-3">
+          <AlertTriangle className="text-rose-400" size={20} />
+          <h3 className="text-lg font-semibold text-rose-400">Danger Zone</h3>
+        </div>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-1">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">
+              {campaign.status?.toLowerCase() === 'archived' ? 'Restore Campaign' : 'Delete Campaign'}
+            </h4>
+            <p className="text-xs text-slate-400 mt-1 max-w-xl leading-relaxed">
+              {campaign.status?.toLowerCase() === 'archived'
+                ? 'Restore this archived campaign back to active status.'
+                : 'Deleting this campaign will archive and remove it from active campaigns and workflows.'}
+            </p>
+          </div>
+          {campaign.status?.toLowerCase() === 'archived' ? (
+            onRestoreCampaign && (
+              <button
+                type="button"
+                onClick={onRestoreCampaign}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 shadow-sm"
+              >
+                <ArchiveRestore size={14} />
+                Restore Campaign
+              </button>
+            )
+          ) : (
+            onDeleteCampaign && (
+              <button
+                type="button"
+                onClick={onDeleteCampaign}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 shadow-sm"
+              >
+                <Trash2 size={14} />
+                Delete Campaign
+              </button>
+            )
+          )}
+        </div>
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ import { CampaignCalendar } from './CampaignCalendar';
 import { CampaignInfoTab } from './CampaignInfoTab';
 import { EditCampaignModal } from './EditCampaignModal';
 import { DispatchInfluencerModal } from './DispatchInfluencerModal';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
 import { useCampaigns } from '../../hooks/marketing/useCampaigns';
 import { useSearchParams } from 'react-router-dom';
@@ -66,6 +67,8 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const [editingInfluencer, setEditingInfluencer] = useState<CampaignInfluencer | null>(null);
   const [dispatchingInfluencer, setDispatchingInfluencer] = useState<CampaignInfluencer | null>(null);
   const [isEditingCampaign, setIsEditingCampaign] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [isMoreExpanded, setIsMoreExpanded] = useState<boolean>(() => currentView === 'description' || currentView === 'tracking-link');
   const { influencers, refresh } = useCampaignInfluencers(campaign.id);
 
@@ -436,24 +439,32 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         return <CampaignAnalytics campaign={campaign} influencers={activeInfluencers} onBack={() => handleViewChange('overview')} />;
       case 'overview':
       default:
-        return <CampaignInfoTab campaign={campaign} onEditCampaign={() => setIsEditingCampaign(true)} />;
+        return (
+          <CampaignInfoTab 
+            campaign={campaign} 
+            onEditCampaign={() => setIsEditingCampaign(true)} 
+            onDeleteCampaign={() => setShowDeleteModal(true)}
+            onRestoreCampaign={() => setShowRestoreModal(true)}
+          />
+        );
     }
   };
 
   return (
     <div className="text-slate-200 w-full max-w-full min-w-0">
       {/* Dashboard Header Menu */}
-      <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3 shrink-0">
-          <h2 className="text-xl font-bold text-slate-100">{campaign.campaign_name}</h2>
+      <div className="bg-slate-800/80 p-4 sm:p-5 rounded-2xl border border-slate-700 space-y-4 mb-6 shadow-sm">
+        {/* Campaign Title & Active Status */}
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-bold text-slate-100 tracking-tight">{campaign.campaign_name}</h2>
           <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-green-500/20 text-green-400 capitalize border border-green-500/30">
             {campaign.status}
           </span>
         </div>
 
-        <div className="flex flex-col items-start sm:items-end gap-2.5 w-full md:w-auto">
-          {/* Row 1: Primary departments + Compact Icon + Archive/Trash */}
-          <div className="flex items-center flex-wrap gap-2 sm:gap-2.5 max-w-full">
+        {/* Primary Row: 6 main navigation items on left, compact Expand/Collapse Icon on far right */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="flex items-center flex-wrap gap-2 sm:gap-2.5">
             {NAV_ITEMS.filter(item => !item.isExtra).map(item => (
               <button 
                 key={item.key}
@@ -464,8 +475,10 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                 {item.icon} {item.label}
               </button>
             ))}
+          </div>
 
-            {/* Compact Expand/Collapse Icon Button */}
+          {/* Compact Expand/Collapse Icon Button */}
+          <div className="flex items-center justify-end shrink-0">
             <button
               type="button"
               onClick={(e) => { e.preventDefault(); setIsMoreExpanded(prev => !prev); }}
@@ -479,30 +492,13 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
             >
               {isMoreExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
-
-            {/* Archive / Restore Button */}
-            {campaign.status?.toLowerCase() === 'archived' ? (
-              <button 
-                onClick={handleRestoreCampaign}
-                title="Restore Campaign"
-                className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-emerald-600/80 hover:bg-emerald-600 text-white animate-fade-in shrink-0 aspect-square h-[36px] w-[36px]"
-              >
-                <ArchiveRestore size={16} />
-              </button>
-            ) : (
-              <button 
-                onClick={handleArchiveCampaign}
-                title="Archive Campaign"
-                className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-rose-600 hover:bg-rose-500 text-white animate-fade-in shrink-0 aspect-square h-[36px] w-[36px]"
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
           </div>
+        </div>
 
-          {/* Row 2: Expanded Additional Departments */}
-          {isMoreExpanded && (
-            <div className="flex items-center flex-wrap gap-2 sm:gap-2.5 pt-2 border-t border-slate-700/60 w-full justify-start sm:justify-end animate-fade-in">
+        {/* Row 2: Expanded Departments with clean divider and identical left alignment */}
+        {isMoreExpanded && (
+          <div className="pt-3 border-t border-slate-700/60 animate-fade-in">
+            <div className="flex items-center flex-wrap gap-2 sm:gap-2.5">
               {NAV_ITEMS.filter(item => item.isExtra).map(item => (
                 <button 
                   key={item.key}
@@ -514,8 +510,8 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                 </button>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Analytics Widgets Specific to Campaign */}
@@ -569,6 +565,37 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           }}
         />
       )}
+
+      {/* Delete Campaign Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showDeleteModal}
+        title="Delete Campaign?"
+        message={`Are you sure you want to delete "${campaign.campaign_name}"? This action will archive this campaign.`}
+        confirmText="Delete Campaign"
+        cancelText="Cancel"
+        onConfirm={() => {
+          setShowDeleteModal(false);
+          handleArchiveCampaign();
+        }}
+        onClose={() => setShowDeleteModal(false)}
+        isDestructive={true}
+      />
+
+      {/* Restore Campaign Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showRestoreModal}
+        title="Restore Campaign?"
+        message={`Are you sure you want to restore "${campaign.campaign_name}" back to active status?`}
+        confirmText="Restore Campaign"
+        cancelText="Cancel"
+        onConfirm={() => {
+          setShowRestoreModal(false);
+          handleRestoreCampaign();
+        }}
+        onClose={() => setShowRestoreModal(false)}
+        isDestructive={false}
+        variant="primary"
+      />
     </div>
   );
 };
