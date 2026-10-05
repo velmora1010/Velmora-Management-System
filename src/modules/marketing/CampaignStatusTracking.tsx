@@ -9653,6 +9653,19 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
   const [finalD, setFinalD] = useState(activeAttempt?.final_description || existingData.finalD || '');
 
+  useEffect(() => {
+    if (activeAttempt?.final_product_link !== undefined) {
+      setFinalL(activeAttempt.final_product_link || '');
+    } else if (existingData.finalL !== undefined) {
+      setFinalL(existingData.finalL || '');
+    }
+    if (activeAttempt?.final_description !== undefined) {
+      setFinalD(activeAttempt.final_description || '');
+    } else if (existingData.finalD !== undefined) {
+      setFinalD(existingData.finalD || '');
+    }
+  }, [activeAttempt?.final_product_link, activeAttempt?.final_description, existingData.finalL, existingData.finalD]);
+
   // Manual Draft Submit Date (Required for approval)
   const [draftSubmitDate, setDraftSubmitDate] = useState<string>(
     activeAttempt?.draft_submit_date || existingData.draft_submit_date || ''
@@ -10745,29 +10758,50 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
           {/* Approved Deliverables Info (When Approved is selected) */}
           {appStat === 'Approved' && (
-            <div className="animate-fade-in space-y-4 bg-[#0b1329] p-4 rounded-xl border border-slate-800">
+            <div className="animate-fade-in space-y-4 bg-[#0b1329] p-5 rounded-xl border border-slate-800">
               <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
                 <Check size={14} /> Approved Deliverable Info
               </h6>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Product Link</label>
+              
+              <div className="space-y-4">
+                {/* 1. Final Product Link */}
+                <div className="w-full">
+                  <label className="block text-[11px] font-bold text-slate-400 mb-1.5 tracking-wider uppercase">
+                    Final Product Link
+                  </label>
                   <input 
-                    type="text" 
+                    type="url" 
                     value={finalL} 
                     onChange={e => setFinalL(e.target.value)} 
                     placeholder="https://..."
-                    className="w-full bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+                    className="w-full bg-[#070c18] border border-slate-800 focus:border-blue-500 rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:outline-none transition-colors font-mono" 
                   />
                 </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1 tracking-wider uppercase">Final Caption / Description</label>
-                  <input 
-                    type="text" 
+
+                {/* 2. Final Caption / Description */}
+                <div className="w-full">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                      Final Caption / Description
+                    </label>
+                    <span className="text-[11px] text-slate-500">
+                      Multi-line supported • Preserves formatting
+                    </span>
+                  </div>
+                  <textarea 
                     value={finalD} 
                     onChange={e => setFinalD(e.target.value)} 
-                    placeholder="Caption text"
-                    className="w-full bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500" 
+                    placeholder="Enter complete caption and description (e.g. Comment &quot;LINK&quot; to get the product link. One bottle makes 5 Litres of Kitchen Cleaner #justmixx #KitchenCleaner #CleanMagic #HomeCleaning ...)"
+                    rows={6}
+                    style={{
+                      minHeight: '140px',
+                      height: '180px',
+                      resize: 'vertical',
+                      whiteSpace: 'pre-wrap',
+                      overflowWrap: 'break-word',
+                      wordBreak: 'break-word',
+                    }}
+                    className="w-full bg-[#070c18] border border-slate-800 focus:border-blue-500 rounded-xl p-4 text-sm text-white placeholder:text-slate-600 focus:outline-none leading-relaxed transition-colors shadow-inner font-sans block" 
                   />
                 </div>
               </div>
@@ -10775,7 +10809,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
           )}
 
           {/* Save Button */}
-          <div className="flex justify-end pt-2 border-t border-slate-800">
+          <div className="flex justify-end pt-4 border-t border-slate-800">
             <button 
               onClick={handleSaveApproval} 
               disabled={isUploading}
@@ -10923,6 +10957,29 @@ const DraftForm: React.FC<DraftFormProps> = ({
               <div className="p-2.5 bg-rose-950/30 border border-rose-800/40 rounded-xl text-xs flex items-center justify-between text-rose-200">
                 <span className="text-rose-400 font-semibold">Expected Re-Draft Submit Date:</span>
                 <span className="font-bold">{formatDisplayDateLocal(previewModalAttempt.re_draft_submit_date)}</span>
+              </div>
+            )}
+
+            {previewModalAttempt.final_product_link && (
+              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-xl text-xs space-y-1">
+                <span className="text-emerald-400 font-semibold block uppercase tracking-wider text-[10px]">Final Product Link:</span>
+                <a 
+                  href={previewModalAttempt.final_product_link} 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="text-blue-400 hover:underline break-all block font-mono"
+                >
+                  {previewModalAttempt.final_product_link}
+                </a>
+              </div>
+            )}
+
+            {previewModalAttempt.final_description && (
+              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-xl text-xs space-y-1">
+                <span className="text-emerald-400 font-semibold block uppercase tracking-wider text-[10px]">Final Caption / Description:</span>
+                <p className="whitespace-pre-wrap break-words text-slate-200 leading-relaxed font-sans">
+                  {previewModalAttempt.final_description}
+                </p>
               </div>
             )}
 
