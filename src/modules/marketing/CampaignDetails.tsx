@@ -31,6 +31,24 @@ interface CampaignDetailsProps {
 
 type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'script' | 'calendar' | 'analytics' | 'description' | 'tracking-link';
 
+interface NavItem {
+  key: CampaignView;
+  label: string;
+  icon: React.ReactNode;
+  isExtra?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { key: 'overview', label: 'Campaign Details', icon: <LayoutDashboard size={15} /> },
+  { key: 'influencer-list', label: 'Campaign Influencer', icon: <Users size={15} /> },
+  { key: 'dispatched-list', label: 'Influencer Logistics', icon: <Package size={15} /> },
+  { key: 'status-tracking', label: 'Status Tracking', icon: <Settings size={15} /> },
+  { key: 'script', label: 'Script', icon: <FileText size={15} /> },
+  { key: 'calendar', label: 'Calendar', icon: <Calendar size={15} /> },
+  { key: 'description', label: 'Description', icon: <FileText size={15} />, isExtra: true },
+  { key: 'tracking-link', label: 'Influencer Tracking Link', icon: <Link2 size={15} />, isExtra: true }
+];
+
 import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
 
 export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBack, onCampaignUpdate }) => {
@@ -426,106 +444,76 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
     <div className="text-slate-200 w-full max-w-full min-w-0">
       {/* Dashboard Header Menu */}
       <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <h2 className="text-xl font-bold text-slate-100">{campaign.campaign_name}</h2>
           <span className="px-2.5 py-1 rounded-md text-xs font-semibold bg-green-500/20 text-green-400 capitalize border border-green-500/30">
             {campaign.status}
           </span>
         </div>
-        <div className="flex items-center gap-2 sm:gap-2.5 overflow-x-auto max-w-full pb-1 scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <button 
-            type="button"
-            onClick={(e) => { e.preventDefault(); handleViewChange('overview'); }}
-            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'overview' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
-          >
-            <LayoutDashboard size={15} /> Campaign Details
-          </button>
-          <button 
-            type="button"
-            onClick={(e) => { e.preventDefault(); handleViewChange('influencer-list'); }}
-            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'influencer-list' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
-          >
-            <Users size={15} /> Campaign Influencer
-          </button>
-          <button 
-            type="button"
-            onClick={(e) => { e.preventDefault(); handleViewChange('dispatched-list'); }}
-            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'dispatched-list' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
-          >
-            <Package size={15} /> Influencer Logistics
-          </button>
-          <button 
-            type="button"
-            onClick={(e) => { e.preventDefault(); handleViewChange('status-tracking'); }}
-            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'status-tracking' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
-          >
-            <Settings size={15} /> Status Tracking
-          </button>
-          <button 
-            type="button"
-            onClick={(e) => { e.preventDefault(); handleViewChange('script'); }}
-            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'script' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
-          >
-            <FileText size={15} /> Script
-          </button>
-          <button 
-            type="button"
-            onClick={(e) => { e.preventDefault(); handleViewChange('calendar'); }}
-            className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'calendar' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
-          >
-            <Calendar size={15} /> Calendar
-          </button>
 
-          {/* View More / View Less Toggle Button */}
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); setIsMoreExpanded(prev => !prev); }}
-            className={`px-3 py-2 text-sm font-semibold rounded-lg transition-colors flex items-center gap-1.5 shrink-0 border cursor-pointer ${
-              isMoreExpanded
-                ? 'bg-purple-900/40 text-purple-200 border-purple-500/50 shadow-sm'
-                : 'bg-slate-700/80 hover:bg-slate-600 text-purple-300 border-slate-600 hover:border-purple-400/50'
-            }`}
-            title={isMoreExpanded ? 'View Less' : 'View More'}
-          >
-            <span>{isMoreExpanded ? 'View Less' : 'View More'}</span>
-            {isMoreExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
+        <div className="flex flex-col items-start sm:items-end gap-2.5 w-full md:w-auto">
+          {/* Row 1: Primary departments + Compact Icon + Archive/Trash */}
+          <div className="flex items-center flex-wrap gap-2 sm:gap-2.5 max-w-full">
+            {NAV_ITEMS.filter(item => !item.isExtra).map(item => (
+              <button 
+                key={item.key}
+                type="button"
+                onClick={(e) => { e.preventDefault(); handleViewChange(item.key); }}
+                className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === item.key ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
+              >
+                {item.icon} {item.label}
+              </button>
+            ))}
 
-          {/* Revealed Departments when expanded (or when active) */}
-          {(isMoreExpanded || currentView === 'description' || currentView === 'tracking-link') && (
-            <>
-              <button 
-                type="button"
-                onClick={(e) => { e.preventDefault(); handleViewChange('description'); }}
-                className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'description' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
-              >
-                <FileText size={15} /> Description
-              </button>
-              <button 
-                type="button"
-                onClick={(e) => { e.preventDefault(); handleViewChange('tracking-link'); }}
-                className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'tracking-link' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
-              >
-                <Link2 size={15} /> Influencer Tracking Link
-              </button>
-            </>
-          )}
-          {campaign.status?.toLowerCase() === 'archived' ? (
-            <button 
-              onClick={handleRestoreCampaign}
-              title="Restore Campaign"
-              className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-emerald-600/80 hover:bg-emerald-600 text-white animate-fade-in shrink-0 aspect-square h-[36px] w-[36px]"
+            {/* Compact Expand/Collapse Icon Button */}
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setIsMoreExpanded(prev => !prev); }}
+              className={`p-2 text-sm rounded-lg transition-colors flex items-center justify-center shrink-0 aspect-square h-[36px] w-[36px] cursor-pointer border ${
+                isMoreExpanded
+                  ? 'bg-purple-600/30 text-purple-200 border-purple-500/50 shadow-sm'
+                  : 'bg-slate-700/80 hover:bg-slate-600 text-slate-300 hover:text-white border-slate-600'
+              }`}
+              title={isMoreExpanded ? "Hide additional departments" : "Show more departments"}
+              aria-label={isMoreExpanded ? "Hide additional departments" : "Show more departments"}
             >
-              <ArchiveRestore size={16} />
+              {isMoreExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
-          ) : (
-            <button 
-              onClick={handleArchiveCampaign}
-              title="Archive Campaign"
-              className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-rose-600 hover:bg-rose-500 text-white animate-fade-in shrink-0 aspect-square h-[36px] w-[36px]"
-            >
-              <Trash2 size={16} />
-            </button>
+
+            {/* Archive / Restore Button */}
+            {campaign.status?.toLowerCase() === 'archived' ? (
+              <button 
+                onClick={handleRestoreCampaign}
+                title="Restore Campaign"
+                className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-emerald-600/80 hover:bg-emerald-600 text-white animate-fade-in shrink-0 aspect-square h-[36px] w-[36px]"
+              >
+                <ArchiveRestore size={16} />
+              </button>
+            ) : (
+              <button 
+                onClick={handleArchiveCampaign}
+                title="Archive Campaign"
+                className="p-2 text-sm rounded-lg transition-colors flex items-center justify-center bg-rose-600 hover:bg-rose-500 text-white animate-fade-in shrink-0 aspect-square h-[36px] w-[36px]"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
+
+          {/* Row 2: Expanded Additional Departments */}
+          {isMoreExpanded && (
+            <div className="flex items-center flex-wrap gap-2 sm:gap-2.5 pt-2 border-t border-slate-700/60 w-full justify-start sm:justify-end animate-fade-in">
+              {NAV_ITEMS.filter(item => item.isExtra).map(item => (
+                <button 
+                  key={item.key}
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); handleViewChange(item.key); }}
+                  className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === item.key ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
+                >
+                  {item.icon} {item.label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </div>
