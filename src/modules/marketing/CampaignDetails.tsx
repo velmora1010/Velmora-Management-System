@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2, FileText } from 'lucide-react';
+import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2, FileText, ChevronDown, ChevronUp, Link2 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { AddCampaignInfluencer } from './AddCampaignInfluencer';
 import { CampaignInfluencerList } from './CampaignInfluencerList';
 import { CampaignDispatchedList } from './CampaignDispatchedList';
 import { CampaignStatusTracking } from './CampaignStatusTracking';
 import { CampaignScriptSection } from './CampaignScriptSection';
+import { CampaignDescriptionSection } from './CampaignDescriptionSection';
+import { CampaignTrackingLinkSection } from './CampaignTrackingLinkSection';
 import { CampaignAnalytics } from './CampaignAnalytics';
 import { CampaignCalendar } from './CampaignCalendar';
 import { CampaignInfoTab } from './CampaignInfoTab';
@@ -27,7 +29,7 @@ interface CampaignDetailsProps {
   onCampaignUpdate?: (campaign: Campaign) => void;
 }
 
-type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'script' | 'calendar' | 'analytics';
+type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'script' | 'calendar' | 'analytics' | 'description' | 'tracking-link';
 
 import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
 
@@ -35,7 +37,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const [searchParams, setSearchParams] = useSearchParams();
 
   const subviewParam = searchParams.get('subview');
-  const validSubviews: CampaignView[] = ['overview', 'add-influencer', 'influencer-list', 'dispatched-list', 'status-tracking', 'script', 'calendar', 'analytics'];
+  const validSubviews: CampaignView[] = ['overview', 'add-influencer', 'influencer-list', 'dispatched-list', 'status-tracking', 'script', 'calendar', 'analytics', 'description', 'tracking-link'];
   const currentView: CampaignView = (subviewParam && validSubviews.includes(subviewParam as CampaignView))
     ? (subviewParam as CampaignView)
     : 'overview';
@@ -46,6 +48,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const [editingInfluencer, setEditingInfluencer] = useState<CampaignInfluencer | null>(null);
   const [dispatchingInfluencer, setDispatchingInfluencer] = useState<CampaignInfluencer | null>(null);
   const [isEditingCampaign, setIsEditingCampaign] = useState(false);
+  const [isMoreExpanded, setIsMoreExpanded] = useState<boolean>(() => currentView === 'description' || currentView === 'tracking-link');
   const { influencers, refresh } = useCampaignInfluencers(campaign.id);
 
   const handleViewChange = (newView: CampaignView, edits: Partial<DepartmentNavigation> = {}) => {
@@ -405,6 +408,10 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         return <CampaignStatusTracking campaign={campaign} onBack={() => handleViewChange('overview')} />;
       case 'script':
         return <CampaignScriptSection campaign={campaign} onBack={() => handleViewChange('overview')} />;
+      case 'description':
+        return <CampaignDescriptionSection campaign={campaign} onBack={() => handleViewChange('overview')} />;
+      case 'tracking-link':
+        return <CampaignTrackingLinkSection campaign={campaign} onBack={() => handleViewChange('overview')} />;
       case 'calendar':
         return <CampaignCalendar campaign={campaign} onBack={() => handleViewChange('overview')} onNavigateToStatusTracking={() => handleViewChange('status-tracking')} />;
       case 'analytics':
@@ -468,6 +475,41 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           >
             <Calendar size={15} /> Calendar
           </button>
+
+          {/* View More / View Less Toggle Button */}
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); setIsMoreExpanded(prev => !prev); }}
+            className={`px-3 py-2 text-sm font-semibold rounded-lg transition-colors flex items-center gap-1.5 shrink-0 border cursor-pointer ${
+              isMoreExpanded
+                ? 'bg-purple-900/40 text-purple-200 border-purple-500/50 shadow-sm'
+                : 'bg-slate-700/80 hover:bg-slate-600 text-purple-300 border-slate-600 hover:border-purple-400/50'
+            }`}
+            title={isMoreExpanded ? 'View Less' : 'View More'}
+          >
+            <span>{isMoreExpanded ? 'View Less' : 'View More'}</span>
+            {isMoreExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          {/* Revealed Departments when expanded (or when active) */}
+          {(isMoreExpanded || currentView === 'description' || currentView === 'tracking-link') && (
+            <>
+              <button 
+                type="button"
+                onClick={(e) => { e.preventDefault(); handleViewChange('description'); }}
+                className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'description' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
+              >
+                <FileText size={15} /> Description
+              </button>
+              <button 
+                type="button"
+                onClick={(e) => { e.preventDefault(); handleViewChange('tracking-link'); }}
+                className={`px-3.5 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 shrink-0 ${currentView === 'tracking-link' ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'}`}
+              >
+                <Link2 size={15} /> Influencer Tracking Link
+              </button>
+            </>
+          )}
           {campaign.status?.toLowerCase() === 'archived' ? (
             <button 
               onClick={handleRestoreCampaign}

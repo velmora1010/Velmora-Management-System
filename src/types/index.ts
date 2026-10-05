@@ -245,6 +245,28 @@ export interface CampaignScript {
   updated_at?: string;
 }
 
+export interface CampaignDescription {
+  id: string;
+  campaign_id: string;
+  product: string;
+  description: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InfluencerTrackingLink {
+  id: string;
+  campaign_id: string;
+  influencer_id: string;
+  influencer_name?: string;
+  influencer_code?: string;
+  product: string;
+  tracking_url: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface InfluencerPlatformDetail {
   id?: string;
   influencer_id?: string;
