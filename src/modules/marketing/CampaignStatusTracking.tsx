@@ -73,6 +73,7 @@ export type WorkflowStepKey = 'delivery' | 'video1' | 'video2' | 'video3' | 'vid
 export const normalizeWorkflowStepId = (val: string): string => {
   if (!val) return '';
   const s = val.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.includes('redraft') || s === 're_draft') return 're_draft';
   if (s.includes('draftapproval') || s === 'draftapprovalpending' || s === 'draft_approval_pending') return 'draft_approval_pending';
   if (s.includes('draftapproved') || s === 'draftapproved' || s === 'draft_approved') return 'draft';
   if (s.includes('sharescript') || s === 'script') return 'share_script';
@@ -91,6 +92,7 @@ export const normalizeWorkflowStepId = (val: string): string => {
 export const normalizeWorkflowStepLabel = (val: string): string => {
   const id = normalizeWorkflowStepId(val);
   switch (id) {
+    case 're_draft': return 'Re-Draft';
     case 'draft_approval_pending': return 'Draft Approval Pending';
     case 'share_script': return 'Share Script';
     case 'call_explain': return 'Call & Explain';
@@ -148,6 +150,7 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
   { id: 'draft', label: 'Draft Approved', shortLabel: 'Draft Approved', icon: Video },
   { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Pending', icon: Clock },
+  { id: 're_draft', label: 'Re-Draft', shortLabel: 'Re-Draft', icon: RotateCcw },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
@@ -2083,6 +2086,19 @@ export const isInfluencerDraftApprovalPending = (record: StatusTrackingRecord, v
 };
 
 /**
+ * Checks if influencer draft requires re-draft (draft was marked Not Approved / rejected).
+ */
+export const isInfluencerReDraftRequired = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  if (vData.isReDraftRequired) return true;
+  return getInfluencerDraftStatus(record, videoNumber) === 'not_approved';
+};
+
+/**
  * Checks if influencer is currently at the Draft workflow stage.
  */
 export const isInfluencerDraftStage = (record: StatusTrackingRecord, videoNumber: number): boolean => {
@@ -2293,6 +2309,8 @@ export const isStepFilterMatch = (
       return isInfluencerDraftApproved(record, videoNumber);
     case 'draft_approval_pending':
       return isInfluencerDraftApprovalPending(record, videoNumber);
+    case 're_draft':
+      return isInfluencerReDraftRequired(record, videoNumber);
     case 'payment':
       return isInfluencerPaymentCompleted(record, videoNumber);
     case 'post_date':
@@ -3822,6 +3840,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             if (norm === 'draft') {
               return isInfluencerDraftApproved(record, selectedVideoNumber);
             }
+            if (norm === 're_draft') {
+              return isInfluencerReDraftRequired(record, selectedVideoNumber);
+            }
             if (norm === activeStepId) return true;
             if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
             if (norm === 'pay_advance' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
@@ -4172,10 +4193,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       count: draftApprovalPendingCount,
       icon: Clock
     };
+    const reDraftCount = baseFilteredRecords.filter(r => 
+      isInfluencerReDraftRequired(r, selectedVideoNumber)
+    ).length;
+    const reDraftItem = {
+      id: 're_draft',
+      label: 'Re-Draft',
+      count: reDraftCount,
+      icon: RotateCcw
+    };
     if (draftIndex >= 0) {
-      result.splice(draftIndex + 1, 0, pendingItem);
+      result.splice(draftIndex + 1, 0, pendingItem, reDraftItem);
     } else {
-      result.push(pendingItem);
+      result.push(pendingItem, reDraftItem);
     }
 
     return [
@@ -4221,6 +4251,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           const norm = normalizeWorkflowStepId(st);
           if (norm === 'draft_approval_pending') {
             return isInfluencerDraftApprovalPending(record, selectedVideoNumber);
+          }
+          if (norm === 'draft') {
+            return isInfluencerDraftApproved(record, selectedVideoNumber);
+          }
+          if (norm === 're_draft') {
+            return isInfluencerReDraftRequired(record, selectedVideoNumber);
           }
           if (norm === activeStepId) return true;
           if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;

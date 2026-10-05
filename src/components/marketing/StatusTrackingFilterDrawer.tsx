@@ -53,8 +53,9 @@ export const STATUS_TRACKING_WORKFLOW_STEPS: { id: string; label: string; count?
   { id: 'share_script', label: 'Share Script' },
   { id: 'call_explain', label: 'Call & Explain' },
   { id: 'timeline', label: 'Timeline' },
-  { id: 'draft', label: 'Draft' },
+  { id: 'draft', label: 'Draft Approved' },
   { id: 'draft_approval_pending', label: 'Draft Approval Pending' },
+  { id: 're_draft', label: 'Re-Draft' },
   { id: 'pay_advance', label: 'Advance Payment' },
   { id: 'payment', label: 'Payment' },
   { id: 'post_date', label: 'Post Date' }
