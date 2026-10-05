@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2, FileText, ChevronDown, ChevronUp, Link2 } from 'lucide-react';
+import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2, FileText, Link2 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { AddCampaignInfluencer } from './AddCampaignInfluencer';
 import { CampaignInfluencerList } from './CampaignInfluencerList';
@@ -36,18 +36,17 @@ interface NavItem {
   key: CampaignView;
   label: string;
   icon: React.ReactNode;
-  isExtra?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { key: 'overview', label: 'Campaign Details', icon: <LayoutDashboard size={15} /> },
-  { key: 'influencer-list', label: 'Campaign Influencer', icon: <Users size={15} /> },
-  { key: 'dispatched-list', label: 'Influencer Logistics', icon: <Package size={15} /> },
-  { key: 'status-tracking', label: 'Status Tracking', icon: <Settings size={15} /> },
-  { key: 'script', label: 'Script', icon: <FileText size={15} /> },
-  { key: 'calendar', label: 'Calendar', icon: <Calendar size={15} /> },
-  { key: 'description', label: 'Description', icon: <FileText size={15} />, isExtra: true },
-  { key: 'tracking-link', label: 'Influencer Tracking Link', icon: <Link2 size={15} />, isExtra: true }
+  { key: 'overview', label: 'Campaign Details', icon: <LayoutDashboard size={14} /> },
+  { key: 'influencer-list', label: 'Campaign Influencer', icon: <Users size={14} /> },
+  { key: 'dispatched-list', label: 'Influencer Logistics', icon: <Package size={14} /> },
+  { key: 'status-tracking', label: 'Status Tracking', icon: <Settings size={14} /> },
+  { key: 'script', label: 'Script', icon: <FileText size={14} /> },
+  { key: 'calendar', label: 'Calendar', icon: <Calendar size={14} /> },
+  { key: 'description', label: 'Description', icon: <FileText size={14} /> },
+  { key: 'tracking-link', label: 'Influencer Tracking Link', icon: <Link2 size={14} /> }
 ];
 
 import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
@@ -69,7 +68,6 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const [isEditingCampaign, setIsEditingCampaign] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
-  const [isMoreExpanded, setIsMoreExpanded] = useState<boolean>(() => currentView === 'description' || currentView === 'tracking-link');
   const { influencers, refresh } = useCampaignInfluencers(campaign.id);
 
   const handleViewChange = (newView: CampaignView, edits: Partial<DepartmentNavigation> = {}) => {
@@ -462,73 +460,23 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           </span>
         </div>
 
-        {/* Navigation Bar: Single horizontal row on desktop */}
-        <div className="relative flex items-center justify-between gap-2.5">
-          {/* Navigation Items: all 8 items in one horizontal row */}
-          <div className="flex items-center gap-2 xl:gap-2.5 flex-nowrap overflow-x-auto no-scrollbar py-0.5">
-            {NAV_ITEMS.map(item => (
-              <button 
-                key={item.key}
-                type="button"
-                onClick={(e) => { e.preventDefault(); handleViewChange(item.key); }}
-                className={`${item.isExtra ? 'hidden lg:inline-flex' : 'inline-flex'} px-3 py-2 text-xs xl:text-sm font-medium rounded-lg transition-colors items-center gap-1.5 xl:gap-2 shrink-0 whitespace-nowrap cursor-pointer ${
-                  currentView === item.key 
-                    ? 'bg-purple-600 text-white shadow-sm font-semibold' 
-                    : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'
-                }`}
-              >
-                {item.icon} {item.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Compact Expand/Collapse Icon Button & Mobile/Tablet Popover at far right */}
-          <div className="relative shrink-0 flex items-center">
-            <button
+        {/* Navigation Bar: All 8 items in ONE horizontal row without scrollbar or dropdown */}
+        <div className="w-full max-w-full flex items-center justify-start gap-1.5 lg:gap-2 flex-nowrap">
+          {NAV_ITEMS.map(item => (
+            <button 
+              key={item.key}
               type="button"
-              onClick={(e) => { e.preventDefault(); setIsMoreExpanded(prev => !prev); }}
-              className={`p-2 text-sm rounded-lg transition-colors flex items-center justify-center shrink-0 aspect-square h-[36px] w-[36px] cursor-pointer border ${
-                (isMoreExpanded || currentView === 'description' || currentView === 'tracking-link')
-                  ? 'bg-purple-600/25 text-purple-300 border-purple-500/40 hover:bg-purple-600/35 shadow-sm'
-                  : 'bg-slate-700/80 hover:bg-slate-600 text-slate-300 hover:text-white border-slate-600'
+              onClick={(e) => { e.preventDefault(); handleViewChange(item.key); }}
+              className={`px-2.5 xl:px-3 py-1.5 xl:py-2 text-xs xl:text-[13px] font-medium rounded-lg transition-colors flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer ${
+                currentView === item.key 
+                  ? 'bg-purple-600 text-white shadow-sm font-semibold' 
+                  : 'bg-slate-700/80 hover:bg-slate-600 text-slate-200'
               }`}
-              title={isMoreExpanded ? "Collapse additional items" : "Expand additional items"}
-              aria-label={isMoreExpanded ? "Collapse additional items" : "Expand additional items"}
             >
-              <span className="hidden lg:inline-flex"><ChevronUp size={16} /></span>
-              <span className="lg:hidden">{isMoreExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</span>
+              {item.icon}
+              <span>{item.label}</span>
             </button>
-
-            {/* Tablet/Mobile Dropdown Popover (< lg) */}
-            {isMoreExpanded && (
-              <>
-                <div 
-                  className="fixed inset-0 z-40 lg:hidden"
-                  onClick={() => setIsMoreExpanded(false)}
-                />
-                <div className="lg:hidden absolute right-0 top-full mt-2 w-56 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 p-1.5 space-y-1 animate-fade-in">
-                  {NAV_ITEMS.filter(item => item.isExtra).map(item => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        handleViewChange(item.key);
-                        setIsMoreExpanded(false);
-                      }}
-                      className={`w-full px-3 py-2 text-xs sm:text-sm font-medium rounded-lg transition-colors flex items-center gap-2 cursor-pointer ${
-                        currentView === item.key
-                          ? 'bg-purple-600 text-white shadow-sm font-semibold'
-                          : 'bg-slate-700/60 hover:bg-slate-600 text-slate-200'
-                      }`}
-                    >
-                      {item.icon} {item.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          ))}
         </div>
       </div>
 
