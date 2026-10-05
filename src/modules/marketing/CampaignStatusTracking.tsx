@@ -27,6 +27,12 @@ import { resolveInfluencerPaymentDetails } from '../../utils/influencerPaymentUt
 import { saveVideoPayment, fetchVideoPaymentTransactions, InfluencerVideoPayment, InfluencerVideoPaymentTransaction } from '../../services/influencerVideoPaymentService';
 import { upsertCampaignVideoScript, type CampaignVideoScriptRecord } from '../../services/campaignVideoScriptService';
 import { 
+  upsertDraftVideoAsset, 
+  fetchDraftVideoAssets, 
+  deleteDraftVideoAssetsForAttempt,
+  type DraftVideoAsset
+} from '../../services/draftVideoAssetService';
+import { 
   fetchCampaignScripts, 
   getScriptAudioUrl, 
   getScriptVideoUrl, 
@@ -900,7 +906,12 @@ export const getInfluencerDeliveryStatus = (record: StatusTrackingRecord): 'Deli
 // =========================================================================
 export interface DraftAttempt {
   attempt_number: number;
-  video_url: string;
+  video_url: string; // Original Video URL
+  original_file_name?: string;
+  original_file_size?: string;
+  tamil_video_url?: string; // Tamil Translated Video URL
+  tamil_file_name?: string;
+  tamil_file_size?: string;
   approval_status: 'Approved' | 'Not Approved' | 'Pending Approval';
   approval_confirmed?: boolean;
   timing_status?: string;
@@ -918,6 +929,61 @@ export interface DraftAttempt {
   reviewed_at?: string;
   reviewed_by?: string;
 }
+
+export const isTamilLanguage = (langStr?: string | null): boolean => {
+  if (!langStr) return false;
+  return langStr.trim().toLowerCase() === 'tamil';
+};
+
+export const getInfluencerTargetLanguages = (record: StatusTrackingRecord, videoNumber?: number): string[] => {
+  const result: string[] = [];
+
+  // 1. Check video-specific language assigned in share_script step (if any)
+  if (videoNumber && record?.notes) {
+    try {
+      const metadata = typeof record.notes === 'string' ? JSON.parse(record.notes) : record.notes;
+      const stepLang = metadata?.videos?.[String(videoNumber)]?.steps?.share_script?.data?.language;
+      if (stepLang && typeof stepLang === 'string' && stepLang.trim()) {
+        result.push(stepLang.trim());
+      }
+    } catch (e) {}
+  }
+
+  // 2. Check record.influencer languages
+  const infLangs = record?.influencer?.languages || (record?.influencer as any)?.language || (record?.influencer as any)?.target_language;
+  if (Array.isArray(infLangs)) {
+    infLangs.forEach(l => {
+      if (typeof l === 'string' && !l.startsWith('views_data:') && l.trim()) {
+        result.push(l.trim());
+      }
+    });
+  } else if (typeof infLangs === 'string' && infLangs.trim()) {
+    infLangs.split(/[,/]+/).forEach(l => {
+      if (!l.startsWith('views_data:') && l.trim()) result.push(l.trim());
+    });
+  }
+
+  // 3. Check record.dispatch languages
+  const dispLangs = record?.dispatch?.languages || (record?.dispatch as any)?.language || (record?.dispatch as any)?.target_language;
+  if (Array.isArray(dispLangs)) {
+    dispLangs.forEach(l => {
+      if (typeof l === 'string' && !l.startsWith('views_data:') && l.trim()) {
+        result.push(l.trim());
+      }
+    });
+  } else if (typeof dispLangs === 'string' && dispLangs.trim()) {
+    dispLangs.split(/[,/]+/).forEach(l => {
+      if (!l.startsWith('views_data:') && l.trim()) result.push(l.trim());
+    });
+  }
+
+  return Array.from(new Set(result));
+};
+
+export const isInfluencerTamil = (record: StatusTrackingRecord, videoNumber?: number): boolean => {
+  const langs = getInfluencerTargetLanguages(record, videoNumber);
+  return langs.some(l => isTamilLanguage(l));
+};
 
 export interface TimelineHistoryEntry {
   id?: string;
@@ -9909,7 +9975,7 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
   );
 };
 
-// --- STEP: Draft (Complete Approval / Re-Draft Loop / Multiple Attempts History) ---
+// --- STEP: Draft (Complete Approval / Re-Draft Loop / Multiple Draft Videos based on Language) ---
 interface DraftFormProps {
   record: StatusTrackingRecord;
   videoNumber: number;
@@ -9918,6 +9984,20 @@ interface DraftFormProps {
   onNavigateToPostDate?: () => void;
 }
 
+const ALLOWED_VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'm4v', 'quicktime'];
+
+const validateVideoFile = (file: File): boolean => {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const mimeType = (file.type || '').toLowerCase();
+  const isValidExt = ALLOWED_VIDEO_EXTENSIONS.includes(ext);
+  const isValidMime = mimeType.startsWith('video/') || mimeType === 'video/mp4' || mimeType === 'video/quicktime';
+  if (!isValidExt && !isValidMime) {
+    toast.error(`Unsupported file format "${file.name}". Please upload a supported video file (.mp4, .mov, .webm).`);
+    return false;
+  }
+  return true;
+};
+
 const DraftForm: React.FC<DraftFormProps> = ({ 
   record, 
   videoNumber, 
@@ -9925,10 +10005,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
   onSave, 
   onNavigateToPostDate 
 }) => {
+  // Target Language resolution for this creator and video
+  const isTamil = useMemo(() => isInfluencerTamil(record, videoNumber), [record, videoNumber]);
+  const targetLanguages = useMemo(() => getInfluencerTargetLanguages(record, videoNumber), [record, videoNumber]);
+
   // Extract attempts or initialize with full video preservation
-  const attempts: DraftAttempt[] = useMemo(() => {
+  const [attempts, setAttempts] = useState<DraftAttempt[]>(() => {
     if (existingData.is_deleted) return [];
-    if (Array.isArray(existingData.attempts)) {
+    if (Array.isArray(existingData.attempts) && existingData.attempts.length > 0) {
       return existingData.attempts;
     }
     const legacyVid = existingData.vid || (videoNumber === 1 ? record.draft_video_url : '');
@@ -9937,6 +10021,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
       return [{
         attempt_number: 1,
         video_url: legacyVid,
+        original_file_name: existingData.original_file_name || legacyVid.split('/').pop()?.split('?')[0] || 'original_video.mp4',
+        tamil_video_url: existingData.tamil_video_url || undefined,
+        tamil_file_name: existingData.tamil_file_name || undefined,
         approval_status: legacyApp === 'Approved' ? 'Approved' : (legacyApp === 'Not Approved' ? 'Not Approved' : 'Pending Approval'),
         timing_status: existingData.timing || (videoNumber === 1 ? record.draft_timing_status : 'On Time'),
         corrections: existingData.corr || (videoNumber === 1 ? record.draft_corrections_required : ''),
@@ -9946,7 +10033,42 @@ const DraftForm: React.FC<DraftFormProps> = ({
       }];
     }
     return [];
-  }, [existingData, record, videoNumber]);
+  });
+
+  // Sync state if existingData changes (e.g. video switch)
+  useEffect(() => {
+    if (existingData.is_deleted) {
+      setAttempts([]);
+      return;
+    }
+    if (Array.isArray(existingData.attempts)) {
+      setAttempts(existingData.attempts);
+    }
+  }, [existingData.attempts, existingData.is_deleted]);
+
+  // Load persisted assets from draft_video_assets table if available
+  useEffect(() => {
+    if (!record?.campaign_id || !record?.influencer_id) return;
+    let isMounted = true;
+    fetchDraftVideoAssets(record.campaign_id, record.influencer_id, videoNumber).then(assets => {
+      if (!isMounted || !assets || assets.length === 0) return;
+      setAttempts(prevAttempts => {
+        if (prevAttempts.length === 0) return prevAttempts;
+        return prevAttempts.map(att => {
+          const origAsset = assets.find(a => a.draft_attempt_id === att.attempt_number && a.asset_type === 'original');
+          const tamilAsset = assets.find(a => a.draft_attempt_id === att.attempt_number && a.asset_type === 'tamil_translation');
+          return {
+            ...att,
+            video_url: origAsset?.file_url || att.video_url,
+            original_file_name: origAsset?.file_name || att.original_file_name,
+            tamil_video_url: tamilAsset?.file_url || att.tamil_video_url,
+            tamil_file_name: tamilAsset?.file_name || att.tamil_file_name,
+          };
+        });
+      });
+    });
+    return () => { isMounted = false; };
+  }, [record?.campaign_id, record?.influencer_id, videoNumber]);
 
   const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
 
@@ -9966,6 +10088,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
   useEffect(() => {
     setAppStat(resolveInitialApprovalStatus());
   }, [activeAttempt?.approval_status, existingData.approval_status, activeAttempt?.video_url]);
+
   const [corr, setCorr] = useState(activeAttempt?.corrections || existingData.corr || '');
   const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
   const [finalD, setFinalD] = useState(activeAttempt?.final_description || existingData.finalD || '');
@@ -10011,20 +10134,32 @@ const DraftForm: React.FC<DraftFormProps> = ({
     }
   }, [activeAttempt, existingData.latest_re_draft_submit_date, existingData.re_draft_submit_date]);
   
-  // Re-Draft Upload Mode State
+  // Re-Draft Mode State (Attempt N + 1)
   const [isReDraftMode, setIsReDraftMode] = useState(false);
-  const [reDraftFile, setReDraftFile] = useState<File | null>(null);
-  const [reDraftUrl, setReDraftUrl] = useState('');
+  const [reDraftOriginalFile, setReDraftOriginalFile] = useState<File | null>(null);
+  const [reDraftOriginalUrl, setReDraftOriginalUrl] = useState('');
+  const [reDraftTamilFile, setReDraftTamilFile] = useState<File | null>(null);
+  const [reDraftTamilUrl, setReDraftTamilUrl] = useState('');
   const [reDraftSubmissionDate, setReDraftSubmissionDate] = useState<string>('');
 
-  // Initial Draft Upload State
-  const [initialFile, setInitialFile] = useState<File | null>(null);
-  const [initialUrl, setInitialUrl] = useState(activeAttempt?.video_url || existingData.vid || '');
+  // Initial Draft Upload State (Attempt 1)
+  const [initialOriginalFile, setInitialOriginalFile] = useState<File | null>(null);
+  const [initialOriginalUrl, setInitialOriginalUrl] = useState(activeAttempt?.video_url || existingData.vid || '');
+  const [initialTamilFile, setInitialTamilFile] = useState<File | null>(null);
+  const [initialTamilUrl, setInitialTamilUrl] = useState(activeAttempt?.tamil_video_url || existingData.tamil_video_url || '');
   const [initialDraftDate, setInitialDraftDate] = useState<string>(
     activeAttempt?.draft_submission_date || activeAttempt?.draft_submit_date || existingData.draft_submission_date || existingData.draft_submit_date || ''
   );
 
-  // Refs for visible date pickers
+  // Hidden File Input Refs
+  const initialOriginalInputRef = useRef<HTMLInputElement>(null);
+  const initialTamilInputRef = useRef<HTMLInputElement>(null);
+  const reDraftOriginalInputRef = useRef<HTMLInputElement>(null);
+  const reDraftTamilInputRef = useRef<HTMLInputElement>(null);
+  const activeOriginalReplaceInputRef = useRef<HTMLInputElement>(null);
+  const activeTamilReplaceInputRef = useRef<HTMLInputElement>(null);
+
+  // Date picker refs
   const initialDateInputRef = useRef<HTMLInputElement>(null);
   const reDraftDateInputRef = useRef<HTMLInputElement>(null);
   const draftSubmitDateInputRef = useRef<HTMLInputElement>(null);
@@ -10038,15 +10173,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
     activeAttempt?.timing_status || existingData.timing || 'Not Submit'
   );
 
-  // Modal Video Preview State
-  const [previewModalAttempt, setPreviewModalAttempt] = useState<DraftAttempt | null>(null);
+  // Modal Video Preview State for either asset
+  const [previewModalAsset, setPreviewModalAsset] = useState<{
+    url: string;
+    title: string;
+    attemptNumber: number;
+    assetType: 'Original Video' | 'Tamil Translated Video';
+    uploadedAt: string;
+  } | null>(null);
 
   const expDate = record.draft_expected_date;
   const expTime = record.draft_expected_time;
 
   useEffect(() => {
-    const activeVid = activeAttempt?.video_url || initialUrl;
-    if (!activeVid && !initialFile && !reDraftFile) {
+    const activeVid = activeAttempt?.video_url || initialOriginalUrl;
+    if (!activeVid && !initialOriginalFile && !reDraftOriginalFile) {
       setCalculatedTiming('Not Submit');
     } else {
       if (activeAttempt?.timing_status) {
@@ -10065,69 +10206,75 @@ const DraftForm: React.FC<DraftFormProps> = ({
         setCalculatedTiming('On Time');
       }
     }
-  }, [activeAttempt, initialUrl, initialFile, reDraftFile, expDate, expTime, existingData.timing]);
+  }, [activeAttempt, initialOriginalUrl, initialOriginalFile, reDraftOriginalFile, expDate, expTime, existingData.timing]);
 
-  // Handle Initial Draft Upload
-  const handleInitialUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setInitialFile(selectedFile);
-      setInitialUrl(URL.createObjectURL(selectedFile));
-    }
-  };
+  // Upload helper targeting specific attempt and asset type with collision-proof paths
+  const uploadVideoFile = async (
+    file: File, 
+    attemptNumber: number, 
+    assetType: 'original' | 'tamil_translation'
+  ): Promise<string> => {
+    const fileExt = (file.name.split('.').pop() || 'mp4').toLowerCase();
+    const campId = record.campaign_id || 'camp';
+    const infId = record.influencer_id || 'inf';
+    const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const filePath = `drafts/campaigns/${campId}/influencers/${infId}/video_${videoNumber}/attempt_${attemptNumber}/${assetType}_${uniqueKey}.${fileExt}`;
 
-  // Handle Re-Draft File Select
-  const handleReDraftSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      setReDraftFile(selectedFile);
-      setReDraftUrl(URL.createObjectURL(selectedFile));
-    }
+    const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, file, {
+      contentType: file.type || (fileExt === 'mov' ? 'video/quicktime' : 'video/mp4'),
+      cacheControl: '3600',
+      upsert: true
+    });
+    if (error) throw error;
+
+    const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
+    return publicData.publicUrl;
   };
 
   // Submit Initial Draft (Attempt 1)
   const handleSubmitInitialDraft = async () => {
     if (isUploading) return;
-    if (!initialFile && !initialUrl) {
-      toast.error('Please upload a draft video first.');
+
+    // Validation
+    if (!initialOriginalFile && !initialOriginalUrl) {
+      toast.error('Please upload the Original Video first.');
+      return;
+    }
+    if (!isTamil && (!initialTamilFile && !initialTamilUrl)) {
+      toast.error('Please upload the Tamil Translated Video. Both versions are required for non-Tamil influencers.');
       return;
     }
     if (!initialDraftDate || !initialDraftDate.trim()) {
       toast.error('Please enter/select the Draft Submission Date.');
       return;
     }
+
     setIsUploading(true);
-    let finalUrl = initialUrl;
+    let finalOriginalUrl = initialOriginalUrl;
+    let finalTamilUrl = initialTamilUrl;
 
-    if (initialFile) {
-      try {
-        const fileExt = initialFile.name.split('.').pop() || 'mp4';
-        const campId = record.campaign_id || 'camp';
-        const infId = record.influencer_id || 'inf';
-        const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-        const filePath = `drafts/camp_${campId}_inf_${infId}_v${videoNumber}_att1_${uniqueKey}.${fileExt}`;
-
-        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, initialFile, {
-          contentType: initialFile.type || 'video/mp4',
-          cacheControl: '3600',
-          upsert: true
-        });
-        if (error) throw error;
-
-        const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
-        finalUrl = publicData.publicUrl;
-        setInitialUrl(finalUrl);
-      } catch (err: any) {
-        console.error('Error uploading draft video:', err);
-        toast.error('Failed to upload video file: ' + (err?.message || 'Storage error'));
-        setIsUploading(false);
-        return;
+    try {
+      if (initialOriginalFile) {
+        finalOriginalUrl = await uploadVideoFile(initialOriginalFile, 1, 'original');
+        setInitialOriginalUrl(finalOriginalUrl);
       }
+      if (!isTamil && initialTamilFile) {
+        finalTamilUrl = await uploadVideoFile(initialTamilFile, 1, 'tamil_translation');
+        setInitialTamilUrl(finalTamilUrl);
+      }
+    } catch (err: any) {
+      console.error('Error uploading draft video:', err);
+      toast.error('Failed to upload video file: ' + (err?.message || 'Storage error'));
+      setIsUploading(false);
+      return;
     }
 
     const firstAttempt: DraftAttempt = {
       attempt_number: 1,
-      video_url: finalUrl,
+      video_url: finalOriginalUrl,
+      original_file_name: initialOriginalFile?.name || finalOriginalUrl.split('/').pop()?.split('?')[0] || 'original_video.mp4',
+      tamil_video_url: isTamil ? undefined : finalTamilUrl,
+      tamil_file_name: isTamil ? undefined : (initialTamilFile?.name || finalTamilUrl?.split('/').pop()?.split('?')[0] || 'tamil_translation.mp4'),
       draft_submission_date: initialDraftDate.trim(),
       draft_submit_date: initialDraftDate.trim(),
       submitted_at: new Date().toISOString(),
@@ -10135,6 +10282,34 @@ const DraftForm: React.FC<DraftFormProps> = ({
       timing_status: calculatedTiming,
       uploaded_at: new Date().toISOString()
     };
+
+    // Save to draft_video_assets table (asynchronous best effort)
+    try {
+      if (record.campaign_id && record.influencer_id) {
+        await upsertDraftVideoAsset({
+          campaignId: record.campaign_id,
+          influencerId: record.influencer_id,
+          videoNumber,
+          draftAttemptId: 1,
+          assetType: 'original',
+          fileUrl: finalOriginalUrl,
+          fileName: initialOriginalFile?.name || null
+        });
+        if (!isTamil && finalTamilUrl) {
+          await upsertDraftVideoAsset({
+            campaignId: record.campaign_id,
+            influencerId: record.influencer_id,
+            videoNumber,
+            draftAttemptId: 1,
+            assetType: 'tamil_translation',
+            fileUrl: finalTamilUrl,
+            fileName: initialTamilFile?.name || null
+          });
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Draft video asset persistence error:', dbErr);
+    }
 
     // Sync draft date to influencer_post_dates_rows
     try {
@@ -10149,67 +10324,75 @@ const DraftForm: React.FC<DraftFormProps> = ({
       console.warn('Sync draft date to post dates error:', sErr);
     }
 
+    const updatedAttempts = [firstAttempt];
+    setAttempts(updatedAttempts);
+
     await onSave({
-      attempts: [firstAttempt],
+      attempts: updatedAttempts,
       active_attempt_number: 1,
       approval_status: 'Pending Approval',
       draft_submission_date: initialDraftDate.trim(),
       draft_submit_date: initialDraftDate.trim(),
-      vid: finalUrl,
+      vid: finalOriginalUrl,
+      original_file_name: firstAttempt.original_file_name,
+      tamil_video_url: firstAttempt.tamil_video_url,
+      tamil_file_name: firstAttempt.tamil_file_name,
       timing: calculatedTiming
     }, false);
 
-    setInitialFile(null);
+    setInitialOriginalFile(null);
+    setInitialTamilFile(null);
     setDraftSubmitDate(initialDraftDate.trim());
     setAppStat('Pending Approval');
     setIsUploading(false);
     toast.success('Draft submission saved! Status: Pending Approval 🟡');
   };
 
-  // Submit Re-Draft (Attempt N + 1) — Creates new attempt, preserving all previous attempts permanently
+  // Submit Re-Draft (Attempt N + 1) — Permanently appends to history
   const handleSubmitReDraft = async () => {
     if (isUploading) return;
-    if (!reDraftFile && !reDraftUrl) {
-      toast.error('Please select a new re-draft video file.');
+
+    if (!reDraftOriginalFile && !reDraftOriginalUrl) {
+      toast.error('Please select the new revised Original Video.');
+      return;
+    }
+    if (!isTamil && (!reDraftTamilFile && !reDraftTamilUrl)) {
+      toast.error('Please select the revised Tamil Translated Video. Both are required for non-Tamil creators.');
       return;
     }
     if (!reDraftSubmissionDate || !reDraftSubmissionDate.trim()) {
       toast.error('Please enter/select the Draft Submission Date for this re-draft.');
       return;
     }
+
     setIsUploading(true);
-    let finalUrl = reDraftUrl;
     const nextAttemptNumber = attempts.length + 1;
+    let finalOriginalUrl = reDraftOriginalUrl;
+    let finalTamilUrl = reDraftTamilUrl;
 
-    if (reDraftFile) {
-      try {
-        const fileExt = reDraftFile.name.split('.').pop() || 'mp4';
-        const campId = record.campaign_id || 'camp';
-        const infId = record.influencer_id || 'inf';
-        const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
-        const filePath = `drafts/camp_${campId}_inf_${infId}_v${videoNumber}_att${nextAttemptNumber}_${uniqueKey}.${fileExt}`;
-
-        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, reDraftFile, {
-          contentType: reDraftFile.type || 'video/mp4',
-          cacheControl: '3600',
-          upsert: true
-        });
-        if (error) throw error;
-
-        const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
-        finalUrl = publicData.publicUrl;
-      } catch (err: any) {
-        console.error('Error uploading re-draft video:', err);
-        toast.error('Failed to upload re-draft video file: ' + (err?.message || 'Storage error'));
-        setIsUploading(false);
-        return;
+    try {
+      if (reDraftOriginalFile) {
+        finalOriginalUrl = await uploadVideoFile(reDraftOriginalFile, nextAttemptNumber, 'original');
+        setReDraftOriginalUrl(finalOriginalUrl);
       }
+      if (!isTamil && reDraftTamilFile) {
+        finalTamilUrl = await uploadVideoFile(reDraftTamilFile, nextAttemptNumber, 'tamil_translation');
+        setReDraftTamilUrl(finalTamilUrl);
+      }
+    } catch (err: any) {
+      console.error('Error uploading re-draft video:', err);
+      toast.error('Failed to upload re-draft video: ' + (err?.message || 'Storage error'));
+      setIsUploading(false);
+      return;
     }
 
     const expectedSubmit = activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date || '';
     const newAttempt: DraftAttempt = {
       attempt_number: nextAttemptNumber,
-      video_url: finalUrl,
+      video_url: finalOriginalUrl,
+      original_file_name: reDraftOriginalFile?.name || finalOriginalUrl.split('/').pop()?.split('?')[0] || 'original_video.mp4',
+      tamil_video_url: isTamil ? undefined : finalTamilUrl,
+      tamil_file_name: isTamil ? undefined : (reDraftTamilFile?.name || finalTamilUrl?.split('/').pop()?.split('?')[0] || 'tamil_translation.mp4'),
       draft_submission_date: reDraftSubmissionDate.trim(),
       draft_submit_date: reDraftSubmissionDate.trim(),
       submitted_at: new Date().toISOString(),
@@ -10219,8 +10402,36 @@ const DraftForm: React.FC<DraftFormProps> = ({
       uploaded_at: new Date().toISOString()
     };
 
-    // Permanently append new attempt
+    // Save to draft_video_assets table
+    try {
+      if (record.campaign_id && record.influencer_id) {
+        await upsertDraftVideoAsset({
+          campaignId: record.campaign_id,
+          influencerId: record.influencer_id,
+          videoNumber,
+          draftAttemptId: nextAttemptNumber,
+          assetType: 'original',
+          fileUrl: finalOriginalUrl,
+          fileName: reDraftOriginalFile?.name || null
+        });
+        if (!isTamil && finalTamilUrl) {
+          await upsertDraftVideoAsset({
+            campaignId: record.campaign_id,
+            influencerId: record.influencer_id,
+            videoNumber,
+            draftAttemptId: nextAttemptNumber,
+            assetType: 'tamil_translation',
+            fileUrl: finalTamilUrl,
+            fileName: reDraftTamilFile?.name || null
+          });
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Re-draft asset persistence error:', dbErr);
+    }
+
     const updatedAttempts = [...attempts, newAttempt];
+    setAttempts(updatedAttempts);
 
     try {
       await syncInfluencerPostDate({
@@ -10240,15 +10451,20 @@ const DraftForm: React.FC<DraftFormProps> = ({
       approval_status: 'Pending Approval',
       draft_submission_date: reDraftSubmissionDate.trim(),
       draft_submit_date: reDraftSubmissionDate.trim(),
-      vid: finalUrl,
+      vid: finalOriginalUrl,
+      original_file_name: newAttempt.original_file_name,
+      tamil_video_url: newAttempt.tamil_video_url,
+      tamil_file_name: newAttempt.tamil_file_name,
       timing: calculatedTiming,
       corr: ''
     }, false);
 
     setIsUploading(false);
     setIsReDraftMode(false);
-    setReDraftFile(null);
-    setReDraftUrl('');
+    setReDraftOriginalFile(null);
+    setReDraftOriginalUrl('');
+    setReDraftTamilFile(null);
+    setReDraftTamilUrl('');
     setReDraftSubmissionDate('');
     setDraftSubmitDate(reDraftSubmissionDate.trim());
     setAppStat('Pending Approval');
@@ -10256,37 +10472,105 @@ const DraftForm: React.FC<DraftFormProps> = ({
     toast.success(`Re-Draft Attempt ${nextAttemptNumber} submitted! Status: Pending Approval 🟡`);
   };
 
+  // Replace / Upload an asset on the active attempt
+  const handleReplaceActiveAsset = async (
+    file: File, 
+    assetType: 'original' | 'tamil_translation'
+  ) => {
+    if (!activeAttempt) return;
+    if (!validateVideoFile(file)) return;
+
+    setIsUploading(true);
+    try {
+      const uploadedUrl = await uploadVideoFile(file, activeAttempt.attempt_number, assetType);
+      
+      // Upsert to draft_video_assets
+      if (record.campaign_id && record.influencer_id) {
+        await upsertDraftVideoAsset({
+          campaignId: record.campaign_id,
+          influencerId: record.influencer_id,
+          videoNumber,
+          draftAttemptId: activeAttempt.attempt_number,
+          assetType,
+          fileUrl: uploadedUrl,
+          fileName: file.name
+        });
+      }
+
+      const updatedAttempts = attempts.map(att => {
+        if (att.attempt_number === activeAttempt.attempt_number) {
+          return {
+            ...att,
+            ...(assetType === 'original' 
+              ? { video_url: uploadedUrl, original_file_name: file.name }
+              : { tamil_video_url: uploadedUrl, tamil_file_name: file.name })
+          };
+        }
+        return att;
+      });
+
+      setAttempts(updatedAttempts);
+
+      await onSave({
+        attempts: updatedAttempts,
+        active_attempt_number: activeAttempt.attempt_number,
+        approval_status: activeAttempt.approval_status,
+        vid: assetType === 'original' ? uploadedUrl : activeAttempt.video_url,
+        original_file_name: assetType === 'original' ? file.name : activeAttempt.original_file_name,
+        tamil_video_url: assetType === 'tamil_translation' ? uploadedUrl : activeAttempt.tamil_video_url,
+        tamil_file_name: assetType === 'tamil_translation' ? file.name : activeAttempt.tamil_file_name,
+        draft_submission_date: activeAttempt.draft_submission_date || activeAttempt.draft_submit_date,
+        draft_submit_date: activeAttempt.draft_submit_date || activeAttempt.draft_submission_date,
+        timing: activeAttempt.timing_status || calculatedTiming
+      }, activeAttempt.approval_status === 'Approved');
+
+      toast.success(`${assetType === 'original' ? 'Original Video' : 'Tamil Translated Video'} updated successfully!`);
+    } catch (err: any) {
+      console.error(`Error updating ${assetType}:`, err);
+      toast.error('Failed to update video: ' + (err?.message || 'Storage error'));
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   // Delete Draft Attempt
   const handleDeleteAttempt = async (attempt: DraftAttempt) => {
     setIsDeleting(true);
     try {
-      // 1. Remove file from Supabase storage if stored in influencer-profiles
-      let storagePath: string | null = null;
-      const vUrl = attempt.video_url;
-      if (vUrl && vUrl.includes('/influencer-profiles/')) {
-        const parts = vUrl.split('/influencer-profiles/');
-        if (parts[1]) {
-          storagePath = decodeURIComponent(parts[1].split('?')[0]);
+      // 1. Remove files from storage
+      const pathsToDelete: string[] = [];
+      [attempt.video_url, attempt.tamil_video_url].forEach(u => {
+        if (u && u.includes('/influencer-profiles/')) {
+          const parts = u.split('/influencer-profiles/');
+          if (parts[1]) pathsToDelete.push(decodeURIComponent(parts[1].split('?')[0]));
         }
-      }
-      if (storagePath) {
+      });
+      if (pathsToDelete.length > 0) {
         try {
-          await supabaseAdmin.storage.from('influencer-profiles').remove([storagePath]);
+          await supabaseAdmin.storage.from('influencer-profiles').remove(pathsToDelete);
         } catch (sErr) {
           console.warn('Storage file deletion error (non-fatal):', sErr);
         }
       }
 
-      // 2. Filter out deleted attempt
+      // 2. Delete from draft_video_assets table
+      if (record.campaign_id && record.influencer_id) {
+        await deleteDraftVideoAssetsForAttempt(record.campaign_id, record.influencer_id, videoNumber, attempt.attempt_number);
+      }
+
+      // 3. Filter out deleted attempt
       const remainingAttempts = attempts.filter(a => a.attempt_number !== attempt.attempt_number);
 
       if (remainingAttempts.length === 0) {
-        // Reset to NOT_STARTED
+        setAttempts([]);
         const emptyPayload = {
           attempts: [],
           active_attempt_number: 0,
           approval_status: '',
           vid: '',
+          original_file_name: '',
+          tamil_video_url: '',
+          tamil_file_name: '',
           timing: 'Not Submit',
           corr: '',
           finalL: '',
@@ -10299,8 +10583,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
         };
         await onSave(emptyPayload, false);
 
-        setInitialFile(null);
-        setInitialUrl('');
+        setInitialOriginalFile(null);
+        setInitialOriginalUrl('');
+        setInitialTamilFile(null);
+        setInitialTamilUrl('');
         setInitialDraftDate('');
         setAppStat('');
         setCorr('');
@@ -10309,18 +10595,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
         setCalculatedTiming('Not Submit');
         setReDraftSubmitDate('');
         setAttemptToDelete(null);
-        setPreviewModalAttempt(null);
+        setPreviewModalAsset(null);
         toast.success('Draft video deleted. Step reset to Not Started.');
       } else {
-        // Revert to previous attempt
         const prevAttempt = remainingAttempts[remainingAttempts.length - 1];
         const isPrevApproved = prevAttempt.approval_status === 'Approved' && prevAttempt.timing_status !== 'Not Submit';
+        setAttempts(remainingAttempts);
 
         const rollbackPayload = {
           attempts: remainingAttempts,
           active_attempt_number: prevAttempt.attempt_number,
           approval_status: prevAttempt.approval_status || 'Pending Approval',
           vid: prevAttempt.video_url || '',
+          original_file_name: prevAttempt.original_file_name || '',
+          tamil_video_url: prevAttempt.tamil_video_url || '',
+          tamil_file_name: prevAttempt.tamil_file_name || '',
           timing: prevAttempt.timing_status || 'On Time',
           corr: prevAttempt.corrections || '',
           finalL: prevAttempt.final_product_link || '',
@@ -10340,7 +10629,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         setDraftSubmitDate(prevAttempt.draft_submission_date || prevAttempt.draft_submit_date || '');
         setReDraftSubmitDate(prevAttempt.re_draft_submit_date || '');
         setAttemptToDelete(null);
-        setPreviewModalAttempt(null);
+        setPreviewModalAsset(null);
         toast.success(`Draft Attempt ${attempt.attempt_number} deleted. Reverted to Attempt ${prevAttempt.attempt_number}.`);
       }
     } catch (err: any) {
@@ -10353,8 +10642,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
   // Save Approval Details (Approved, Pending Approval, or Not Approved)
   const handleSaveApproval = async () => {
-    if (!activeAttempt && !initialUrl) {
-      toast.error('No draft video submitted yet. Please upload a draft video first.');
+    if (!activeAttempt && !initialOriginalUrl) {
+      toast.error('No draft video submitted yet. Please upload required draft videos first.');
       return;
     }
 
@@ -10364,6 +10653,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
     }
 
     if (appStat === 'Approved') {
+      if (!activeAttempt?.video_url) {
+        toast.error('Original Video must be uploaded before approving.');
+        return;
+      }
+      if (!isTamil && !activeAttempt?.tamil_video_url) {
+        toast.error('Tamil Translated Video is required for non-Tamil creators before approving.');
+        return;
+      }
       if (!draftSubmitDate || draftSubmitDate.trim() === '') {
         toast.error('Please enter the Draft Submit Date before approving the draft.');
         return;
@@ -10389,9 +10686,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
     const userName = await getCurrentUserName();
     const nowIso = new Date().toISOString();
 
-    const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit' && !!draftSubmitDate;
+    const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit' && !!draftSubmitDate && (isTamil || !!activeAttempt?.tamil_video_url);
 
-    // Update active attempt in attempts array while preserving video_url and all history
+    // Update active attempt in attempts array while preserving all history
     const updatedAttempts = attempts.map((att, idx) => {
       if (idx === attempts.length - 1) {
         return {
@@ -10412,11 +10709,16 @@ const DraftForm: React.FC<DraftFormProps> = ({
       return att;
     });
 
+    setAttempts(updatedAttempts);
+
     const payload = {
       attempts: updatedAttempts,
       active_attempt_number: activeAttempt?.attempt_number || 1,
       approval_status: appStat,
-      vid: activeAttempt?.video_url || initialUrl,
+      vid: activeAttempt?.video_url || initialOriginalUrl,
+      original_file_name: activeAttempt?.original_file_name,
+      tamil_video_url: activeAttempt?.tamil_video_url,
+      tamil_file_name: activeAttempt?.tamil_file_name,
       timing: calculatedTiming,
       draft_submission_date: draftSubmitDate,
       draft_submit_date: draftSubmitDate,
@@ -10431,10 +10733,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
       reviewed_at: nowIso
     };
 
-    // Save to Supabase (completed is true ONLY if Approved with valid timing!)
     await onSave(payload, isApproved);
 
-    // Also sync draft date to influencer_post_dates_rows
     if (draftSubmitDate) {
       try {
         await syncInfluencerPostDate({
@@ -10464,7 +10764,16 @@ const DraftForm: React.FC<DraftFormProps> = ({
   };
 
   const isCurrentDraftNotApproved = activeAttempt?.approval_status === 'Not Approved';
-  const isCurrentDraftApproved = activeAttempt?.approval_status === 'Approved';
+
+  // Can submit first-time draft?
+  const canSubmitInitialDraft = isTamil
+    ? Boolean((initialOriginalFile || initialOriginalUrl) && initialDraftDate.trim())
+    : Boolean((initialOriginalFile || initialOriginalUrl) && (initialTamilFile || initialTamilUrl) && initialDraftDate.trim());
+
+  // Can submit re-draft?
+  const canSubmitReDraft = isTamil
+    ? Boolean((reDraftOriginalFile || reDraftOriginalUrl) && reDraftSubmissionDate.trim())
+    : Boolean((reDraftOriginalFile || reDraftOriginalUrl) && (reDraftTamilFile || reDraftTamilUrl) && reDraftSubmissionDate.trim());
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
@@ -10519,7 +10828,253 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 1. RE-DRAFT UPLOAD PANEL (When user clicked 'Upload Re-Draft') */}
+      {/* 1. DRAFT VIDEOS SECTION (When an active attempt exists and not in re-draft mode) */}
+      {activeAttempt && !isReDraftMode && (
+        <div className="p-5 bg-[#0b1329] border border-slate-800 rounded-xl space-y-4 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+            <div>
+              <h5 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Video size={16} className="text-purple-400" />
+                <span>{isTamil ? 'Draft Video' : 'Draft Videos'}</span>
+                <span className="text-[11px] font-normal text-slate-400 lowercase">(attempt {activeAttempt.attempt_number})</span>
+              </h5>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {isTamil 
+                  ? 'Original video for this draft attempt.' 
+                  : 'Uploaded versions of the draft video for this attempt.'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase font-bold text-slate-400">Creator Language:</span>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-800/60 uppercase">
+                {targetLanguages.length > 0 ? targetLanguages.join(', ') : (isTamil ? 'Tamil' : 'Other')}
+              </span>
+            </div>
+          </div>
+
+          {/* Side-by-side or stacked grid for Original and Tamil Translated videos */}
+          <div className={`grid grid-cols-1 ${isTamil ? '' : 'md:grid-cols-2'} gap-4`}>
+            
+            {/* ORIGINAL VIDEO CARD */}
+            <div className="p-4 bg-[#070c18] border border-slate-800 rounded-xl flex flex-col justify-between space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                  <Video size={14} className="text-blue-400" />
+                  <span>Original Video</span>
+                  <span className="text-rose-400">*</span>
+                </span>
+                {activeAttempt.video_url ? (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60 flex items-center gap-1">
+                    <Check size={10} strokeWidth={3} /> Uploaded
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800/60">
+                    Missing
+                  </span>
+                )}
+              </div>
+
+              {/* Preview Thumbnail / Player */}
+              <div className="relative w-full h-36 bg-black rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center group shadow-inner">
+                {activeAttempt.video_url ? (
+                  <>
+                    <video 
+                      src={activeAttempt.video_url} 
+                      className="w-full h-full object-cover" 
+                      preload="metadata" 
+                    />
+                    <div 
+                      onClick={() => setPreviewModalAsset({
+                        url: activeAttempt.video_url,
+                        title: `Draft Attempt ${activeAttempt.attempt_number} — Original Video`,
+                        attemptNumber: activeAttempt.attempt_number,
+                        assetType: 'Original Video',
+                        uploadedAt: activeAttempt.uploaded_at
+                      })}
+                      className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center cursor-pointer transition-colors"
+                      title="Click to play full video"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-blue-600/90 hover:bg-blue-500 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                        <Play size={18} className="fill-white ml-0.5" />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <span className="text-xs text-slate-500">No original video uploaded</span>
+                )}
+              </div>
+
+              {/* File Info & Action Buttons */}
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
+                <span className="text-[11px] text-slate-400 truncate font-mono max-w-[170px]" title={activeAttempt.original_file_name || activeAttempt.video_url}>
+                  {activeAttempt.original_file_name || activeAttempt.video_url?.split('/').pop()?.split('?')[0] || 'original_video.mp4'}
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {activeAttempt.video_url && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewModalAsset({
+                        url: activeAttempt.video_url,
+                        title: `Draft Attempt ${activeAttempt.attempt_number} — Original Video`,
+                        attemptNumber: activeAttempt.attempt_number,
+                        assetType: 'Original Video',
+                        uploadedAt: activeAttempt.uploaded_at
+                      })}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Eye size={12} /> View
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => activeOriginalReplaceInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <RotateCcw size={12} /> Replace
+                  </button>
+                  <input 
+                    ref={activeOriginalReplaceInputRef}
+                    type="file"
+                    accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleReplaceActiveAsset(e.target.files[0], 'original');
+                        e.target.value = '';
+                      }
+                    }}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* TAMIL TRANSLATED VIDEO CARD (Only when NOT Tamil) */}
+            {!isTamil && (
+              <div className="p-4 bg-[#070c18] border border-slate-800 rounded-xl flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <Video size={14} className="text-purple-400" />
+                    <span>Tamil Translated Video</span>
+                    <span className="text-rose-400">*</span>
+                  </span>
+                  {activeAttempt.tamil_video_url ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60 flex items-center gap-1">
+                      <Check size={10} strokeWidth={3} /> Uploaded
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800/60">
+                      Required
+                    </span>
+                  )}
+                </div>
+
+                {/* Preview Thumbnail or Upload dropzone if missing */}
+                <div className="relative w-full h-36 bg-black rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center group shadow-inner">
+                  {activeAttempt.tamil_video_url ? (
+                    <>
+                      <video 
+                        src={activeAttempt.tamil_video_url} 
+                        className="w-full h-full object-cover" 
+                        preload="metadata" 
+                      />
+                      <div 
+                        onClick={() => setPreviewModalAsset({
+                          url: activeAttempt.tamil_video_url!,
+                          title: `Draft Attempt ${activeAttempt.attempt_number} — Tamil Translated Video`,
+                          attemptNumber: activeAttempt.attempt_number,
+                          assetType: 'Tamil Translated Video',
+                          uploadedAt: activeAttempt.uploaded_at
+                        })}
+                        className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center cursor-pointer transition-colors"
+                        title="Click to play full video"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-purple-600/90 hover:bg-purple-500 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                          <Play size={18} className="fill-white ml-0.5" />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div 
+                      onClick={() => activeTamilReplaceInputRef.current?.click()}
+                      className="w-full h-full border-2 border-dashed border-purple-500/40 hover:border-purple-400 rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+                    >
+                      <UploadCloud className="text-purple-400 mb-1" size={24} />
+                      <span className="text-xs text-purple-300 font-semibold">Upload Tamil Translated Video</span>
+                      <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* File Info & Action Buttons */}
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
+                  <span className="text-[11px] text-slate-400 truncate font-mono max-w-[170px]" title={activeAttempt.tamil_file_name || activeAttempt.tamil_video_url}>
+                    {activeAttempt.tamil_file_name || activeAttempt.tamil_video_url?.split('/').pop()?.split('?')[0] || (activeAttempt.tamil_video_url ? 'tamil_translation.mp4' : 'Missing')}
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {activeAttempt.tamil_video_url ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewModalAsset({
+                            url: activeAttempt.tamil_video_url!,
+                            title: `Draft Attempt ${activeAttempt.attempt_number} — Tamil Translated Video`,
+                            attemptNumber: activeAttempt.attempt_number,
+                            assetType: 'Tamil Translated Video',
+                            uploadedAt: activeAttempt.uploaded_at
+                          })}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-purple-400 hover:text-purple-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <Eye size={12} /> View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => activeTamilReplaceInputRef.current?.click()}
+                          disabled={isUploading}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <RotateCcw size={12} /> Replace
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => activeTamilReplaceInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        <UploadCloud size={12} /> Upload
+                      </button>
+                    )}
+                    <input 
+                      ref={activeTamilReplaceInputRef}
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                      onChange={e => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleReplaceActiveAsset(e.target.files[0], 'tamil_translation');
+                          e.target.value = '';
+                        }
+                      }}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tamil Notice when influencer target language is Tamil */}
+          {isTamil && (
+            <div className="p-3 bg-purple-950/25 border border-purple-800/40 rounded-xl flex items-center gap-2.5 text-xs text-purple-300">
+              <CheckCircle2 size={16} className="text-purple-400 shrink-0" />
+              <span>Tamil Translated Video is not required because the influencer&apos;s target language is <strong>Tamil</strong>.</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 2. RE-DRAFT UPLOAD PANEL (When user clicked 'Upload Re-Draft') */}
       {isReDraftMode && (
         <div className="p-5 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-4 animate-fade-in shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -10529,15 +11084,19 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 Submit Re-Draft (Attempt {(activeAttempt?.attempt_number || 1) + 1})
               </h5>
               <p className="text-xs text-slate-400">
-                Upload revised video and select a new Draft Submission Date. Previous drafts are permanently preserved in history.
+                {isTamil 
+                  ? 'Upload revised Original Video and select the Draft Submission Date. Previous attempts remain in history.'
+                  : 'Upload revised Original Video and Tamil Translated Video, then select the Draft Submission Date.'}
               </p>
             </div>
             <button
               type="button"
               onClick={() => { 
                 setIsReDraftMode(false); 
-                setReDraftFile(null); 
-                setReDraftUrl(''); 
+                setReDraftOriginalFile(null); 
+                setReDraftOriginalUrl(''); 
+                setReDraftTamilFile(null);
+                setReDraftTamilUrl('');
                 setReDraftSubmissionDate('');
               }}
               className="text-slate-400 hover:text-white text-xs font-semibold px-2.5 py-1 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors"
@@ -10546,71 +11105,154 @@ const DraftForm: React.FC<DraftFormProps> = ({
             </button>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-4 items-center">
-            <div className="relative w-full sm:w-52 h-32 border-2 border-dashed border-blue-500/50 rounded-xl bg-[#070c18] flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 transition-colors">
-              <UploadCloud className="text-blue-400 mb-1" size={26} />
-              <span className="text-xs text-blue-300 font-medium">Select Re-Draft Video</span>
-              <input 
-                type="file" 
-                accept="video/*,image/*" 
-                onChange={handleReDraftSelect} 
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-              />
-            </div>
-
-            <div className="flex-1 w-full min-h-32 border border-slate-800 rounded-xl bg-[#070c18] flex flex-col items-center justify-center p-3">
-              {reDraftUrl ? (
-                <div className="w-full flex flex-col items-center gap-2">
-                  <div className="w-24 h-24 rounded-lg bg-black overflow-hidden flex items-center justify-center">
-                    {(reDraftUrl.startsWith('blob:') || reDraftUrl.includes('.mp4') || reDraftUrl.includes('.webm') || reDraftUrl.includes('video')) ? (
-                      <video src={reDraftUrl} className="w-full h-full object-cover" />
-                    ) : (
-                      <Video size={24} className="text-blue-400" />
-                    )}
-                  </div>
-                  <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{reDraftFile?.name}</span>
-                </div>
-              ) : (
-                <span className="text-xs text-slate-500">No new re-draft video selected yet</span>
-              )}
-            </div>
-          </div>
-
-          {/* Re-Draft Submission Date Input */}
-          {(reDraftFile || reDraftUrl) && (
-            <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-2 animate-fade-in">
+          <div className={`grid grid-cols-1 ${isTamil ? '' : 'md:grid-cols-2'} gap-4`}>
+            
+            {/* Re-Draft: ORIGINAL VIDEO */}
+            <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-3">
               <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
-                  DRAFT SUBMISSION DATE *
+                <label className="text-xs font-bold text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Video size={14} className="text-blue-400" />
+                  <span>Original Video</span>
+                  <span className="text-rose-400">*</span>
                 </label>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60">
                   Required
                 </span>
               </div>
-              <div className="relative">
+
+              <div 
+                onClick={() => reDraftOriginalInputRef.current?.click()}
+                className="relative w-full h-32 border-2 border-dashed border-blue-500/50 hover:border-blue-400 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+              >
+                {reDraftOriginalUrl ? (
+                  <div className="w-full flex flex-col items-center gap-1.5">
+                    <div className="w-16 h-16 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
+                      <video src={reDraftOriginalUrl} className="w-full h-full object-cover" />
+                    </div>
+                    <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{reDraftOriginalFile?.name || 'Original Video'}</span>
+                    <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                  </div>
+                ) : (
+                  <>
+                    <UploadCloud className="text-blue-400 mb-1" size={24} />
+                    <span className="text-xs text-blue-300 font-semibold">Upload Original Video</span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                  </>
+                )}
                 <input 
-                  ref={reDraftDateInputRef}
-                  type="date"
-                  value={reDraftSubmissionDate}
-                  onChange={e => setReDraftSubmissionDate(e.target.value)}
-                  style={{ colorScheme: 'dark' }}
-                  className="w-full bg-[#0b1329] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
-                  required
+                  ref={reDraftOriginalInputRef}
+                  type="file" 
+                  accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      const f = e.target.files[0];
+                      if (validateVideoFile(f)) {
+                        setReDraftOriginalFile(f);
+                        setReDraftOriginalUrl(URL.createObjectURL(f));
+                      }
+                      e.target.value = '';
+                    }
+                  }} 
+                  className="hidden" 
                 />
-                <button
-                  type="button"
-                  onClick={() => reDraftDateInputRef.current?.showPicker?.()}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
-                  title="Open calendar"
-                >
-                  <Calendar size={18} />
-                </button>
               </div>
-              <span className="text-[11px] text-slate-400 block">
-                Enter the date when this revised re-draft video was submitted.
-              </span>
+            </div>
+
+            {/* Re-Draft: TAMIL TRANSLATED VIDEO (Only for Non-Tamil) */}
+            {!isTamil && (
+              <div className="p-4 bg-[#070c18] border border-purple-500/40 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Video size={14} className="text-purple-400" />
+                    <span>Tamil Translated Video</span>
+                    <span className="text-rose-400">*</span>
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800/60">
+                    Required
+                  </span>
+                </div>
+
+                <div 
+                  onClick={() => reDraftTamilInputRef.current?.click()}
+                  className="relative w-full h-32 border-2 border-dashed border-purple-500/50 hover:border-purple-400 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+                >
+                  {reDraftTamilUrl ? (
+                    <div className="w-full flex flex-col items-center gap-1.5">
+                      <div className="w-16 h-16 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
+                        <video src={reDraftTamilUrl} className="w-full h-full object-cover" />
+                      </div>
+                      <span className="text-[11px] text-purple-300 font-medium truncate max-w-xs">{reDraftTamilFile?.name || 'Tamil Translated Video'}</span>
+                      <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                    </div>
+                  ) : (
+                    <>
+                      <UploadCloud className="text-purple-400 mb-1" size={24} />
+                      <span className="text-xs text-purple-300 font-semibold">Upload Tamil Translated Video</span>
+                      <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                    </>
+                  )}
+                  <input 
+                    ref={reDraftTamilInputRef}
+                    type="file" 
+                    accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) {
+                        const f = e.target.files[0];
+                        if (validateVideoFile(f)) {
+                          setReDraftTamilFile(f);
+                          setReDraftTamilUrl(URL.createObjectURL(f));
+                        }
+                        e.target.value = '';
+                      }
+                    }} 
+                    className="hidden" 
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tamil info notice in Re-Draft mode */}
+          {isTamil && (
+            <div className="p-3 bg-purple-950/25 border border-purple-800/40 rounded-xl flex items-center gap-2.5 text-xs text-purple-300">
+              <CheckCircle2 size={16} className="text-purple-400 shrink-0" />
+              <span>Tamil Translated Video is not required because the influencer&apos;s target language is <strong>Tamil</strong>.</span>
             </div>
           )}
+
+          {/* Re-Draft Submission Date Input */}
+          <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-2 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                DRAFT SUBMISSION DATE *
+              </label>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                Required
+              </span>
+            </div>
+            <div className="relative">
+              <input 
+                ref={reDraftDateInputRef}
+                type="date"
+                value={reDraftSubmissionDate}
+                onChange={e => setReDraftSubmissionDate(e.target.value)}
+                style={{ colorScheme: 'dark' }}
+                className="w-full bg-[#0b1329] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => reDraftDateInputRef.current?.showPicker?.()}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                title="Open calendar"
+              >
+                <Calendar size={18} />
+              </button>
+            </div>
+            <span className="text-[11px] text-slate-400 block">
+              Enter the date when this revised re-draft was submitted.
+            </span>
+          </div>
 
           <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
             <button
@@ -10618,8 +11260,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
               disabled={isUploading}
               onClick={() => {
                 setIsReDraftMode(false);
-                setReDraftFile(null);
-                setReDraftUrl('');
+                setReDraftOriginalFile(null);
+                setReDraftOriginalUrl('');
+                setReDraftTamilFile(null);
+                setReDraftTamilUrl('');
                 setReDraftSubmissionDate('');
               }}
               className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
@@ -10628,7 +11272,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
             </button>
             <button
               type="button"
-              disabled={isUploading || (!reDraftFile && !reDraftUrl) || !reDraftSubmissionDate.trim()}
+              disabled={isUploading || !canSubmitReDraft}
               onClick={handleSubmitReDraft}
               className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-2 cursor-pointer"
             >
@@ -10648,113 +11292,198 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 2. FIRST-TIME DRAFT UPLOAD (When no draft has ever been uploaded) */}
+      {/* 3. FIRST-TIME DRAFT UPLOAD (When no draft attempt exists yet) */}
       {attempts.length === 0 && !isReDraftMode && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row justify-center gap-6">
-            <div className="relative w-full sm:w-52 h-36 border-2 border-dashed border-blue-500/40 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
-              <UploadCloud className="text-blue-400 mb-1" size={26} />
-              <span className="text-xs text-blue-300 font-medium">Upload Draft Video</span>
-              <input 
-                type="file" 
-                accept="video/*,image/*" 
-                onChange={handleInitialUpload} 
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-              />
-            </div>
-            <div className="flex-1 min-h-36 border border-slate-800 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center p-3">
-              {initialUrl ? (
-                <div className="w-full flex flex-col items-center gap-2">
-                  <div className="w-24 h-24 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
-                    {(initialUrl.startsWith('blob:') || initialUrl.includes('.mp4') || initialUrl.includes('.webm') || initialUrl.includes('video')) ? (
-                      <video src={initialUrl} className="w-full h-full object-cover" />
-                    ) : (
-                      <Video size={24} className="text-blue-400" />
-                    )}
-                  </div>
-                  <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialFile?.name || 'Selected Video'}</span>
-                </div>
-              ) : (
-                <span className="text-xs text-slate-500 font-medium">No Draft Video Selected</span>
-              )}
-            </div>
+          <div className="border-b border-slate-800 pb-2">
+            <h5 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <Video size={16} className="text-purple-400" />
+              <span>{isTamil ? 'Draft Video' : 'Draft Videos'}</span>
+            </h5>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {isTamil 
+                ? 'Upload the original draft video for review.' 
+                : 'Upload both required versions of the draft video.'}
+            </p>
           </div>
 
-          {/* DRAFT SUBMISSION DATE REQUIRED (Shown when video is selected) */}
-          {(initialFile || initialUrl) && (
-            <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-3 animate-fade-in">
+          {/* Side-by-side or stacked grid for Original and Tamil Translated videos */}
+          <div className={`grid grid-cols-1 ${isTamil ? '' : 'md:grid-cols-2'} gap-4`}>
+            
+            {/* ORIGINAL VIDEO CARD */}
+            <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-3">
               <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
-                  DRAFT SUBMISSION DATE *
+                <label className="text-xs font-bold text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Video size={14} className="text-blue-400" />
+                  <span>Original Video</span>
+                  <span className="text-rose-400">*</span>
                 </label>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
                   Required
                 </span>
               </div>
 
-              <div className="relative">
+              <div 
+                onClick={() => initialOriginalInputRef.current?.click()}
+                className="relative w-full h-36 border-2 border-dashed border-blue-500/40 hover:border-blue-400 rounded-xl bg-[#070c18] flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+              >
+                {initialOriginalUrl ? (
+                  <div className="w-full flex flex-col items-center gap-2">
+                    <div className="w-20 h-20 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
+                      <video src={initialOriginalUrl} className="w-full h-full object-cover" />
+                    </div>
+                    <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialOriginalFile?.name || 'Original Video'}</span>
+                    <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                  </div>
+                ) : (
+                  <>
+                    <UploadCloud className="text-blue-400 mb-1" size={26} />
+                    <span className="text-xs text-blue-300 font-semibold">Upload Original Video</span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                  </>
+                )}
                 <input 
-                  ref={initialDateInputRef}
-                  type="date"
-                  value={initialDraftDate}
-                  onChange={e => setInitialDraftDate(e.target.value)}
-                  style={{ colorScheme: 'dark' }}
-                  className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
-                  required
+                  ref={initialOriginalInputRef}
+                  type="file" 
+                  accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      const f = e.target.files[0];
+                      if (validateVideoFile(f)) {
+                        setInitialOriginalFile(f);
+                        setInitialOriginalUrl(URL.createObjectURL(f));
+                      }
+                      e.target.value = '';
+                    }
+                  }} 
+                  className="hidden" 
                 />
-                <button
-                  type="button"
-                  onClick={() => initialDateInputRef.current?.showPicker?.()}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
-                  title="Open calendar"
-                >
-                  <Calendar size={18} />
-                </button>
-              </div>
-              <span className="text-[11px] text-slate-400 block">
-                Enter the date when this draft video was submitted. This date will be saved to the database and displayed on the Campaign Calendar.
-              </span>
-
-              <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  disabled={isUploading}
-                  onClick={() => {
-                    setInitialFile(null);
-                    setInitialUrl('');
-                    setInitialDraftDate('');
-                  }}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={isUploading || (!initialFile && !initialUrl) || !initialDraftDate.trim()}
-                  onClick={handleSubmitInitialDraft}
-                  className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isUploading ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>Uploading...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check size={14} strokeWidth={2.5} />
-                      <span>Save Draft Submission</span>
-                    </>
-                  )}
-                </button>
               </div>
             </div>
+
+            {/* TAMIL TRANSLATED VIDEO CARD (Only for Non-Tamil) */}
+            {!isTamil && (
+              <div className="p-4 bg-[#0b1329] border border-purple-500/40 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Video size={14} className="text-purple-400" />
+                    <span>Tamil Translated Video</span>
+                    <span className="text-rose-400">*</span>
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800/60 uppercase">
+                    Required
+                  </span>
+                </div>
+
+                <div 
+                  onClick={() => initialTamilInputRef.current?.click()}
+                  className="relative w-full h-36 border-2 border-dashed border-purple-500/40 hover:border-purple-400 rounded-xl bg-[#070c18] flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+                >
+                  {initialTamilUrl ? (
+                    <div className="w-full flex flex-col items-center gap-2">
+                      <div className="w-20 h-20 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
+                        <video src={initialTamilUrl} className="w-full h-full object-cover" />
+                      </div>
+                      <span className="text-[11px] text-purple-300 font-medium truncate max-w-xs">{initialTamilFile?.name || 'Tamil Translated Video'}</span>
+                      <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                    </div>
+                  ) : (
+                    <>
+                      <UploadCloud className="text-purple-400 mb-1" size={26} />
+                      <span className="text-xs text-purple-300 font-semibold">Upload Tamil Translated Video</span>
+                      <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                    </>
+                  )}
+                  <input 
+                    ref={initialTamilInputRef}
+                    type="file" 
+                    accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) {
+                        const f = e.target.files[0];
+                        if (validateVideoFile(f)) {
+                          setInitialTamilFile(f);
+                          setInitialTamilUrl(URL.createObjectURL(f));
+                        }
+                        e.target.value = '';
+                      }
+                    }} 
+                    className="hidden" 
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tamil Info Notice */}
+          {isTamil && (
+            <div className="p-3 bg-purple-950/25 border border-purple-800/40 rounded-xl flex items-center gap-2.5 text-xs text-purple-300">
+              <CheckCircle2 size={16} className="text-purple-400 shrink-0" />
+              <span>Tamil Translated Video is not required because the influencer&apos;s target language is <strong>Tamil</strong>.</span>
+            </div>
           )}
+
+          {/* DRAFT SUBMISSION DATE REQUIRED (Shown always for First-time setup) */}
+          <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-3 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                DRAFT SUBMISSION DATE *
+              </label>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                Required
+              </span>
+            </div>
+
+            <div className="relative">
+              <input 
+                ref={initialDateInputRef}
+                type="date"
+                value={initialDraftDate}
+                onChange={e => setInitialDraftDate(e.target.value)}
+                style={{ colorScheme: 'dark' }}
+                className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => initialDateInputRef.current?.showPicker?.()}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                title="Open calendar"
+              >
+                <Calendar size={18} />
+              </button>
+            </div>
+            <span className="text-[11px] text-slate-400 block">
+              Enter the date when this draft video was submitted. This date will be saved to the database and displayed on the Campaign Calendar.
+            </span>
+
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isUploading || !canSubmitInitialDraft}
+                onClick={handleSubmitInitialDraft}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={14} strokeWidth={2.5} />
+                    <span>Save Draft Submission</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* 3. DRAFT HISTORY (The Primary/Only Draft Section) */}
+      {/* 4. DRAFT HISTORY SECTION */}
       {attempts.length > 0 && (
-        <div className="space-y-4">
+        <div className="space-y-4 pt-2 border-t border-slate-800">
           {/* Header with Title on Left and Upload Re-Draft Button on Right */}
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
@@ -10797,17 +11526,22 @@ const DraftForm: React.FC<DraftFormProps> = ({
               return (
                 <div 
                   key={att.attempt_number} 
-                  className={`p-3 sm:p-3.5 rounded-xl bg-[#0b1329] border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors ${
+                  className={`p-3.5 rounded-xl bg-[#0b1329] border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors ${
                     isCurrent ? 'border-blue-500/40 bg-blue-950/10' : 'border-slate-800/80 hover:border-slate-700'
                   }`}
                 >
-                  {/* Left: Compact Thumbnail + Attempt Info */}
+                  {/* Left: Thumbnail + Attempt Info */}
                   <div className="flex items-center gap-3.5 min-w-0">
-                    {/* Compact Square Thumbnail (56x56) */}
                     <div 
-                      onClick={() => setPreviewModalAttempt(att)}
+                      onClick={() => setPreviewModalAsset({
+                        url: att.video_url,
+                        title: `Draft Attempt ${att.attempt_number} — Original Video`,
+                        attemptNumber: att.attempt_number,
+                        assetType: 'Original Video',
+                        uploadedAt: att.uploaded_at
+                      })}
                       className="relative w-14 h-14 rounded-lg bg-black border border-slate-700/80 shrink-0 overflow-hidden cursor-pointer group flex items-center justify-center shadow-sm"
-                      title="Click to view video"
+                      title="Click to view Original Video"
                     >
                       {att.video_url ? (
                         <>
@@ -10840,6 +11574,69 @@ const DraftForm: React.FC<DraftFormProps> = ({
                         }`}>
                           {att.approval_status === 'Approved' ? '✓ Approved' : (att.approval_status === 'Not Approved' ? '✕ Not Approved' : 'Pending Approval')}
                         </span>
+                      </div>
+
+                      {/* Video Assets Upload Badges */}
+                      <div className="flex items-center gap-3 text-[11px] flex-wrap pt-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400">Original Video:</span>
+                          {att.video_url ? (
+                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-950/70 text-emerald-400 border border-emerald-800/60">
+                              ✓ Uploaded
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-950/70 text-rose-400 border border-rose-800/60">
+                              ✕ Missing
+                            </span>
+                          )}
+                          {att.video_url && (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewModalAsset({
+                                url: att.video_url,
+                                title: `Draft Attempt ${att.attempt_number} — Original Video`,
+                                attemptNumber: att.attempt_number,
+                                assetType: 'Original Video',
+                                uploadedAt: att.uploaded_at
+                              })}
+                              className="text-[10px] text-blue-400 hover:text-blue-300 underline font-medium cursor-pointer"
+                            >
+                              Play
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400">Tamil Translation:</span>
+                          {isTamil ? (
+                            <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-purple-950/70 text-purple-300 border border-purple-800/60">
+                              Not Required — Tamil Influencer
+                            </span>
+                          ) : att.tamil_video_url ? (
+                            <>
+                              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-950/70 text-emerald-400 border border-emerald-800/60">
+                                ✓ Uploaded
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewModalAsset({
+                                  url: att.tamil_video_url!,
+                                  title: `Draft Attempt ${att.attempt_number} — Tamil Translated Video`,
+                                  attemptNumber: att.attempt_number,
+                                  assetType: 'Tamil Translated Video',
+                                  uploadedAt: att.uploaded_at
+                                })}
+                                className="text-[10px] text-purple-400 hover:text-purple-300 underline font-medium cursor-pointer"
+                              >
+                                Play
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-950/70 text-rose-400 border border-rose-800/60">
+                              ✕ Missing
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 text-[11px] text-slate-400 flex-wrap">
@@ -10880,8 +11677,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     )}
                     <button
                       type="button"
-                      onClick={() => setPreviewModalAttempt(att)}
-                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      onClick={() => setPreviewModalAsset({
+                        url: att.video_url,
+                        title: `Draft Attempt ${att.attempt_number} — Original Video`,
+                        attemptNumber: att.attempt_number,
+                        assetType: 'Original Video',
+                        uploadedAt: att.uploaded_at
+                      })}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
                     >
                       <Eye size={13} />
                       <span>View</span>
@@ -10905,7 +11708,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 4. APPROVAL & TIMING CONTROLS */}
+      {/* 5. APPROVAL & TIMING CONTROLS */}
       {!isReDraftMode && activeAttempt && (
         <div className="space-y-6 pt-2 border-t border-slate-800 animate-fade-in">
           {/* Manual Draft Submit Date Picker */}
@@ -10950,7 +11753,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
               </label>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <button 
-                  type="button"
+                  type="button" 
                   onClick={() => setAppStat('Approved')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
                     appStat === 'Approved' 
@@ -10962,7 +11765,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   <span>Approved</span>
                 </button>
                 <button 
-                  type="button"
+                  type="button" 
                   onClick={() => setAppStat('Pending Approval')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
                     appStat === 'Pending Approval' || (!appStat && activeAttempt?.video_url)
@@ -10974,7 +11777,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                   <span>Pending Approval</span>
                 </button>
                 <button 
-                  type="button"
+                  type="button" 
                   onClick={() => setAppStat('Not Approved')}
                   className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
                     appStat === 'Not Approved' 
@@ -11148,7 +11951,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 5. DELETE ATTEMPT CONFIRMATION MODAL */}
+      {/* 6. DELETE ATTEMPT CONFIRMATION MODAL */}
       {attemptToDelete && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
           <div 
@@ -11162,14 +11965,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
               <div>
                 <h4 className="text-sm font-bold text-white">Delete Draft Attempt {attemptToDelete.attempt_number}?</h4>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  This action will remove the uploaded draft video file and delete this attempt reference.
+                  This action will remove the uploaded draft video file(s) and delete this attempt reference.
                 </p>
               </div>
             </div>
 
             <div className="p-3 bg-rose-950/20 border border-rose-800/40 rounded-xl text-xs text-rose-300/90">
               {attempts.length === 1 ? (
-                <span>This is the only draft attempt. Deleting it will reset Step 5: Draft back to <strong>Not Started</strong>.</span>
+                <span>This is the only draft attempt. Deleting it will reset Step 4: Draft back to <strong>Not Started</strong>.</span>
               ) : (
                 <span>Draft Attempt {attemptToDelete.attempt_number} will be deleted. Draft Attempt {attemptToDelete.attempt_number - 1} will become the active draft.</span>
               )}
@@ -11207,11 +12010,14 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 6. CENTERED VIDEO PREVIEW MODAL */}
-      {previewModalAttempt && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+      {/* 7. FULLSCREEN / CENTERED VIDEO PREVIEW MODAL */}
+      {previewModalAsset && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setPreviewModalAsset(null)}
+        >
           <div 
-            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-[540px] w-full p-4 sm:p-5 space-y-3.5 shadow-2xl relative"
+            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-2xl w-full p-4 sm:p-5 space-y-3.5 shadow-2xl relative"
             onClick={e => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -11219,118 +12025,51 @@ const DraftForm: React.FC<DraftFormProps> = ({
               <div>
                 <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                   <Video size={18} className="text-blue-400" />
-                  <span>Draft Attempt {previewModalAttempt.attempt_number} Preview</span>
+                  <span>{previewModalAsset.title}</span>
                 </h4>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Video {videoNumber} • Uploaded {formatHistoryTimestamp(previewModalAttempt.uploaded_at)}
+                  Video {videoNumber} • Attempt {previewModalAsset.attemptNumber} • {previewModalAsset.assetType}
                 </p>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
-                  previewModalAttempt.approval_status === 'Approved'
-                    ? 'bg-emerald-950/70 text-emerald-400 border-emerald-700/60'
-                    : previewModalAttempt.approval_status === 'Not Approved'
-                      ? 'bg-rose-950/70 text-rose-400 border-rose-700/60'
-                      : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
-                }`}>
-                  {previewModalAttempt.approval_status || 'Pending Approval'}
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                  {previewModalAsset.assetType}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setPreviewModalAttempt(null)}
-                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+                  onClick={() => setPreviewModalAsset(null)}
+                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
                 >
                   <X size={16} />
                 </button>
               </div>
             </div>
 
-            {/* Video Player in Modal - Compact Centered 4:3 Aspect Ratio Container */}
-            <div className="w-full flex justify-center">
-              <div className="w-full aspect-[4/3] max-h-[380px] bg-black rounded-xl overflow-hidden border border-slate-800/90 flex items-center justify-center shadow-inner">
-                {previewModalAttempt.video_url ? (
-                  <video 
-                    src={previewModalAttempt.video_url} 
-                    controls 
-                    autoPlay 
-                    className="w-full h-full object-contain" 
-                  />
-                ) : (
-                  <div className="p-8 text-xs text-slate-500">Video source not found</div>
-                )}
-              </div>
+            {/* Video Player */}
+            <div className="w-full aspect-video bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center shadow-inner">
+              <video 
+                src={previewModalAsset.url} 
+                controls 
+                autoPlay 
+                className="w-full h-full object-contain" 
+              />
             </div>
 
-            {/* Details in Modal */}
-            {previewModalAttempt.corrections && (
-              <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-xs text-rose-200">
-                <span className="font-bold text-rose-400 block mb-1">Correction Instructions:</span>
-                <p className="whitespace-pre-wrap">{previewModalAttempt.corrections}</p>
-              </div>
-            )}
-
-            {previewModalAttempt.re_draft_submit_date && (
-              <div className="p-2.5 bg-rose-950/30 border border-rose-800/40 rounded-xl text-xs flex items-center justify-between text-rose-200">
-                <span className="text-rose-400 font-semibold">Expected Re-Draft Submit Date:</span>
-                <span className="font-bold">{formatDisplayDateLocal(previewModalAttempt.re_draft_submit_date)}</span>
-              </div>
-            )}
-
-            {previewModalAttempt.final_product_link && (
-              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-xl text-xs space-y-1">
-                <span className="text-emerald-400 font-semibold block uppercase tracking-wider text-[10px]">Final Product Link:</span>
-                <a 
-                  href={previewModalAttempt.final_product_link} 
-                  target="_blank" 
-                  rel="noreferrer" 
-                  className="text-blue-400 hover:underline break-all block font-mono"
-                >
-                  {previewModalAttempt.final_product_link}
-                </a>
-              </div>
-            )}
-
-            {previewModalAttempt.final_description && (
-              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-xl text-xs space-y-1">
-                <span className="text-emerald-400 font-semibold block uppercase tracking-wider text-[10px]">Final Caption / Description:</span>
-                <p className="whitespace-pre-wrap break-words text-slate-200 leading-relaxed font-sans">
-                  {previewModalAttempt.final_description}
-                </p>
-              </div>
-            )}
-
-            {previewModalAttempt.reviewed_at && (
-              <div className="text-xs text-slate-400 flex items-center justify-between">
-                <span>
-                  Reviewed by: <span className="text-white font-semibold">{previewModalAttempt.reviewed_by || 'Admin'}</span>
-                </span>
-                <span>
-                  {formatHistoryTimestamp(previewModalAttempt.reviewed_at)}
-                </span>
-              </div>
-            )}
-
-            {/* Modal Footer with Delete option for current attempt */}
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-              {previewModalAttempt.attempt_number === activeAttempt?.attempt_number ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const toDel = previewModalAttempt;
-                    setPreviewModalAttempt(null);
-                    setAttemptToDelete(toDel);
-                  }}
-                  className="px-3.5 py-2 bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 hover:text-rose-200 text-xs font-bold rounded-xl border border-rose-700/60 transition-colors flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Trash2 size={14} />
-                  <span>Delete Video</span>
-                </button>
-              ) : <div />}
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+              <a 
+                href={previewModalAsset.url} 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-blue-400 hover:text-blue-300 underline font-medium flex items-center gap-1"
+              >
+                <ExternalLink size={12} /> Open in new tab
+              </a>
               <button
                 type="button"
-                onClick={() => setPreviewModalAttempt(null)}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                onClick={() => setPreviewModalAsset(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-semibold transition-colors cursor-pointer"
               >
                 Close Preview
               </button>
