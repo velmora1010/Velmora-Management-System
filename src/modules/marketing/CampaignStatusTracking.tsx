@@ -2232,6 +2232,98 @@ export const isInfluencerPaymentCompleted = (record: StatusTrackingRecord, video
 };
 
 /**
+ * Calculates confirmed/paid payment amount for a specific influencer record and video number.
+ * Only confirmed/paid payments (payment_status === 'paid' or completed payment steps) are counted.
+ * Pending, unpaid, failed, or estimated amounts are strictly excluded.
+ */
+export const getConfirmedPaidForRecordVideo = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): number => {
+  if (!record) return 0;
+
+  let advancePaid = 0;
+  let finalPaid = 0;
+
+  // 1. Primary data source: videoPayments records
+  const videoPayments = record.videoPayments || [];
+  const advPayment = videoPayments.find(
+    (vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'advance'
+  );
+  const finalPayment = videoPayments.find(
+    (vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'final'
+  );
+
+  // Check Advance Payment
+  if (advPayment) {
+    const isPaid = advPayment.payment_status === 'paid' || 
+      (Number(advPayment.paid_amount || 0) > 0 && advPayment.payment_status !== 'pending' && advPayment.payment_status !== 'failed' && advPayment.payment_status !== 'cancelled');
+    if (isPaid) {
+      advancePaid = Number(advPayment.paid_amount || 0);
+      if (advancePaid === 0 && advPayment.payment_status === 'paid' && advPayment.agreed_amount) {
+        advancePaid = Number(advPayment.agreed_amount || 0);
+      }
+    }
+  } else {
+    // Legacy / step metadata fallback for Advance Payment
+    let metadata: any = {};
+    try {
+      metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+    } catch (e) {}
+
+    const vMeta = metadata?.videos?.[String(videoNumber)] || metadata?.videos?.[videoNumber];
+    const advStep = vMeta?.steps?.pay_advance;
+
+    if (videoNumber === 1) {
+      const isLegacyAdvPaid = Boolean(record.pay_advance_completed || (parseFloat(record.advance_paid_amount || '0') > 0));
+      if (isLegacyAdvPaid && advStep?.data?.payment_status !== 'pending') {
+        advancePaid = parseFloat(record.advance_paid_amount || advStep?.data?.advance || '0') || 0;
+      }
+    } else if (advStep) {
+      const isAdvDone = Boolean(advStep.completed || advStep.data?.payment_status === 'paid' || advStep.data?.pay_advance_completed);
+      if (isAdvDone && advStep.data?.payment_status !== 'pending') {
+        advancePaid = parseFloat(advStep.data?.advance || '0') || 0;
+      }
+    }
+  }
+
+  // Check Final / Remaining Payment
+  if (finalPayment) {
+    const isPaid = finalPayment.payment_status === 'paid' || 
+      (Number(finalPayment.paid_amount || 0) > 0 && finalPayment.payment_status !== 'pending' && finalPayment.payment_status !== 'failed' && finalPayment.payment_status !== 'cancelled');
+    if (isPaid) {
+      finalPaid = Number(finalPayment.paid_amount || 0);
+      if (finalPaid === 0 && finalPayment.payment_status === 'paid' && finalPayment.agreed_amount) {
+        finalPaid = Number(finalPayment.agreed_amount || 0);
+      }
+    }
+  } else {
+    // Legacy / step metadata fallback for Final Payment
+    let metadata: any = {};
+    try {
+      metadata = typeof record.notes === 'string' ? JSON.parse(record.notes || '{}') : (record.notes || {});
+    } catch (e) {}
+
+    const vMeta = metadata?.videos?.[String(videoNumber)] || metadata?.videos?.[videoNumber];
+    const finalStep = vMeta?.steps?.payment;
+
+    if (videoNumber === 1) {
+      const isLegacyFinalPaid = Boolean(record.payment_remaining_completed);
+      if (isLegacyFinalPaid && finalStep?.data?.payment_status !== 'pending') {
+        finalPaid = parseFloat(finalStep?.data?.amount || '0') || 0;
+      }
+    } else if (finalStep) {
+      const isFinalDone = Boolean(finalStep.completed || finalStep.data?.payment_completed || finalStep.data?.payment_status === 'paid');
+      if (isFinalDone && finalStep.data?.payment_status !== 'pending') {
+        finalPaid = parseFloat(finalStep.data?.amount || '0') || 0;
+      }
+    }
+  }
+
+  return advancePaid + finalPaid;
+};
+
+/**
  * Checks if all workflow steps for an influencer in a given video number are completed.
  */
 export const isInfluencerVideoCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
@@ -4091,6 +4183,23 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     };
   }, [filteredRecords]);
 
+  // Payment totals for filtered influencers (confirmed/paid only)
+  const selectedVideoPaidTotal = useMemo(() => {
+    return filteredRecords.reduce((acc, record) => {
+      return acc + getConfirmedPaidForRecordVideo(record, selectedVideoNumber);
+    }, 0);
+  }, [filteredRecords, selectedVideoNumber]);
+
+  const allVideosPaidTotal = useMemo(() => {
+    return filteredRecords.reduce((acc, record) => {
+      let recTotal = 0;
+      for (let v = 1; v <= 6; v++) {
+        recTotal += getConfirmedPaidForRecordVideo(record, v);
+      }
+      return acc + recTotal;
+    }, 0);
+  }, [filteredRecords]);
+
   // Active filter chip removal handlers
   const removeFilterVideo = (vNum: number) => {
     setActiveFilters(prev => ({
@@ -4903,6 +5012,29 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           paymentProofUrl: stepData.photo || null,
           notes: stepData.notes || (stepData.account_number ? `Account: ${stepData.account_number}` : null),
         });
+
+        // Optimistically update in-memory record.videoPayments
+        if (!record.videoPayments) record.videoPayments = [];
+        const existingIdx = record.videoPayments.findIndex((vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'final');
+        const updatedVp: any = {
+          campaign_id: String(record.campaign_id),
+          influencer_id: Number(record.influencer_id),
+          video_number: Number(videoNumber),
+          payment_type: 'final',
+          agreed_amount: vAgreed,
+          paid_amount: vPaid,
+          payment_status: isStepCompleted || vPaid > 0 ? 'paid' : 'pending',
+          payment_method: stepData.payment_method || null,
+          transaction_reference: stepData.payment_method === 'UPI' ? (stepData.upi_number || stepData.gpay || null) : null,
+          payment_proof_url: stepData.photo || null,
+          notes: stepData.notes || null,
+          updated_at: new Date().toISOString()
+        };
+        if (existingIdx >= 0) {
+          record.videoPayments[existingIdx] = { ...record.videoPayments[existingIdx], ...updatedVp };
+        } else {
+          record.videoPayments.push(updatedVp);
+        }
       } catch (err) {
         console.error(`Failed to persist video ${videoNumber} payment record:`, err);
       }
@@ -5482,7 +5614,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             </div>
 
             {/* Bottom Toolbar: Filter Status + Search Bar + Advanced Filters */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 pt-0.5">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 shrink-0 pt-0.5">
               <div className="flex items-center gap-2 text-xs">
                 {selectedSummaryStep ? (
                   <div className="flex items-center gap-2 flex-wrap">
@@ -5515,7 +5647,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 )}
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
                 {/* Sync New Scripts Button */}
                 <button
                   type="button"
@@ -5529,7 +5661,36 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   <span className="sm:hidden">{isSyncingScripts ? 'Syncing...' : 'Sync Scripts'}</span>
                 </button>
 
-                <div className="relative w-full sm:w-[280px] md:w-[320px]">
+                {/* Payment Summary Cards */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Selected Video Payment */}
+                  <div 
+                    className="h-[38px] px-3 bg-[#0b1329] border border-slate-800/80 hover:border-slate-700/80 rounded-xl flex flex-col justify-center min-w-[110px] sm:min-w-[120px] shadow-sm transition-colors"
+                    title={`Total confirmed paid for Video ${selectedVideoNumber} (${filteredRecords.length} filtered influencer${filteredRecords.length === 1 ? '' : 's'})`}
+                  >
+                    <span className="text-[9.5px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none truncate">
+                      Video {selectedVideoNumber} Paid
+                    </span>
+                    <span className="text-xs sm:text-[13px] font-black text-emerald-400 tracking-tight leading-tight mt-0.5">
+                      ₹{selectedVideoPaidTotal.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  {/* 6 Videos Total Payment */}
+                  <div 
+                    className="h-[38px] px-3 bg-[#0b1329] border border-slate-800/80 hover:border-slate-700/80 rounded-xl flex flex-col justify-center min-w-[110px] sm:min-w-[120px] shadow-sm transition-colors"
+                    title={`Total confirmed paid across all 6 Videos (${filteredRecords.length} filtered influencer${filteredRecords.length === 1 ? '' : 's'})`}
+                  >
+                    <span className="text-[9.5px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none truncate">
+                      6 Videos Paid
+                    </span>
+                    <span className="text-xs sm:text-[13px] font-black text-emerald-400 tracking-tight leading-tight mt-0.5">
+                      ₹{allVideosPaidTotal.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="relative w-full sm:w-[220px] md:w-[260px]">
                   <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                   <input 
                     type="text" 
