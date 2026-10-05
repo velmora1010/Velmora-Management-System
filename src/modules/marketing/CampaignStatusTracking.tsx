@@ -74,6 +74,7 @@ export const normalizeWorkflowStepId = (val: string): string => {
   if (!val) return '';
   const s = val.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (s.includes('draftapproval') || s === 'draftapprovalpending' || s === 'draft_approval_pending') return 'draft_approval_pending';
+  if (s.includes('draftapproved') || s === 'draftapproved' || s === 'draft_approved') return 'draft';
   if (s.includes('sharescript') || s === 'script') return 'share_script';
   if (s.includes('callexplain') || s.includes('call') || s.includes('explain')) return 'call_explain';
   if (s.includes('advance') || s.includes('payadvance')) return 'pay_advance';
@@ -94,7 +95,7 @@ export const normalizeWorkflowStepLabel = (val: string): string => {
     case 'share_script': return 'Share Script';
     case 'call_explain': return 'Call & Explain';
     case 'pay_advance': return 'Pay Advance';
-    case 'draft': return 'Draft';
+    case 'draft': return 'Draft Approved';
     case 'post_date': return 'Post Date';
     case 'payment': return 'Payment';
     case 'after_post': return 'After Post';
@@ -145,7 +146,7 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain', icon: PhoneCall },
   { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
-  { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
+  { id: 'draft', label: 'Draft Approved', shortLabel: 'Draft Approved', icon: Video },
   { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Pending', icon: Clock },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
@@ -4117,12 +4118,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       }
     }
 
+    const draftApprovedCount = baseFilteredRecords.filter(r => 
+      isInfluencerDraftApproved(r, selectedVideoNumber)
+    ).length;
+
     const base = configs.map(cfg => {
-      const label = cfg.id === 'pay_advance' ? 'Pay Advance' : (cfg.id === 'timeline' ? 'Timeline' : (cfg.id === 'call_explain' ? 'Call & Explain' : cfg.label));
+      const label = cfg.id === 'draft' ? 'Draft Approved' : (cfg.id === 'pay_advance' ? 'Pay Advance' : (cfg.id === 'timeline' ? 'Timeline' : (cfg.id === 'call_explain' ? 'Call & Explain' : cfg.label)));
       return {
         id: cfg.id,
         label,
-        count: activeStepCounts[cfg.id] || 0,
+        count: cfg.id === 'draft' ? draftApprovedCount : (activeStepCounts[cfg.id] || 0),
         icon: cfg.icon
       };
     });

@@ -3,7 +3,7 @@ import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStat
 import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
 import { getCanonicalInfluencerPostDates, formatDisplayDateLocal } from '../../utils/influencerDateUtils';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
-import { getVideoWorkflow } from './CampaignStatusTracking';
+import { getVideoWorkflow, isInfluencerDraftApproved, getInfluencerDraftStatus } from './CampaignStatusTracking';
 import { isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
 import { shipmentAttemptService, type ShipmentAttempt } from '../../services/shipmentAttemptService';
 import type { Campaign, CampaignInfluencer } from '../../types';
@@ -20,7 +20,8 @@ import {
   Send,
   Loader2,
   ArrowLeft,
-  Eye
+  Eye,
+  RotateCcw
 } from 'lucide-react';
 
 interface CampaignCalendarProps {
@@ -32,7 +33,7 @@ interface CampaignCalendarProps {
 interface CalendarEvent {
   id: string;
   recordId: string;
-  type: 'Delivered' | 'Draft' | 'Final Post' | 'Payment';
+  type: 'Draft' | 'Re-Draft' | 'Final Post';
   label: string;
   icon: string;
   colorClass: string;
@@ -331,7 +332,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   const [monthChangeTrigger, setMonthChangeTrigger] = useState(0); // Trigger anim
 
   // Filters state (Month View)
-  type CampaignFilterType = 'All' | 'Delivered' | 'Draft' | 'Draft On Time' | 'Draft Delayed' | 'Payment' | 'Payment On Time' | 'Payment Delayed' | 'Final Post';
+  type CampaignFilterType = 'All' | 'Draft' | 'Re-Draft' | 'Final Post';
   const [filterType, setFilterType] = useState<CampaignFilterType>('All');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -500,135 +501,9 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   }, [bills, activeTrackingRecords]);
 
   // Map tracking records and scheduled post dates to calendar events (ACTIVE ONLY)
+  // Categories: Draft (Approved), Re-Draft, and Final Post
   const events = useMemo(() => {
     const list: CalendarEvent[] = [];
-
-    // 1. Process active status tracking milestones (Delivered and Payment ONLY)
-    for (const r of activeTrackingRecords) {
-      const influencerName = r.dispatch?.influencer_name || 'Unknown';
-      const influencerUsername = r.dispatch?.influencer_code || '';
-      const matchingInf = activeInfluencers.find(inf => String(inf.id) === String(r.influencer_id));
-      const influencerCode = matchingInf?.code || r.dispatch?.influencer_code || '';
-      const campaignName = r.dispatch?.campaign_name || campaign.campaign_name;
-      const avatarUrl = r.dispatch?.influencer_avatar || '';
-
-      // 1. Delivered milestone(s) — support multiple shipment attempts if present
-      const attemptsForInf = campaignShipmentAttempts.filter(
-        a => String(a.influencer_id) === String(r.influencer_id) && a.delivery_confirmed
-      );
-
-      if (attemptsForInf.length > 0) {
-        attemptsForInf.forEach(att => {
-          const dDate = parseDateOnly(att.delivered_date);
-          if (dDate) {
-            const isReplacement = att.shipment_type === 'RE_DISPATCH' || att.attempt_number > 1;
-            list.push({
-              id: `${r.id}-attempt-${att.id}`,
-              recordId: r.id,
-              type: 'Delivered',
-              label: isReplacement ? `Delivered (Attempt ${att.attempt_number})` : 'Delivered (Attempt 1)',
-              icon: '📦',
-              colorClass: isReplacement 
-                ? 'bg-purple-500/10 border border-purple-500/30 text-purple-400' 
-                : 'bg-green-500/10 border border-green-500/30 text-green-400',
-              dateStr: dDate,
-              influencerName,
-              influencerUsername,
-              influencerCode,
-              campaignName,
-              avatarUrl,
-              record: r
-            });
-          }
-        });
-      } else {
-        // Fallback to record-based delivery milestone ONLY when delivery is genuinely completed
-        const isDeliveredCompleted = isDeliveryStepCompleted(r);
-        const actualDelDate = r.dispatch?.actual_delivery_date || r.dispatch?.delivered_date;
-        if (isDeliveredCompleted && actualDelDate) {
-          const dDate = parseDateOnly(actualDelDate);
-          if (dDate) {
-            list.push({
-              id: `${r.id}-delivered`,
-              recordId: r.id,
-              type: 'Delivered',
-              label: 'Delivered',
-              icon: '📦',
-              colorClass: 'bg-green-500/10 border border-green-500/30 text-green-400',
-              dateStr: dDate,
-              influencerName,
-              influencerUsername,
-              influencerCode,
-              campaignName,
-              avatarUrl,
-              record: r
-            });
-          }
-        }
-      }
-
-      // 2. Payment milestone (directly from the bills module)
-      const matchingBill = campaignBills.find(b => {
-        const note = b.notes?.toLowerCase() || '';
-        const s3 = b.sub_category3?.toLowerCase() || '';
-        const s2 = b.sub_category2?.toLowerCase() || '';
-
-        if (r.influencer_id) {
-          const infIdPattern = new RegExp(`\\binfluencer_id:\\s*${r.influencer_id}\\b`, 'i');
-          const simpleIdPattern = new RegExp(`\\binfluencer\\s+id:\\s*${r.influencer_id}\\b`, 'i');
-          if (infIdPattern.test(note) || simpleIdPattern.test(note) || s3 === String(r.influencer_id)) {
-            return true;
-          }
-        }
-        if (r.dispatch_id) {
-          const dispIdPattern = new RegExp(`\\bdispatch_id:\\s*${r.dispatch_id}\\b`, 'i');
-          const simpleDispPattern = new RegExp(`\\bdispatch\\s+id:\\s*${r.dispatch_id}\\b`, 'i');
-          if (dispIdPattern.test(note) || simpleDispPattern.test(note) || s3 === String(r.dispatch_id)) {
-            return true;
-          }
-        }
-        const username = r.dispatch?.influencer_code?.toLowerCase();
-        const name = r.dispatch?.influencer_name?.toLowerCase();
-        if (username && (s3 === username || s2 === username || note.includes(username))) return true;
-        if (name && (s3 === name || s2 === name || note.includes(name))) return true;
-        return false;
-      });
-
-      if (matchingBill && matchingBill.due_date) {
-        const dueDate = parseDateOnly(matchingBill.due_date);
-        if (dueDate) {
-          const paidDate = getPaidDate(matchingBill);
-          const status = matchingBill.bill_status || 'Pending';
-          const pStatus = getMilestoneStatus(matchingBill.due_date, paidDate, status === 'Paid', todayStr, '✓ Paid On Time', 'Late by', 'Early');
-
-          let payColor = 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-400';
-          if (status === 'Paid' && pStatus.status === 'On Time') {
-            payColor = 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400';
-          } else if (pStatus.status === 'Delayed') {
-            payColor = 'bg-red-950/20 border border-red-900/30 text-red-600';
-          }
-
-          list.push({
-            id: `${r.id}-payment`,
-            recordId: r.id,
-            type: 'Payment',
-            label: `Payment Due: ₹${matchingBill.amount || 0}`,
-            icon: '💰',
-            colorClass: payColor,
-            dateStr: dueDate,
-            influencerName,
-            influencerUsername,
-            influencerCode,
-            campaignName,
-            avatarUrl,
-            record: r,
-            bill: matchingBill
-          });
-        }
-      }
-    }
-
-    // 2. Add Post Date & Draft Date events for each ACTIVE influencer in this campaign (STRICTLY DATA-DRIVEN)
     const seenEventKeys = new Set<string>();
 
     for (const inf of activeInfluencers) {
@@ -650,37 +525,67 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       for (let vNum = 1; vNum <= 6; vNum++) {
         let manualDraftDate = '';
         let manualPostDate = '';
-        let draftApprovalStatus = 'Pending Approval';
         let postPlatforms = '';
         let isPostConfirmed = false;
+        let isApproved = false;
+        let isReDraft = false;
+        let reDraftDate = '';
 
         try {
           const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
           const dStep = vWorkflow.steps?.draft;
           const pdStep = vWorkflow.steps?.post_date;
 
-          // Manual Draft Submit Date from draft step attempts or state
-          const rawDraftSubmit = dStep?.data?.draft_submission_date || 
-            dStep?.data?.draft_submit_date || 
-            (Array.isArray(dStep?.data?.attempts) && dStep.data.attempts[dStep.data.attempts.length - 1]?.draft_submission_date) || 
-            (Array.isArray(dStep?.data?.attempts) && dStep.data.attempts[dStep.data.attempts.length - 1]?.draft_submit_date) || 
-            '';
-          if (rawDraftSubmit) {
-            manualDraftDate = parseDateOnly(rawDraftSubmit, 2026);
+          const attempts: any[] = Array.isArray(dStep?.data?.attempts) ? dStep.data.attempts : [];
+          const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+          // 1. DRAFT APPROVED CHECK (Video exists + Approval is 'Approved' + Confirmed)
+          isApproved = isInfluencerDraftApproved(matchingRecord, vNum);
+          if (isApproved) {
+            const approvedAttempt = [...attempts].reverse().find(a => (a.approval_status || '').toLowerCase() === 'approved') || activeAttempt;
+            const rawDraftSubmit = approvedAttempt?.draft_submission_date || 
+              approvedAttempt?.draft_submit_date || 
+              dStep?.data?.draft_submission_date || 
+              dStep?.data?.draft_submit_date || 
+              (vNum === 1 ? matchingRecord.draft_submit_date : '') || 
+              '';
+            if (rawDraftSubmit) {
+              manualDraftDate = parseDateOnly(rawDraftSubmit, 2026);
+            }
           }
 
-          const activeAttempt = Array.isArray(dStep?.data?.attempts) && dStep.data.attempts.length > 0
-            ? dStep.data.attempts[dStep.data.attempts.length - 1]
-            : null;
-          draftApprovalStatus = (activeAttempt?.approval_status || dStep?.data?.approval_status || '').trim();
+          // 2. RE-DRAFT CHECK (Draft rejected/not approved, requiring a revised submission)
+          if (!isApproved) {
+            const draftStatus = getInfluencerDraftStatus(matchingRecord, vNum);
+            const activeStatus = (activeAttempt?.approval_status || dStep?.data?.approval_status || '').toLowerCase().trim();
+            isReDraft = Boolean(
+              vWorkflow.isReDraftRequired || 
+              draftStatus === 'not_approved' || 
+              activeStatus === 'not approved' || 
+              activeStatus === 'rejected'
+            );
 
-          // Manual Post Date from post_date step (ONLY if confirmed!)
+            if (isReDraft) {
+              const reDraftDateRaw = activeAttempt?.re_draft_submit_date || 
+                activeAttempt?.draft_submission_date || 
+                activeAttempt?.draft_submit_date || 
+                dStep?.data?.re_draft_submit_date || 
+                dStep?.data?.draft_submission_date || 
+                (vNum === 1 ? matchingRecord.re_draft_expected_date : '') || 
+                '';
+              if (reDraftDateRaw) {
+                reDraftDate = parseDateOnly(reDraftDateRaw, 2026);
+              }
+            }
+          }
+
+          // 3. FINAL POST CHECK (Only if confirmed and date exists)
           isPostConfirmed = Boolean(
             pdStep?.completed === true || 
             pdStep?.status === 'COMPLETED' || 
             pdStep?.data?.post_date_confirmed === true
           );
-          const rawPostDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date || '';
+          const rawPostDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date || (vNum === 1 ? matchingRecord.final_post_expected_date : '') || '';
           if (rawPostDate && isPostConfirmed) {
             manualPostDate = parseDateOnly(rawPostDate, 2026);
           }
@@ -691,27 +596,18 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             '';
         } catch (e) {}
 
-        // Push Draft milestone ONLY if real saved draft submission date exists
-        if (manualDraftDate) {
-          const key = `${infId}_v${vNum}_DraftSubmit`;
+        // Push Draft Approved event ONLY if approved and real saved draft date exists
+        if (isApproved && manualDraftDate) {
+          const key = `${infId}_v${vNum}_DraftApproved`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
-            const isApproved = draftApprovalStatus.toLowerCase() === 'approved';
-            const isNotApproved = draftApprovalStatus.toLowerCase() === 'not approved';
-            const statusDot = isApproved ? '🟢' : isNotApproved ? '🔴' : '🟡';
-            const colorClass = isApproved
-              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-              : isNotApproved
-                ? 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
-                : 'bg-amber-500/10 border border-amber-500/30 text-amber-400';
-
             list.push({
               id: `draft-${infId}-v${vNum}`,
               recordId: infId,
               type: 'Draft',
-              label: `${statusDot} Draft • ${influencerName || influencerCode} • Video ${vNum}`,
+              label: `🟢 Draft Approved • ${influencerName || influencerCode} • Video ${vNum}`,
               icon: '🎬',
-              colorClass,
+              colorClass: 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400',
               dateStr: manualDraftDate,
               influencerName,
               influencerUsername,
@@ -726,8 +622,34 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
           }
         }
 
-        // Push Post Date milestone ONLY if confirmed and real date exists
-        if (manualPostDate && isPostConfirmed) {
+        // Push Re-Draft event ONLY if re-draft required and real date exists
+        if (isReDraft && reDraftDate) {
+          const key = `${infId}_v${vNum}_ReDraft`;
+          if (!seenEventKeys.has(key)) {
+            seenEventKeys.add(key);
+            list.push({
+              id: `redraft-${infId}-v${vNum}`,
+              recordId: infId,
+              type: 'Re-Draft',
+              label: `🔴 Re-Draft • ${influencerName || influencerCode} • Video ${vNum}`,
+              icon: '🔄',
+              colorClass: 'bg-rose-500/10 border border-rose-500/30 text-rose-400',
+              dateStr: reDraftDate,
+              influencerName,
+              influencerUsername,
+              influencerCode,
+              campaignName,
+              avatarUrl,
+              record: matchingRecord,
+              videoNumber: vNum,
+              postDateStr: manualPostDate,
+              draftDateStr: reDraftDate
+            });
+          }
+        }
+
+        // Push Final Post milestone ONLY if confirmed and real date exists
+        if (isPostConfirmed && manualPostDate) {
           const key = `${infId}_v${vNum}_PostDate`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
@@ -755,68 +677,28 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     }
 
     return list;
-  }, [activeTrackingRecords, activeInfluencers, campaign, campaignBills, todayStr, campaignShipmentAttempts]);
+  }, [activeTrackingRecords, activeInfluencers, campaign, todayStr]);
 
   // Calculate Today's Stats dynamically adapting to active filters
   const todaySummaryStats = useMemo(() => {
-    let card1Title = "Today's Deliveries";
-    let card2Title = "Today's Drafts";
+    let card1Title = "Today's Drafts";
+    let card2Title = "Today's Re-Drafts";
     let card3Title = "Today's Final Posts";
 
     let card1Val = 0;
     let card2Val = 0;
     let card3Val = 0;
 
-    let card1Type: CampaignFilterType = 'Delivered';
-    let card2Type: CampaignFilterType = 'Draft';
-    let card3Type: CampaignFilterType = 'Final Post';
+    const card1Type: CampaignFilterType = 'Draft';
+    const card2Type: CampaignFilterType = 'Re-Draft';
+    const card3Type: CampaignFilterType = 'Final Post';
 
     const todayEvents = events.filter(ev => ev.dateStr === todayStr);
 
-    if (filterType.includes('Draft')) {
-      card1Title = "Today's Drafts";
-      card2Title = "Today's On Time Drafts";
-      card3Title = "Today's Delayed Drafts";
-
-      card1Type = 'Draft';
-      card2Type = 'Draft On Time';
-      card3Type = 'Draft Delayed';
-
-      for (const ev of todayEvents) {
-        if (ev.type === 'Draft') {
-          card1Val++;
-          const expected = ev.draftDateStr || (ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date);
-          if (expected && isDraftOnTime(expected, ev.dateStr)) card2Val++;
-          if (expected && isDraftDelayed(expected, ev.dateStr, todayStr)) card3Val++;
-        }
-      }
-    } else if (filterType.includes('Payment')) {
-      card1Title = "Today's Payments";
-      card2Title = "Today's On Time Payments";
-      card3Title = "Today's Delayed Payments";
-
-      card1Type = 'Payment';
-      card2Type = 'Payment On Time';
-      card3Type = 'Payment Delayed';
-
-      for (const ev of todayEvents) {
-        if (ev.type === 'Payment') {
-          card1Val++;
-          const bill = (ev as any).bill;
-          if (bill?.due_date) {
-            const paidDate = getPaidDate(bill);
-            if (isPaymentOnTime(bill.due_date, paidDate)) card2Val++;
-            if (isPaymentDelayed(bill.due_date, paidDate, bill.bill_status, todayStr)) card3Val++;
-          }
-        }
-      }
-    } else {
-      // Default view
-      for (const ev of todayEvents) {
-        if (ev.type === 'Delivered') card1Val++;
-        else if (ev.type === 'Draft') card2Val++;
-        else if (ev.type === 'Final Post') card3Val++;
-      }
+    for (const ev of todayEvents) {
+      if (ev.type === 'Draft') card1Val++;
+      else if (ev.type === 'Re-Draft') card2Val++;
+      else if (ev.type === 'Final Post') card3Val++;
     }
 
     return {
@@ -824,7 +706,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
       card1Val, card2Val, card3Val,
       card1Type, card2Type, card3Type
     };
-  }, [events, filterType, todayStr]);
+  }, [events, todayStr]);
 
   // Filtered Events (Month View)
   const filteredEvents = useMemo(() => {
@@ -840,37 +722,13 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
       // Filter Type logic
       if (filterType === 'All') return true;
-      if (filterType === 'Delivered') return ev.type === 'Delivered';
-      
       if (filterType === 'Draft') return ev.type === 'Draft';
-      if (filterType === 'Draft On Time') {
-        if (ev.type !== 'Draft') return false;
-        const expected = ev.draftDateStr || (ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date);
-        return expected ? isDraftOnTime(expected, ev.dateStr) : false;
-      }
-      if (filterType === 'Draft Delayed') {
-        if (ev.type !== 'Draft') return false;
-        const expected = ev.draftDateStr || (ev.label.includes('Draft 2') ? ev.record.re_draft_expected_date : ev.record.draft_expected_date);
-        return expected ? isDraftDelayed(expected, ev.dateStr, todayStr) : false;
-      }
-
-      if (filterType === 'Payment') return ev.type === 'Payment';
-      if (filterType === 'Payment On Time') {
-        if (ev.type !== 'Payment') return false;
-        const bill = (ev as any).bill;
-        return bill?.due_date ? isPaymentOnTime(bill.due_date, getPaidDate(bill)) : false;
-      }
-      if (filterType === 'Payment Delayed') {
-        if (ev.type !== 'Payment') return false;
-        const bill = (ev as any).bill;
-        return bill?.due_date ? isPaymentDelayed(bill.due_date, getPaidDate(bill), bill.bill_status, todayStr) : false;
-      }
-
+      if (filterType === 'Re-Draft') return ev.type === 'Re-Draft';
       if (filterType === 'Final Post') return ev.type === 'Final Post';
 
       return true;
     });
-  }, [events, filterType, searchQuery, todayStr]);
+  }, [events, filterType, searchQuery]);
 
   // Month navigation helpers
   const handlePrevMonth = () => {
@@ -971,7 +829,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   // Day Details filter states
   const [daySearchQuery, setDaySearchQuery] = useState('');
   const [dayCampaignSearch, setDayCampaignSearch] = useState('');
-  const [dayFilterType, setDayFilterType] = useState<'All' | 'Delivered' | 'Draft' | 'Final Post' | 'Pending'>('All');
+  const [dayFilterType, setDayFilterType] = useState<'All' | 'Draft' | 'Re-Draft' | 'Final Post'>('All');
   const [dayPlatformFilter, setDayPlatformFilter] = useState<'All' | 'Instagram' | 'YouTube' | 'Facebook'>('All');
   const [dayMilestoneFilter, setDayMilestoneFilter] = useState<'All' | 'Delivered' | 'Draft1' | 'Draft2' | 'FinalVideo'>('All');
   const [daySortBy, setDaySortBy] = useState<'DeliveryDate' | 'Draft1Date' | 'Draft2Date' | 'FinalPostDate' | 'InfluencerName'>('DeliveryDate');
@@ -998,13 +856,9 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         if (!campaignName.toLowerCase().includes(q)) return false;
       }
 
-      // Event Type / Pending filter
+      // Event Type filter
       if (dayFilterType !== 'All') {
-        if (dayFilterType === 'Pending') {
-          if (r.final_post_completed) return false;
-        } else {
-          if (ev.type !== dayFilterType) return false;
-        }
+        if (ev.type !== dayFilterType) return false;
       }
 
       // Platform filter
@@ -1121,12 +975,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
           {/* Filtering controls inside Day view */}
           <div className="bg-slate-800/40 p-3 rounded-xl border border-slate-700/80 shrink-0 flex flex-wrap items-center justify-between gap-4">
             
-            {/* Event Type & Pending filters (tabs) */}
+            {/* Event Type filters (tabs) */}
             <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0 custom-scrollbar flex-nowrap font-sans">
-              {['All', 'Delivered', 'Draft', 'Final Post', 'Pending'].map((tab) => (
+              {(['All', 'Draft', 'Re-Draft', 'Final Post'] as const).map((tab) => (
                 <button
                   key={tab}
-                  onClick={() => setDayFilterType(tab as any)}
+                  onClick={() => setDayFilterType(tab)}
                   className={`py-1 px-3.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer ${
                     dayFilterType === tab
                       ? 'text-white bg-slate-700/85 shadow-sm'
@@ -1517,7 +1371,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
   }
 
   // RENDER MONTHLY CALENDAR GRID VIEW
-  const TABS = ['All', 'Delivered', 'Draft', 'Draft On Time', 'Draft Delayed', 'Payment', 'Payment On Time', 'Payment Delayed', 'Final Post'] as const;
+  const TABS = ['All', 'Draft', 'Re-Draft', 'Final Post'] as const;
 
   return (
     <div className="bg-slate-800/80 rounded-xl border border-slate-700 overflow-hidden flex flex-col min-h-[850px] relative text-slate-200">
@@ -1551,17 +1405,18 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         {/* Today's Stats Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
           
+          {/* Card 1: Today's Drafts (Approved) */}
           <div 
             onClick={() => handleToggleTodayFilter(todaySummaryStats.card1Type)}
             className={`p-4 rounded-xl border transition-all duration-200 cursor-pointer flex items-center justify-between shadow-lg ${
               filterType === todaySummaryStats.card1Type 
-                ? 'bg-green-500/10 border-green-500/40 shadow-green-500/5' 
+                ? 'bg-emerald-500/10 border-emerald-500/40 shadow-emerald-500/5' 
                 : 'bg-slate-800/70 border-slate-700 hover:border-slate-600 hover:scale-[1.01]'
             }`}
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center border border-green-500/20 text-green-400">
-                <Package size={20} />
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 text-emerald-400">
+                <Video size={20} />
               </div>
               <div>
                 <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{todaySummaryStats.card1Title}</h4>
@@ -1569,21 +1424,22 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               </div>
             </div>
             {filterType === todaySummaryStats.card1Type && (
-              <span className="text-[10px] bg-green-500/20 text-green-400 py-0.5 px-2 rounded-full font-bold">Filtered</span>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 py-0.5 px-2 rounded-full font-bold">Filtered</span>
             )}
           </div>
 
+          {/* Card 2: Today's Re-Drafts */}
           <div 
             onClick={() => handleToggleTodayFilter(todaySummaryStats.card2Type)}
             className={`p-4 rounded-xl border transition-all duration-200 cursor-pointer flex items-center justify-between shadow-lg ${
               filterType === todaySummaryStats.card2Type 
-                ? 'bg-purple-500/10 border-purple-500/40 shadow-purple-500/5' 
+                ? 'bg-rose-500/10 border-rose-500/40 shadow-rose-500/5' 
                 : 'bg-slate-800/70 border-slate-700 hover:border-slate-600 hover:scale-[1.01]'
             }`}
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center border border-purple-500/20 text-purple-400">
-                <Video size={20} />
+              <div className="w-10 h-10 rounded-lg bg-rose-500/10 flex items-center justify-center border border-rose-500/20 text-rose-400">
+                <RotateCcw size={20} />
               </div>
               <div>
                 <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{todaySummaryStats.card2Title}</h4>
@@ -1591,20 +1447,21 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               </div>
             </div>
             {filterType === todaySummaryStats.card2Type && (
-              <span className="text-[10px] bg-purple-500/20 text-purple-400 py-0.5 px-2 rounded-full font-bold">Filtered</span>
+              <span className="text-[10px] bg-rose-500/20 text-rose-400 py-0.5 px-2 rounded-full font-bold">Filtered</span>
             )}
           </div>
 
+          {/* Card 3: Today's Final Posts */}
           <div 
             onClick={() => handleToggleTodayFilter(todaySummaryStats.card3Type)}
             className={`p-4 rounded-xl border transition-all duration-200 cursor-pointer flex items-center justify-between shadow-lg ${
               filterType === todaySummaryStats.card3Type 
-                ? 'bg-red-500/10 border-red-500/40 shadow-red-500/5' 
+                ? 'bg-blue-500/10 border-blue-500/40 shadow-blue-500/5' 
                 : 'bg-slate-800/70 border-slate-700 hover:border-slate-600 hover:scale-[1.01]'
             }`}
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center border border-red-500/20 text-red-400">
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20 text-blue-400">
                 <Send size={20} />
               </div>
               <div>
@@ -1613,7 +1470,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               </div>
             </div>
             {filterType === todaySummaryStats.card3Type && (
-              <span className="text-[10px] bg-red-500/20 text-red-400 py-0.5 px-2 rounded-full font-bold">Filtered</span>
+              <span className="text-[10px] bg-blue-500/20 text-blue-400 py-0.5 px-2 rounded-full font-bold">Filtered</span>
             )}
           </div>
 
@@ -1733,9 +1590,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                 const isToday = day.dateStr === todayStr;
                 
                 const draftCount = dayEvents.filter(ev => ev.type === 'Draft').length;
+                const reDraftCount = dayEvents.filter(ev => ev.type === 'Re-Draft').length;
                 const postCount = dayEvents.filter(ev => ev.type === 'Final Post').length;
-                const deliveredCount = dayEvents.filter(ev => ev.type === 'Delivered').length;
-                const paymentCount = dayEvents.filter(ev => ev.type === 'Payment').length;
 
                 const MAX_VISIBLE_EVENTS = 2;
                 const hasMoreEvents = dayEvents.length > MAX_VISIBLE_EVENTS;
@@ -1782,11 +1638,20 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                         <div className="flex flex-wrap items-center justify-end gap-1 overflow-hidden">
                           {draftCount > 0 && (
                             <span 
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 shadow-sm leading-none"
-                              title={`${draftCount} Draft${draftCount > 1 ? 's' : ''}`}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm leading-none"
+                              title={`${draftCount} Draft Approved`}
                             >
-                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
                               <span>Draft · {draftCount}</span>
+                            </span>
+                          )}
+                          {reDraftCount > 0 && (
+                            <span 
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 shadow-sm leading-none"
+                              title={`${reDraftCount} Re-Draft`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" />
+                              <span>Re-Draft · {reDraftCount}</span>
                             </span>
                           )}
                           {postCount > 0 && (
@@ -1796,24 +1661,6 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                             >
                               <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
                               <span>Post · {postCount}</span>
-                            </span>
-                          )}
-                          {deliveredCount > 0 && (
-                            <span 
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm leading-none"
-                              title={`${deliveredCount} Delivered`}
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                              <span>Delivered · {deliveredCount}</span>
-                            </span>
-                          )}
-                          {paymentCount > 0 && (
-                            <span 
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm leading-none"
-                              title={`${paymentCount} Payment${paymentCount > 1 ? 's' : ''}`}
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                              <span>Payment · {paymentCount}</span>
                             </span>
                           )}
                         </div>
@@ -1828,17 +1675,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                         const formattedUsername = rawUsername.startsWith('@') ? rawUsername : `@${rawUsername}`;
                         const displayLabel = codeBadge ? `${codeBadge} ${formattedUsername}` : formattedUsername;
 
-                        let badgeStyle = 'bg-[#3b154c]/70 text-purple-200 border-purple-500/30 hover:bg-[#3b154c]';
-                        let dotStyle = 'bg-purple-400';
-                        if (ev.type === 'Final Post') {
+                        let badgeStyle = 'bg-emerald-950/60 text-emerald-200 border-emerald-500/30 hover:bg-emerald-900/70';
+                        let dotStyle = 'bg-emerald-400';
+                        if (ev.type === 'Re-Draft') {
+                          badgeStyle = 'bg-rose-950/60 text-rose-200 border-rose-500/30 hover:bg-rose-900/70';
+                          dotStyle = 'bg-rose-400';
+                        } else if (ev.type === 'Final Post') {
                           badgeStyle = 'bg-[#152e54]/70 text-blue-200 border-blue-500/30 hover:bg-[#152e54]';
                           dotStyle = 'bg-blue-400';
-                        } else if (ev.type === 'Delivered') {
-                          badgeStyle = 'bg-emerald-950/60 text-emerald-200 border-emerald-500/30 hover:bg-emerald-900/70';
-                          dotStyle = 'bg-emerald-400';
-                        } else if (ev.type === 'Payment') {
-                          badgeStyle = 'bg-amber-950/60 text-amber-200 border-amber-500/30 hover:bg-amber-900/70';
-                          dotStyle = 'bg-amber-400';
                         }
 
                         return (
