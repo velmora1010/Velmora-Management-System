@@ -38,6 +38,8 @@ import {
   getScriptVideoUrl, 
   type CampaignScript 
 } from '../../services/campaignScriptService';
+import { fetchInfluencerTrackingLinks } from '../../services/influencerTrackingLinkService';
+import { fetchCampaignDescriptions } from '../../services/campaignDescriptionService';
 import { 
   StatusTrackingFilterDrawer, 
   type StatusTrackingFilterState, 
@@ -904,6 +906,16 @@ export const getInfluencerDeliveryStatus = (record: StatusTrackingRecord): 'Deli
 // =========================================================================
 // TYPES & HELPERS FOR DRAFT ATTEMPTS, RE-DRAFT & TIMELINE AUDIT HISTORY
 // =========================================================================
+export interface PlatformDeliverableInfo {
+  platform: 'Instagram' | 'YouTube' | 'Facebook' | string;
+  final_post_link: string;
+  final_description: string;
+  status: 'generated' | 'link_missing' | 'desc_missing' | 'missing' | 'not_generated';
+  generated_at?: string;
+  tracking_link_id?: string;
+  description_id?: string;
+}
+
 export interface DraftAttempt {
   attempt_number: number;
   video_url: string; // Original Video URL
@@ -922,6 +934,8 @@ export interface DraftAttempt {
   expected_submit_date?: string;
   final_product_link?: string;
   final_description?: string;
+  selected_platforms?: string[];
+  platform_deliverables?: Record<string, PlatformDeliverableInfo>;
   uploaded_at: string;
   submitted_at?: string;
   approved_at?: string;
@@ -9998,6 +10012,48 @@ const validateVideoFile = (file: File): boolean => {
   return true;
 };
 
+const SocialPlatformIcon: React.FC<{ platform: string }> = ({ platform }) => {
+  const norm = platform.toLowerCase();
+  if (norm.includes('instagram')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-xs">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect width="20" height="20" x="2" y="2" rx="5" ry="5"/>
+          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+          <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>
+        </svg>
+      </span>
+    );
+  }
+  if (norm.includes('youtube')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-red-600 flex items-center justify-center text-white shrink-0 shadow-xs">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/>
+        </svg>
+      </span>
+    );
+  }
+  if (norm.includes('facebook')) {
+    return (
+      <span className="w-5 h-5 rounded-md bg-[#1877F2] flex items-center justify-center text-white shrink-0 font-bold text-[13px] leading-none shadow-xs">
+        f
+      </span>
+    );
+  }
+  return (
+    <span className="w-5 h-5 rounded-md bg-purple-600 flex items-center justify-center text-white shrink-0">
+      <Globe size={12} />
+    </span>
+  );
+};
+
+const AVAILABLE_DRAFT_SOCIAL_PLATFORMS = [
+  { id: 'Instagram', name: 'Instagram', brandColor: '#E1306C' },
+  { id: 'YouTube', name: 'YouTube', brandColor: '#FF0000' },
+  { id: 'Facebook', name: 'Facebook', brandColor: '#1877F2' }
+] as const;
+
 const DraftForm: React.FC<DraftFormProps> = ({ 
   record, 
   videoNumber, 
@@ -10029,6 +10085,15 @@ const DraftForm: React.FC<DraftFormProps> = ({
         corrections: existingData.corr || (videoNumber === 1 ? record.draft_corrections_required : ''),
         final_product_link: existingData.finalL || (videoNumber === 1 ? record.draft_final_product_link : ''),
         final_description: existingData.finalD || (videoNumber === 1 ? record.draft_final_description : ''),
+        selected_platforms: existingData.selected_platforms || ['Instagram'],
+        platform_deliverables: existingData.platform_deliverables || (existingData.finalL ? {
+          'Instagram': {
+            platform: 'Instagram',
+            final_post_link: existingData.finalL,
+            final_description: existingData.finalD || '',
+            status: 'generated'
+          }
+        } : {}),
         uploaded_at: record.created_at || new Date().toISOString()
       }];
     }
@@ -10093,6 +10158,66 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
   const [finalD, setFinalD] = useState(activeAttempt?.final_description || existingData.finalD || '');
 
+  // Resolve assigned product for this video
+  const resolvedProductInfo = useMemo(() => {
+    return getResolvedProductForVideo(record.influencer, videoNumber);
+  }, [record.influencer, videoNumber]);
+
+  const assignedProductName = useMemo(() => {
+    if (resolvedProductInfo.isAssigned && resolvedProductInfo.productName) {
+      return resolvedProductInfo.productName;
+    }
+    if (record.dispatch?.product_name) {
+      return record.dispatch.product_name;
+    }
+    if (videoNumber === 1 && record.ref_concept) {
+      return record.ref_concept;
+    }
+    return '';
+  }, [resolvedProductInfo, record.dispatch?.product_name, record.ref_concept, videoNumber]);
+
+  // Multi-selected social platforms state
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(() => {
+    if (Array.isArray(activeAttempt?.selected_platforms) && activeAttempt.selected_platforms.length > 0) {
+      return activeAttempt.selected_platforms;
+    }
+    if (Array.isArray(existingData?.selected_platforms) && existingData.selected_platforms.length > 0) {
+      return existingData.selected_platforms;
+    }
+    if (activeAttempt?.platform_deliverables && Object.keys(activeAttempt.platform_deliverables).length > 0) {
+      return Object.keys(activeAttempt.platform_deliverables);
+    }
+    if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
+      return Object.keys(existingData.platform_deliverables);
+    }
+    return ['Instagram'];
+  });
+
+  // Multi-platform deliverables mapping
+  const [platformDeliverables, setPlatformDeliverables] = useState<Record<string, PlatformDeliverableInfo>>(() => {
+    if (activeAttempt?.platform_deliverables && Object.keys(activeAttempt.platform_deliverables).length > 0) {
+      return activeAttempt.platform_deliverables;
+    }
+    if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
+      return existingData.platform_deliverables;
+    }
+    const legacyLink = activeAttempt?.final_product_link || existingData?.finalL || '';
+    const legacyDesc = activeAttempt?.final_description || existingData?.finalD || '';
+    if (legacyLink || legacyDesc) {
+      return {
+        'Instagram': {
+          platform: 'Instagram',
+          final_post_link: legacyLink,
+          final_description: legacyDesc,
+          status: legacyLink ? 'generated' : 'not_generated'
+        }
+      };
+    }
+    return {};
+  });
+
+  const [isGeneratingDeliverables, setIsGeneratingDeliverables] = useState(false);
+
   useEffect(() => {
     if (activeAttempt?.final_product_link !== undefined) {
       setFinalL(activeAttempt.final_product_link || '');
@@ -10104,7 +10229,181 @@ const DraftForm: React.FC<DraftFormProps> = ({
     } else if (existingData.finalD !== undefined) {
       setFinalD(existingData.finalD || '');
     }
-  }, [activeAttempt?.final_product_link, activeAttempt?.final_description, existingData.finalL, existingData.finalD]);
+
+    if (activeAttempt?.selected_platforms && activeAttempt.selected_platforms.length > 0) {
+      setSelectedPlatforms(activeAttempt.selected_platforms);
+    } else if (existingData?.selected_platforms && existingData.selected_platforms.length > 0) {
+      setSelectedPlatforms(existingData.selected_platforms);
+    }
+
+    if (activeAttempt?.platform_deliverables && Object.keys(activeAttempt.platform_deliverables).length > 0) {
+      setPlatformDeliverables(activeAttempt.platform_deliverables);
+    } else if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
+      setPlatformDeliverables(existingData.platform_deliverables);
+    }
+  }, [
+    activeAttempt?.final_product_link, 
+    activeAttempt?.final_description, 
+    activeAttempt?.selected_platforms, 
+    activeAttempt?.platform_deliverables, 
+    existingData.finalL, 
+    existingData.finalD,
+    existingData.selected_platforms,
+    existingData.platform_deliverables
+  ]);
+
+  const handleTogglePlatform = (platId: string) => {
+    setSelectedPlatforms(prev => {
+      if (prev.includes(platId)) {
+        return prev.filter(p => p !== platId);
+      } else {
+        return [...prev, platId];
+      }
+    });
+  };
+
+  const handleUpdateDeliverable = (platId: string, field: 'final_post_link' | 'final_description', val: string) => {
+    setPlatformDeliverables(prev => {
+      const existing = prev[platId] || {
+        platform: platId,
+        final_post_link: '',
+        final_description: '',
+        status: 'not_generated'
+      };
+      const updated = {
+        ...prev,
+        [platId]: {
+          ...existing,
+          [field]: val
+        }
+      };
+      if (selectedPlatforms[0] === platId) {
+        if (field === 'final_post_link') setFinalL(val);
+        if (field === 'final_description') setFinalD(val);
+      }
+      return updated;
+    });
+  };
+
+  const handleGenerateLinkAndDescription = async () => {
+    if (appStat !== 'Approved') {
+      toast.error('Draft must be marked as Approved before generating deliverables.');
+      return;
+    }
+    if (selectedPlatforms.length === 0) {
+      toast.error('Please select at least one social platform.');
+      return;
+    }
+
+    setIsGeneratingDeliverables(true);
+    try {
+      const campaignId = record.campaign_id;
+      const [allTrackingLinks, allDescriptions] = await Promise.all([
+        fetchInfluencerTrackingLinks(campaignId),
+        fetchCampaignDescriptions(campaignId)
+      ]);
+
+      const prodName = assignedProductName.trim();
+      const normProd = prodName.toLowerCase();
+
+      // Find matching description for this product from Description Management
+      const matchedDesc = allDescriptions.find(d => {
+        const dp = (d.product || '').trim().toLowerCase();
+        return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
+      });
+
+      const updatedDeliverables: Record<string, PlatformDeliverableInfo> = { ...platformDeliverables };
+      const missingWarnings: string[] = [];
+      let successCount = 0;
+
+      for (const plat of selectedPlatforms) {
+        const normPlat = plat.trim().toLowerCase();
+
+        // Exact lookup in Tracking Link department
+        const matchedLink = allTrackingLinks.find(link => {
+          // 1. Influencer matching
+          const matchInf = String(link.influencer_id) === String(record.influencer_id) ||
+            (link.influencer_code && (link.influencer_code.toLowerCase() === (record.influencer?.code || '').toLowerCase() || link.influencer_code.toLowerCase() === (record.dispatch?.influencer_code || '').toLowerCase())) ||
+            (link.creator_code && (link.creator_code.toLowerCase() === (record.influencer?.code || '').toLowerCase() || link.creator_code.toLowerCase() === (record.dispatch?.influencer_code || '').toLowerCase()));
+          if (!matchInf) return false;
+
+          // 2. Video matching
+          const linkVidNum = (link.video_number || '').toLowerCase();
+          const linkUtmContent = (link.utm_content || '').toLowerCase();
+          const matchVideo =
+            linkVidNum === `video ${videoNumber}`.toLowerCase() ||
+            linkVidNum === String(videoNumber) ||
+            linkUtmContent === `v${videoNumber}`.toLowerCase() ||
+            (videoNumber === 1 && (!link.video_number || link.video_number === 'Video 1'));
+          if (!matchVideo) return false;
+
+          // 3. Platform matching
+          const linkPlat = (link.platform || '').trim().toLowerCase();
+          const linkUtmSource = (link.utm_source || '').trim().toLowerCase();
+          const matchPlat = linkPlat === normPlat || linkUtmSource === normPlat;
+          if (!matchPlat) return false;
+
+          // 4. Product matching
+          if (normProd && link.product) {
+            const lp = link.product.trim().toLowerCase();
+            const matchProd = lp === normProd || normalizeScriptMatch(lp) === normalizeScriptMatch(normProd);
+            if (!matchProd) return false;
+          }
+
+          return true;
+        });
+
+        const hasLink = Boolean(matchedLink?.tracking_url);
+        const hasDesc = Boolean(matchedDesc?.description);
+
+        let status: PlatformDeliverableInfo['status'] = 'generated';
+        if (!hasLink && !hasDesc) {
+          status = 'missing';
+          missingWarnings.push(`${plat}: Tracking Link and Description missing`);
+        } else if (!hasLink) {
+          status = 'link_missing';
+          missingWarnings.push(`${plat}: Tracking Link missing`);
+        } else if (!hasDesc) {
+          status = 'desc_missing';
+          missingWarnings.push(`${plat}: Description missing for "${prodName || 'assigned product'}"`);
+        } else {
+          successCount++;
+        }
+
+        updatedDeliverables[plat] = {
+          platform: plat,
+          final_post_link: hasLink ? matchedLink!.tracking_url : (updatedDeliverables[plat]?.final_post_link || ''),
+          final_description: hasDesc ? matchedDesc!.description : (updatedDeliverables[plat]?.final_description || ''),
+          status,
+          generated_at: new Date().toISOString(),
+          tracking_link_id: matchedLink?.id,
+          description_id: matchedDesc?.id
+        };
+      }
+
+      setPlatformDeliverables(updatedDeliverables);
+
+      // Keep legacy finalL / finalD synced with primary platform
+      const primary = selectedPlatforms[0];
+      if (primary && updatedDeliverables[primary]) {
+        setFinalL(updatedDeliverables[primary].final_post_link || '');
+        setFinalD(updatedDeliverables[primary].final_description || '');
+      }
+
+      if (missingWarnings.length === 0) {
+        toast.success('✓ Link and Description generated successfully.');
+      } else if (successCount > 0) {
+        toast.success(`Generated for ${successCount} platform(s). Check notices below.`);
+      } else {
+        toast.error('Cannot generate final post information. Missing required data.');
+      }
+    } catch (err: any) {
+      console.error('Error generating link and description:', err);
+      toast.error('Failed to generate link and description: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsGeneratingDeliverables(false);
+    }
+  };
 
   // Manual Draft Submit Date (Required for approval)
   const [draftSubmitDate, setDraftSubmitDate] = useState<string>(
@@ -10568,6 +10867,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
           corr: '',
           finalL: '',
           finalD: '',
+          selected_platforms: [],
+          platform_deliverables: {},
           draft_submission_date: '',
           draft_submit_date: '',
           re_draft_submit_date: '',
@@ -10585,6 +10886,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
         setCorr('');
         setFinalL('');
         setFinalD('');
+        setSelectedPlatforms(['Instagram']);
+        setPlatformDeliverables({});
         setCalculatedTiming('Not Submit');
         setReDraftSubmitDate('');
         setAttemptToDelete(null);
@@ -10607,6 +10910,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
           corr: prevAttempt.corrections || '',
           finalL: prevAttempt.final_product_link || '',
           finalD: prevAttempt.final_description || '',
+          selected_platforms: prevAttempt.selected_platforms || ['Instagram'],
+          platform_deliverables: prevAttempt.platform_deliverables || {},
           draft_submission_date: prevAttempt.draft_submission_date || prevAttempt.draft_submit_date || '',
           draft_submit_date: prevAttempt.draft_submit_date || prevAttempt.draft_submission_date || '',
           re_draft_submit_date: prevAttempt.re_draft_submit_date || '',
@@ -10618,6 +10923,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
         setCorr(prevAttempt.corrections || '');
         setFinalL(prevAttempt.final_product_link || '');
         setFinalD(prevAttempt.final_description || '');
+        setSelectedPlatforms(prevAttempt.selected_platforms || ['Instagram']);
+        setPlatformDeliverables(prevAttempt.platform_deliverables || {});
         setCalculatedTiming(prevAttempt.timing_status || 'On Time');
         setDraftSubmitDate(prevAttempt.draft_submission_date || prevAttempt.draft_submit_date || '');
         setReDraftSubmitDate(prevAttempt.re_draft_submit_date || '');
@@ -10676,6 +10983,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
     const nowIso = new Date().toISOString();
 
     const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit' && !!draftSubmitDate;
+    const primaryPlat = selectedPlatforms[0];
+    const primaryDeliverable = primaryPlat ? platformDeliverables[primaryPlat] : null;
 
     // Update active attempt in attempts array while preserving all history
     const updatedAttempts = attempts.map((att, idx) => {
@@ -10688,8 +10997,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
           draft_submission_date: draftSubmitDate || att.draft_submission_date || att.draft_submit_date,
           draft_submit_date: draftSubmitDate || att.draft_submit_date,
           re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : undefined,
-          final_product_link: isApproved ? finalL : att.final_product_link,
-          final_description: isApproved ? finalD : att.final_description,
+          final_product_link: isApproved ? (primaryDeliverable?.final_post_link || finalL) : att.final_product_link,
+          final_description: isApproved ? (primaryDeliverable?.final_description || finalD) : att.final_description,
+          selected_platforms: isApproved ? selectedPlatforms : att.selected_platforms,
+          platform_deliverables: isApproved ? platformDeliverables : att.platform_deliverables,
           timing_status: calculatedTiming,
           reviewed_at: nowIso,
           reviewed_by: userName
@@ -10714,8 +11025,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
       corr: appStat === 'Not Approved' ? corr : '',
       re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : '',
       latest_re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : (existingData.latest_re_draft_submit_date || ''),
-      finalL: isApproved ? finalL : '',
-      finalD: isApproved ? finalD : '',
+      finalL: isApproved ? (primaryDeliverable?.final_post_link || finalL) : '',
+      finalD: isApproved ? (primaryDeliverable?.final_description || finalD) : '',
+      selected_platforms: isApproved ? selectedPlatforms : [],
+      platform_deliverables: isApproved ? platformDeliverables : {},
       review_confirmed: isApproved,
       approval_confirmed: isApproved,
       approval_reconfirmed: isApproved,
@@ -11856,53 +12169,264 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
           {/* Approved Deliverables Info (When Approved is selected) */}
           {appStat === 'Approved' && (
-            <div className="animate-fade-in space-y-4 bg-[#0b1329] p-5 rounded-xl border border-slate-800">
-              <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                <Check size={14} /> Approved Deliverable Info
-              </h6>
-              
-              <div className="space-y-4">
-                {/* 1. Final Product Link */}
-                <div className="w-full">
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1.5 tracking-wider uppercase">
-                    Final Product Link
-                  </label>
-                  <input 
-                    type="url" 
-                    value={finalL} 
-                    onChange={e => setFinalL(e.target.value)} 
-                    placeholder="https://..."
-                    className="w-full bg-[#070c18] border border-slate-800 focus:border-blue-500 rounded-xl px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:outline-none transition-colors font-mono" 
-                  />
+            <div className="animate-fade-in space-y-5 bg-[#0b1329] p-5 sm:p-6 rounded-2xl border border-slate-800 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <Check size={14} strokeWidth={2.5} />
+                  </div>
+                  <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    Approved Deliverable Info
+                  </h6>
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Source of Truth: Influencer Tracking Links & Description Management
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Your draft is approved. Select the platforms where this influencer will post, then generate the final tracking link and caption automatically.
+              </p>
+
+              {/* Platform Multi-Select & Action Row */}
+              <div className="space-y-3 bg-[#070c18] p-4 rounded-xl border border-slate-800/90">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                      Select Platform <span className="text-purple-400">*</span>
+                    </label>
+                    <p className="text-[11px] text-slate-500">
+                      Select the required platforms. The final post links will be taken from Influencer Tracking Links and the caption will be taken from Description Management.
+                    </p>
+                  </div>
+
+                  {/* Generate Link and Description Action Button */}
+                  <button
+                    type="button"
+                    onClick={handleGenerateLinkAndDescription}
+                    disabled={isGeneratingDeliverables || selectedPlatforms.length === 0}
+                    className="self-start sm:self-center flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:from-purple-700 active:to-indigo-700 text-white transition-all shadow-md shadow-purple-900/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+                  >
+                    {isGeneratingDeliverables ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin text-white" />
+                        <span>Generating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={16} className="text-amber-300" />
+                        <span>Generate Link and Description</span>
+                      </>
+                    )}
+                  </button>
                 </div>
 
-                {/* 2. Final Caption / Description */}
-                <div className="w-full">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-                      Final Caption / Description
-                    </label>
-                    <span className="text-[11px] text-slate-500">
-                      Multi-line supported • Preserves formatting
-                    </span>
-                  </div>
-                  <textarea 
-                    value={finalD} 
-                    onChange={e => setFinalD(e.target.value)} 
-                    placeholder="Enter complete caption and description (e.g. Comment &quot;LINK&quot; to get the product link. One bottle makes 5 Litres of Kitchen Cleaner #justmixx #KitchenCleaner #CleanMagic #HomeCleaning ...)"
-                    rows={6}
-                    style={{
-                      minHeight: '140px',
-                      height: '180px',
-                      resize: 'vertical',
-                      whiteSpace: 'pre-wrap',
-                      overflowWrap: 'break-word',
-                      wordBreak: 'break-word',
-                    }}
-                    className="w-full bg-[#070c18] border border-slate-800 focus:border-blue-500 rounded-xl p-4 text-sm text-white placeholder:text-slate-600 focus:outline-none leading-relaxed transition-colors shadow-inner font-sans block" 
-                  />
+                {/* Multi-select Platform Chips (Only Instagram, YouTube, Facebook) */}
+                <div className="flex items-center gap-2.5 flex-wrap pt-1">
+                  {AVAILABLE_DRAFT_SOCIAL_PLATFORMS.map((plat) => {
+                    const isSelected = selectedPlatforms.includes(plat.id);
+                    return (
+                      <button
+                        key={plat.id}
+                        type="button"
+                        onClick={() => handleTogglePlatform(plat.id)}
+                        className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-purple-600/20 border-purple-500/80 text-white shadow-sm'
+                            : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                        }`}
+                      >
+                        <span className={`w-4 h-4 rounded-md flex items-center justify-center border text-[10px] ${
+                          isSelected
+                            ? 'bg-purple-600 border-purple-500 text-white'
+                            : 'border-slate-700 bg-slate-900/50 text-transparent'
+                        }`}>
+                          <Check size={11} strokeWidth={3} />
+                        </span>
+                        <SocialPlatformIcon platform={plat.id} />
+                        <span>{plat.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
+
+              {/* Platform Deliverable Sections (One per selected platform) */}
+              {selectedPlatforms.length === 0 ? (
+                <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center bg-[#070c18]/50">
+                  <p className="text-xs text-slate-400">
+                    Please select at least one social platform (Instagram, YouTube, or Facebook) above to generate deliverable links and captions.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4 pt-1">
+                  {selectedPlatforms.map((platId) => {
+                    const deliverable = platformDeliverables[platId] || {
+                      platform: platId,
+                      final_post_link: '',
+                      final_description: '',
+                      status: 'not_generated'
+                    };
+                    const platMeta = AVAILABLE_DRAFT_SOCIAL_PLATFORMS.find(p => p.id === platId) || { name: platId, id: platId };
+
+                    return (
+                      <div
+                        key={platId}
+                        className="bg-[#070c18] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4.5 sm:p-5 space-y-4 shadow-sm transition-all"
+                      >
+                        {/* Header Bar */}
+                        <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                          <div className="flex items-center gap-2.5">
+                            <SocialPlatformIcon platform={platId} />
+                            <span className="text-sm font-bold text-white tracking-wide uppercase">
+                              {platMeta.name}
+                            </span>
+                          </div>
+                          {/* Status Badge */}
+                          {deliverable.status === 'generated' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <Check size={12} strokeWidth={2.5} />
+                              <span>Generated</span>
+                            </span>
+                          ) : deliverable.status === 'link_missing' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              <AlertTriangle size={12} />
+                              <span>Link Missing</span>
+                            </span>
+                          ) : deliverable.status === 'desc_missing' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              <AlertTriangle size={12} />
+                              <span>Description Missing</span>
+                            </span>
+                          ) : deliverable.status === 'missing' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                              <AlertTriangle size={12} />
+                              <span>Link & Description Missing</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700/60">
+                              <span>Not Generated</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Notices if Missing */}
+                        {deliverable.status === 'link_missing' && (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle size={14} className="shrink-0" />
+                              <span>Tracking link not found for <strong>{platMeta.name}</strong> (Video {videoNumber}, {assignedProductName || 'assigned product'}).</span>
+                            </div>
+                            <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Influencer Tracking Link</span>
+                          </div>
+                        )}
+                        {deliverable.status === 'desc_missing' && (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle size={14} className="shrink-0" />
+                              <span>Description not found for <strong>{assignedProductName || 'assigned product'}</strong>.</span>
+                            </div>
+                            <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Description Management</span>
+                          </div>
+                        )}
+                        {deliverable.status === 'missing' && (
+                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs space-y-1">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle size={14} className="shrink-0" />
+                              <span>Cannot generate complete information. Both tracking link and product description are missing.</span>
+                            </div>
+                            <p className="text-[11px] text-rose-400/80 pl-5">
+                              Please ensure tracking link exists in Tracking Links and product description exists in Description Management.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* 1. FINAL POST LINK */}
+                        <div className="w-full">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                              Final Post Link
+                            </label>
+                            {deliverable.final_post_link && (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(deliverable.final_post_link);
+                                    toast.success(`${platMeta.name} link copied!`);
+                                  }}
+                                  className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                                >
+                                  <Copy size={11} />
+                                  <span>Copy Link</span>
+                                </button>
+                                <a
+                                  href={deliverable.final_post_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                                >
+                                  <ExternalLink size={11} />
+                                  <span>Open</span>
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                          <input
+                            type="url"
+                            value={deliverable.final_post_link}
+                            onChange={(e) => handleUpdateDeliverable(platId, 'final_post_link', e.target.value)}
+                            placeholder="https://..."
+                            className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none transition-colors font-mono"
+                          />
+                        </div>
+
+                        {/* 2. FINAL CAPTION / DESCRIPTION */}
+                        <div className="w-full">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                              Final Caption / Description
+                            </label>
+                            <div className="flex items-center gap-3">
+                              <span className="text-[11px] text-slate-500 hidden sm:inline">
+                                Multi-line supported • Preserves formatting
+                              </span>
+                              {deliverable.final_description && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(deliverable.final_description);
+                                    toast.success(`${platMeta.name} caption copied!`);
+                                  }}
+                                  className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                                >
+                                  <Copy size={11} />
+                                  <span>Copy Caption</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <textarea
+                            value={deliverable.final_description}
+                            onChange={(e) => handleUpdateDeliverable(platId, 'final_description', e.target.value)}
+                            placeholder={`Enter complete caption and description for ${platMeta.name}...`}
+                            rows={5}
+                            style={{
+                              minHeight: '120px',
+                              height: '140px',
+                              resize: 'vertical',
+                              whiteSpace: 'pre-wrap',
+                              overflowWrap: 'break-word',
+                              wordBreak: 'break-word'
+                            }}
+                            className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl p-3.5 text-xs text-white placeholder:text-slate-600 focus:outline-none leading-relaxed transition-colors shadow-inner font-sans block resize-y"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
