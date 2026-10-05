@@ -1397,14 +1397,23 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         };
       } else if (cfg.id === 'after_post') {
         const afterPostData = st.data || {};
+        const pData = afterPostData.platforms_data;
+        const sPlatforms = afterPostData.selected_platforms;
+        let isMultiPlatformDone = true;
+        if (pData && Array.isArray(sPlatforms) && sPlatforms.length > 0) {
+          isMultiPlatformDone = sPlatforms.every((p: string) => {
+            const entry = pData[p];
+            return Boolean(entry?.link && !isFakeUrl(entry.link) && entry?.postedAt);
+          });
+        }
         const link = afterPostData.link || (videoNum === 1 ? record.final_post_link : '') || '';
         const postedAt = afterPostData.postedAt || (videoNum === 1 ? record.final_post_actual_datetime : '') || '';
         const platform = afterPostData.platform || 'Instagram';
-        const isLiveDone = Boolean(st.completed || afterPostData.confirmed_live || afterPostData.confirmed || (videoNum === 1 && record.final_post_completed));
+        const isLiveDone = isMultiPlatformDone && Boolean(st.completed || afterPostData.confirmed_live || afterPostData.confirmed || (videoNum === 1 && record.final_post_completed));
         steps[cfg.id] = {
           ...st,
           completed: isLiveDone,
-          status: isLiveDone ? 'COMPLETED' : (link ? 'IN_PROGRESS' : 'NOT_STARTED'),
+          status: isLiveDone ? 'COMPLETED' : ((link || pData) ? 'IN_PROGRESS' : 'NOT_STARTED'),
           data: {
             ...afterPostData,
             platform,
@@ -2111,6 +2120,18 @@ export const isInfluencerAfterPostCompleted = (record: StatusTrackingRecord, vid
 
   const vData = getVideoWorkflow(record, videoNumber);
   const apStep = vData.steps['after_post'];
+  if (!apStep) return false;
+
+  const pData = apStep.data?.platforms_data;
+  const sPlatforms = apStep.data?.selected_platforms;
+  if (pData && Array.isArray(sPlatforms) && sPlatforms.length > 0) {
+    const allPlatformsValid = sPlatforms.every((p: string) => {
+      const entry = pData[p];
+      return Boolean(entry?.link && !isFakeUrl(entry.link) && entry?.postedAt);
+    });
+    return allPlatformsValid && Boolean(apStep.completed || apStep.data?.confirmed_live || apStep.data?.confirmed);
+  }
+
   const hasLink = Boolean(apStep?.data?.link && !isFakeUrl(apStep.data.link));
   return Boolean(
     apStep?.completed || 
@@ -2465,7 +2486,11 @@ export const getStepVisualState = (
   }
 
   if (stepId === 'after_post') {
-    const hasPostLink = Boolean(stepData.link || (videoNumber === 1 ? record.final_post_link : ''));
+    const hasPostLink = Boolean(
+      stepData.link || 
+      (stepData.platforms_data && Object.values(stepData.platforms_data).some((e: any) => Boolean(e?.link))) ||
+      (videoNumber === 1 ? record.final_post_link : '')
+    );
     if (hasPostLink) {
       return 'in_progress';
     }
@@ -6242,8 +6267,11 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   const rawCode = dispatch.influencer_code || record.influencer_id;
   const canonicalBase = getOriginalOrderId(rawCode) || String(rawCode).replace(/^#+/, '');
   const influencerCode = `#${canonicalBase}`;
-  const influencerName = dispatch.influencer_name || 'Unknown Influencer';
-  const username = dispatch.username || '—';
+  const influencerName = dispatch.influencer_name || record.influencer?.name || 'Unknown Influencer';
+  const rawUsername = dispatch.username || record.influencer?.instagram_username || record.influencer?.username || '—';
+  const username = rawUsername && rawUsername !== '—'
+    ? (rawUsername.startsWith('@') ? rawUsername : `@${rawUsername}`)
+    : '—';
   const avatarUrl = dispatch.influencer_avatar;
 
   // Derive workflow data for this specific video
@@ -6517,6 +6545,41 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               </span>
             );
           })()}
+        </div>
+
+        {/* Highlighted Influencer Identity Card (Rendered across ALL workflow steps) */}
+        <div className="bg-[#0e1629] border border-blue-500/40 rounded-xl p-4 sm:p-5 mb-5 shadow-lg shadow-blue-950/20">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 items-center">
+            {/* 1. Name */}
+            <div className="space-y-1">
+              <span className="text-base sm:text-lg font-black text-white tracking-wide uppercase block truncate" title={influencerName}>
+                {influencerName}
+              </span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
+                Creator Name
+              </span>
+            </div>
+
+            {/* 2. Code */}
+            <div className="space-y-1 sm:border-l sm:border-slate-800 sm:pl-6">
+              <span className="text-base sm:text-lg font-mono font-bold text-amber-400 tracking-wider block">
+                {influencerCode}
+              </span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
+                Creator Code
+              </span>
+            </div>
+
+            {/* 3. User ID */}
+            <div className="space-y-1 sm:border-l sm:border-slate-800 sm:pl-6">
+              <span className="text-sm sm:text-base font-mono font-bold text-blue-400 truncate block" title={username}>
+                {username}
+              </span>
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block">
+                User ID
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Step Component Form - Exclusively renders the active step */}
@@ -11406,69 +11469,167 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
   postDateData,
   onSave
 }) => {
-  // Automatically inherit and reflect platform from Post Date step
-  const inheritedPlatform = useMemo(() => {
-    if (existingData.platform && existingData.platform !== 'Instagram') {
-      return existingData.platform;
+  // Automatically inherit and reflect platform list from Post Date step
+  const targetPlatforms: string[] = useMemo(() => {
+    // 1. From existingData.selected_platforms
+    if (Array.isArray(existingData.platforms_data && existingData.selected_platforms) && existingData.selected_platforms.length > 0) {
+      return existingData.selected_platforms;
     }
-    if (postDateData?.platform) {
-      return postDateData.platform;
-    }
+    // 2. From postDateData.selected_platforms
     if (Array.isArray(postDateData?.selected_platforms) && postDateData.selected_platforms.length > 0) {
-      return postDateData.selected_platforms.join(' + ');
+      return postDateData.selected_platforms;
     }
-    // Also check workflow steps directly from record
+    // 3. From postDateData.platform string (e.g. "Instagram + YouTube")
+    if (postDateData?.platform && typeof postDateData.platform === 'string') {
+      const split = postDateData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
+      if (split.length > 0) return split;
+    }
+    // 4. Also check workflow steps directly from record
     try {
       const vWorkflow = getVideoWorkflow(record, videoNumber);
       const pdData = vWorkflow?.steps?.post_date?.data;
-      if (pdData?.platform) return pdData.platform;
       if (Array.isArray(pdData?.selected_platforms) && pdData.selected_platforms.length > 0) {
-        return pdData.selected_platforms.join(' + ');
+        return pdData.selected_platforms;
+      }
+      if (pdData?.platform && typeof pdData.platform === 'string') {
+        const split = pdData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
+        if (split.length > 0) return split;
       }
     } catch (e) {}
-    return existingData.platform || 'Instagram';
-  }, [existingData.platform, postDateData?.platform, postDateData?.selected_platforms, record, videoNumber]);
+    // 5. From existingData.platform
+    if (existingData.platform && typeof existingData.platform === 'string') {
+      const split = existingData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
+      if (split.length > 0) return split;
+    }
+    return ['Instagram'];
+  }, [existingData.platforms_data, existingData.selected_platforms, existingData.platform, postDateData?.selected_platforms, postDateData?.platform, record, videoNumber]);
 
-  const [postLink, setPostLink] = useState(
-    existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : '')
-  );
-  const [postedAt, setPostedAt] = useState(
-    existingData.postedAt 
-      ? formatForDateTimeInput(existingData.postedAt) 
-      : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
-  );
+  // Per-platform entries state { link, postedAt }
+  const [platformEntries, setPlatformEntries] = useState<Record<string, { link: string; postedAt: string }>>(() => {
+    const initial: Record<string, { link: string; postedAt: string }> = {};
+    const existingMap = existingData.platforms_data || {};
+
+    targetPlatforms.forEach((p, idx) => {
+      if (existingMap[p]) {
+        initial[p] = {
+          link: existingMap[p].link || '',
+          postedAt: existingMap[p].postedAt ? formatForDateTimeInput(existingMap[p].postedAt) : ''
+        };
+      } else if (idx === 0) {
+        // Fallback for primary/first platform from legacy fields
+        initial[p] = {
+          link: existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''),
+          postedAt: existingData.postedAt 
+            ? formatForDateTimeInput(existingData.postedAt) 
+            : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
+        };
+      } else {
+        initial[p] = { link: '', postedAt: '' };
+      }
+    });
+    return initial;
+  });
+
+  // Ensure entries exist if targetPlatforms change or additional platforms are found
+  useEffect(() => {
+    setPlatformEntries(prev => {
+      let changed = false;
+      const updated = { ...prev };
+      const existingMap = existingData.platforms_data || {};
+
+      targetPlatforms.forEach((p, idx) => {
+        if (!updated[p]) {
+          changed = true;
+          if (existingMap[p]) {
+            updated[p] = {
+              link: existingMap[p].link || '',
+              postedAt: existingMap[p].postedAt ? formatForDateTimeInput(existingMap[p].postedAt) : ''
+            };
+          } else if (idx === 0 && (existingData.link || record.final_post_link)) {
+            updated[p] = {
+              link: existingData.link || (videoNumber === 1 ? (record.final_post_link || '') : ''),
+              postedAt: existingData.postedAt 
+                ? formatForDateTimeInput(existingData.postedAt) 
+                : (videoNumber === 1 ? formatForDateTimeInput(record.final_post_actual_datetime) : '')
+            };
+          } else {
+            updated[p] = { link: '', postedAt: '' };
+          }
+        }
+      });
+      return changed ? updated : prev;
+    });
+  }, [targetPlatforms, existingData, record, videoNumber]);
+
   const [isSaving, setIsSaving] = useState(false);
-  const isAlreadyCompleted = existingData.confirmed_live === true || existingData.completed === true;
 
-  const handleOpenLiveVideo = () => {
-    if (!postLink || !postLink.trim()) {
-      toast.error('Please enter a live post URL first.');
+  const handleUpdatePlatformField = (platform: string, field: 'link' | 'postedAt', value: string) => {
+    setPlatformEntries(prev => ({
+      ...prev,
+      [platform]: {
+        ...(prev[platform] || { link: '', postedAt: '' }),
+        [field]: value
+      }
+    }));
+  };
+
+  const handleOpenLiveVideo = (platform: string) => {
+    const entry = platformEntries[platform];
+    if (!entry?.link || !entry.link.trim()) {
+      toast.error(`Please enter a live post URL for ${platform} first.`);
       return;
     }
-    let url = postLink.trim();
+    let url = entry.link.trim();
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = `https://${url}`;
     }
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
+  const isPlatformComplete = (platform: string) => {
+    const entry = platformEntries[platform];
+    return Boolean(entry?.link?.trim() && !isFakeUrl(entry.link) && entry?.postedAt?.trim());
+  };
+
+  const allPlatformsCompleted = targetPlatforms.length > 0 && targetPlatforms.every(p => isPlatformComplete(p));
+  const isAlreadyCompleted = Boolean(existingData.confirmed_live === true || existingData.completed === true) && allPlatformsCompleted;
+
   const handleSaveAfterPost = async () => {
-    if (!postLink || !postLink.trim() || isFakeUrl(postLink)) {
-      toast.error(`Please enter a valid Video ${videoNumber} live post link.`);
-      return;
-    }
-    if (!postedAt || !postedAt.trim()) {
-      toast.error('Please select the posting date and time.');
-      return;
+    // Validate each platform
+    for (const p of targetPlatforms) {
+      const entry = platformEntries[p];
+      if (!entry?.link || !entry.link.trim() || isFakeUrl(entry.link)) {
+        toast.error(`Please enter a valid Video ${videoNumber} live post link for ${p}.`);
+        return;
+      }
+      if (!entry?.postedAt || !entry.postedAt.trim()) {
+        toast.error(`Please select the posting date and time for ${p}.`);
+        return;
+      }
     }
 
     setIsSaving(true);
     try {
+      const platforms_data: Record<string, { link: string; postedAt: string; completed: boolean }> = {};
+      targetPlatforms.forEach(p => {
+        const entry = platformEntries[p];
+        platforms_data[p] = {
+          link: entry.link.trim(),
+          postedAt: entry.postedAt.trim(),
+          completed: true
+        };
+      });
+
+      const primaryPlatform = targetPlatforms[0] || 'Instagram';
+      const primaryEntry = platforms_data[primaryPlatform];
+
       const payload = {
         ...existingData,
-        platform: inheritedPlatform,
-        link: postLink.trim(),
-        postedAt: postedAt.trim(),
+        selected_platforms: targetPlatforms,
+        platform: targetPlatforms.join(' + '),
+        platforms_data,
+        link: primaryEntry.link,
+        postedAt: primaryEntry.postedAt,
         confirmed_live: true,
         confirmed: true,
         completed: true,
@@ -11486,11 +11647,15 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
       logActivity({
         department: 'Marketing',
         action: 'After Post Completed',
-        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} marked live on ${inheritedPlatform} with link: ${postLink.trim()}`,
-        metadata: { video_number: videoNumber, platform: inheritedPlatform, link: postLink.trim(), posted_at: postedAt.trim() }
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} marked live on ${targetPlatforms.join(' + ')}`,
+        metadata: { 
+          video_number: videoNumber, 
+          platforms: targetPlatforms, 
+          platforms_data 
+        }
       });
 
-      toast.success(`Video ${videoNumber} marked as Live & Completed! Workflow finished.`);
+      toast.success(`Video ${videoNumber} marked as Live & Completed across all ${targetPlatforms.length} platform(s)! Workflow finished.`);
     } catch (err: any) {
       console.error('Error saving after post details:', err);
       toast.error('Failed to save After Post details: ' + (err.message || 'Unknown error'));
@@ -11500,96 +11665,171 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
   };
 
   return (
-    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
+    <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-6">
       {/* Header Info */}
-      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+      <div className="flex items-center justify-between pb-4 border-b border-slate-800">
         <div>
           <h5 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
             <Radio size={16} className="text-emerald-400" />
             Live Post Management (Video {videoNumber})
           </h5>
           <p className="text-xs text-slate-400 mt-0.5">
-            Record the live social media post details to complete the workflow.
+            Record the live social media post details for each platform to complete the workflow.
           </p>
         </div>
         {isAlreadyCompleted && (
-          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5">
+          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5 shadow-sm">
             <Check size={13} strokeWidth={2.5} />
             Completed
           </span>
         )}
       </div>
 
-      <div className="space-y-5">
-        {/* 1. Auto-Reflected Platform Card (Read-only, inherited from Post Date) */}
-        <div className="p-4 bg-[#0b1329] border border-slate-800 rounded-xl space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Platform (Inherited from Post Date)
-            </label>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
-              Auto-Reflected
+      {/* Summary Banner showing inherited platforms */}
+      <div className="p-3.5 bg-[#0b1329] border border-slate-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <Globe size={18} className="text-blue-400 shrink-0" />
+          <div>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+              Required Platforms (Inherited from Post Date)
             </span>
-          </div>
-          <div className="flex items-center gap-2 pt-1">
-            <Globe size={16} className="text-blue-400" />
-            <span className="text-sm font-bold text-white">
-              {inheritedPlatform}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-500">
-            Automatically inherited from Video {videoNumber} Post Date setup.
-          </p>
-        </div>
-
-        {/* 2. Live Post URL / Link with 'Open Live Video' button */}
-        <div>
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
-            Live Post URL / Link *
-          </label>
-          <div className="flex items-center gap-2">
-            <input 
-              type="text" 
-              value={postLink} 
-              onChange={e => setPostLink(e.target.value)} 
-              placeholder={`https://www.${inheritedPlatform.split(' ')[0]?.toLowerCase() || 'instagram'}.com/...`}
-              className="flex-1 bg-[#0b1329] border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
-            />
-            <button
-              type="button"
-              onClick={handleOpenLiveVideo}
-              disabled={!postLink.trim()}
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-blue-400 hover:text-blue-300 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
-              title="Open link in new tab"
-            >
-              <ExternalLink size={14} />
-              <span>Open Live Video</span>
-            </button>
+            <div className="flex items-center gap-1.5 flex-wrap mt-1">
+              {targetPlatforms.map((p) => (
+                <span key={p} className="text-xs font-bold px-2.5 py-0.5 rounded bg-blue-950/90 text-blue-300 border border-blue-800/60">
+                  {p}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
-
-        {/* 3. Posted Date & Time */}
-        <div>
-          <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">
-            Posted Date & Time *
-          </label>
-          <input 
-            type="datetime-local" 
-            value={postedAt} 
-            onChange={e => setPostedAt(e.target.value)} 
-            style={{ colorScheme: 'dark' }}
-            className="w-full max-w-md bg-[#0b1329] border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
-          />
-        </div>
+        <span className="text-[11px] text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 self-start sm:self-auto">
+          {targetPlatforms.filter(isPlatformComplete).length} of {targetPlatforms.length} platform(s) complete
+        </span>
       </div>
 
-      {/* 4. Action Button */}
-      <div className="flex justify-end pt-3 border-t border-slate-800">
+      {/* Platform Cards */}
+      <div className="space-y-4">
+        {targetPlatforms.map((platform, idx) => {
+          const entry = platformEntries[platform] || { link: '', postedAt: '' };
+          const isComplete = isPlatformComplete(platform);
+          const hasLink = Boolean(entry.link?.trim());
+
+          return (
+            <div 
+              key={platform || idx} 
+              className={`p-4 sm:p-5 rounded-xl border transition-all space-y-4 ${
+                isComplete 
+                  ? 'bg-[#0b1329] border-emerald-800/40 shadow-sm' 
+                  : 'bg-[#0b1329] border-slate-800'
+              }`}
+            >
+              {/* Platform Header & Completion Badge */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center">
+                    <Globe size={16} />
+                  </div>
+                  <div>
+                    <h6 className="text-sm font-bold text-white uppercase tracking-wider">
+                      {platform}
+                    </h6>
+                    <span className="text-[10px] text-slate-400">
+                      Platform {idx + 1} of {targetPlatforms.length} • Video {videoNumber}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Status Badge */}
+                {isComplete ? (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5 shadow-sm">
+                    <CheckCircle2 size={13} strokeWidth={2.5} />
+                    Completed
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-slate-900/90 text-amber-400 border border-amber-800/40 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    Pending Details
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Live Post URL / Link */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    Live Post URL / Link *
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="text" 
+                      value={entry.link} 
+                      onChange={e => handleUpdatePlatformField(platform, 'link', e.target.value)} 
+                      placeholder={`https://www.${platform.toLowerCase().replace(/[^a-z0-9]/g, '') || 'instagram'}.com/...`}
+                      className="flex-1 bg-[#070c18] border border-slate-700/80 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleOpenLiveVideo(platform)}
+                      disabled={!hasLink}
+                      className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-blue-400 hover:text-blue-300 border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                      title={`Open ${platform} link in new tab`}
+                    >
+                      <ExternalLink size={14} />
+                      <span className="hidden sm:inline">Open Live Video</span>
+                      <span className="sm:hidden">Open</span>
+                    </button>
+                  </div>
+                  {!hasLink && (
+                    <span className="text-[10px] text-slate-500">
+                      Enter the published {platform} post link to enable preview.
+                    </span>
+                  )}
+                </div>
+
+                {/* Posted Date & Time */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    Posted Date & Time *
+                  </label>
+                  <input 
+                    type="datetime-local" 
+                    value={entry.postedAt} 
+                    onChange={e => handleUpdatePlatformField(platform, 'postedAt', e.target.value)} 
+                    style={{ colorScheme: 'dark' }}
+                    className="w-full bg-[#070c18] border border-slate-700/80 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none transition-colors" 
+                  />
+                  {!entry.postedAt && (
+                    <span className="text-[10px] text-slate-500">
+                      Select when this video went live on {platform}.
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Completion Validation Warning & Action Button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-slate-800">
+        <div>
+          {!allPlatformsCompleted ? (
+            <p className="text-xs text-amber-400 font-medium flex items-center gap-1.5">
+              <span>⚠️ Enter valid live post URLs and posted date/time for all {targetPlatforms.length} platform(s) to complete.</span>
+            </p>
+          ) : (
+            <p className="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
+              <CheckCircle2 size={14} />
+              <span>All platform details provided and verified.</span>
+            </p>
+          )}
+        </div>
+
         <button 
           type="button"
           onClick={handleSaveAfterPost} 
-          disabled={isSaving}
-          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer"
+          disabled={isSaving || !allPlatformsCompleted}
+          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer shrink-0"
         >
           {isSaving ? (
             <>
