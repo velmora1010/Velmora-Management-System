@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer, InfluencerTrackingLink } from '../types';
+import { isActiveStatus } from '../utils/marketingUtils';
 
 const LOCAL_STORAGE_KEY_PREFIX = 'velmora_influencer_tracking_links_';
 
@@ -48,7 +49,61 @@ export const TRACKING_VIDEOS: TrackingVideoConfig[] = [
 ];
 
 // ==========================================
-// 2. URL UTILITIES
+// 2. CREATOR CODE NUMERICAL SORT UTILITIES
+// ==========================================
+
+/**
+ * Extracts the numeric portion of a Creator Code (e.g. "HIS2" -> 2, "#HIS186" -> 186)
+ */
+export function extractCodeNumber(code?: string | null): number {
+  if (!code) return 0;
+  const str = String(code).trim();
+  const match = str.match(/\d+/);
+  return match ? parseInt(match[0], 10) : 0;
+}
+
+/**
+ * Extracts the alphabetic prefix of a Creator Code (e.g. "HIS2" -> "HIS", "#WBS214" -> "WBS")
+ */
+export function extractCodePrefix(code?: string | null): string {
+  if (!code) return '';
+  const clean = String(code).replace(/^#+/, '').trim();
+  const match = clean.match(/^[A-Za-z]+/);
+  return match ? match[0].toUpperCase() : '';
+}
+
+/**
+ * Compares two tracking links by Creator Code in ascending numerical order:
+ * e.g. HIS1, HIS2, HIS9, HIS10, HIS99, HIS100, HIS186
+ */
+export function compareTrackingLinksByCodeAsc(
+  a: { influencer_code?: string; creator_code?: string; id?: any },
+  b: { influencer_code?: string; creator_code?: string; id?: any }
+): number {
+  const codeA = (a.influencer_code || a.creator_code || '').trim();
+  const codeB = (b.influencer_code || b.creator_code || '').trim();
+
+  const numA = extractCodeNumber(codeA);
+  const numB = extractCodeNumber(codeB);
+
+  // 1. Numerical ascending comparison
+  if (numA !== numB) {
+    return numA - numB;
+  }
+
+  // 2. If numbers are identical, compare prefix alphabetically
+  const prefixA = extractCodePrefix(codeA);
+  const prefixB = extractCodePrefix(codeB);
+  if (prefixA !== prefixB) {
+    return prefixA.localeCompare(prefixB);
+  }
+
+  // 3. Fallback comparison
+  return codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+}
+
+// ==========================================
+// 3. URL UTILITIES
 // ==========================================
 
 /**
@@ -116,7 +171,7 @@ export function buildInfluencerTrackingUrl(
 }
 
 // ==========================================
-// 3. RECORD NORMALIZATION & LOCAL CACHING
+// 4. RECORD NORMALIZATION & LOCAL CACHING
 // ==========================================
 
 export function normalizeTrackingLink(raw: any): InfluencerTrackingLink {
@@ -207,7 +262,8 @@ function getLocalTrackingLinks(campaignId: string | number): InfluencerTrackingL
     const raw = localStorage.getItem(`${LOCAL_STORAGE_KEY_PREFIX}${campaignId}`);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(normalizeTrackingLink) : [];
+    const list = Array.isArray(parsed) ? parsed.map(normalizeTrackingLink) : [];
+    return list.sort(compareTrackingLinksByCodeAsc);
   } catch {
     return [];
   }
@@ -215,14 +271,15 @@ function getLocalTrackingLinks(campaignId: string | number): InfluencerTrackingL
 
 function saveLocalTrackingLinks(campaignId: string | number, items: InfluencerTrackingLink[]): void {
   try {
-    localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}${campaignId}`, JSON.stringify(items));
+    const sorted = [...items].sort(compareTrackingLinksByCodeAsc);
+    localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}${campaignId}`, JSON.stringify(sorted));
   } catch (err) {
     console.warn('Failed saving tracking links to localStorage:', err);
   }
 }
 
 // ==========================================
-// 4. FETCH TRACKING LINKS
+// 5. FETCH TRACKING LINKS (SORTED ASCENDING)
 // ==========================================
 
 export async function fetchInfluencerTrackingLinks(
@@ -235,8 +292,7 @@ export async function fetchInfluencerTrackingLinks(
     const { data, error } = await client
       .from(SUPABASE_TABLES.influencerTrackingLinks)
       .select('*')
-      .eq('campaign_id', cleanId)
-      .order('created_at', { ascending: false });
+      .eq('campaign_id', cleanId);
 
     if (error) {
       console.warn('Supabase fetchInfluencerTrackingLinks error, checking local fallback:', error.message);
@@ -244,7 +300,7 @@ export async function fetchInfluencerTrackingLinks(
     }
 
     if (data && data.length > 0) {
-      const normalized = (data as any[]).map(normalizeTrackingLink);
+      const normalized = (data as any[]).map(normalizeTrackingLink).sort(compareTrackingLinksByCodeAsc);
       saveLocalTrackingLinks(cleanId, normalized);
       return normalized;
     }
@@ -257,7 +313,7 @@ export async function fetchInfluencerTrackingLinks(
 }
 
 // ==========================================
-// 5. BATCH GENERATE TRACKING LINKS
+// 6. BATCH GENERATE TRACKING LINKS
 // ==========================================
 
 export interface BatchGenerateParams {
@@ -287,8 +343,22 @@ export async function batchGenerateInfluencerTrackingLinks(
 ): Promise<BatchGenerateResult> {
   const cleanCampaignId = String(params.campaign_id).trim();
   const client = supabaseAdmin || supabase;
-  const influencers = params.influencers || [];
-  const total = influencers.length;
+
+  // 1. FILTER: Strictly exclude eliminated influencers
+  const eligibleInfluencers = (params.influencers || []).filter(inf => isActiveStatus(inf.is_archived));
+
+  // 2. SORT: Order eligible influencers in numerical ascending Creator Code order before generation
+  const sortedInfluencers = [...eligibleInfluencers].sort((a, b) => {
+    const numA = extractCodeNumber(a.code || (a as any).influencer_code);
+    const numB = extractCodeNumber(b.code || (b as any).influencer_code);
+    if (numA !== numB) return numA - numB;
+    const prefA = extractCodePrefix(a.code || (a as any).influencer_code);
+    const prefB = extractCodePrefix(b.code || (b as any).influencer_code);
+    if (prefA !== prefB) return prefA.localeCompare(prefB);
+    return String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true });
+  });
+
+  const total = sortedInfluencers.length;
 
   if (total === 0) {
     return {
@@ -297,7 +367,7 @@ export async function batchGenerateInfluencerTrackingLinks(
       failedCount: 0,
       links: [],
       failedInfluencerIds: [],
-      errors: ['No influencers provided in campaign to generate tracking links.']
+      errors: ['No eligible influencers found in campaign to generate tracking links.']
     };
   }
 
@@ -306,8 +376,8 @@ export async function batchGenerateInfluencerTrackingLinks(
   const now = new Date().toISOString();
   const cleanBaseUrl = extractBaseProductUrl(params.base_product_url);
 
-  // Prepare link records for each influencer
-  const recordsToUpsert: InfluencerTrackingLink[] = influencers.map((inf) => {
+  // Prepare link records for each eligible influencer in ascending order
+  const recordsToUpsert: InfluencerTrackingLink[] = sortedInfluencers.map((inf) => {
     // Priority: inf.code -> inf.influencer_name / fallback
     const rawCode = inf.code || (inf as any).influencer_code || `HIS${inf.id}`;
     const cleanCode = String(rawCode).replace(/^#+/, '').trim().toLowerCase();
@@ -454,27 +524,25 @@ export async function batchGenerateInfluencerTrackingLinks(
     }
   }
 
-  // Update local storage cache
+  // Update local storage cache in numerical ascending order
   const mergedMap = new Map<string, InfluencerTrackingLink>();
   existingLinks.forEach(l => mergedMap.set(l.id, l));
   successfulLinks.forEach(l => mergedMap.set(l.id, l));
-  const finalLocalLinks = Array.from(mergedMap.values()).sort(
-    (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-  );
+  const finalLocalLinks = Array.from(mergedMap.values()).sort(compareTrackingLinksByCodeAsc);
   saveLocalTrackingLinks(cleanCampaignId, finalLocalLinks);
 
   return {
     total,
     successCount: successfulLinks.length,
     failedCount: failedInfluencerIds.length,
-    links: successfulLinks,
+    links: successfulLinks.sort(compareTrackingLinksByCodeAsc),
     failedInfluencerIds,
     errors
   };
 }
 
 // ==========================================
-// 6. SINGLE CREATE / UPDATE / DELETE
+// 7. SINGLE CREATE / UPDATE / DELETE
 // ==========================================
 
 export interface CreateTrackingLinkParams {

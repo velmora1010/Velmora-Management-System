@@ -28,11 +28,13 @@ import {
   fetchInfluencerTrackingLinks, 
   deleteInfluencerTrackingLink,
   TRACKING_PLATFORMS,
-  TRACKING_VIDEOS
+  TRACKING_VIDEOS,
+  compareTrackingLinksByCodeAsc
 } from '../../services/influencerTrackingLinkService';
 import { CampaignTrackingLinkModal } from './CampaignTrackingLinkModal';
 import { CampaignTrackingLinkCard } from './CampaignTrackingLinkCard';
 import { useCampaignInfluencers } from '../../hooks/marketing/useCampaignInfluencers';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
 interface CampaignTrackingLinkSectionProps {
@@ -48,9 +50,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Filters
+  // 3 Primary Filters: Product, Platform, Video (Influencer filter completely removed)
   const [selectedProduct, setSelectedProduct] = useState<string>('All');
-  const [selectedInfluencerId, setSelectedInfluencerId] = useState<string>('All');
   const [selectedPlatform, setSelectedPlatform] = useState<string>('All');
   const [selectedVideo, setSelectedVideo] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -70,6 +71,17 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
 
   // Fetch campaign influencers
   const { influencers, refresh: refreshInfluencers } = useCampaignInfluencers(campaign.id);
+
+  // Set of eliminated influencer IDs to strictly exclude from active tracking links
+  const eliminatedInfluencerIds = useMemo(() => {
+    const set = new Set<string>();
+    influencers.forEach(inf => {
+      if (!isActiveStatus(inf.is_archived)) {
+        set.add(String(inf.id));
+      }
+    });
+    return set;
+  }, [influencers]);
 
   // Load tracking links
   const loadLinks = useCallback(async () => {
@@ -113,10 +125,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         if (idx >= 0) {
           copy[idx] = saved;
         } else {
-          copy.unshift(saved);
+          copy.push(saved);
         }
       });
-      return copy;
+      return copy.sort(compareTrackingLinksByCodeAsc);
     });
   };
 
@@ -167,39 +179,45 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     window.open(clean, '_blank', 'noopener,noreferrer');
   };
 
-  // Filtered links list
+  // Filtered links list: Excludes eliminated influencers and sorts numerically ascending
   const filteredLinks = useMemo(() => {
-    return links.filter(l => {
-      // 1. Product Filter
+    // 1. Exclude records belonging to eliminated influencers
+    const activeEligibleLinks = links.filter(
+      l => !eliminatedInfluencerIds.has(String(l.influencer_id))
+    );
+
+    // 2. Apply Product, Platform, Video, and Search filters
+    const filtered = activeEligibleLinks.filter(l => {
+      // Product Filter
       const matchProduct = selectedProduct === 'All' || 
         l.product.toLowerCase() === selectedProduct.toLowerCase();
 
-      // 2. Influencer Filter
-      const matchInfluencer = selectedInfluencerId === 'All' || 
-        String(l.influencer_id) === selectedInfluencerId;
-
-      // 3. Platform Filter
+      // Platform Filter
       const matchPlatform = selectedPlatform === 'All' || 
         (l.platform && l.platform.toLowerCase() === selectedPlatform.toLowerCase()) ||
         (l.utm_source && l.utm_source.toLowerCase() === selectedPlatform.toLowerCase());
 
-      // 4. Video Filter
+      // Video Filter
       const matchVideo = selectedVideo === 'All' || 
         (l.video_number && l.video_number.toLowerCase() === selectedVideo.toLowerCase()) ||
         (l.utm_content && l.utm_content.toLowerCase() === selectedVideo.toLowerCase());
 
-      // 5. Search Query
+      // Search Query
       const q = searchQuery.trim().toLowerCase();
       const matchSearch = !q || 
         (l.influencer_name && l.influencer_name.toLowerCase().includes(q)) ||
         (l.influencer_code && l.influencer_code.toLowerCase().includes(q)) ||
         (l.creator_code && l.creator_code.toLowerCase().includes(q)) ||
         (l.tracking_url && l.tracking_url.toLowerCase().includes(q)) ||
-        (l.product && l.product.toLowerCase().includes(q));
+        (l.product && l.product.toLowerCase().includes(q)) ||
+        (l.platform && l.platform.toLowerCase().includes(q));
 
-      return matchProduct && matchInfluencer && matchPlatform && matchVideo && matchSearch;
+      return matchProduct && matchPlatform && matchVideo && matchSearch;
     });
-  }, [links, selectedProduct, selectedInfluencerId, selectedPlatform, selectedVideo, searchQuery]);
+
+    // 3. Sort by Creator Code in ASCENDING NUMERICAL order (e.g. HIS1, HIS2, ... HIS186)
+    return filtered.sort(compareTrackingLinksByCodeAsc);
+  }, [links, eliminatedInfluencerIds, selectedProduct, selectedPlatform, selectedVideo, searchQuery]);
 
   return (
     <div className="w-full space-y-5 animate-fade-in text-slate-200">
@@ -238,12 +256,12 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         </div>
       </div>
 
-      {/* Filters Bar & Controls */}
+      {/* Filters Bar & Controls (INFLUENCER FILTER REMOVED) */}
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 space-y-3.5 shadow-sm">
-        {/* Row 1: Dropdown Filters */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Row 1: PRODUCT, PLATFORM, VIDEO Filters in clean 3-column layout */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {/* Filter 1: Product */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-1.5">
+          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
               <Filter size={12} className="text-purple-400" />
               <span>Product:</span>
@@ -262,32 +280,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
             </select>
           </div>
 
-          {/* Filter 2: Influencer */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-1.5">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-              <User size={12} className="text-purple-400" />
-              <span>Influencer:</span>
-            </span>
-            <select
-              value={selectedInfluencerId}
-              onChange={(e) => setSelectedInfluencerId(e.target.value)}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer w-full truncate"
-            >
-              <option value="All" className="bg-slate-900">All Influencers ({influencers.length})</option>
-              {influencers.map((inf) => {
-                const displayName = inf.influencer_name || inf.name || `ID ${inf.id}`;
-                const code = inf.code ? ` (${inf.code})` : '';
-                return (
-                  <option key={inf.id} value={String(inf.id)} className="bg-slate-900">
-                    {displayName}{code}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-
-          {/* Filter 3: Platform */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-1.5">
+          {/* Filter 2: Platform */}
+          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
               <Globe size={12} className="text-purple-400" />
               <span>Platform:</span>
@@ -306,8 +300,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
             </select>
           </div>
 
-          {/* Filter 4: Video */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-1.5">
+          {/* Filter 3: Video */}
+          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
               <Video size={12} className="text-purple-400" />
               <span>Video:</span>
@@ -346,9 +340,6 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
             <span className="font-medium text-slate-300">
               Showing <span className="text-purple-400 font-bold">{filteredLinks.length}</span>{' '}
               {filteredLinks.length === 1 ? 'Link' : 'Links'}
-              {links.length > 0 && filteredLinks.length !== links.length && (
-                <span className="text-slate-500 text-[11px] ml-1">of {links.length} total</span>
-              )}
             </span>
 
             {/* View Mode Toggle */}
@@ -429,8 +420,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           </h4>
           <p className="text-xs sm:text-sm text-slate-400 max-w-md mb-6 leading-relaxed">
             {links.length === 0
-              ? `Get started by clicking Create Tracking Link to automatically generate unique UTM tracking links for all ${influencers.length} influencers in ${campaign.campaign_name}.`
-              : 'No tracking links match the selected filters or search query. Try clearing filters or create a new link.'}
+              ? `Get started by clicking Create Tracking Link to automatically generate unique UTM tracking links for all eligible influencers in ${campaign.campaign_name}.`
+              : 'No tracking links match the selected filters or search query. Try adjusting filters or create a new link.'}
           </p>
           <button
             type="button"
@@ -442,7 +433,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           </button>
         </div>
       ) : viewMode === 'table' ? (
-        /* Table View */
+        /* Table View (Sorted Numerically ASCENDING by Creator Code) */
         <div className="bg-[#0b1329] border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
@@ -485,7 +476,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                         </div>
                       </td>
 
-                      {/* Creator Code */}
+                      {/* Creator Code (e.g. #HIS1, #HIS2, #HIS186) */}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 font-mono font-bold text-[11px] border border-purple-500/30">
                           {link.influencer_code || link.creator_code ? `#${(link.creator_code || link.influencer_code || '').replace(/^#+/, '').toUpperCase()}` : '-'}

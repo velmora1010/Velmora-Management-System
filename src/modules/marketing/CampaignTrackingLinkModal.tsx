@@ -11,7 +11,9 @@ import {
   CheckCircle2, 
   RefreshCw,
   Info,
-  ExternalLink
+  ExternalLink,
+  UserCheck,
+  UserX
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
 import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
@@ -20,11 +22,13 @@ import {
   TRACKING_VIDEOS, 
   buildInfluencerTrackingUrl, 
   extractBaseProductUrl, 
+  extractCodeNumber,
   batchGenerateInfluencerTrackingLinks,
   updateInfluencerTrackingLink,
   type TrackingPlatformConfig,
   type TrackingVideoConfig
 } from '../../services/influencerTrackingLinkService';
+import { isActiveStatus } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
 interface CampaignTrackingLinkModalProps {
@@ -73,6 +77,25 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
 
   // Errors
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // 1. FILTER: Strictly separate eligible vs eliminated influencers
+  const eligibleInfluencers = useMemo(() => {
+    return influencers.filter(inf => isActiveStatus(inf.is_archived));
+  }, [influencers]);
+
+  const eliminatedCount = useMemo(() => {
+    return influencers.length - eligibleInfluencers.length;
+  }, [influencers, eligibleInfluencers]);
+
+  // 2. SORT: Order eligible influencers in numerical ascending Creator Code order
+  const sortedEligibleInfluencers = useMemo(() => {
+    return [...eligibleInfluencers].sort((a, b) => {
+      const numA = extractCodeNumber(a.code || (a as any).influencer_code);
+      const numB = extractCodeNumber(b.code || (b as any).influencer_code);
+      if (numA !== numB) return numA - numB;
+      return String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true });
+    });
+  }, [eligibleInfluencers]);
 
   // Reset or initialize state on open
   useEffect(() => {
@@ -126,10 +149,10 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     return extractBaseProductUrl(productUrl);
   }, [productUrl]);
 
-  // Sample sample influencer for preview
+  // Lowest code eligible influencer for preview (e.g. #HIS1)
   const sampleInfluencer = useMemo(() => {
-    return influencers.length > 0 ? influencers[0] : null;
-  }, [influencers]);
+    return sortedEligibleInfluencers.length > 0 ? sortedEligibleInfluencers[0] : null;
+  }, [sortedEligibleInfluencers]);
 
   // Live Sample Preview URL
   const samplePreviewUrl = useMemo(() => {
@@ -162,8 +185,8 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       setValidationError('Please enter a valid URL (e.g. https://www.justmixx.com/products/kitchen-cleaner).');
       return false;
     }
-    if (influencers.length === 0) {
-      setValidationError('No influencers found in this campaign. Please add influencers to the campaign first.');
+    if (sortedEligibleInfluencers.length === 0) {
+      setValidationError('No eligible (non-eliminated) influencers found in this campaign.');
       return false;
     }
     setValidationError(null);
@@ -209,8 +232,8 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     }
   };
 
-  // Handle Batch Generation
-  const handleConfirmAndGenerate = async (influencersToProcess = influencers) => {
+  // Handle Batch Generation (Excluding Eliminated)
+  const handleConfirmAndGenerate = async (influencersToProcess = sortedEligibleInfluencers) => {
     if (!validateForm()) return;
 
     setIsGenerating(true);
@@ -227,7 +250,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         utm_source: currentPlatform.utmSource,
         video_number: currentVideo.name,
         utm_content: currentVideo.utmContent,
-        influencers: influencersToProcess,
+        influencers: influencersToProcess, // ONLY ELIGIBLE INFLUENCERS
         onProgress: (current, total, percentage) => {
           setGenerationProgress({ current, total, percentage });
         }
@@ -242,7 +265,6 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         });
         toast.success(`✓ ${result.successCount} tracking links generated successfully!`);
         onSuccess(result.links);
-        // Delay close slightly so user sees the 100% completion
         setTimeout(() => {
           onClose();
         }, 1200);
@@ -275,7 +297,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   // Retry failed records
   const handleRetryFailed = () => {
     if (!generationResult || generationResult.failedIds.length === 0) return;
-    const failedInfluencers = influencers.filter(i =>
+    const failedInfluencers = sortedEligibleInfluencers.filter(i =>
       generationResult.failedIds.includes(i.id)
     );
     handleConfirmAndGenerate(failedInfluencers);
@@ -302,7 +324,8 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                 {campaign.campaign_name}
                 {!isEditMode && (
                   <span className="text-purple-400 ml-2 font-semibold">
-                    • {influencers.length} Total Influencers
+                    • {sortedEligibleInfluencers.length} Eligible Influencers
+                    {eliminatedCount > 0 && ` (${eliminatedCount} Eliminated Excluded)`}
                   </span>
                 )}
               </p>
@@ -579,12 +602,13 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                   <Sparkles size={13} className="text-purple-400" />
                   Generation Summary
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold text-[11px]">
-                  {influencers.length} Links to Generate
+                <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold text-[11px] border border-purple-500/30">
+                  {sortedEligibleInfluencers.length} Links to Generate
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              {/* Exact summary metrics requested: Product, Platform, Video, Eligible Influencers, Excluded/Eliminated, Links to Generate */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                 <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
                   <span className="text-[10px] text-slate-500 block uppercase font-semibold">Product</span>
                   <span className="text-slate-200 font-semibold truncate block mt-0.5">{selectedProduct}</span>
@@ -598,8 +622,18 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                   <span className="text-slate-200 font-semibold truncate block mt-0.5">{currentVideo.name}</span>
                 </div>
                 <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
-                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Total Creators</span>
-                  <span className="text-emerald-400 font-bold truncate block mt-0.5">{influencers.length}</span>
+                  <span className="text-[10px] text-slate-500 block uppercase font-semibold flex items-center gap-1">
+                    <UserCheck size={11} className="text-emerald-400" />
+                    Eligible
+                  </span>
+                  <span className="text-emerald-400 font-bold truncate block mt-0.5">{sortedEligibleInfluencers.length}</span>
+                </div>
+                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
+                  <span className="text-[10px] text-slate-500 block uppercase font-semibold flex items-center gap-1">
+                    <UserX size={11} className="text-rose-400" />
+                    Excluded
+                  </span>
+                  <span className="text-rose-400 font-bold truncate block mt-0.5">{eliminatedCount}</span>
                 </div>
               </div>
 
@@ -677,10 +711,10 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
               </button>
               <button
                 type="button"
-                onClick={() => handleConfirmAndGenerate(influencers)}
-                disabled={isGenerating || influencers.length === 0}
+                onClick={() => handleConfirmAndGenerate(sortedEligibleInfluencers)}
+                disabled={isGenerating || sortedEligibleInfluencers.length === 0}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${
-                  !isGenerating && influencers.length > 0
+                  !isGenerating && sortedEligibleInfluencers.length > 0
                     ? 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white shadow-purple-900/25'
                     : 'bg-purple-600/50 text-purple-200/50 cursor-not-allowed shadow-none'
                 }`}
