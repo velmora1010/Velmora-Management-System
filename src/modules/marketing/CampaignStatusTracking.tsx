@@ -81,8 +81,10 @@ export type WorkflowStepKey = 'delivery' | 'video1' | 'video2' | 'video3' | 'vid
 export const normalizeWorkflowStepId = (val: string): string => {
   if (!val) return '';
   const s = val.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.includes('redraftsubmitted') || s === 're_draft_submitted') return 're_draft_submitted';
   if (s.includes('redraft') || s === 're_draft') return 're_draft';
-  if (s.includes('draftapproval') || s === 'draftapprovalpending' || s === 'draft_approval_pending') return 'draft_approval_pending';
+  if (s.includes('draftpending') || s === 'draft_pending') return 'draft_pending';
+  if (s.includes('draftapproval') || s === 'draftapprovalpending' || s === 'draft_approval_pending' || s.includes('draftsubmitted') || s === 'draft_submitted') return 'draft_approval_pending';
   if (s.includes('draftapproved') || s === 'draftapproved' || s === 'draft_approved') return 'draft';
   if (s.includes('sharescript') || s === 'script') return 'share_script';
   if (s.includes('callexplain') || s.includes('call') || s.includes('explain')) return 'call_explain';
@@ -100,7 +102,9 @@ export const normalizeWorkflowStepId = (val: string): string => {
 export const normalizeWorkflowStepLabel = (val: string): string => {
   const id = normalizeWorkflowStepId(val);
   switch (id) {
+    case 're_draft_submitted': return 'Re-Draft Submitted';
     case 're_draft': return 'Re-Draft';
+    case 'draft_pending': return 'Draft Pending';
     case 'draft_approval_pending': return 'Draft Approval Pending';
     case 'share_script': return 'Share Script';
     case 'call_explain': return 'Call & Explain';
@@ -156,8 +160,8 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain', icon: PhoneCall },
   { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
+  { id: 'draft_pending', label: 'Draft Pending', shortLabel: 'Draft Pending', icon: Clock },
   { id: 'draft', label: 'Draft Approved', shortLabel: 'Draft Approved', icon: Video },
-  { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Pending', icon: Clock },
   { id: 're_draft', label: 'Re-Draft', shortLabel: 'Re-Draft', icon: RotateCcw },
   { id: 're_draft_submitted', label: 'Re-Draft Submitted', shortLabel: 'Re-Draft Submitted', icon: CheckCircle2 },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
@@ -1533,10 +1537,17 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         };
       } else if (cfg.id === 'payment') {
         const vPrice = getInfluencerVideoPrice(record.influencer, videoNum);
-        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === Number(videoNum) && vp.payment_type === 'final');
+        const matchingPayments = (record.videoPayments || []).filter((vp: any) => Number(vp.video_number) === Number(videoNum));
+        const videoPayment = matchingPayments.find((vp: any) => vp.payment_type === 'final')
+          || matchingPayments.find((vp: any) => vp.payment_type === 'advance')
+          || matchingPayments[0];
         const isPaid = videoPayment 
           ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) 
-          : (videoNum === 1 ? (Boolean(record.payment_remaining_completed) || st.completed) : st.completed);
+          : (videoNum === 1 ? (Boolean(record.payment_remaining_completed) || Boolean(record.pay_advance_completed) || st.completed) : st.completed);
+        const proofUrl = videoPayment?.payment_proof_url 
+          || (videoNum === 1 ? (record.payment_remaining_photo_url || record.pay_advance_photo_url) : '') 
+          || st.data?.photo 
+          || '';
         steps[cfg.id] = {
           ...st,
           completed: isPaid,
@@ -1544,7 +1555,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
             ...st.data,
             amount: (videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (st.data?.amount || (vPrice !== null ? String(vPrice) : ''))),
             gpay: videoPayment?.transaction_reference || st.data?.gpay || '',
-            photo: videoPayment?.payment_proof_url || st.data?.photo || (videoNum === 1 ? record.payment_remaining_photo_url : '') || '',
+            photo: proofUrl,
             payment_status: videoPayment?.payment_status || (isPaid ? 'paid' : 'pending'),
             payment_completed: isPaid,
             payment_method: videoPayment?.payment_method || st.data?.payment_method || '',
@@ -1695,14 +1706,21 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         };
       } else if (cfg.id === 'payment') {
         const vPrice = getInfluencerVideoPrice(record.influencer, 1);
-        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === 1 && vp.payment_type === 'final');
+        const matchingPayments = (record.videoPayments || []).filter((vp: any) => Number(vp.video_number) === 1);
+        const videoPayment = matchingPayments.find((vp: any) => vp.payment_type === 'final')
+          || matchingPayments.find((vp: any) => vp.payment_type === 'advance')
+          || matchingPayments[0];
         completed = videoPayment 
           ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) 
-          : Boolean(record.payment_remaining_completed);
+          : (Boolean(record.payment_remaining_completed) || Boolean(record.pay_advance_completed));
+        const proofUrl = videoPayment?.payment_proof_url 
+          || record.payment_remaining_photo_url 
+          || record.pay_advance_photo_url 
+          || '';
         data = {
           amount: videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (vPrice !== null ? String(vPrice) : ''),
           gpay: videoPayment?.transaction_reference || '',
-          photo: videoPayment?.payment_proof_url || record.payment_remaining_photo_url || '',
+          photo: proofUrl,
           payment_status: videoPayment?.payment_status || (completed ? 'paid' : null),
           payment_completed: completed,
           payment_method: videoPayment?.payment_method || '',
@@ -1767,12 +1785,20 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         };
       } else if (cfg.id === 'payment') {
         const vPrice = getInfluencerVideoPrice(record.influencer, videoNum);
-        const videoPayment = (record.videoPayments || []).find((vp: any) => Number(vp.video_number) === videoNum && vp.payment_type === 'final');
-        completed = videoPayment ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) : false;
+        const matchingPayments = (record.videoPayments || []).filter((vp: any) => Number(vp.video_number) === Number(videoNum));
+        const videoPayment = matchingPayments.find((vp: any) => vp.payment_type === 'final')
+          || matchingPayments.find((vp: any) => vp.payment_type === 'advance')
+          || matchingPayments[0];
+        completed = videoPayment 
+          ? (videoPayment.payment_status === 'paid' || Number(videoPayment.paid_amount || 0) > 0) 
+          : (videoNum === 1 ? (Boolean(record.payment_remaining_completed) || Boolean(record.pay_advance_completed)) : false);
+        const proofUrl = videoPayment?.payment_proof_url 
+          || (videoNum === 1 ? (record.payment_remaining_photo_url || record.pay_advance_photo_url) : '') 
+          || '';
         data = {
           amount: videoPayment?.paid_amount != null ? String(videoPayment.paid_amount) : (vPrice !== null ? String(vPrice) : ''),
           gpay: videoPayment?.transaction_reference || '',
-          photo: videoPayment?.payment_proof_url || '',
+          photo: proofUrl,
           payment_status: videoPayment?.payment_status || (completed ? 'paid' : null),
           payment_completed: completed,
           payment_method: videoPayment?.payment_method || '',
@@ -2575,6 +2601,61 @@ export const isInfluencerDraftPendingReview = (record: StatusTrackingRecord, vid
 };
 
 /**
+ * Authoritative check for DRAFT PENDING status:
+ * The influencer has reached the Draft stage (Delivery + Script + Call explained/skipped),
+ * but NO draft has been submitted yet for this video.
+ * Excludes:
+ * - Draft Approved
+ * - Draft Submitted / Awaiting Approval
+ * - Re-Draft Required / Rejected
+ * - Re-Draft Submitted
+ * - Progressed downstream (Payment / Post Date / After Post)
+ */
+export const isInfluencerDraftPending = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (!record) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  // 1. Must have reached Draft stage
+  if (!isInfluencerDeliveryConfirmed(record)) return false;
+  if (!isInfluencerShareScriptCompleted(record, videoNumber)) return false;
+  if (!isInfluencerCallCompleted(record, videoNumber) && !isInfluencerCallSkipped(record, videoNumber)) return false;
+
+  // 2. Must NOT be approved
+  if (isInfluencerDraftApproved(record, videoNumber)) return false;
+
+  // 3. Must NOT be awaiting review for a submitted draft
+  if (isInfluencerDraftApprovalPending(record, videoNumber)) return false;
+
+  // 4. Must NOT require re-draft or have re-draft submitted
+  if (isInfluencerReDraftRequired(record, videoNumber)) return false;
+  if (isInfluencerReDraftSubmitted(record, videoNumber)) return false;
+
+  // 5. Must NOT have completed or active downstream steps
+  if (isInfluencerPaymentCompleted(record, videoNumber)) return false;
+  if (isInfluencerPostDateCompleted(record, videoNumber)) return false;
+  if (isInfluencerAfterPostCompleted(record, videoNumber)) return false;
+
+  // 6. Check if draft has any uploaded video/attempts
+  const vData = getVideoWorkflow(record, videoNumber);
+  const dStep = vData.steps['draft'];
+  const data = dStep?.data || {};
+  const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+  const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+  const hasVideo = Boolean(
+    activeAttempt?.video_url || 
+    data.vid || 
+    data.video_url || 
+    (videoNumber === 1 && record.draft_video_url)
+  );
+  if (hasVideo) return false;
+
+  return true;
+};
+
+/**
  * Reusable single predicate matching step ID for both counts and filtered list.
  * Guarantees that summary filter count exactly equals the number of matching rows when clicked!
  */
@@ -2596,6 +2677,8 @@ export const isStepFilterMatch = (
       return isInfluencerCallSkipped(record, videoNumber);
     case 'pay_advance':
       return isInfluencerPaymentCompleted(record, videoNumber);
+    case 'draft_pending':
+      return isInfluencerDraftPending(record, videoNumber);
     case 'draft':
       return isInfluencerDraftApproved(record, videoNumber);
     case 'draft_approval_pending':
@@ -2645,7 +2728,7 @@ export const validateFilterCounts = (
 /**
  * ONE CENTRALIZED WORKFLOW-STATE CALCULATION
  * Returns the exact current active workflow step for an influencer in a given video number:
- * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'draft' | 're_draft' | 're_draft_submitted' | 'post_date' | 'payment' | 'after_post' | 'completed'
+ * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'draft_pending' | 'draft' | 're_draft' | 're_draft_submitted' | 'post_date' | 'payment' | 'after_post' | 'completed'
  */
 export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, videoNumber: number): string => {
   return getCurrentWorkflowState(record, videoNumber, {
@@ -2656,6 +2739,7 @@ export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, 
     isPayAdvanceCompleted: isInfluencerPayAdvanceCompleted,
     isDraftCompleted: isInfluencerDraftApproved,
     isDraftApprovalPending: isInfluencerDraftApprovalPending,
+    isDraftPending: isInfluencerDraftPending,
     isReDraftRequired: isInfluencerReDraftRequired,
     isReDraftSubmitted: isInfluencerReDraftSubmitted,
     isPostDateCompleted: isInfluencerPostDateCompleted,
@@ -4180,8 +4264,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           const activeStepId = vData.activeStepId;
           const matches = activeFilters.workflowStatuses.some(st => {
             const norm = normalizeWorkflowStepId(st);
+            if (norm === 'draft_pending') {
+              return isInfluencerDraftPending(record, selectedVideoNumber);
+            }
             if (norm === 'draft_approval_pending') {
               return isInfluencerDraftApprovalPending(record, selectedVideoNumber);
+            }
+            if (norm === 're_draft_submitted') {
+              return isInfluencerReDraftSubmitted(record, selectedVideoNumber);
             }
             if (norm === 'draft') {
               return isInfluencerDraftApproved(record, selectedVideoNumber);
@@ -4544,12 +4634,22 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       };
     });
 
+    const draftPendingCount = baseFilteredRecords.filter(r => 
+      isInfluencerDraftPending(r, selectedVideoNumber)
+    ).length;
+
     const draftApprovalPendingCount = baseFilteredRecords.filter(r => 
       isInfluencerDraftApprovalPending(r, selectedVideoNumber)
     ).length;
 
     const draftIndex = base.findIndex(b => b.id === 'draft');
     const result = [...base];
+    const draftPendingItem = {
+      id: 'draft_pending',
+      label: 'Draft Pending',
+      count: draftPendingCount,
+      icon: Clock
+    };
     const pendingItem = {
       id: 'draft_approval_pending',
       label: 'Draft Approval Pending',
@@ -4566,9 +4666,10 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       icon: RotateCcw
     };
     if (draftIndex >= 0) {
-      result.splice(draftIndex + 1, 0, pendingItem, reDraftItem);
+      result.splice(draftIndex, 0, draftPendingItem);
+      result.splice(draftIndex + 2, 0, pendingItem, reDraftItem);
     } else {
-      result.push(pendingItem, reDraftItem);
+      result.push(draftPendingItem, pendingItem, reDraftItem);
     }
 
     return [
@@ -4612,8 +4713,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         const activeStepId = vData.activeStepId;
         return activeFilters.workflowStatuses.some(st => {
           const norm = normalizeWorkflowStepId(st);
+          if (norm === 'draft_pending') {
+            return isInfluencerDraftPending(record, selectedVideoNumber);
+          }
           if (norm === 'draft_approval_pending') {
             return isInfluencerDraftApprovalPending(record, selectedVideoNumber);
+          }
+          if (norm === 're_draft_submitted') {
+            return isInfluencerReDraftSubmitted(record, selectedVideoNumber);
           }
           if (norm === 'draft') {
             return isInfluencerDraftApproved(record, selectedVideoNumber);
@@ -5215,6 +5322,18 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           if (stepData.finalL !== undefined) updates.draft_final_product_link = stepData.finalL;
           if (stepData.finalD !== undefined) updates.draft_final_description = stepData.finalD;
         }
+      } else if (stepId === 'payment') {
+        if (videoNumber === 1) {
+          updates.payment_remaining_completed = isStepCompleted;
+          if (stepData.photo) {
+            updates.payment_remaining_photo_url = stepData.photo;
+          } else if (stepData.photo === '') {
+            updates.payment_remaining_photo_url = null;
+          }
+          if (stepData.existingPaymentType === 'advance' || (!record.payment_remaining_photo_url && record.pay_advance_photo_url)) {
+            if (stepData.photo) updates.pay_advance_photo_url = stepData.photo;
+          }
+        }
       } else if (stepId === 'post_date') {
         // Post date is manual date only
       } else if (stepId === 'after_post') {
@@ -5275,11 +5394,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       try {
         const vAgreed = getInfluencerVideoPrice(record.influencer, videoNumber) || parseFloat(stepData.amount) || 0;
         const vPaid = parseFloat(stepData.amount) || 0;
+        const targetPaymentType: 'advance' | 'final' = (stepData.existingPaymentType === 'advance' ? 'advance' : 'final');
         await saveVideoPayment({
           campaignId: record.campaign_id,
           influencerId: record.influencer_id,
           videoNumber: videoNumber,
-          paymentType: 'final',
+          paymentType: targetPaymentType,
           agreedAmount: vAgreed,
           paidAmount: vPaid,
           paymentStatus: isStepCompleted || vPaid > 0 ? 'paid' : 'pending',
@@ -5291,12 +5411,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
         // Optimistically update in-memory record.videoPayments
         if (!record.videoPayments) record.videoPayments = [];
-        const existingIdx = record.videoPayments.findIndex((vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'final');
+        const existingIdx = record.videoPayments.findIndex((vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === targetPaymentType);
         const updatedVp: any = {
           campaign_id: String(record.campaign_id),
           influencer_id: Number(record.influencer_id),
           video_number: Number(videoNumber),
-          payment_type: 'final',
+          payment_type: targetPaymentType,
           agreed_amount: vAgreed,
           paid_amount: vPaid,
           payment_status: isStepCompleted || vPaid > 0 ? 'paid' : 'pending',
@@ -6203,7 +6323,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               <span>Time Line</span>
                             </span>
                           );
-                        } else if (workflowState === 'draft') {
+                        } else if (workflowState === 'draft' || workflowState === 'draft_pending') {
                           // Draft status badge removed from influencer row per requirements
                           return null;
                         } else if (workflowState === 'post_date') {
@@ -14133,7 +14253,14 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
   );
 };
 
-// --- STEP: Payment (Final step for Videos 2 to 6; NO Pay Advance) ---
+// Helper to detect if a URL or filename is a PDF document
+const isPaymentProofPdf = (urlOrName: string | null | undefined): boolean => {
+  if (!urlOrName) return false;
+  const clean = urlOrName.split('?')[0].toLowerCase().trim();
+  return clean.endsWith('.pdf') || clean.includes('/pdf') || clean.includes('application/pdf');
+};
+
+// --- STEP: Payment (Final step for Videos 2 to 6; Unified Payment for all videos) ---
 const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: any) => {
   const influencer = record.influencer || {};
   const dispatch = record.dispatch || {};
@@ -14162,12 +14289,19 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
     ? (existingData.amount || (perVideoPrice !== null && perVideoPrice > 0 ? String(perVideoPrice) : ''))
     : (perVideoPrice !== null && perVideoPrice > 0 ? String(perVideoPrice) : (existingData.amount || ''));
 
+  // Initial persistent proof detection across existingData, record fallbacks
+  const initialProof = existingData.photo 
+    || (videoNumber === 1 ? (record.payment_remaining_photo_url || record.pay_advance_photo_url) : '') 
+    || '';
+
   const [amount, setAmount] = useState(defaultExpectedAmount);
-  const [paymentConfirmed, setPaymentConfirmed] = useState(existingData.payment_completed || false);
-  const [photo, setPhoto] = useState(existingData.photo || '');
+  const [paymentConfirmed, setPaymentConfirmed] = useState(
+    existingData.payment_completed || existingData.payment_status === 'paid' || false
+  );
+  const [photo, setPhoto] = useState(initialProof);
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [preview, setPreview] = useState<string | null>(photo || null);
+  const [preview, setPreview] = useState<string | null>(initialProof || null);
 
   const [transactions, setTransactions] = useState<InfluencerVideoPaymentTransaction[]>([]);
 
@@ -14175,12 +14309,33 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
     if (record?.campaign_id && record?.influencer_id) {
       const txs = await fetchVideoPaymentTransactions(record.campaign_id, record.influencer_id, videoNumber);
       setTransactions(txs);
+      
+      // If photo was not yet set, automatically restore from permanent transaction proof!
+      const txWithProof = txs.find(t => t.payment_proof_url && t.payment_proof_url.trim() !== '');
+      if (txWithProof?.payment_proof_url) {
+        setPhoto(prev => prev || txWithProof.payment_proof_url!);
+        setPreview(prev => prev || txWithProof.payment_proof_url!);
+      }
+      if (txs.some(t => t.payment_status === 'paid' || Number(t.amount || 0) > 0)) {
+        setPaymentConfirmed(prev => prev || true);
+      }
     }
   }, [record?.campaign_id, record?.influencer_id, videoNumber]);
 
   useEffect(() => {
     loadTransactions();
   }, [loadTransactions]);
+
+  // Sync if existingData or initialProof updates
+  useEffect(() => {
+    if (initialProof && !photo) {
+      setPhoto(initialProof);
+      setPreview(initialProof);
+    }
+    if ((existingData.payment_completed || existingData.payment_status === 'paid') && !paymentConfirmed) {
+      setPaymentConfirmed(true);
+    }
+  }, [initialProof, existingData.payment_completed, existingData.payment_status]);
 
   // Sync if not historical and perVideoPrice updates
   useEffect(() => {
@@ -14192,6 +14347,16 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
+      const isPdf = selectedFile.type === 'application/pdf' || selectedFile.name.toLowerCase().endsWith('.pdf');
+      const isImg = selectedFile.type.startsWith('image/');
+      if (!isPdf && !isImg) {
+        toast.error('Please upload a valid image (PNG, JPG, WEBP) or PDF file.');
+        return;
+      }
+      if (selectedFile.size > 25 * 1024 * 1024) {
+        toast.error('File size exceeds 25MB limit.');
+        return;
+      }
       setFile(selectedFile);
       setPreview(URL.createObjectURL(selectedFile));
     }
@@ -14219,18 +14384,26 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
 
     if (file) {
       try {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const filePath = `dispatch/${fileName}`;
+        const fileExt = file.name.split('.').pop()?.toLowerCase() || 'png';
+        const timestamp = Date.now();
+        const randStr = Math.random().toString(36).substring(7);
+        const fileName = `camp_${record.campaign_id}_inf_${record.influencer_id}_v${videoNumber}_${timestamp}_${randStr}.${fileExt}`;
+        const filePath = `payment-proofs/${fileName}`;
 
-        const { error } = await supabaseAdmin.storage.from('influencer-profiles').upload(filePath, file);
-        if (error) throw error;
+        const { error: uploadError } = await supabaseAdmin.storage
+          .from('influencer-profiles')
+          .upload(filePath, file, {
+            contentType: file.type || (fileExt === 'pdf' ? 'application/pdf' : 'image/png'),
+            upsert: true
+          });
+        if (uploadError) throw uploadError;
 
         const { data: publicData } = supabaseAdmin.storage.from('influencer-profiles').getPublicUrl(filePath);
         finalUrl = publicData.publicUrl;
         setPhoto(finalUrl);
       } catch (err) {
         console.error('Error uploading payment photo:', err);
+        toast.error('Failed to upload payment proof to Storage. Please try again.');
         setIsUploading(false);
         return;
       }
@@ -14246,12 +14419,16 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
       ifsc_code: isAccount ? resolvedPayment.ifsc_code : null,
       bank_name: isAccount ? resolvedPayment.bank_name : null,
       pan_number: isAccount ? resolvedPayment.pan_number : null,
-      payment_completed: paymentConfirmed
+      payment_completed: paymentConfirmed,
+      existingPaymentType: existingData.payment_record?.payment_type || 'final'
     });
+    setFile(null);
     setIsUploading(false);
     await loadTransactions();
     toast.success(`Video ${videoNumber} Payment confirmed successfully!`);
   };
+
+  const isPdf = Boolean(file?.type === 'application/pdf' || isPaymentProofPdf(preview));
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
@@ -14285,7 +14462,7 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
           id={`payment-confirmed-video-${videoNumber}`}
           checked={paymentConfirmed}
           onChange={(e) => setPaymentConfirmed(e.target.checked)}
-          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500" 
+          className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer" 
         />
         <label htmlFor={`payment-confirmed-video-${videoNumber}`} className="text-sm font-medium text-slate-200 cursor-pointer">
           Payment for Video {videoNumber} has been completed and sent to the influencer.
@@ -14310,10 +14487,11 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
           <div className="pt-2">
             <div className="relative w-full h-24 border-2 border-dashed border-slate-700/80 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-colors">
               <UploadCloud className="text-blue-400 mb-1" size={20} />
-              <span className="text-xs text-blue-300 font-medium">Upload Payment Screenshot</span>
+              <span className="text-xs text-blue-300 font-medium">Upload Payment Screenshot (Image / PDF)</span>
+              <span className="text-[10px] text-slate-500 mt-0.5">PNG, JPG, WEBP, or PDF up to 25MB</span>
               <input 
                 type="file" 
-                accept="image/*" 
+                accept="image/*,application/pdf" 
                 onChange={handlePhotoUpload} 
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
               />
@@ -14323,16 +14501,78 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
 
         <div className="flex flex-col items-center justify-center">
           {preview ? (
-            <div className="flex flex-col items-center w-full">
-              <div className="w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800 flex items-center justify-center p-2 mb-2 overflow-hidden shadow-lg">
-                <img src={preview} alt="Payment Screenshot" className="max-w-full max-h-full object-contain rounded-lg" />
+            isPdf ? (
+              <div className="w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800 flex flex-col items-center justify-center p-4 relative group shadow-lg">
+                <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-2.5">
+                  <FileText className="text-rose-400" size={28} />
+                </div>
+                <span className="text-xs font-semibold text-slate-200 truncate max-w-[220px] mb-1" title={file ? file.name : (preview.split('/').pop()?.split('?')[0] || 'Payment_Proof.pdf')}>
+                  {file ? file.name : (preview.split('/').pop()?.split('?')[0] || 'Payment_Proof.pdf')}
+                </span>
+                <span className="text-[10px] text-rose-300 bg-rose-950/60 border border-rose-800/60 px-2.5 py-0.5 rounded-full font-mono mb-3">
+                  PDF Document
+                </span>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={preview}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-xs font-medium flex items-center gap-1.5 transition-colors"
+                  >
+                    <Eye size={12} /> View
+                  </a>
+                  <label className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5 cursor-pointer transition-colors">
+                    <RefreshCw size={12} /> Replace
+                    <input type="file" accept="image/*,application/pdf" onChange={handlePhotoUpload} className="hidden" />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setFile(null); setPreview(null); setPhoto(''); }}
+                    className="px-2.5 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/50 border border-rose-800/40 text-rose-300 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 size={12} /> Delete
+                  </button>
+                </div>
               </div>
-              <span className="text-xs text-slate-400">Payment Screenshot Preview</span>
-            </div>
+            ) : (
+              <div className="flex flex-col items-center w-full">
+                <div className="w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800 flex items-center justify-center p-2 mb-2 relative overflow-hidden group shadow-lg">
+                  <img src={preview} alt="Payment Screenshot" className="max-w-full max-h-full object-contain rounded-lg" />
+                  <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                    <a
+                      href={preview}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-600 text-white text-xs font-medium flex items-center gap-1.5 shadow"
+                    >
+                      <Eye size={13} /> View
+                    </a>
+                    <label className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 cursor-pointer shadow">
+                      <RefreshCw size={13} /> Replace
+                      <input type="file" accept="image/*,application/pdf" onChange={handlePhotoUpload} className="hidden" />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => { setFile(null); setPreview(null); setPhoto(''); }}
+                      className="px-2.5 py-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-white text-xs font-medium flex items-center gap-1.5 shadow cursor-pointer"
+                    >
+                      <Trash2 size={13} /> Delete
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400">Payment Screenshot Preview</span>
+                  <a href={preview} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline flex items-center gap-0.5">
+                    Open full size <ExternalLink size={10} />
+                  </a>
+                </div>
+              </div>
+            )
           ) : (
-             <div className="flex flex-col items-center justify-center w-full h-52 bg-[#0b1329] rounded-xl border border-slate-800/60 p-4 opacity-50">
+             <div className="flex flex-col items-center justify-center w-full h-52 bg-[#0b1329] rounded-xl border border-dashed border-slate-800/80 p-4">
                <UploadCloud className="text-slate-500 mb-2" size={28} />
-               <span className="text-xs text-slate-400">No screenshot selected</span>
+               <span className="text-xs font-medium text-slate-400 mb-0.5">No payment screenshot uploaded</span>
+               <span className="text-[11px] text-slate-500">Upload screenshot above (Image or PDF)</span>
              </div>
           )}
         </div>

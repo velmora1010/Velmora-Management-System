@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Check, ShieldCheck, CreditCard, Smartphone, History } from 'lucide-react';
+import { Copy, Check, ShieldCheck, CreditCard, Smartphone, History, FileText, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { 
   normalizePaymentMethod, 
@@ -306,6 +306,19 @@ export const StatusTrackingPaymentCard: React.FC<StatusTrackingPaymentCardProps>
                     <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-full capitalize">
                       {tx.payment_status || 'Paid'}
                     </span>
+                    {tx.payment_proof_url && (
+                      <a
+                        href={tx.payment_proof_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-blue-400 hover:text-blue-300 hover:underline flex items-center gap-0.5 ml-0.5 px-1.5 py-0.5 rounded bg-blue-950/40 border border-blue-800/40 transition-colors"
+                        title="View Payment Proof"
+                      >
+                        <FileText size={10} />
+                        <span>Proof</span>
+                        <ExternalLink size={9} />
+                      </a>
+                    )}
                   </div>
                 </div>
               );

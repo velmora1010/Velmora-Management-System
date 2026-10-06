@@ -17,6 +17,7 @@ export type WorkflowStateKey =
   | 'call_skipped'
   | 'pay_advance'
   | 'timeline'
+  | 'draft_pending'
   | 'draft'
   | 're_draft'
   | 're_draft_submitted'
@@ -34,6 +35,7 @@ export interface WorkflowStepHelpers {
   isTimelineCompleted?: (r: any, v: number) => boolean;
   isDraftCompleted?: (r: any, v: number) => boolean;
   isDraftApprovalPending?: (r: any, v: number) => boolean;
+  isDraftPending?: (r: any, v: number) => boolean;
   isReDraftRequired?: (r: any, v: number) => boolean;
   isReDraftSubmitted?: (r: any, v: number) => boolean;
   isPostDateCompleted?: (r: any, v: number) => boolean;
@@ -318,7 +320,7 @@ export function getCurrentWorkflowState(
     if (isPending) {
       return 'draft';
     }
-    return isCallSkipped ? 'call_skipped' : 'call_explain';
+    return 'draft_pending';
   }
 
   // Draft is Approved -> Next is Payment (Do NOT skip Payment)
@@ -350,6 +352,7 @@ export function getStepCompletion(
   if (stepId === 'call_skipped') return helpers?.isCallSkipped ? helpers.isCallSkipped(record, videoNumber) : false;
   if (stepId === 'pay_advance') return helpers?.isPayAdvanceCompleted ? helpers.isPayAdvanceCompleted(record, videoNumber) : false;
   if (stepId === 'timeline') return helpers?.isTimelineCompleted ? helpers.isTimelineCompleted(record, videoNumber) : false;
+  if (stepId === 'draft_pending') return helpers?.isDraftPending ? helpers.isDraftPending(record, videoNumber) : false;
   if (stepId === 'draft') return helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false;
   if (stepId === 're_draft') return helpers?.isReDraftSubmitted ? helpers.isReDraftSubmitted(record, videoNumber) || (helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false) : false;
   if (stepId === 're_draft_submitted') return helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false;
