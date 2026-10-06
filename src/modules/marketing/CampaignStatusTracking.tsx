@@ -159,10 +159,10 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'draft', label: 'Draft Approved', shortLabel: 'Draft Approved', icon: Video },
   { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Pending', icon: Clock },
   { id: 're_draft', label: 'Re-Draft', shortLabel: 'Re-Draft', icon: RotateCcw },
+  { id: 're_draft_submitted', label: 'Re-Draft Submitted', shortLabel: 'Re-Draft Submitted', icon: CheckCircle2 },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
   { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
-  { id: 're_dispatch', label: 'Re-Dispatch', shortLabel: 'Re-Dispatch', icon: RotateCcw },
 ];
 
 export const VIDEO_1_SUMMARY_BOX_CONFIGS = WORKFLOW_SUMMARY_BOX_CONFIGS;
@@ -1797,18 +1797,70 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   const hasDraftVid = Boolean(activeDAttempt?.video_url || dData.vid || dData.video_url || (videoNum === 1 && record.draft_video_url));
   const isDraftTrulyCompleted = Boolean(hasDraftVid && draftApprovalStatus === 'Approved' && (activeDAttempt?.timing_status || dData.timing || (videoNum === 1 ? record.draft_timing_status : '')) !== 'Not Submit' && draftStep?.completed);
 
+  const isReDraftSubmitted = !isReDraftRequired && !isDraftTrulyCompleted && (dAttempts.length > 1 || (activeDAttempt && (activeDAttempt.attempt_number || 1) > 1)) && hasDraftVid;
+
   const draftStatus = isReDraftRequired 
     ? 'Not Approved' 
     : (isDraftTrulyCompleted ? 'Approved' : (hasDraftVid ? 'Pending Approval' : 'Not Started'));
+
+  // Dynamically include re_draft and re_draft_submitted in configs when applicable
+  let effectiveConfigs = [...configs];
+  if (isReDraftRequired) {
+    const draftIdx = effectiveConfigs.findIndex(c => c.id === 'draft');
+    if (draftIdx >= 0) {
+      effectiveConfigs.splice(draftIdx + 1, 0, {
+        id: 're_draft',
+        label: 'Re-Draft',
+        shortLabel: 'Re-Draft',
+        icon: RotateCcw
+      });
+      steps['re_draft'] = {
+        completed: false,
+        skipped: false,
+        status: 'IN_PROGRESS',
+        data: dData
+      };
+    }
+  } else if (isReDraftSubmitted) {
+    const draftIdx = effectiveConfigs.findIndex(c => c.id === 'draft');
+    if (draftIdx >= 0) {
+      effectiveConfigs.splice(draftIdx + 1, 0,
+        {
+          id: 're_draft',
+          label: 'Re-Draft',
+          shortLabel: 'Re-Draft',
+          icon: RotateCcw
+        },
+        {
+          id: 're_draft_submitted',
+          label: 'Re-Draft Submitted',
+          shortLabel: 'Re-Draft Submitted',
+          icon: CheckCircle2
+        }
+      );
+      steps['re_draft'] = {
+        completed: true,
+        skipped: false,
+        status: 'COMPLETED',
+        data: dData
+      };
+      steps['re_draft_submitted'] = {
+        completed: false,
+        skipped: false,
+        status: 'IN_PROGRESS',
+        data: dData
+      };
+    }
+  }
 
   const isStepDone = (cId: string) => {
     const s = steps[cId];
     return Boolean(s?.completed || s?.skipped || s?.status === 'SKIPPED');
   };
 
-  const completedOrSkippedCount = configs.filter(c => isStepDone(c.id)).length;
-  const completedCount = configs.filter(c => steps[c.id]?.completed).length;
-  const totalSteps = configs.length;
+  const completedOrSkippedCount = effectiveConfigs.filter(c => isStepDone(c.id)).length;
+  const completedCount = effectiveConfigs.filter(c => steps[c.id]?.completed).length;
+  const totalSteps = effectiveConfigs.length;
 
   const isStarted = depth > 0 ? isDelivered : isInfluencerVideoStarted(record, videoNum);
 
@@ -1817,7 +1869,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     status = 'NOT_STARTED';
   } else if (completedOrSkippedCount === totalSteps) {
     status = 'COMPLETED';
-  } else if (completedOrSkippedCount > 0 || isReDraftRequired) {
+  } else if (completedOrSkippedCount > 0 || isReDraftRequired || isReDraftSubmitted) {
     status = 'IN_PROGRESS';
   } else {
     status = 'NOT_STARTED';
@@ -1830,18 +1882,29 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     activeStepId = '';
   } else if (!isDelivered) {
     activeStepId = 'delivered';
+  } else if (!isStepDone('share_script')) {
+    activeStepId = 'share_script';
+  } else if (!isStepDone('call_explain')) {
+    activeStepId = 'call_explain';
   } else if (isReDraftRequired) {
+    activeStepId = 're_draft';
+  } else if (isReDraftSubmitted) {
+    activeStepId = 're_draft_submitted';
+  } else if (!isDraftTrulyCompleted) {
     activeStepId = 'draft';
-  } else if (completedOrSkippedCount === totalSteps) {
-    activeStepId = '';
+  } else if (!isStepDone('payment')) {
+    activeStepId = 'payment';
+  } else if (!isStepDone('post_date')) {
+    activeStepId = 'post_date';
+  } else if (!isStepDone('after_post')) {
+    activeStepId = 'after_post';
   } else {
-    const firstIncomplete = configs.find(c => !isStepDone(c.id));
-    activeStepId = firstIncomplete ? firstIncomplete.id : '';
+    activeStepId = '';
   }
 
   const result: VideoWorkflowData = {
     videoNumber: videoNum,
-    configs,
+    configs: effectiveConfigs,
     steps,
     completedCount,
     totalSteps,
@@ -2161,6 +2224,11 @@ export const isInfluencerDraftApprovalPending = (record: StatusTrackingRecord, v
   // Must NOT be marked Not Approved
   if (approvalStatus === 'not approved' || approvalStatus === 'not_approved' || approvalStatus === 'rejected' || vData.isReDraftRequired) return false;
 
+  // If this is a Re-Draft attempt (attempt > 1), it belongs in Re-Draft Submitted
+  if (attempts.length > 1 || (activeAttempt && (activeAttempt.attempt_number || 1) > 1)) {
+    return false;
+  }
+
   // Approval is still pending
   return true;
 };
@@ -2172,10 +2240,61 @@ export const isInfluencerReDraftRequired = (record: StatusTrackingRecord, videoN
   if (isInfluencerInReDispatch(record)) return false;
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
+  if (isInfluencerDraftApproved(record, videoNumber)) return false;
 
   const vData = getVideoWorkflow(record, videoNumber);
-  if (vData.isReDraftRequired) return true;
-  return getInfluencerDraftStatus(record, videoNumber) === 'not_approved';
+  const dStep = vData.steps['draft'];
+  if (!dStep) return false;
+
+  const data = dStep.data || {};
+  const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+  const activeAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+
+  const approvalStatus = (activeAttempt?.approval_status || data.approval_status || data.appStat || (videoNumber === 1 ? record.draft_approval_status : '') || '').toLowerCase().trim();
+  return Boolean(
+    approvalStatus === 'not approved' || 
+    approvalStatus === 'not_approved' || 
+    approvalStatus === 'rejected' || 
+    vData.isReDraftRequired
+  );
+};
+
+/**
+ * Checks if influencer has submitted a Re-Draft (Attempt > 1) and is awaiting approval.
+ */
+export const isInfluencerReDraftSubmitted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+  if (isInfluencerDraftApproved(record, videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const dStep = vData.steps['draft'];
+  if (!dStep) return false;
+
+  const data = dStep.data || {};
+  const attempts: DraftAttempt[] = Array.isArray(data.attempts) ? data.attempts : [];
+  if (attempts.length <= 1) {
+    const single = attempts[0];
+    if (!single || (single.attempt_number || 1) <= 1) return false;
+  }
+
+  const activeAttempt = attempts[attempts.length - 1];
+  if (!activeAttempt) return false;
+
+  const hasVideo = Boolean(activeAttempt.video_url || data.vid || data.video_url);
+  if (!hasVideo) return false;
+
+  const approvalStatus = (activeAttempt.approval_status || '').toLowerCase().trim();
+  if (approvalStatus === 'approved') return false;
+  if (approvalStatus === 'not approved' || approvalStatus === 'not_approved' || approvalStatus === 'rejected') return false;
+
+  return Boolean(
+    approvalStatus === 'pending approval' || 
+    approvalStatus === 'pending' || 
+    approvalStatus === '' || 
+    !activeAttempt.approval_status
+  );
 };
 
 /**
@@ -2483,6 +2602,8 @@ export const isStepFilterMatch = (
       return isInfluencerDraftApprovalPending(record, videoNumber);
     case 're_draft':
       return isInfluencerReDraftRequired(record, videoNumber);
+    case 're_draft_submitted':
+      return isInfluencerReDraftSubmitted(record, videoNumber);
     case 'payment':
       return isInfluencerPaymentCompleted(record, videoNumber);
     case 'post_date':
@@ -2524,7 +2645,7 @@ export const validateFilterCounts = (
 /**
  * ONE CENTRALIZED WORKFLOW-STATE CALCULATION
  * Returns the exact current active workflow step for an influencer in a given video number:
- * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'draft' | 'post_date' | 'payment' | 'after_post' | 'completed'
+ * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'draft' | 're_draft' | 're_draft_submitted' | 'post_date' | 'payment' | 'after_post' | 'completed'
  */
 export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, videoNumber: number): string => {
   return getCurrentWorkflowState(record, videoNumber, {
@@ -2533,7 +2654,10 @@ export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, 
     isCallCompleted: isInfluencerCallCompleted,
     isCallSkipped: isInfluencerCallSkipped,
     isPayAdvanceCompleted: isInfluencerPayAdvanceCompleted,
-    isDraftCompleted: isInfluencerDraftCompleted,
+    isDraftCompleted: isInfluencerDraftApproved,
+    isDraftApprovalPending: isInfluencerDraftApprovalPending,
+    isReDraftRequired: isInfluencerReDraftRequired,
+    isReDraftSubmitted: isInfluencerReDraftSubmitted,
     isPostDateCompleted: isInfluencerPostDateCompleted,
     isPaymentCompleted: isInfluencerPaymentCompleted,
     isAfterPostCompleted: isInfluencerAfterPostCompleted,
@@ -2632,11 +2756,33 @@ export const getStepVisualState = (
   const stepData = stepObj?.data || {};
 
   // 5. Step-specific pending & in-progress evaluations (BLUE, AMBER, or RED)
+  if (stepId === 're_draft') {
+    if (isInfluencerReDraftRequired(record, videoNumber)) {
+      return 'rejected'; // Clear RED state (correction required)
+    }
+    if (isInfluencerReDraftSubmitted(record, videoNumber) || isInfluencerDraftApproved(record, videoNumber)) {
+      return 'completed';
+    }
+    return 'not_started';
+  }
+
+  if (stepId === 're_draft_submitted') {
+    if (isInfluencerReDraftSubmitted(record, videoNumber)) {
+      return 'completed'; // Clear GREEN state per specification (corrected draft received, awaiting approval)
+    }
+    if (isInfluencerDraftApproved(record, videoNumber)) {
+      return 'completed';
+    }
+    if (isInfluencerReDraftRequired(record, videoNumber)) {
+      return 'rejected';
+    }
+    return 'not_started';
+  }
+
   if (stepId === 'draft') {
-    const draftStatus = getInfluencerDraftStatus(record, videoNumber);
-    if (draftStatus === 'completed') return 'completed';
-    if (draftStatus === 'not_approved') return 'rejected'; // Re-Draft required (RED)
-    if (draftStatus === 'pending_approval') return 'pending'; // Draft Submitted – Pending Manager Approval (YELLOW/AMBER)
+    if (isInfluencerDraftApproved(record, videoNumber)) return 'completed';
+    if (isInfluencerReDraftRequired(record, videoNumber) || isInfluencerReDraftSubmitted(record, videoNumber)) return 'rejected'; // Initial Draft was rejected (Red ✕)
+    if (isInfluencerDraftApprovalPending(record, videoNumber)) return 'pending'; // Draft Submitted – Pending Manager Approval (YELLOW/AMBER)
     if (stepObj?.status === 'IN_PROGRESS') return 'in_progress';
     return 'not_started';
   }
@@ -3211,23 +3357,47 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                         })`
                   }
                 >
-                  <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${visualStyles.circle}`}>
+                  <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${
+                    cfg.id === 're_draft' && visualState === 'rejected'
+                      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/80 shadow-[0_0_12px_rgba(244,63,94,0.5)] animate-pulse'
+                      : cfg.id === 're_draft_submitted' && visualState === 'completed'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/80 shadow-[0_0_12px_rgba(16,185,129,0.5)] animate-pulse'
+                      : visualStyles.circle
+                  }`}>
                     {visualState === 'review_required' || (cfg.id === 'draft' && visualState === 'pending') ? (
                       <StepIcon size={13} className="text-amber-400" />
                     ) : isCompleted ? (
                       <Check size={14} strokeWidth={2.5} className="text-white" />
                     ) : isSkipped ? (
                       <FastForward size={13} className="text-amber-400" />
-                    ) : isReDraftReq ? (
-                      <span className="font-black text-[9px] text-rose-400 tracking-tight">RD</span>
+                    ) : visualState === 'rejected' ? (
+                      cfg.id === 're_draft' ? (
+                        <RotateCcw size={13} className="text-rose-400" />
+                      ) : (
+                        <X size={14} strokeWidth={2.5} className="text-rose-400" />
+                      )
                     ) : (
                       <StepIcon size={13} className={`${visualStyles.iconClass} transition-colors`} />
                     )}
                   </div>
                   <div className="flex flex-col items-center text-center min-w-0 mt-1">
-                    <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${visualStyles.label}`}>
+                    <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${
+                      cfg.id === 're_draft' && visualState === 'rejected'
+                        ? 'text-rose-400 font-bold'
+                        : cfg.id === 're_draft_submitted'
+                        ? 'text-emerald-400 font-bold'
+                        : cfg.id === 'draft' && visualState === 'rejected'
+                        ? 'text-rose-400 font-semibold'
+                        : visualStyles.label
+                    }`}>
                       {cfg.id === 'draft' && (visualState === 'pending' || visualState === 'review_required')
                         ? 'Draft Pending Approval'
+                        : cfg.id === 'draft' && visualState === 'rejected'
+                        ? 'Draft'
+                        : cfg.id === 're_draft'
+                        ? 'Re-Draft'
+                        : cfg.id === 're_draft_submitted'
+                        ? 'Re-Draft Submitted'
                         : (cfg.shortLabel || cfg.label)}
                     </span>
                   </div>
@@ -3242,7 +3412,11 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                   const isNextInProgress = nextVisualState === 'in_progress';
 
                   let lineColor = 'bg-slate-700/60';
-                  if (isCurrentStepDone && isNextStepDone) {
+                  if (cfg.id === 'draft' && visualState === 'rejected' && nextCfg.id === 're_draft') {
+                    lineColor = 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]';
+                  } else if (cfg.id === 're_draft' && nextCfg.id === 're_draft_submitted') {
+                    lineColor = 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]';
+                  } else if (isCurrentStepDone && isNextStepDone) {
                     lineColor = 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]';
                   } else if (isCurrentStepDone && isNextPending) {
                     lineColor = 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]';
@@ -4812,6 +4986,28 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     if (!record) {
       console.error('handleSaveVideoStep: record not found for id', recordId);
       return { success: false, error: 'Tracking record not found' };
+    }
+
+    // MANDATORY STEP SKIPPING GUARDS: Prevent completing steps prematurely
+    if (stepId === 'payment' && isStepCompleted) {
+      if (!isInfluencerDraftApproved(record, videoNumber)) {
+        toast.error(`Draft must be Approved before completing Payment for Video ${videoNumber}.`);
+        return { success: false, error: 'Draft must be approved before completing Payment' };
+      }
+    }
+
+    if (stepId === 'post_date' && isStepCompleted) {
+      if (!isInfluencerPaymentCompleted(record, videoNumber)) {
+        toast.error(`Payment must be completed before confirming Post Date for Video ${videoNumber}.`);
+        return { success: false, error: 'Payment must be completed before confirming Post Date' };
+      }
+    }
+
+    if (stepId === 'after_post' && isStepCompleted) {
+      if (!isInfluencerPostDateCompleted(record, videoNumber)) {
+        toast.error(`Post Date must be confirmed before completing After Post for Video ${videoNumber}.`);
+        return { success: false, error: 'Post Date must be confirmed before completing After Post' };
+      }
     }
 
     let metadata: any = {};
@@ -6815,6 +7011,24 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               }
             }
 
+            if (activeStepConfig?.id === 're_draft') {
+              return (
+                <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-rose-950/80 text-rose-400 border-rose-700/60">
+                  <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+                  🔴 Re-Draft Required
+                </span>
+              );
+            }
+
+            if (activeStepConfig?.id === 're_draft_submitted') {
+              return (
+                <span className="px-3 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 bg-emerald-950/80 text-emerald-400 border-emerald-700/60">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  🟢 Re-Draft Submitted – Pending Manager Approval
+                </span>
+              );
+            }
+
             const visualState = activeStepConfig ? getStepVisualState(record, videoNumber, activeStepConfig.id) : 'not_started';
             const styles = getStepVisualStyles(visualState);
 
@@ -6971,16 +7185,21 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
             />
           )}
 
-          {activeStepConfig?.id === 'draft' && (
+          {(activeStepConfig?.id === 'draft' || activeStepConfig?.id === 're_draft' || activeStepConfig?.id === 're_draft_submitted') && (
             <DraftForm 
-              key={`v-${videoNumber}-draft-form-${record.id}`}
+              key={`v-${videoNumber}-draft-form-${record.id}-${activeStepConfig.id}`}
               record={record} 
               videoNumber={videoNumber}
-              existingData={activeStepState.data}
+              stepId={activeStepConfig.id}
+              existingData={videoData.steps?.draft?.data || activeStepState.data}
               onSave={async (formData: any, completed: boolean) => { await onSaveStep('draft', formData, completed); }} 
               onNavigateToPostDate={() => {
                 setSelectedVideoStepId('payment');
                 onStepChange?.('payment');
+              }}
+              onNavigateToStep={(sId: string) => {
+                setSelectedVideoStepId(sId);
+                onStepChange?.(sId);
               }}
             />
           )}
@@ -9993,9 +10212,11 @@ const ExpectedTimelineForm: React.FC<ExpectedTimelineFormProps> = ({
 interface DraftFormProps {
   record: StatusTrackingRecord;
   videoNumber: number;
+  stepId?: string;
   existingData?: any;
   onSave: (data: any, completed: boolean) => Promise<void> | void;
   onNavigateToPostDate?: () => void;
+  onNavigateToStep?: (stepId: string) => void;
 }
 
 const ALLOWED_VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'm4v', 'quicktime'];
@@ -10057,9 +10278,11 @@ const AVAILABLE_DRAFT_SOCIAL_PLATFORMS = [
 const DraftForm: React.FC<DraftFormProps> = ({ 
   record, 
   videoNumber, 
+  stepId = 'draft',
   existingData = {}, 
   onSave, 
-  onNavigateToPostDate 
+  onNavigateToPostDate,
+  onNavigateToStep 
 }) => {
   // Target Language resolution for this creator and video
   const isTamil = useMemo(() => isInfluencerTamil(record, videoNumber), [record, videoNumber]);
@@ -10759,9 +10982,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
     setReDraftTamilUrl('');
     setReDraftSubmissionDate('');
     setDraftSubmitDate(reDraftSubmissionDate.trim());
-    setAppStat('Pending Approval');
-    setCorr('');
-    toast.success(`Re-Draft Attempt ${nextAttemptNumber} submitted! Status: Pending Approval 🟡`);
+    toast.success(`Re-Draft Attempt ${nextAttemptNumber} submitted! Status: Re-Draft Submitted 🟢`);
+    if (onNavigateToStep) {
+      onNavigateToStep('re_draft_submitted');
+    }
   };
 
   // Replace / Upload an asset on the active attempt
@@ -11057,11 +11281,16 @@ const DraftForm: React.FC<DraftFormProps> = ({
       toast.success('Draft approved! Video workflow moved to Payment 💳');
       if (onNavigateToPostDate) {
         onNavigateToPostDate();
+      } else if (onNavigateToStep) {
+        onNavigateToStep('payment');
       }
     } else if (appStat === 'Pending Approval') {
       toast.success('Draft saved as Pending Approval 🟡');
     } else {
       toast.error('Draft marked as Not Approved. Re-Draft required 🔴');
+      if (onNavigateToStep) {
+        onNavigateToStep('re_draft');
+      }
     }
   };
 
@@ -11073,11 +11302,625 @@ const DraftForm: React.FC<DraftFormProps> = ({
   // Can submit re-draft? (Only Original Video & Date required; Tamil video is optional)
   const canSubmitReDraft = Boolean((reDraftOriginalFile || reDraftOriginalUrl) && reDraftSubmissionDate.trim());
 
+  // Identity & Auto DM details
+  const influencerName = record.influencer?.name || record.influencer_name || record.dispatch?.influencer_name || 'Creator';
+  const creatorCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || (record.influencer_id ? `#${record.influencer_id}` : '—');
+  const userId = record.influencer?.instagram_handle || record.influencer?.user_id || record.dispatch?.user_id || (record.influencer_id ? String(record.influencer_id) : '—');
+  const isAutoDmActive = isRecordAutoDmEnabled(record);
+
+  // Workflow view detection
+  const isReDraftRequiredNow = isInfluencerReDraftRequired(record, videoNumber);
+  const isReDraftSubmittedNow = isInfluencerReDraftSubmitted(record, videoNumber);
+
+  // Determine current active view inside Draft/Re-Draft flow
+  const isReDraftView = stepId === 're_draft' || (isReDraftRequiredNow && stepId !== 're_draft_submitted' && stepId !== 'draft') || isReDraftMode;
+  const isReDraftSubmittedView = stepId === 're_draft_submitted' || (isReDraftSubmittedNow && stepId !== 're_draft' && stepId !== 'draft');
+  const isStandardDraftView = !isReDraftView && !isReDraftSubmittedView;
+
+  // Resolved rejected attempt and feedback for Re-Draft
+  const rejectedAttempt = useMemo(() => {
+    return [...attempts].reverse().find(a => a.approval_status === 'Not Approved') || activeAttempt || (attempts.length > 0 ? attempts[attempts.length - 1] : null);
+  }, [attempts, activeAttempt]);
+
+  const rejectionFeedback = rejectedAttempt?.corrections || existingData.corr || (videoNumber === 1 ? record.draft_corrections_required : '') || 'Please review correction guidelines and upload a revised draft video.';
+
+  // For Re-Draft Submitted, resolve previous rejected attempt to display past feedback
+  const previousAttemptForSubmitted = useMemo(() => {
+    if (attempts.length <= 1) return null;
+    return [...attempts].slice(0, attempts.length - 1).reverse().find(a => a.approval_status === 'Not Approved') || attempts[attempts.length - 2] || null;
+  }, [attempts]);
+
+  const renderCreatorInfoCard = () => (
+    <div className="p-4 bg-[#0b1329] border border-slate-800 rounded-xl shadow-sm">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-xs">
+        <div>
+          <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Creator Name</span>
+          <span className="text-white font-semibold text-sm truncate block mt-0.5" title={influencerName}>{influencerName}</span>
+        </div>
+        <div>
+          <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Creator Code</span>
+          <span className="text-purple-400 font-mono font-bold text-sm block mt-0.5">{creatorCode}</span>
+        </div>
+        <div>
+          <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">User ID / Handle</span>
+          <span className="text-slate-300 font-mono text-xs block mt-0.5 truncate" title={userId}>{userId}</span>
+        </div>
+        <div>
+          <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Auto DM Tool</span>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            {isAutoDmActive ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                <Check size={10} strokeWidth={3} /> Connected
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                Not Connected
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      
+
+      {/* ============================================================== */}
+      {/* A. DEDICATED RE-DRAFT VIEW (When Draft was Not Approved)       */}
+      {/* ============================================================== */}
+      {isReDraftView && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Banner */}
+          <div className="p-4 rounded-xl border bg-rose-950/30 border-rose-700/60 text-rose-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+            <div className="flex items-center gap-3">
+              <span className="w-3.5 h-3.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+              <div>
+                <h4 className="text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-2 text-rose-200">
+                  <span>🔴 Step: Re-Draft</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-black/40 border border-rose-500/30">
+                    Attempt {(rejectedAttempt?.attempt_number || 1) + 1}
+                  </span>
+                </h4>
+                <p className="text-xs text-rose-300/80 mt-0.5">
+                  Previous draft was not approved. Review the corrections required below and submit a revised re-draft.
+                </p>
+              </div>
+            </div>
+            {rejectedAttempt?.re_draft_submit_date && (
+              <div className="flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 pt-2 sm:pt-0 border-rose-700/30">
+                <span className="text-[10px] uppercase font-bold text-rose-400">Re-Draft Due Date</span>
+                <span className="text-xs font-mono font-bold text-rose-200">
+                  {formatDisplayDateLocal(rejectedAttempt.re_draft_submit_date)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Creator Information Card */}
+          {renderCreatorInfoCard()}
+
+          {/* Previous Draft Attempt & Rejection Reason Card */}
+          {rejectedAttempt && (
+            <div className="p-5 bg-[#0b1329] border border-rose-700/50 rounded-xl space-y-4 shadow-sm">
+              <div className="flex items-center justify-between border-b border-rose-800/40 pb-3">
+                <h5 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <XCircle size={16} className="text-rose-400" />
+                  <span>Previous Draft (Attempt {rejectedAttempt.attempt_number})</span>
+                </h5>
+                {(rejectedAttempt.draft_submission_date || rejectedAttempt.draft_submit_date) && (
+                  <span className="text-xs font-mono text-slate-400">
+                    Submitted: {formatDisplayDateLocal(rejectedAttempt.draft_submission_date || rejectedAttempt.draft_submit_date || '')}
+                  </span>
+                )}
+              </div>
+
+              {/* Grid: Left Video Preview, Right Feedback */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Previous Video Player/Preview */}
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                    Previous Submitted Video
+                  </span>
+                  <div className="relative w-full h-44 bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center group shadow-inner">
+                    {rejectedAttempt.video_url ? (
+                      <>
+                        <video src={rejectedAttempt.video_url} className="w-full h-full object-cover" preload="metadata" />
+                        <div 
+                          onClick={() => setPreviewModalAsset({
+                            url: rejectedAttempt.video_url,
+                            title: `Previous Draft Attempt ${rejectedAttempt.attempt_number} — Original Video`,
+                            attemptNumber: rejectedAttempt.attempt_number,
+                            assetType: 'Original Video',
+                            uploadedAt: rejectedAttempt.uploaded_at
+                          })}
+                          className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center cursor-pointer transition-colors"
+                        >
+                          <div className="w-11 h-11 rounded-full bg-rose-600/90 hover:bg-rose-500 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                            <Play size={20} className="fill-white ml-0.5" />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-xs text-slate-500">No video preview</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Prominently Highlighted Rejection Reason / Feedback */}
+                <div className="p-4 bg-rose-950/40 border border-rose-700/70 rounded-xl flex flex-col justify-between space-y-3">
+                  <div>
+                    <span className="text-xs font-bold text-rose-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <AlertTriangle size={15} className="text-rose-400" />
+                      <span>Reason / Corrections Required</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-900/80 text-rose-200 border border-rose-600/40">
+                        Attempt {rejectedAttempt.attempt_number}
+                      </span>
+                    </span>
+                    <p className="text-xs sm:text-sm text-rose-100/90 mt-2.5 leading-relaxed bg-black/30 p-3 rounded-lg border border-rose-900/50 whitespace-pre-wrap font-sans">
+                      {rejectionFeedback}
+                    </p>
+                  </div>
+                  {rejectedAttempt.re_draft_submit_date && (
+                    <div className="pt-2 border-t border-rose-800/40 text-[11px] text-rose-300 flex items-center justify-between">
+                      <span>Expected Re-Draft Submission:</span>
+                      <strong className="font-mono">{formatDisplayDateLocal(rejectedAttempt.re_draft_submit_date)}</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Re-Draft Video Upload dropzone */}
+          <div className="p-5 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-4 shadow-sm">
+            <div className="border-b border-slate-800 pb-3">
+              <h5 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <UploadCloud size={16} className="text-blue-400" />
+                <span>Upload Re-Draft Video (Attempt {(rejectedAttempt?.attempt_number || 1) + 1})</span>
+              </h5>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Upload the revised video addressing the manager corrections above.
+              </p>
+            </div>
+
+            <div className={`grid grid-cols-1 ${isTamil ? '' : 'md:grid-cols-2'} gap-4`}>
+              {/* ORIGINAL VIDEO */}
+              <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Video size={14} className="text-blue-400" />
+                    <span>Original Video</span>
+                    <span className="text-rose-400">*</span>
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                    Required
+                  </span>
+                </div>
+
+                <div 
+                  onClick={() => reDraftOriginalInputRef.current?.click()}
+                  className="relative w-full h-36 border-2 border-dashed border-blue-500/40 hover:border-blue-400 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+                >
+                  {reDraftOriginalUrl ? (
+                    <div className="w-full flex flex-col items-center gap-2">
+                      <div className="w-20 h-20 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
+                        <video src={reDraftOriginalUrl} className="w-full h-full object-cover" />
+                      </div>
+                      <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{reDraftOriginalFile?.name || 'Original Video'}</span>
+                      <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                    </div>
+                  ) : (
+                    <>
+                      <UploadCloud className="text-blue-400 mb-1" size={26} />
+                      <span className="text-xs text-blue-300 font-semibold">Upload Revised Original Video</span>
+                      <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                    </>
+                  )}
+                  <input 
+                    ref={reDraftOriginalInputRef}
+                    type="file" 
+                    accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) {
+                        const f = e.target.files[0];
+                        if (validateVideoFile(f)) {
+                          setReDraftOriginalFile(f);
+                          setReDraftOriginalUrl(URL.createObjectURL(f));
+                        }
+                        e.target.value = '';
+                      }
+                    }} 
+                    className="hidden" 
+                  />
+                </div>
+              </div>
+
+              {/* TAMIL TRANSLATED VIDEO (Only for Non-Tamil) */}
+              {!isTamil && (
+                <div className="p-4 bg-[#070c18] border border-purple-500/40 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Video size={14} className="text-purple-400" />
+                      <span>Tamil Translated Video</span>
+                    </label>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase">
+                      Optional
+                    </span>
+                  </div>
+
+                  <div 
+                    onClick={() => reDraftTamilInputRef.current?.click()}
+                    className="relative w-full h-36 border-2 border-dashed border-purple-500/40 hover:border-purple-400 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+                  >
+                    {reDraftTamilUrl ? (
+                      <div className="w-full flex flex-col items-center gap-2">
+                        <div className="w-20 h-20 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
+                          <video src={reDraftTamilUrl} className="w-full h-full object-cover" />
+                        </div>
+                        <span className="text-[11px] text-purple-300 font-medium truncate max-w-xs">{reDraftTamilFile?.name || 'Tamil Translated Video'}</span>
+                        <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                      </div>
+                    ) : (
+                      <>
+                        <UploadCloud className="text-purple-400 mb-1" size={26} />
+                        <span className="text-xs text-purple-300 font-semibold">Upload Tamil Translated Video</span>
+                        <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                      </>
+                    )}
+                    <input 
+                      ref={reDraftTamilInputRef}
+                      type="file" 
+                      accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                      onChange={e => {
+                        if (e.target.files && e.target.files[0]) {
+                          const f = e.target.files[0];
+                          if (validateVideoFile(f)) {
+                            setReDraftTamilFile(f);
+                            setReDraftTamilUrl(URL.createObjectURL(f));
+                          }
+                          e.target.value = '';
+                        }
+                      }} 
+                      className="hidden" 
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Tamil Notice */}
+            {isTamil && (
+              <div className="p-3 bg-purple-950/25 border border-purple-800/40 rounded-xl flex items-center gap-2.5 text-xs text-purple-300">
+                <CheckCircle2 size={16} className="text-purple-400 shrink-0" />
+                <span>Tamil Translated Video is not required because the creator&apos;s target language is <strong>Tamil</strong>.</span>
+              </div>
+            )}
+
+            {/* Required Re-Draft Submission Date */}
+            <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                  RE-DRAFT SUBMISSION DATE *
+                </label>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                  Required
+                </span>
+              </div>
+              <div className="relative">
+                <input 
+                  ref={reDraftDateInputRef}
+                  type="date"
+                  value={reDraftSubmissionDate}
+                  onChange={e => setReDraftSubmissionDate(e.target.value)}
+                  style={{ colorScheme: 'dark' }}
+                  className="w-full bg-[#0b1329] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => reDraftDateInputRef.current?.showPicker?.()}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                  title="Open calendar"
+                >
+                  <Calendar size={18} />
+                </button>
+              </div>
+              <span className="text-[11px] text-slate-400 block">
+                Enter the date when this revised re-draft was submitted. This date will be saved to Supabase and the Campaign Calendar.
+              </span>
+            </div>
+
+            {/* Submit Action */}
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isUploading || !canSubmitReDraft}
+                onClick={handleSubmitReDraft}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-2 cursor-pointer"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Submitting Re-Draft...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={16} strokeWidth={2.5} />
+                    <span>Submit Re-Draft</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* B. DEDICATED RE-DRAFT SUBMITTED VIEW (Pending Review)          */}
+      {/* ============================================================== */}
+      {isReDraftSubmittedView && activeAttempt && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Banner */}
+          <div className="p-4 rounded-xl border bg-emerald-950/30 border-emerald-700/60 text-emerald-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+            <div className="flex items-center gap-3">
+              <span className="w-3.5 h-3.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <div>
+                <h4 className="text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center gap-2 text-emerald-200">
+                  <span>🟢 Step: Re-Draft Submitted</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-black/40 border border-emerald-500/30">
+                    Attempt {activeAttempt.attempt_number}
+                  </span>
+                </h4>
+                <p className="text-xs text-emerald-300/80 mt-0.5">
+                  Re-draft video submitted successfully. Awaiting manager review and approval confirmation.
+                </p>
+              </div>
+            </div>
+            {(activeAttempt.draft_submission_date || activeAttempt.draft_submit_date) && (
+              <div className="flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 pt-2 sm:pt-0 border-emerald-700/30">
+                <span className="text-[10px] uppercase font-bold text-emerald-400">Re-Draft Submission Date</span>
+                <span className="text-xs font-mono font-bold text-emerald-200">
+                  {formatDisplayDateLocal(activeAttempt.draft_submission_date || activeAttempt.draft_submit_date || '')}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Creator Information Card */}
+          {renderCreatorInfoCard()}
+
+          {/* Previous Rejection Reason Callout (What was requested to be changed) */}
+          {previousAttemptForSubmitted && (
+            <div className="p-4 bg-rose-950/30 border border-rose-800/50 rounded-xl space-y-1.5">
+              <span className="text-xs font-bold text-rose-300 uppercase tracking-wider flex items-center gap-1.5">
+                <AlertTriangle size={14} className="text-rose-400" />
+                <span>Previous Rejection Feedback (Attempt {previousAttemptForSubmitted.attempt_number})</span>
+              </span>
+              <p className="text-xs text-rose-200/90 leading-relaxed pl-5 font-sans">
+                {previousAttemptForSubmitted.corrections || 'No specific text recorded'}
+              </p>
+            </div>
+          )}
+
+          {/* Submitted Re-Draft Video(s) Preview Card */}
+          <div className="p-5 bg-[#0b1329] border border-slate-800 rounded-xl space-y-4 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div>
+                <h5 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Video size={16} className="text-emerald-400" />
+                  <span>Submitted Re-Draft Video</span>
+                  <span className="text-[11px] font-normal text-slate-400 lowercase">(attempt {activeAttempt.attempt_number})</span>
+                </h5>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Review the revised video submitted by the creator.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase font-bold text-slate-400">Language:</span>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-800/60 uppercase">
+                  {targetLanguages.length > 0 ? targetLanguages.join(', ') : (isTamil ? 'Tamil' : 'Other')}
+                </span>
+              </div>
+            </div>
+
+            {/* Video Cards Grid */}
+            <div className={`grid grid-cols-1 ${isTamil ? '' : 'md:grid-cols-2'} gap-4`}>
+              {/* Original Video */}
+              <div className="p-4 bg-[#070c18] border border-slate-800 rounded-xl flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <Video size={14} className="text-blue-400" />
+                    <span>Revised Original Video</span>
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60 flex items-center gap-1">
+                    <Check size={10} strokeWidth={3} /> Submitted
+                  </span>
+                </div>
+
+                <div className="relative w-full h-40 bg-black rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center group shadow-inner">
+                  {activeAttempt.video_url ? (
+                    <>
+                      <video src={activeAttempt.video_url} className="w-full h-full object-cover" preload="metadata" />
+                      <div 
+                        onClick={() => setPreviewModalAsset({
+                          url: activeAttempt.video_url,
+                          title: `Re-Draft Attempt ${activeAttempt.attempt_number} — Original Video`,
+                          attemptNumber: activeAttempt.attempt_number,
+                          assetType: 'Original Video',
+                          uploadedAt: activeAttempt.uploaded_at
+                        })}
+                        className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center cursor-pointer transition-colors"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                          <Play size={18} className="fill-white ml-0.5" />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-xs text-slate-500">No original video uploaded</span>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
+                  <span className="text-[11px] text-slate-400 truncate font-mono max-w-[170px]" title={activeAttempt.original_file_name || activeAttempt.video_url}>
+                    {activeAttempt.original_file_name || activeAttempt.video_url?.split('/').pop()?.split('?')[0] || 're_draft_original.mp4'}
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {activeAttempt.video_url && (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewModalAsset({
+                          url: activeAttempt.video_url,
+                          title: `Re-Draft Attempt ${activeAttempt.attempt_number} — Original Video`,
+                          attemptNumber: activeAttempt.attempt_number,
+                          assetType: 'Original Video',
+                          uploadedAt: activeAttempt.uploaded_at
+                        })}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer"
+                      >
+                        <Eye size={12} /> View
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => activeOriginalReplaceInputRef.current?.click()}
+                      disabled={isUploading}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCcw size={12} /> Replace
+                    </button>
+                    <input 
+                      ref={activeOriginalReplaceInputRef}
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                      onChange={e => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleReplaceActiveAsset(e.target.files[0], 'original');
+                          e.target.value = '';
+                        }
+                      }}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Tamil Video (If Non-Tamil) */}
+              {!isTamil && (
+                <div className="p-4 bg-[#070c18] border border-slate-800 rounded-xl flex flex-col justify-between space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                      <Video size={14} className="text-purple-400" />
+                      <span>Tamil Translated Video</span>
+                    </span>
+                    {activeAttempt.tamil_video_url ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60 flex items-center gap-1">
+                        <Check size={10} strokeWidth={3} /> Submitted
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60 uppercase">
+                        Optional
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="relative w-full h-40 bg-black rounded-lg overflow-hidden border border-slate-800 flex items-center justify-center group shadow-inner">
+                    {activeAttempt.tamil_video_url ? (
+                      <>
+                        <video src={activeAttempt.tamil_video_url} className="w-full h-full object-cover" preload="metadata" />
+                        <div 
+                          onClick={() => setPreviewModalAsset({
+                            url: activeAttempt.tamil_video_url!,
+                            title: `Re-Draft Attempt ${activeAttempt.attempt_number} — Tamil Translated Video`,
+                            attemptNumber: activeAttempt.attempt_number,
+                            assetType: 'Tamil Translated Video',
+                            uploadedAt: activeAttempt.uploaded_at
+                          })}
+                          className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center cursor-pointer transition-colors"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-purple-600/90 hover:bg-purple-500 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                            <Play size={18} className="fill-white ml-0.5" />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div 
+                        onClick={() => activeTamilReplaceInputRef.current?.click()}
+                        className="w-full h-full border-2 border-dashed border-purple-500/40 hover:border-purple-400 rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+                      >
+                        <UploadCloud className="text-purple-400 mb-1" size={24} />
+                        <span className="text-xs text-purple-300 font-semibold">Upload Tamil Translated Video</span>
+                        <span className="text-[10px] text-slate-500 mt-0.5">Optional</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
+                    <span className="text-[11px] text-slate-400 truncate font-mono max-w-[170px]" title={activeAttempt.tamil_file_name || activeAttempt.tamil_video_url}>
+                      {activeAttempt.tamil_file_name || activeAttempt.tamil_video_url?.split('/').pop()?.split('?')[0] || (activeAttempt.tamil_video_url ? 're_draft_tamil.mp4' : 'Not Uploaded')}
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {activeAttempt.tamil_video_url ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewModalAsset({
+                              url: activeAttempt.tamil_video_url!,
+                              title: `Re-Draft Attempt ${activeAttempt.attempt_number} — Tamil Translated Video`,
+                              attemptNumber: activeAttempt.attempt_number,
+                              assetType: 'Tamil Translated Video',
+                              uploadedAt: activeAttempt.uploaded_at
+                            })}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-purple-400 hover:text-purple-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye size={12} /> View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => activeTamilReplaceInputRef.current?.click()}
+                            disabled={isUploading}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          >
+                            <RotateCcw size={12} /> Replace
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => activeTamilReplaceInputRef.current?.click()}
+                          disabled={isUploading}
+                          className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <UploadCloud size={12} /> Upload
+                        </button>
+                      )}
+                      <input 
+                        ref={activeTamilReplaceInputRef}
+                        type="file"
+                        accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+                        onChange={e => {
+                          if (e.target.files && e.target.files[0]) {
+                            handleReplaceActiveAsset(e.target.files[0], 'tamil_translation');
+                            e.target.value = '';
+                          }
+                        }}
+                        className="hidden"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* C. STANDARD DRAFT VIEW (Initial Submission / Standard Flow)    */}
+      {/* ============================================================== */}
       {/* 0. DRAFT STATUS BANNER (When an attempt exists) */}
-      {activeAttempt && !isReDraftMode && (
+      {isStandardDraftView && activeAttempt && !isReDraftMode && (
         <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in ${
           activeAttempt.approval_status === 'Approved'
             ? 'bg-emerald-950/30 border-emerald-700/60 text-emerald-300'
@@ -11127,7 +11970,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
       )}
 
       {/* 1. DRAFT VIDEOS SECTION (When an active attempt exists and not in re-draft mode) */}
-      {activeAttempt && !isReDraftMode && (
+      {isStandardDraftView && activeAttempt && !isReDraftMode && (
         <div className="p-5 bg-[#0b1329] border border-slate-800 rounded-xl space-y-4 shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
             <div>
@@ -11371,225 +12214,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
         </div>
       )}
 
-      {/* 2. RE-DRAFT UPLOAD PANEL (When user clicked 'Upload Re-Draft') */}
-      {isReDraftMode && (
-        <div className="p-5 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-4 animate-fade-in shadow-xl">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div>
-              <h5 className="text-sm font-bold text-white flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                Submit Re-Draft (Attempt {(activeAttempt?.attempt_number || 1) + 1})
-              </h5>
-              <p className="text-xs text-slate-400">
-                {isTamil 
-                  ? 'Upload revised Original Video and select the Draft Submission Date. Previous attempts remain in history.'
-                  : 'Upload revised Original Video and Tamil Translated Video, then select the Draft Submission Date.'}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => { 
-                setIsReDraftMode(false); 
-                setReDraftOriginalFile(null); 
-                setReDraftOriginalUrl(''); 
-                setReDraftTamilFile(null);
-                setReDraftTamilUrl('');
-                setReDraftSubmissionDate('');
-              }}
-              className="text-slate-400 hover:text-white text-xs font-semibold px-2.5 py-1 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-
-          <div className={`grid grid-cols-1 ${isTamil ? '' : 'md:grid-cols-2'} gap-4`}>
-            
-            {/* Re-Draft: ORIGINAL VIDEO */}
-            <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <Video size={14} className="text-blue-400" />
-                  <span>Original Video</span>
-                  <span className="text-rose-400">*</span>
-                </label>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60">
-                  Required
-                </span>
-              </div>
-
-              <div 
-                onClick={() => reDraftOriginalInputRef.current?.click()}
-                className="relative w-full h-32 border-2 border-dashed border-blue-500/50 hover:border-blue-400 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
-              >
-                {reDraftOriginalUrl ? (
-                  <div className="w-full flex flex-col items-center gap-1.5">
-                    <div className="w-16 h-16 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
-                      <video src={reDraftOriginalUrl} className="w-full h-full object-cover" />
-                    </div>
-                    <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{reDraftOriginalFile?.name || 'Original Video'}</span>
-                    <span className="text-[10px] text-slate-400 underline">Click to change</span>
-                  </div>
-                ) : (
-                  <>
-                    <UploadCloud className="text-blue-400 mb-1" size={24} />
-                    <span className="text-xs text-blue-300 font-semibold">Upload Original Video</span>
-                    <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
-                  </>
-                )}
-                <input 
-                  ref={reDraftOriginalInputRef}
-                  type="file" 
-                  accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
-                  onChange={e => {
-                    if (e.target.files && e.target.files[0]) {
-                      const f = e.target.files[0];
-                      if (validateVideoFile(f)) {
-                        setReDraftOriginalFile(f);
-                        setReDraftOriginalUrl(URL.createObjectURL(f));
-                      }
-                      e.target.value = '';
-                    }
-                  }} 
-                  className="hidden" 
-                />
-              </div>
-            </div>
-
-            {/* Re-Draft: TAMIL TRANSLATED VIDEO (Only for Non-Tamil) */}
-            {!isTamil && (
-              <div className="p-4 bg-[#070c18] border border-purple-500/40 rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Video size={14} className="text-purple-400" />
-                    <span>Tamil Translated Video</span>
-                  </label>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase">
-                    Optional
-                  </span>
-                </div>
-
-                <div 
-                  onClick={() => reDraftTamilInputRef.current?.click()}
-                  className="relative w-full h-32 border-2 border-dashed border-purple-500/50 hover:border-purple-400 rounded-xl bg-[#0b1329] flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
-                >
-                  {reDraftTamilUrl ? (
-                    <div className="w-full flex flex-col items-center gap-1.5">
-                      <div className="w-16 h-16 rounded-lg bg-black overflow-hidden flex items-center justify-center shadow">
-                        <video src={reDraftTamilUrl} className="w-full h-full object-cover" />
-                      </div>
-                      <span className="text-[11px] text-purple-300 font-medium truncate max-w-xs">{reDraftTamilFile?.name || 'Tamil Translated Video'}</span>
-                      <span className="text-[10px] text-slate-400 underline">Click to change</span>
-                    </div>
-                  ) : (
-                    <>
-                      <UploadCloud className="text-purple-400 mb-1" size={24} />
-                      <span className="text-xs text-purple-300 font-semibold">Upload Tamil Translated Video</span>
-                      <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
-                    </>
-                  )}
-                  <input 
-                    ref={reDraftTamilInputRef}
-                    type="file" 
-                    accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
-                    onChange={e => {
-                      if (e.target.files && e.target.files[0]) {
-                        const f = e.target.files[0];
-                        if (validateVideoFile(f)) {
-                          setReDraftTamilFile(f);
-                          setReDraftTamilUrl(URL.createObjectURL(f));
-                        }
-                        e.target.value = '';
-                      }
-                    }} 
-                    className="hidden" 
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Tamil info notice in Re-Draft mode */}
-          {isTamil && (
-            <div className="p-3 bg-purple-950/25 border border-purple-800/40 rounded-xl flex items-center gap-2.5 text-xs text-purple-300">
-              <CheckCircle2 size={16} className="text-purple-400 shrink-0" />
-              <span>Tamil Translated Video is not required because the influencer&apos;s target language is <strong>Tamil</strong>.</span>
-            </div>
-          )}
-
-          {/* Re-Draft Submission Date Input */}
-          <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-2 animate-fade-in">
-            <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
-                DRAFT SUBMISSION DATE *
-              </label>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
-                Required
-              </span>
-            </div>
-            <div className="relative">
-              <input 
-                ref={reDraftDateInputRef}
-                type="date"
-                value={reDraftSubmissionDate}
-                onChange={e => setReDraftSubmissionDate(e.target.value)}
-                style={{ colorScheme: 'dark' }}
-                className="w-full bg-[#0b1329] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => reDraftDateInputRef.current?.showPicker?.()}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
-                title="Open calendar"
-              >
-                <Calendar size={18} />
-              </button>
-            </div>
-            <span className="text-[11px] text-slate-400 block">
-              Enter the date when this revised re-draft was submitted.
-            </span>
-          </div>
-
-          <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
-            <button
-              type="button"
-              disabled={isUploading}
-              onClick={() => {
-                setIsReDraftMode(false);
-                setReDraftOriginalFile(null);
-                setReDraftOriginalUrl('');
-                setReDraftTamilFile(null);
-                setReDraftTamilUrl('');
-                setReDraftSubmissionDate('');
-              }}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={isUploading || !canSubmitReDraft}
-              onClick={handleSubmitReDraft}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center gap-2 cursor-pointer"
-            >
-              {isUploading ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>Uploading...</span>
-                </>
-              ) : (
-                <>
-                  <Check size={14} strokeWidth={2.5} />
-                  <span>Save Draft Submission</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* 3. FIRST-TIME DRAFT UPLOAD (When no draft attempt exists yet) */}
-      {attempts.length === 0 && !isReDraftMode && (
+      {isStandardDraftView && attempts.length === 0 && !isReDraftMode && (
         <div className="space-y-4">
           <div className="border-b border-slate-800 pb-2">
             <h5 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
@@ -12000,7 +12626,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
       )}
 
       {/* 5. APPROVAL & TIMING CONTROLS */}
-      {!isReDraftMode && activeAttempt && (
+      {(isReDraftSubmittedView || (isStandardDraftView && activeAttempt)) && !isReDraftMode && (
         <div className="space-y-6 pt-2 border-t border-slate-800 animate-fade-in">
           {/* Manual Draft Submit Date Picker */}
           <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-2">
@@ -12657,7 +13283,14 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     }
   };
 
+  const isPaymentCompleted = isInfluencerPaymentCompleted(record, videoNumber);
+
   const handleSavePostDate = async () => {
+    if (!isPaymentCompleted) {
+      toast.error(`Cannot save Post Date for Video ${videoNumber}: Payment must be completed first.`);
+      return;
+    }
+
     if (selectedPlatforms.length === 0) {
       toast.error('Please select at least one platform (Instagram, YouTube, or Facebook).');
       return;
@@ -12750,6 +13383,19 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
+      {/* Prerequisite Alert Banner */}
+      {!isPaymentCompleted && (
+        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-600/60 text-amber-200 flex items-start gap-3 text-xs shadow-md">
+          <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
+          <div>
+            <h5 className="font-bold text-amber-300 uppercase tracking-wider">Prerequisite Required: Payment Incomplete</h5>
+            <p className="mt-0.5 text-amber-200/90 leading-relaxed">
+              Payment for Video {videoNumber} must be completed before configuring and saving the Post Date. Please navigate to the Payment step first.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 1. MANUAL POST DATE CARD */}
       <div>
         <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
@@ -12866,7 +13512,8 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
                   <button
                     type="button"
                     onClick={handleSavePostDate}
-                    disabled={isSavingDate || !isFormValid}
+                    disabled={isSavingDate || !isFormValid || !isPaymentCompleted}
+                    title={!isPaymentCompleted ? 'Payment must be completed first' : 'Save Post Date'}
                     className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
                   >
                     {isSavingDate ? (
@@ -13164,10 +13811,15 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
     return hasValidLink && hasPostedDate;
   };
 
-  const allPlatformsCompleted = targetPlatforms.length > 0 && targetPlatforms.every(p => isPlatformComplete(p));
+  const isPostDateCompleted = isInfluencerPostDateCompleted(record, videoNumber);
   const isAlreadyCompleted = Boolean(existingData.confirmed_live === true || existingData.completed === true) && allPlatformsCompleted;
 
   const handleSaveAfterPost = async () => {
+    if (!isPostDateCompleted) {
+      toast.error(`Cannot complete After Post for Video ${videoNumber}: Post Date has not been confirmed yet.`);
+      return;
+    }
+
     // Validate each platform: date is required, time is optional
     for (const p of targetPlatforms) {
       const entry = platformEntries[p];
@@ -13248,6 +13900,19 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-6">
+      {/* Prerequisite Alert Banner */}
+      {!isPostDateCompleted && (
+        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-600/60 text-amber-200 flex items-start gap-3 text-xs shadow-md">
+          <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
+          <div>
+            <h5 className="font-bold text-amber-300 uppercase tracking-wider">Prerequisite Required: Post Date Incomplete</h5>
+            <p className="mt-0.5 text-amber-200/90 leading-relaxed">
+              Post Date for Video {videoNumber} must be assigned and confirmed before completing After Post. Please configure the Post Date step first.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header Info */}
       <div className="flex items-center justify-between pb-4 border-b border-slate-800">
         <div>
@@ -13447,7 +14112,8 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
         <button 
           type="button"
           onClick={handleSaveAfterPost} 
-          disabled={isSaving || !allPlatformsCompleted}
+          disabled={isSaving || !allPlatformsCompleted || !isPostDateCompleted}
+          title={!isPostDateCompleted ? 'Post Date must be confirmed first' : 'Mark as Live / Completed'}
           className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer shrink-0"
         >
           {isSaving ? (
@@ -13531,7 +14197,14 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
     }
   };
 
+  const isDraftApproved = isInfluencerDraftApproved(record, videoNumber);
+
   const handleSave = async () => {
+    if (!isDraftApproved) {
+      toast.error(`Cannot complete payment for Video ${videoNumber}: Draft must be Approved first.`);
+      return;
+    }
+
     if (!amount) {
       toast.error(`Please enter the payment amount for Video ${videoNumber}.`);
       return;
@@ -13582,6 +14255,19 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
+      {/* Prerequisite Alert Banner */}
+      {!isDraftApproved && (
+        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-600/60 text-amber-200 flex items-start gap-3 text-xs shadow-md">
+          <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
+          <div>
+            <h5 className="font-bold text-amber-300 uppercase tracking-wider">Prerequisite Required: Draft Not Approved</h5>
+            <p className="mt-0.5 text-amber-200/90 leading-relaxed">
+              Video {videoNumber} draft must be verified and marked as <strong>Approved</strong> before confirming payment. Please navigate to the Draft step to approve the video first.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Compact Payment Details Card from Campaign Influencer */}
       <StatusTrackingPaymentCard 
         paymentInfo={paymentInfoForCard} 
@@ -13655,7 +14341,8 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
       <div className="flex justify-end pt-4 border-t border-slate-800">
         <button 
           onClick={handleSave} 
-          disabled={isUploading}
+          disabled={isUploading || !isDraftApproved}
+          title={!isDraftApproved ? 'Draft must be approved first' : 'Confirm payment'}
           className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer"
         >
           {isUploading ? (

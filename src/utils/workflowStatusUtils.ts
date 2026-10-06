@@ -18,6 +18,8 @@ export type WorkflowStateKey =
   | 'pay_advance'
   | 'timeline'
   | 'draft'
+  | 're_draft'
+  | 're_draft_submitted'
   | 'post_date'
   | 'payment'
   | 'after_post'
@@ -31,6 +33,9 @@ export interface WorkflowStepHelpers {
   isPayAdvanceCompleted?: (r: any, v: number) => boolean;
   isTimelineCompleted?: (r: any, v: number) => boolean;
   isDraftCompleted?: (r: any, v: number) => boolean;
+  isDraftApprovalPending?: (r: any, v: number) => boolean;
+  isReDraftRequired?: (r: any, v: number) => boolean;
+  isReDraftSubmitted?: (r: any, v: number) => boolean;
   isPostDateCompleted?: (r: any, v: number) => boolean;
   isPaymentCompleted?: (r: any, v: number) => boolean;
   isAfterPostCompleted?: (r: any, v: number) => boolean;
@@ -289,26 +294,44 @@ export function getCurrentWorkflowState(
   }
 
   // ALL VIDEOS (1 TO 6) UNIFIED WORKFLOW:
-  // 1. Delivered -> 2. Share Script -> 3. Call Explain -> 4. Draft -> 5. Payment -> 6. Post Date -> 7. After Post
+  // 1. Delivered -> 2. Share Script -> 3. Call Explain -> 4. Draft -> Re-Draft -> Re-Draft Submitted -> Draft Approved -> 5. Payment -> 6. Post Date -> 7. After Post
   if (!isScriptCompleted) {
     return 'delivered';
   }
   if (!isCallCompleted && !isCallSkipped) {
     return 'share_script';
   }
+
+  // Re-Draft & Re-Draft Submitted priority
+  const isReDraftRequired = helpers?.isReDraftRequired ? helpers.isReDraftRequired(record, videoNumber) : false;
+  if (isReDraftRequired) {
+    return 're_draft';
+  }
+
+  const isReDraftSubmitted = helpers?.isReDraftSubmitted ? helpers.isReDraftSubmitted(record, videoNumber) : false;
+  if (isReDraftSubmitted) {
+    return 're_draft_submitted';
+  }
+
   if (!isDraftCompleted) {
+    const isPending = helpers?.isDraftApprovalPending ? helpers.isDraftApprovalPending(record, videoNumber) : false;
+    if (isPending) {
+      return 'draft';
+    }
     return isCallSkipped ? 'call_skipped' : 'call_explain';
   }
+
+  // Draft is Approved -> Next is Payment (Do NOT skip Payment)
   if (!isPaymentCompleted) {
-    return 'draft';
-  }
-  if (!isPostDateCompleted) {
     return 'payment';
   }
-  if (!isAfterPostCompleted) {
+  if (!isPostDateCompleted) {
     return 'post_date';
   }
-  return 'after_post';
+  if (!isAfterPostCompleted) {
+    return 'after_post';
+  }
+  return 'completed';
 }
 
 /**
@@ -328,6 +351,8 @@ export function getStepCompletion(
   if (stepId === 'pay_advance') return helpers?.isPayAdvanceCompleted ? helpers.isPayAdvanceCompleted(record, videoNumber) : false;
   if (stepId === 'timeline') return helpers?.isTimelineCompleted ? helpers.isTimelineCompleted(record, videoNumber) : false;
   if (stepId === 'draft') return helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false;
+  if (stepId === 're_draft') return helpers?.isReDraftSubmitted ? helpers.isReDraftSubmitted(record, videoNumber) || (helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false) : false;
+  if (stepId === 're_draft_submitted') return helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false;
   if (stepId === 'post_date') return helpers?.isPostDateCompleted ? helpers.isPostDateCompleted(record, videoNumber) : false;
   if (stepId === 'payment') return helpers?.isPaymentCompleted ? helpers.isPaymentCompleted(record, videoNumber) : false;
   if (stepId === 'after_post') return helpers?.isAfterPostCompleted ? helpers.isAfterPostCompleted(record, videoNumber) : false;
