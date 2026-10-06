@@ -14415,38 +14415,67 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
 }) => {
   // Automatically inherit and reflect platform list from Post Date step
   const targetPlatforms: string[] = useMemo(() => {
+    const sanitizePlatforms = (platforms: any[]): string[] => {
+      return Array.from(
+        new Set(
+          platforms
+            .map(p => String(p).trim())
+            .filter(p => p.length > 0)
+        )
+      );
+    };
+
     // 1. From existingData.selected_platforms
-    if (Array.isArray(existingData.platforms_data && existingData.selected_platforms) && existingData.selected_platforms.length > 0) {
-      return existingData.selected_platforms;
+    if (Array.isArray(existingData.selected_platforms) && existingData.selected_platforms.length > 0) {
+      return sanitizePlatforms(existingData.selected_platforms);
+    }
+    // 1b. From existingData.platforms_data keys
+    if (existingData.platforms_data && typeof existingData.platforms_data === 'object') {
+      const keys = Object.keys(existingData.platforms_data).filter(Boolean);
+      if (keys.length > 0) return sanitizePlatforms(keys);
     }
     // 2. From postDateData.selected_platforms
     if (Array.isArray(postDateData?.selected_platforms) && postDateData.selected_platforms.length > 0) {
-      return postDateData.selected_platforms;
+      return sanitizePlatforms(postDateData.selected_platforms);
     }
     // 3. From postDateData.platform string (e.g. "Instagram + YouTube")
     if (postDateData?.platform && typeof postDateData.platform === 'string') {
-      const split = postDateData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
-      if (split.length > 0) return split;
+      const split = postDateData.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
+      if (split.length > 0) return sanitizePlatforms(split);
     }
-    // 4. Also check workflow steps directly from record
+    // 4. From record.postDates entry for this video
+    const scheduleEntry = (record.postDates || []).find((p: any) => Number(p.video_number) === Number(videoNumber));
+    if (Array.isArray(scheduleEntry?.selected_platforms) && scheduleEntry.selected_platforms.length > 0) {
+      return sanitizePlatforms(scheduleEntry.selected_platforms);
+    }
+    if (scheduleEntry?.platform && typeof scheduleEntry.platform === 'string') {
+      const split = scheduleEntry.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
+      if (split.length > 0) return sanitizePlatforms(split);
+    }
+    // 5. Also check workflow steps directly from record
     try {
       const vWorkflow = getVideoWorkflow(record, videoNumber);
       const pdData = vWorkflow?.steps?.post_date?.data;
       if (Array.isArray(pdData?.selected_platforms) && pdData.selected_platforms.length > 0) {
-        return pdData.selected_platforms;
+        return sanitizePlatforms(pdData.selected_platforms);
       }
       if (pdData?.platform && typeof pdData.platform === 'string') {
-        const split = pdData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
-        if (split.length > 0) return split;
+        const split = pdData.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
+        if (split.length > 0) return sanitizePlatforms(split);
       }
     } catch (e) {}
-    // 5. From existingData.platform
+    // 6. From existingData.platform
     if (existingData.platform && typeof existingData.platform === 'string') {
-      const split = existingData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
-      if (split.length > 0) return split;
+      const split = existingData.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
+      if (split.length > 0) return sanitizePlatforms(split);
     }
-    return ['Instagram'];
-  }, [existingData.platforms_data, existingData.selected_platforms, existingData.platform, postDateData?.selected_platforms, postDateData?.platform, record, videoNumber]);
+    // 7. Backward compatibility for legacy single-platform data if already completed or has link/postedAt
+    if (existingData.link || existingData.postedAt || (videoNumber === 1 && record.final_post_link) || isInfluencerPostDateCompleted(record, videoNumber)) {
+      return ['Instagram'];
+    }
+    // 8. Safely return empty array when no platforms selected in Post Date
+    return [];
+  }, [existingData, postDateData, record, videoNumber]);
 
   // Extract planned Post Date from Post Date step
   const plannedPostDate = useMemo(() => {
@@ -14622,12 +14651,21 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
   };
 
   // Completion check: required = valid live link + filled posted_date; posted_time is OPTIONAL
-  const isPlatformComplete = (platform: string) => {
+  const isPlatformComplete = useCallback((platform: string) => {
+    if (!platform) return false;
     const entry = platformEntries[platform];
     const hasValidLink = Boolean(entry?.link?.trim() && !isFakeUrl(entry.link));
     const hasPostedDate = Boolean(entry?.posted_date?.trim());
     return hasValidLink && hasPostedDate;
-  };
+  }, [platformEntries]);
+
+  // Evaluates whether ALL platforms selected for this specific influencer + video are completed
+  const allPlatformsCompleted = useMemo(() => {
+    if (!Array.isArray(targetPlatforms) || targetPlatforms.length === 0) {
+      return false;
+    }
+    return targetPlatforms.every(p => isPlatformComplete(p));
+  }, [targetPlatforms, isPlatformComplete]);
 
   const isPostDateCompleted = isInfluencerPostDateCompleted(record, videoNumber);
   const isAlreadyCompleted = Boolean(existingData.confirmed_live === true || existingData.completed === true) && allPlatformsCompleted;
@@ -14635,6 +14673,11 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
   const handleSaveAfterPost = async () => {
     if (!isPostDateCompleted) {
       toast.error(`Cannot complete After Post for Video ${videoNumber}: Post Date has not been confirmed yet.`);
+      return;
+    }
+
+    if (!Array.isArray(targetPlatforms) || targetPlatforms.length === 0) {
+      toast.error('Select at least one platform in Post Date before completing After Post.');
       return;
     }
 
@@ -14774,22 +14817,39 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
               Required Platforms (Inherited from Post Date)
             </span>
             <div className="flex items-center gap-1.5 flex-wrap mt-1">
-              {targetPlatforms.map((p) => (
-                <span key={p} className="text-xs font-bold px-2.5 py-0.5 rounded bg-blue-950/90 text-blue-300 border border-blue-800/60">
-                  {p}
+              {targetPlatforms.length > 0 ? (
+                targetPlatforms.map((p) => (
+                  <span key={p} className="text-xs font-bold px-2.5 py-0.5 rounded bg-blue-950/90 text-blue-300 border border-blue-800/60">
+                    {p}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-amber-400 italic">
+                  No platforms selected in Post Date
                 </span>
-              ))}
+              )}
             </div>
           </div>
         </div>
         <span className="text-[11px] text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 self-start sm:self-auto">
-          {targetPlatforms.filter(isPlatformComplete).length} of {targetPlatforms.length} platform(s) complete
+          {targetPlatforms.length > 0 
+            ? `${targetPlatforms.filter(isPlatformComplete).length} of ${targetPlatforms.length} platform(s) complete`
+            : '0 platforms'}
         </span>
       </div>
 
       {/* Platform Cards */}
-      <div className="space-y-4">
-        {targetPlatforms.map((platform, idx) => {
+      {targetPlatforms.length === 0 ? (
+        <div className="p-6 rounded-xl bg-slate-900/60 border border-dashed border-slate-700 text-center space-y-2">
+          <Globe className="mx-auto text-slate-500" size={32} />
+          <h6 className="text-sm font-semibold text-slate-200">No Platforms Configured</h6>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Select at least one platform in Post Date before completing After Post.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {targetPlatforms.map((platform, idx) => {
           const entry = platformEntries[platform] || { link: '', posted_date: '', posted_time: '', is_custom_date: false };
           const isComplete = isPlatformComplete(platform);
           const hasLink = Boolean(entry.link?.trim());
@@ -14925,14 +14985,19 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
 
       {/* Completion Validation Warning & Action Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-slate-800">
         <div>
           {!allPlatformsCompleted ? (
             <p className="text-xs text-amber-400 font-medium flex items-center gap-1.5">
-              <span>⚠️ Enter valid live post URLs and posted date for all {targetPlatforms.length} platform(s) to complete.</span>
+              <span>
+                {targetPlatforms.length === 0
+                  ? '⚠️ Select at least one platform in Post Date before completing After Post.'
+                  : `⚠️ Enter valid live post URLs and posted date for all ${targetPlatforms.length} platform(s) to complete.`}
+              </span>
             </p>
           ) : (
             <p className="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
@@ -14945,8 +15010,16 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
         <button 
           type="button"
           onClick={handleSaveAfterPost} 
-          disabled={isSaving || !allPlatformsCompleted || !isPostDateCompleted}
-          title={!isPostDateCompleted ? 'Post Date must be confirmed first' : 'Mark as Live / Completed'}
+          disabled={isSaving || !allPlatformsCompleted || !isPostDateCompleted || targetPlatforms.length === 0}
+          title={
+            !isPostDateCompleted 
+              ? 'Post Date must be confirmed first' 
+              : targetPlatforms.length === 0
+              ? 'Select at least one platform in Post Date before completing After Post'
+              : !allPlatformsCompleted
+              ? 'Enter valid live post URLs and posted date for all platforms'
+              : 'Mark as Live / Completed'
+          }
           className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer shrink-0"
         >
           {isSaving ? (
