@@ -10,7 +10,7 @@ import {
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Pause, Edit3, Loader2,
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Activity, Truck, Share2, Globe, GitBranch,
   Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward,
-  FilePlus, CheckCircle2, Save, Sparkles, Radio, Image as ImageIcon, Upload
+  FilePlus, CheckCircle2, Save, Sparkles, Radio, Image as ImageIcon, Upload, AlertCircle
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -161,12 +161,12 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain', icon: PhoneCall },
   { id: 'call_skipped', label: 'Call Skipped', shortLabel: 'Call Skipped', icon: PhoneOff },
   { id: 'draft_pending', label: 'Draft Pending', shortLabel: 'Draft Pending', icon: Clock },
+  { id: 'draft_approval_pending', label: 'Draft Approval Pending', shortLabel: 'Draft Approval Pending', icon: AlertCircle },
   { id: 'draft', label: 'Draft Approved', shortLabel: 'Draft Approved', icon: Video },
   { id: 're_draft', label: 'Re-Draft', shortLabel: 'Re-Draft', icon: RotateCcw },
   { id: 're_draft_submitted', label: 'Re-Draft Submitted', shortLabel: 'Re-Draft Submitted', icon: CheckCircle2 },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
-  { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
 ];
 
 export const VIDEO_1_SUMMARY_BOX_CONFIGS = WORKFLOW_SUMMARY_BOX_CONFIGS;
@@ -13312,11 +13312,14 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     });
   };
 
+  const hasGeneratedDeliverables = useMemo(() => {
+    return selectedPlatforms.some(plat => {
+      const d = platformDeliverables[plat];
+      return Boolean(d && (d.status === 'generated' || d.final_post_link || d.final_description));
+    });
+  }, [selectedPlatforms, platformDeliverables]);
+
   const handleGenerateLinkAndDescription = async () => {
-    if (!isDraftApproved) {
-      toast.error('Draft must be marked as Approved before generating deliverables.');
-      return;
-    }
     if (selectedPlatforms.length === 0) {
       toast.error('Please select at least one social platform.');
       return;
@@ -13336,6 +13339,15 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       // Find matching description for this product from Description Management
       const matchedDesc = allDescriptions.find(d => {
         const dp = (d.product || '').trim().toLowerCase();
+        const dVid = (d as any).video || (d as any).video_number;
+        if (dVid) {
+          const normDVid = String(dVid).toLowerCase();
+          const matchesVid = normDVid === `video ${videoNumber}`.toLowerCase() || normDVid === String(videoNumber) || normDVid === `v${videoNumber}`;
+          if (!matchesVid) return false;
+        }
+        return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
+      }) || allDescriptions.find(d => {
+        const dp = (d.product || '').trim().toLowerCase();
         return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
       });
 
@@ -13343,20 +13355,27 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       const missingWarnings: string[] = [];
       let successCount = 0;
 
+      const currentInfCode = (record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || '').trim().toLowerCase();
+      const rawCodeClean = currentInfCode.replace(/^#+/, '');
+      const currentInfId = String(record.influencer_id || '').trim();
+
       for (const plat of selectedPlatforms) {
         const normPlat = plat.trim().toLowerCase();
 
         // Exact lookup in Tracking Link department
         const matchedLink = allTrackingLinks.find(link => {
           // 1. Influencer matching
-          const matchInf = String(link.influencer_id) === String(record.influencer_id) ||
-            (link.influencer_code && (link.influencer_code.toLowerCase() === (record.influencer?.code || '').toLowerCase() || link.influencer_code.toLowerCase() === (record.dispatch?.influencer_code || '').toLowerCase())) ||
-            (link.creator_code && (link.creator_code.toLowerCase() === (record.influencer?.code || '').toLowerCase() || link.creator_code.toLowerCase() === (record.dispatch?.influencer_code || '').toLowerCase()));
+          const linkInfId = String(link.influencer_id || '').trim();
+          const linkInfCode = (link.influencer_code || '').trim().toLowerCase().replace(/^#+/, '');
+          const linkCreatorCode = (link.creator_code || '').trim().toLowerCase().replace(/^#+/, '');
+
+          const matchInf = (linkInfId && currentInfId && linkInfId === currentInfId) ||
+            (rawCodeClean && (linkInfCode === rawCodeClean || linkCreatorCode === rawCodeClean));
           if (!matchInf) return false;
 
-          // 2. Video matching
-          const linkVidNum = (link.video_number || '').toLowerCase();
-          const linkUtmContent = (link.utm_content || '').toLowerCase();
+          // 2. Video matching (v1 to v6)
+          const linkVidNum = (link.video_number || '').trim().toLowerCase();
+          const linkUtmContent = (link.utm_content || '').trim().toLowerCase();
           const matchVideo =
             linkVidNum === `video ${videoNumber}`.toLowerCase() ||
             linkVidNum === String(videoNumber) ||
@@ -13370,11 +13389,13 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
           const matchPlat = linkPlat === normPlat || linkUtmSource === normPlat;
           if (!matchPlat) return false;
 
-          // 4. Product matching
+          // 4. Product matching (with legacy placeholder label protection)
           if (normProd && link.product) {
             const lp = link.product.trim().toLowerCase();
-            const matchProd = lp === normProd || normalizeScriptMatch(lp) === normalizeScriptMatch(normProd);
-            if (!matchProd) return false;
+            if (!lp.startsWith('video ')) {
+              const matchProd = lp === normProd || normalizeScriptMatch(lp) === normalizeScriptMatch(normProd);
+              if (!matchProd) return false;
+            }
           }
 
           return true;
@@ -13409,6 +13430,27 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       }
 
       setPlatformDeliverables(updatedDeliverables);
+
+      // Persist immediately to Supabase
+      if (onSave) {
+        const primaryPlat = selectedPlatforms[0];
+        const primaryDeliverable = primaryPlat ? updatedDeliverables[primaryPlat] : null;
+        const finalPostLink = primaryDeliverable?.final_post_link || '';
+        const finalDescription = primaryDeliverable?.final_description || '';
+
+        await onSave({
+          ...existingData,
+          selected_platforms: selectedPlatforms,
+          platform: selectedPlatforms.join(' + '),
+          platform_deliverables: updatedDeliverables,
+          final_post_link: finalPostLink,
+          final_description: finalDescription,
+          finalL: finalPostLink,
+          finalD: finalDescription,
+          is_modified: true,
+          suppressDefaultToast: true
+        }, false);
+      }
 
       if (missingWarnings.length === 0) {
         toast.success('✓ Link and Description generated successfully.');
@@ -13690,275 +13732,39 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       </div>
 
       {/* 2. APPROVED DELIVERABLE INFO SECTION */}
-      {isDraftApproved ? (
-        <div className="animate-fade-in space-y-5 bg-[#0b1329] p-5 sm:p-6 rounded-2xl border border-slate-800 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                <Check size={14} strokeWidth={2.5} />
-              </div>
-              <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                Approved Deliverable Info
-              </h6>
+      <div className="animate-fade-in space-y-5 bg-[#0b1329] p-5 sm:p-6 rounded-2xl border border-slate-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
+          <div className="flex items-center gap-2">
+            <div className={`w-6 h-6 rounded-lg ${isDraftApproved ? 'bg-emerald-500/20 text-emerald-400' : 'bg-purple-500/20 text-purple-400'} flex items-center justify-center`}>
+              <Check size={14} strokeWidth={2.5} />
             </div>
-            <span className="text-[11px] text-slate-400">
-              Source of Truth: Influencer Tracking Links & Description Management
-            </span>
+            <h6 className={`text-xs font-bold ${isDraftApproved ? 'text-emerald-400' : 'text-purple-300'} uppercase tracking-wider`}>
+              Approved Deliverable Info
+            </h6>
           </div>
-
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Draft approved. Select the platforms for the final post and generate the influencer tracking link and description.
-          </p>
-
-          {/* Unified Platform Multi-Select & Action Row */}
-          <div className="space-y-3 bg-[#070c18] p-4 rounded-xl border border-slate-800/90">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
-                  Select Platform <span className="text-purple-400">*</span>
-                </label>
-                <p className="text-[11px] text-slate-500">
-                  Select the required platforms. The final post links will be taken from Influencer Tracking Links and the caption will be taken from Description Management.
-                </p>
-              </div>
-
-              {/* Generate Link and Description Action Button */}
-              <button
-                type="button"
-                onClick={handleGenerateLinkAndDescription}
-                disabled={isGeneratingDeliverables || selectedPlatforms.length === 0}
-                className="self-start sm:self-center flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:from-purple-700 active:to-indigo-700 text-white transition-all shadow-md shadow-purple-900/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
-              >
-                {isGeneratingDeliverables ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin text-white" />
-                    <span>Generating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={16} className="text-amber-300" />
-                    <span>Generate Link and Description</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Multi-select Platform Chips (Instagram, YouTube, Facebook) */}
-            <div className="flex items-center gap-2.5 flex-wrap pt-1">
-              {availablePlatforms.map((plat) => {
-                const isSelected = selectedPlatforms.includes(plat);
-                return (
-                  <button
-                    key={plat}
-                    type="button"
-                    onClick={() => handleTogglePlatform(plat)}
-                    className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-purple-600/20 border-purple-500/80 text-white shadow-sm'
-                        : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                    }`}
-                  >
-                    <span className={`w-4 h-4 rounded-md flex items-center justify-center border text-[10px] ${
-                      isSelected
-                        ? 'bg-purple-600 border-purple-500 text-white'
-                        : 'border-slate-700 bg-slate-900/50 text-transparent'
-                    }`}>
-                      <Check size={11} strokeWidth={3} />
-                    </span>
-                    <SocialPlatformIcon platform={plat} />
-                    <span>{plat}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Platform Deliverable Sections (One per selected platform) */}
-          {selectedPlatforms.length === 0 ? (
-            <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center bg-[#070c18]/50">
-              <p className="text-xs text-slate-400">
-                Please select at least one social platform (Instagram, YouTube, or Facebook) above to generate deliverable links and captions.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4 pt-1">
-              {selectedPlatforms.map((platId) => {
-                const deliverable = platformDeliverables[platId] || {
-                  platform: platId,
-                  final_post_link: '',
-                  final_description: '',
-                  status: 'not_generated'
-                };
-
-                return (
-                  <div
-                    key={platId}
-                    className="bg-[#070c18] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4.5 sm:p-5 space-y-4 shadow-sm transition-all"
-                  >
-                    {/* Header Bar */}
-                    <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-                      <div className="flex items-center gap-2.5">
-                        <SocialPlatformIcon platform={platId} />
-                        <span className="text-sm font-bold text-white tracking-wide uppercase">
-                          {platId}
-                        </span>
-                      </div>
-                      {/* Status Badge */}
-                      {deliverable.status === 'generated' ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                          <Check size={12} strokeWidth={2.5} />
-                          <span>Generated</span>
-                        </span>
-                      ) : deliverable.status === 'link_missing' ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                          <AlertTriangle size={12} />
-                          <span>Link Missing</span>
-                        </span>
-                      ) : deliverable.status === 'desc_missing' ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                          <AlertTriangle size={12} />
-                          <span>Description Missing</span>
-                        </span>
-                      ) : deliverable.status === 'missing' ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
-                          <AlertTriangle size={12} />
-                          <span>Link & Description Missing</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700/60">
-                          <span>Not Generated</span>
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Notices if Missing */}
-                    {deliverable.status === 'link_missing' && (
-                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle size={14} className="shrink-0" />
-                          <span>Tracking link not found for <strong>{platId}</strong> (Video {videoNumber}, {assignedProductName || 'assigned product'}).</span>
-                        </div>
-                        <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Influencer Tracking Link</span>
-                      </div>
-                    )}
-                    {deliverable.status === 'desc_missing' && (
-                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle size={14} className="shrink-0" />
-                          <span>Description not found for <strong>{assignedProductName || 'assigned product'}</strong>.</span>
-                        </div>
-                        <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Description Management</span>
-                      </div>
-                    )}
-                    {deliverable.status === 'missing' && (
-                      <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs space-y-1">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle size={14} className="shrink-0" />
-                          <span>Cannot generate complete information. Both tracking link and product description are missing.</span>
-                        </div>
-                        <p className="text-[11px] text-rose-400/80 pl-5">
-                          Please ensure tracking link exists in Tracking Links and product description exists in Description Management.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* 1. FINAL POST LINK */}
-                    <div className="w-full">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                          Final Post Link
-                        </label>
-                        {deliverable.final_post_link && (
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard?.writeText(deliverable.final_post_link);
-                                toast.success(`${platId} link copied!`);
-                              }}
-                              className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                            >
-                              <Copy size={11} />
-                              <span>Copy Link</span>
-                            </button>
-                            <a
-                              href={deliverable.final_post_link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
-                            >
-                              <ExternalLink size={11} />
-                              <span>Open</span>
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                      <input
-                        type="url"
-                        value={deliverable.final_post_link}
-                        onChange={(e) => handleUpdateDeliverable(platId, 'final_post_link', e.target.value)}
-                        placeholder="https://..."
-                        className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none transition-colors font-mono"
-                      />
-                    </div>
-
-                    {/* 2. FINAL CAPTION / DESCRIPTION */}
-                    <div className="w-full">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                          Final Caption / Description
-                        </label>
-                        <div className="flex items-center gap-3">
-                          <span className="text-[11px] text-slate-500 hidden sm:inline">
-                            Multi-line supported • Preserves formatting
-                          </span>
-                          {deliverable.final_description && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard?.writeText(deliverable.final_description);
-                                toast.success(`${platId} caption copied!`);
-                              }}
-                              className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                            >
-                              <Copy size={11} />
-                              <span>Copy Caption</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <textarea
-                        value={deliverable.final_description}
-                        onChange={(e) => handleUpdateDeliverable(platId, 'final_description', e.target.value)}
-                        placeholder={`Enter complete caption and description for ${platId}...`}
-                        rows={5}
-                        style={{
-                          minHeight: '120px',
-                          height: '140px',
-                          resize: 'vertical',
-                          whiteSpace: 'pre-wrap',
-                          overflowWrap: 'break-word',
-                          wordBreak: 'break-word'
-                        }}
-                        className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl p-3.5 text-xs text-white placeholder:text-slate-600 focus:outline-none leading-relaxed transition-colors shadow-inner font-sans block resize-y"
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <span className="text-[11px] text-slate-400">
+            Source of Truth: Influencer Tracking Links & Description Management
+          </span>
         </div>
-      ) : (
-        /* Notice when Draft is not yet approved */
-        <div className="p-4 rounded-xl bg-purple-950/30 border border-purple-800/40 text-purple-200 text-xs space-y-3">
-          <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-purple-300">
-            <Sparkles size={14} className="text-amber-300 shrink-0" />
-            <span>Approved Deliverable Info</span>
+
+        <p className="text-xs text-slate-400 leading-relaxed">
+          {isDraftApproved
+            ? 'Draft approved. Select the platforms for the final post and generate the influencer tracking link and description.'
+            : 'Select the platforms for the final post and generate the influencer tracking link and description.'}
+        </p>
+
+        {/* Unified Platform Multi-Select */}
+        <div className="space-y-3 bg-[#070c18] p-4 rounded-xl border border-slate-800/90">
+          <div>
+            <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+              Select Platform <span className="text-purple-400">*</span>
+            </label>
+            <p className="text-[11px] text-slate-500">
+              Select the required platforms for the final post. The final post links will be taken from Influencer Tracking Links and the caption will be taken from Description Management.
+            </p>
           </div>
-          <p className="text-purple-200/80 leading-relaxed">
-            Draft is not yet approved for Video {videoNumber}. Select platforms below to configure post date; tracking link and description generation will unlock once the draft is marked as Approved.
-          </p>
+
+          {/* Multi-select Platform Chips (Instagram, YouTube, Facebook) */}
           <div className="flex items-center gap-2.5 flex-wrap pt-1">
             {availablePlatforms.map((plat) => {
               const isSelected = selectedPlatforms.includes(plat);
@@ -13987,7 +13793,212 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
             })}
           </div>
         </div>
-      )}
+
+        {/* GENERATE FINAL LINK & DESCRIPTION */}
+        {selectedPlatforms.length > 0 && (
+          <div className="space-y-3 bg-[#070c18] p-4 rounded-xl border border-slate-800/90">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h6 className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
+                  Generate Final Link & Description
+                </h6>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Automatically fetch matching product tracking URLs and captions for Video {videoNumber} across selected platforms.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGenerateLinkAndDescription}
+                disabled={isGeneratingDeliverables || selectedPlatforms.length === 0}
+                className="self-start sm:self-center flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:from-purple-700 active:to-indigo-700 text-white transition-all shadow-md shadow-purple-900/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+              >
+                {isGeneratingDeliverables ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin text-white" />
+                    <span>Generating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} className="text-amber-300" />
+                    <span>{hasGeneratedDeliverables ? 'Regenerate Link and Description' : 'Generate Link and Description'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Platform Deliverable Sections (Shown ONLY after generation) */}
+        {hasGeneratedDeliverables && (
+          <div className="space-y-4 pt-1">
+            {selectedPlatforms.map((platId) => {
+              const deliverable = platformDeliverables[platId] || {
+                platform: platId,
+                final_post_link: '',
+                final_description: '',
+                status: 'not_generated'
+              };
+
+              return (
+                <div
+                  key={platId}
+                  className="bg-[#070c18] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4.5 sm:p-5 space-y-4 shadow-sm transition-all"
+                >
+                  {/* Header Bar */}
+                  <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                    <div className="flex items-center gap-2.5">
+                      <SocialPlatformIcon platform={platId} />
+                      <span className="text-sm font-bold text-white tracking-wide uppercase">
+                        {platId}
+                      </span>
+                    </div>
+                    {/* Status Badge */}
+                    {deliverable.status === 'generated' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                        <Check size={12} strokeWidth={2.5} />
+                        <span>Generated</span>
+                      </span>
+                    ) : deliverable.status === 'link_missing' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        <AlertTriangle size={12} />
+                        <span>Link Missing</span>
+                      </span>
+                    ) : deliverable.status === 'desc_missing' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        <AlertTriangle size={12} />
+                        <span>Description Missing</span>
+                      </span>
+                    ) : deliverable.status === 'missing' ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                        <AlertTriangle size={12} />
+                        <span>Link & Description Missing</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700/60">
+                        <span>Not Generated</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Notices if Missing */}
+                  {deliverable.status === 'link_missing' && (
+                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle size={14} className="shrink-0" />
+                        <span>Tracking link not found for <strong>{platId}</strong> (Video {videoNumber}, {assignedProductName || 'assigned product'}).</span>
+                      </div>
+                      <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Influencer Tracking Link</span>
+                    </div>
+                  )}
+                  {deliverable.status === 'desc_missing' && (
+                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle size={14} className="shrink-0" />
+                        <span>Description not found for <strong>{assignedProductName || 'assigned product'}</strong> (Video {videoNumber}).</span>
+                      </div>
+                      <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Description Management</span>
+                    </div>
+                  )}
+                  {deliverable.status === 'missing' && (
+                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs space-y-1">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle size={14} className="shrink-0" />
+                        <span>Cannot generate complete information. Both tracking link and product description are missing.</span>
+                      </div>
+                      <p className="text-[11px] text-rose-400/80 pl-5">
+                        Please ensure tracking link exists in Tracking Links and product description exists in Description Management.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 1. FINAL PRODUCT LINK */}
+                  <div className="w-full">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        Final Product Link
+                      </label>
+                      {deliverable.final_post_link && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(deliverable.final_post_link);
+                              toast.success(`${platId} link copied!`);
+                            }}
+                            className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <Copy size={11} />
+                            <span>Copy Link</span>
+                          </button>
+                          <a
+                            href={deliverable.final_post_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                          >
+                            <ExternalLink size={11} />
+                            <span>Open</span>
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                    <input
+                      type="url"
+                      value={deliverable.final_post_link}
+                      onChange={(e) => handleUpdateDeliverable(platId, 'final_post_link', e.target.value)}
+                      placeholder="https://..."
+                      className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none transition-colors font-mono"
+                    />
+                  </div>
+
+                  {/* 2. FINAL CAPTION / DESCRIPTION */}
+                  <div className="w-full">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        Final Caption / Description
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[11px] text-slate-500 hidden sm:inline">
+                          Multi-line supported • Preserves formatting
+                        </span>
+                        {deliverable.final_description && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(deliverable.final_description);
+                              toast.success(`${platId} caption copied!`);
+                            }}
+                            className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <Copy size={11} />
+                            <span>Copy Caption</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <textarea
+                      value={deliverable.final_description}
+                      onChange={(e) => handleUpdateDeliverable(platId, 'final_description', e.target.value)}
+                      placeholder={`Enter complete caption and description for ${platId}...`}
+                      rows={5}
+                      style={{
+                        minHeight: '120px',
+                        height: '140px',
+                        resize: 'vertical',
+                        whiteSpace: 'pre-wrap',
+                        overflowWrap: 'break-word',
+                        wordBreak: 'break-word'
+                      }}
+                      className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl p-3.5 text-xs text-white placeholder:text-slate-600 focus:outline-none leading-relaxed transition-colors shadow-inner font-sans block resize-y"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* 3. POST DATE & THUMBNAIL CARD */}
       <div>
