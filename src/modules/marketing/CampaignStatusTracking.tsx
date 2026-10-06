@@ -2484,11 +2484,13 @@ export const isInfluencerAfterPostCompleted = (record: StatusTrackingRecord, vid
   const apStep = vData.steps['after_post'];
   if (!apStep) return false;
 
+  const pdStep = vData.steps['post_date'];
   const pData = apStep.data?.platforms_data;
-  const sPlatforms = apStep.data?.selected_platforms;
-  if (pData && Array.isArray(sPlatforms) && sPlatforms.length > 0) {
+  const sPlatforms = apStep.data?.selected_platforms || pdStep?.data?.selected_platforms || (Array.isArray(pdStep?.data?.platform) ? pdStep.data.platform : (typeof pdStep?.data?.platform === 'string' ? pdStep.data.platform.split('+').map((s: string) => s.trim()).filter(Boolean) : []));
+
+  if (Array.isArray(sPlatforms) && sPlatforms.length > 0) {
     const allPlatformsValid = sPlatforms.every((p: string) => {
-      const entry = pData[p];
+      const entry = pData?.[p] || (sPlatforms.length === 1 ? apStep.data : null);
       const hasDate = Boolean(entry?.posted_date || entry?.postedAt);
       return Boolean(entry?.link && !isFakeUrl(entry.link) && hasDate);
     });
@@ -2752,9 +2754,7 @@ export const isInfluencerDraftPending = (record: StatusTrackingRecord, videoNumb
   if (isInfluencerReDraftRequired(record, videoNumber)) return false;
   if (isInfluencerReDraftSubmitted(record, videoNumber)) return false;
 
-  // 5. Must NOT have completed or active downstream steps
-  if (isInfluencerPaymentCompleted(record, videoNumber)) return false;
-  if (isInfluencerPostDateCompleted(record, videoNumber)) return false;
+  // 5. Must NOT be already completed in After Post
   if (isInfluencerAfterPostCompleted(record, videoNumber)) return false;
 
   // 6. Check if draft has any uploaded video/attempts
@@ -2768,7 +2768,7 @@ export const isInfluencerDraftPending = (record: StatusTrackingRecord, videoNumb
     activeAttempt?.video_url || 
     data.vid || 
     data.video_url || 
-    (videoNumber === 1 && record.draft_video_url)
+    (videoNumber === 1 && (record.draft_video_url || record.draft_received))
   );
   if (hasVideo) return false;
 
@@ -3602,6 +3602,8 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                         ? 'Re-Draft'
                         : cfg.id === 're_draft_submitted'
                         ? 'Re-Draft Submitted'
+                        : cfg.id === 'call_explain' && (isSkipped || visualState === 'skipped')
+                        ? 'Call Skipped'
                         : (cfg.shortLabel || cfg.label)}
                     </span>
                   </div>
@@ -10635,255 +10637,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
   }, [activeAttempt?.approval_status, existingData.approval_status, activeAttempt?.video_url]);
 
   const [corr, setCorr] = useState(activeAttempt?.corrections || existingData.corr || '');
-  const [finalL, setFinalL] = useState(activeAttempt?.final_product_link || existingData.finalL || '');
-  const [finalD, setFinalD] = useState(activeAttempt?.final_description || existingData.finalD || '');
 
-  // Resolve assigned product for this video
-  const resolvedProductInfo = useMemo(() => {
-    return getResolvedProductForVideo(record.influencer, videoNumber);
-  }, [record.influencer, videoNumber]);
-
-  const assignedProductName = useMemo(() => {
-    if (resolvedProductInfo.isAssigned && resolvedProductInfo.productName) {
-      return resolvedProductInfo.productName;
-    }
-    if (record.dispatch?.product_name) {
-      return record.dispatch.product_name;
-    }
-    if (videoNumber === 1 && record.ref_concept) {
-      return record.ref_concept;
-    }
-    return '';
-  }, [resolvedProductInfo, record.dispatch?.product_name, record.ref_concept, videoNumber]);
-
-  // Multi-selected social platforms state
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(() => {
-    if (Array.isArray(activeAttempt?.selected_platforms) && activeAttempt.selected_platforms.length > 0) {
-      return activeAttempt.selected_platforms;
-    }
-    if (Array.isArray(existingData?.selected_platforms) && existingData.selected_platforms.length > 0) {
-      return existingData.selected_platforms;
-    }
-    if (activeAttempt?.platform_deliverables && Object.keys(activeAttempt.platform_deliverables).length > 0) {
-      return Object.keys(activeAttempt.platform_deliverables);
-    }
-    if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
-      return Object.keys(existingData.platform_deliverables);
-    }
-    return ['Instagram'];
-  });
-
-  // Multi-platform deliverables mapping
-  const [platformDeliverables, setPlatformDeliverables] = useState<Record<string, PlatformDeliverableInfo>>(() => {
-    if (activeAttempt?.platform_deliverables && Object.keys(activeAttempt.platform_deliverables).length > 0) {
-      return activeAttempt.platform_deliverables;
-    }
-    if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
-      return existingData.platform_deliverables;
-    }
-    const legacyLink = activeAttempt?.final_product_link || existingData?.finalL || '';
-    const legacyDesc = activeAttempt?.final_description || existingData?.finalD || '';
-    if (legacyLink || legacyDesc) {
-      return {
-        'Instagram': {
-          platform: 'Instagram',
-          final_post_link: legacyLink,
-          final_description: legacyDesc,
-          status: legacyLink ? 'generated' : 'not_generated'
-        }
-      };
-    }
-    return {};
-  });
-
-  const [isGeneratingDeliverables, setIsGeneratingDeliverables] = useState(false);
-
-  useEffect(() => {
-    if (activeAttempt?.final_product_link !== undefined) {
-      setFinalL(activeAttempt.final_product_link || '');
-    } else if (existingData.finalL !== undefined) {
-      setFinalL(existingData.finalL || '');
-    }
-    if (activeAttempt?.final_description !== undefined) {
-      setFinalD(activeAttempt.final_description || '');
-    } else if (existingData.finalD !== undefined) {
-      setFinalD(existingData.finalD || '');
-    }
-
-    if (activeAttempt?.selected_platforms && activeAttempt.selected_platforms.length > 0) {
-      setSelectedPlatforms(activeAttempt.selected_platforms);
-    } else if (existingData?.selected_platforms && existingData.selected_platforms.length > 0) {
-      setSelectedPlatforms(existingData.selected_platforms);
-    }
-
-    if (activeAttempt?.platform_deliverables && Object.keys(activeAttempt.platform_deliverables).length > 0) {
-      setPlatformDeliverables(activeAttempt.platform_deliverables);
-    } else if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
-      setPlatformDeliverables(existingData.platform_deliverables);
-    }
-  }, [
-    activeAttempt?.final_product_link, 
-    activeAttempt?.final_description, 
-    activeAttempt?.selected_platforms, 
-    activeAttempt?.platform_deliverables, 
-    existingData.finalL, 
-    existingData.finalD,
-    existingData.selected_platforms,
-    existingData.platform_deliverables
-  ]);
-
-  const handleTogglePlatform = (platId: string) => {
-    setSelectedPlatforms(prev => {
-      if (prev.includes(platId)) {
-        return prev.filter(p => p !== platId);
-      } else {
-        return [...prev, platId];
-      }
-    });
-  };
-
-  const handleUpdateDeliverable = (platId: string, field: 'final_post_link' | 'final_description', val: string) => {
-    setPlatformDeliverables(prev => {
-      const existing = prev[platId] || {
-        platform: platId,
-        final_post_link: '',
-        final_description: '',
-        status: 'not_generated'
-      };
-      const updated = {
-        ...prev,
-        [platId]: {
-          ...existing,
-          [field]: val
-        }
-      };
-      if (selectedPlatforms[0] === platId) {
-        if (field === 'final_post_link') setFinalL(val);
-        if (field === 'final_description') setFinalD(val);
-      }
-      return updated;
-    });
-  };
-
-  const handleGenerateLinkAndDescription = async () => {
-    if (appStat !== 'Approved') {
-      toast.error('Draft must be marked as Approved before generating deliverables.');
-      return;
-    }
-    if (selectedPlatforms.length === 0) {
-      toast.error('Please select at least one social platform.');
-      return;
-    }
-
-    setIsGeneratingDeliverables(true);
-    try {
-      const campaignId = record.campaign_id;
-      const [allTrackingLinks, allDescriptions] = await Promise.all([
-        fetchInfluencerTrackingLinks(campaignId),
-        fetchCampaignDescriptions(campaignId)
-      ]);
-
-      const prodName = assignedProductName.trim();
-      const normProd = prodName.toLowerCase();
-
-      // Find matching description for this product from Description Management
-      const matchedDesc = allDescriptions.find(d => {
-        const dp = (d.product || '').trim().toLowerCase();
-        return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
-      });
-
-      const updatedDeliverables: Record<string, PlatformDeliverableInfo> = { ...platformDeliverables };
-      const missingWarnings: string[] = [];
-      let successCount = 0;
-
-      for (const plat of selectedPlatforms) {
-        const normPlat = plat.trim().toLowerCase();
-
-        // Exact lookup in Tracking Link department
-        const matchedLink = allTrackingLinks.find(link => {
-          // 1. Influencer matching
-          const matchInf = String(link.influencer_id) === String(record.influencer_id) ||
-            (link.influencer_code && (link.influencer_code.toLowerCase() === (record.influencer?.code || '').toLowerCase() || link.influencer_code.toLowerCase() === (record.dispatch?.influencer_code || '').toLowerCase())) ||
-            (link.creator_code && (link.creator_code.toLowerCase() === (record.influencer?.code || '').toLowerCase() || link.creator_code.toLowerCase() === (record.dispatch?.influencer_code || '').toLowerCase()));
-          if (!matchInf) return false;
-
-          // 2. Video matching
-          const linkVidNum = (link.video_number || '').toLowerCase();
-          const linkUtmContent = (link.utm_content || '').toLowerCase();
-          const matchVideo =
-            linkVidNum === `video ${videoNumber}`.toLowerCase() ||
-            linkVidNum === String(videoNumber) ||
-            linkUtmContent === `v${videoNumber}`.toLowerCase() ||
-            (videoNumber === 1 && (!link.video_number || link.video_number === 'Video 1'));
-          if (!matchVideo) return false;
-
-          // 3. Platform matching
-          const linkPlat = (link.platform || '').trim().toLowerCase();
-          const linkUtmSource = (link.utm_source || '').trim().toLowerCase();
-          const matchPlat = linkPlat === normPlat || linkUtmSource === normPlat;
-          if (!matchPlat) return false;
-
-          // 4. Product matching
-          if (normProd && link.product) {
-            const lp = link.product.trim().toLowerCase();
-            const matchProd = lp === normProd || normalizeScriptMatch(lp) === normalizeScriptMatch(normProd);
-            if (!matchProd) return false;
-          }
-
-          return true;
-        });
-
-        const hasLink = Boolean(matchedLink?.tracking_url);
-        const hasDesc = Boolean(matchedDesc?.description);
-
-        let status: PlatformDeliverableInfo['status'] = 'generated';
-        if (!hasLink && !hasDesc) {
-          status = 'missing';
-          missingWarnings.push(`${plat}: Tracking Link and Description missing`);
-        } else if (!hasLink) {
-          status = 'link_missing';
-          missingWarnings.push(`${plat}: Tracking Link missing`);
-        } else if (!hasDesc) {
-          status = 'desc_missing';
-          missingWarnings.push(`${plat}: Description missing for "${prodName || 'assigned product'}"`);
-        } else {
-          successCount++;
-        }
-
-        updatedDeliverables[plat] = {
-          platform: plat,
-          final_post_link: hasLink ? matchedLink!.tracking_url : (updatedDeliverables[plat]?.final_post_link || ''),
-          final_description: hasDesc ? matchedDesc!.description : (updatedDeliverables[plat]?.final_description || ''),
-          status,
-          generated_at: new Date().toISOString(),
-          tracking_link_id: matchedLink?.id,
-          description_id: matchedDesc?.id
-        };
-      }
-
-      setPlatformDeliverables(updatedDeliverables);
-
-      // Keep legacy finalL / finalD synced with primary platform
-      const primary = selectedPlatforms[0];
-      if (primary && updatedDeliverables[primary]) {
-        setFinalL(updatedDeliverables[primary].final_post_link || '');
-        setFinalD(updatedDeliverables[primary].final_description || '');
-      }
-
-      if (missingWarnings.length === 0) {
-        toast.success('✓ Link and Description generated successfully.');
-      } else if (successCount > 0) {
-        toast.success(`Generated for ${successCount} platform(s). Check notices below.`);
-      } else {
-        toast.error('Cannot generate final post information. Missing required data.');
-      }
-    } catch (err: any) {
-      console.error('Error generating link and description:', err);
-      toast.error('Failed to generate link and description: ' + (err?.message || 'Unknown error'));
-    } finally {
-      setIsGeneratingDeliverables(false);
-    }
-  };
 
   // Manual Draft Submit Date & Time (Required date for approval, optional time)
   const [draftSubmitDate, setDraftSubmitDate] = useState<string>(
@@ -11505,8 +11259,6 @@ const DraftForm: React.FC<DraftFormProps> = ({
     const approvedTime = draftSubmitTime?.trim() || null;
 
     const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit' && !!draftSubmitDate;
-    const primaryPlat = selectedPlatforms[0];
-    const primaryDeliverable = primaryPlat ? platformDeliverables[primaryPlat] : null;
 
     // Update active attempt in attempts array while preserving all history
     const updatedAttempts = attempts.map((att, idx) => {
@@ -11522,10 +11274,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
           draft_submission_time: approvedTime,
           submission_time: approvedTime,
           re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : undefined,
-          final_product_link: isApproved ? (primaryDeliverable?.final_post_link || finalL) : att.final_product_link,
-          final_description: isApproved ? (primaryDeliverable?.final_description || finalD) : att.final_description,
-          selected_platforms: isApproved ? selectedPlatforms : att.selected_platforms,
-          platform_deliverables: isApproved ? platformDeliverables : att.platform_deliverables,
+          final_product_link: att.final_product_link || '',
+          final_description: att.final_description || '',
+          selected_platforms: att.selected_platforms || [],
+          platform_deliverables: att.platform_deliverables || {},
           timing_status: calculatedTiming,
           reviewed_at: nowIso,
           reviewed_by: userName
@@ -11553,10 +11305,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
       corr: appStat === 'Not Approved' ? corr : '',
       re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : '',
       latest_re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : (existingData.latest_re_draft_submit_date || ''),
-      finalL: isApproved ? (primaryDeliverable?.final_post_link || finalL) : '',
-      finalD: isApproved ? (primaryDeliverable?.final_description || finalD) : '',
-      selected_platforms: isApproved ? selectedPlatforms : [],
-      platform_deliverables: isApproved ? platformDeliverables : {},
+      finalL: existingData.finalL || '',
+      finalD: existingData.finalD || '',
+      selected_platforms: existingData.selected_platforms || [],
+      platform_deliverables: existingData.platform_deliverables || {},
       review_confirmed: isApproved,
       approval_confirmed: isApproved,
       approval_reconfirmed: isApproved,
@@ -13217,268 +12969,6 @@ const DraftForm: React.FC<DraftFormProps> = ({
             </div>
           )}
 
-          {/* Approved Deliverables Info (When Approved is selected) */}
-          {appStat === 'Approved' && (
-            <div className="animate-fade-in space-y-5 bg-[#0b1329] p-5 sm:p-6 rounded-2xl border border-slate-800 shadow-sm">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                    <Check size={14} strokeWidth={2.5} />
-                  </div>
-                  <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                    Approved Deliverable Info
-                  </h6>
-                </div>
-                <span className="text-[11px] text-slate-400">
-                  Source of Truth: Influencer Tracking Links & Description Management
-                </span>
-              </div>
-
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Your draft is approved. Select the platforms where this influencer will post, then generate the final tracking link and caption automatically.
-              </p>
-
-              {/* Platform Multi-Select & Action Row */}
-              <div className="space-y-3 bg-[#070c18] p-4 rounded-xl border border-slate-800/90">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
-                      Select Platform <span className="text-purple-400">*</span>
-                    </label>
-                    <p className="text-[11px] text-slate-500">
-                      Select the required platforms. The final post links will be taken from Influencer Tracking Links and the caption will be taken from Description Management.
-                    </p>
-                  </div>
-
-                  {/* Generate Link and Description Action Button */}
-                  <button
-                    type="button"
-                    onClick={handleGenerateLinkAndDescription}
-                    disabled={isGeneratingDeliverables || selectedPlatforms.length === 0}
-                    className="self-start sm:self-center flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:from-purple-700 active:to-indigo-700 text-white transition-all shadow-md shadow-purple-900/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
-                  >
-                    {isGeneratingDeliverables ? (
-                      <>
-                        <Loader2 size={16} className="animate-spin text-white" />
-                        <span>Generating...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={16} className="text-amber-300" />
-                        <span>Generate Link and Description</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Multi-select Platform Chips (Only Instagram, YouTube, Facebook) */}
-                <div className="flex items-center gap-2.5 flex-wrap pt-1">
-                  {AVAILABLE_DRAFT_SOCIAL_PLATFORMS.map((plat) => {
-                    const isSelected = selectedPlatforms.includes(plat.id);
-                    return (
-                      <button
-                        key={plat.id}
-                        type="button"
-                        onClick={() => handleTogglePlatform(plat.id)}
-                        className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-purple-600/20 border-purple-500/80 text-white shadow-sm'
-                            : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                        }`}
-                      >
-                        <span className={`w-4 h-4 rounded-md flex items-center justify-center border text-[10px] ${
-                          isSelected
-                            ? 'bg-purple-600 border-purple-500 text-white'
-                            : 'border-slate-700 bg-slate-900/50 text-transparent'
-                        }`}>
-                          <Check size={11} strokeWidth={3} />
-                        </span>
-                        <SocialPlatformIcon platform={plat.id} />
-                        <span>{plat.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Platform Deliverable Sections (One per selected platform) */}
-              {selectedPlatforms.length === 0 ? (
-                <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center bg-[#070c18]/50">
-                  <p className="text-xs text-slate-400">
-                    Please select at least one social platform (Instagram, YouTube, or Facebook) above to generate deliverable links and captions.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4 pt-1">
-                  {selectedPlatforms.map((platId) => {
-                    const deliverable = platformDeliverables[platId] || {
-                      platform: platId,
-                      final_post_link: '',
-                      final_description: '',
-                      status: 'not_generated'
-                    };
-                    const platMeta = AVAILABLE_DRAFT_SOCIAL_PLATFORMS.find(p => p.id === platId) || { name: platId, id: platId };
-
-                    return (
-                      <div
-                        key={platId}
-                        className="bg-[#070c18] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4.5 sm:p-5 space-y-4 shadow-sm transition-all"
-                      >
-                        {/* Header Bar */}
-                        <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-                          <div className="flex items-center gap-2.5">
-                            <SocialPlatformIcon platform={platId} />
-                            <span className="text-sm font-bold text-white tracking-wide uppercase">
-                              {platMeta.name}
-                            </span>
-                          </div>
-                          {/* Status Badge */}
-                          {deliverable.status === 'generated' ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                              <Check size={12} strokeWidth={2.5} />
-                              <span>Generated</span>
-                            </span>
-                          ) : deliverable.status === 'link_missing' ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                              <AlertTriangle size={12} />
-                              <span>Link Missing</span>
-                            </span>
-                          ) : deliverable.status === 'desc_missing' ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                              <AlertTriangle size={12} />
-                              <span>Description Missing</span>
-                            </span>
-                          ) : deliverable.status === 'missing' ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
-                              <AlertTriangle size={12} />
-                              <span>Link & Description Missing</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700/60">
-                              <span>Not Generated</span>
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Notices if Missing */}
-                        {deliverable.status === 'link_missing' && (
-                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <AlertTriangle size={14} className="shrink-0" />
-                              <span>Tracking link not found for <strong>{platMeta.name}</strong> (Video {videoNumber}, {assignedProductName || 'assigned product'}).</span>
-                            </div>
-                            <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Influencer Tracking Link</span>
-                          </div>
-                        )}
-                        {deliverable.status === 'desc_missing' && (
-                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <AlertTriangle size={14} className="shrink-0" />
-                              <span>Description not found for <strong>{assignedProductName || 'assigned product'}</strong>.</span>
-                            </div>
-                            <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Description Management</span>
-                          </div>
-                        )}
-                        {deliverable.status === 'missing' && (
-                          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs space-y-1">
-                            <div className="flex items-center gap-2">
-                              <AlertTriangle size={14} className="shrink-0" />
-                              <span>Cannot generate complete information. Both tracking link and product description are missing.</span>
-                            </div>
-                            <p className="text-[11px] text-rose-400/80 pl-5">
-                              Please ensure tracking link exists in Tracking Links and product description exists in Description Management.
-                            </p>
-                          </div>
-                        )}
-
-                        {/* 1. FINAL POST LINK */}
-                        <div className="w-full">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                              Final Post Link
-                            </label>
-                            {deliverable.final_post_link && (
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigator.clipboard?.writeText(deliverable.final_post_link);
-                                    toast.success(`${platMeta.name} link copied!`);
-                                  }}
-                                  className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                                >
-                                  <Copy size={11} />
-                                  <span>Copy Link</span>
-                                </button>
-                                <a
-                                  href={deliverable.final_post_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
-                                >
-                                  <ExternalLink size={11} />
-                                  <span>Open</span>
-                                </a>
-                              </div>
-                            )}
-                          </div>
-                          <input
-                            type="url"
-                            value={deliverable.final_post_link}
-                            onChange={(e) => handleUpdateDeliverable(platId, 'final_post_link', e.target.value)}
-                            placeholder="https://..."
-                            className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none transition-colors font-mono"
-                          />
-                        </div>
-
-                        {/* 2. FINAL CAPTION / DESCRIPTION */}
-                        <div className="w-full">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                              Final Caption / Description
-                            </label>
-                            <div className="flex items-center gap-3">
-                              <span className="text-[11px] text-slate-500 hidden sm:inline">
-                                Multi-line supported • Preserves formatting
-                              </span>
-                              {deliverable.final_description && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigator.clipboard?.writeText(deliverable.final_description);
-                                    toast.success(`${platMeta.name} caption copied!`);
-                                  }}
-                                  className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                                >
-                                  <Copy size={11} />
-                                  <span>Copy Caption</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                          <textarea
-                            value={deliverable.final_description}
-                            onChange={(e) => handleUpdateDeliverable(platId, 'final_description', e.target.value)}
-                            placeholder={`Enter complete caption and description for ${platMeta.name}...`}
-                            rows={5}
-                            style={{
-                              minHeight: '120px',
-                              height: '140px',
-                              resize: 'vertical',
-                              whiteSpace: 'pre-wrap',
-                              overflowWrap: 'break-word',
-                              wordBreak: 'break-word'
-                            }}
-                            className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl p-3.5 text-xs text-white placeholder:text-slate-600 focus:outline-none leading-relaxed transition-colors shadow-inner font-sans block resize-y"
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Save Button */}
           <div className="flex justify-end pt-4 border-t border-slate-800">
@@ -13636,6 +13126,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
 
 // --- STEP: Post Date (For Any Video 1 to 6 - Manual Post Date, Multi-Platform Selection & Upload Thumbnail) ---
 const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvanceStep }: any) => {
+  const isDraftApproved = isInfluencerDraftApproved(record, videoNumber);
+  const isPaymentCompleted = isInfluencerPaymentCompleted(record, videoNumber);
+
   // Strict match for Video N from record.postDates or existingData
   const scheduleEntry = (record.postDates || []).find(
     (pd: any) => Number(pd.video_number) === Number(videoNumber)
@@ -13655,7 +13148,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   );
   const [isSavingDate, setIsSavingDate] = useState<boolean>(false);
 
-  // Thumbnail State
+  // Thumbnail State (OPTIONAL)
   const [thumbnailUrl, setThumbnailUrl] = useState<string>(initialThumbnailUrl);
   const [thumbnailPath, setThumbnailPath] = useState<string>(initialThumbnailPath);
   const [thumbnailFileName, setThumbnailFileName] = useState<string>(initialThumbnailName);
@@ -13663,7 +13156,12 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   const [showThumbnailModal, setShowThumbnailModal] = useState<boolean>(false);
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
 
-  // Multi-Platform selection (Instagram, YouTube, Facebook - supports any combination)
+  // Creator information
+  const influencerName = record.influencer?.name || record.influencer_name || record.dispatch?.influencer_name || 'Creator';
+  const creatorCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || (record.influencer_id ? `#${record.influencer_id}` : '—');
+  const userId = record.influencer?.instagram_handle || record.influencer?.user_id || record.dispatch?.user_id || (record.influencer_id ? String(record.influencer_id) : '—');
+
+  // Multi-Platform selection (Single source of truth for Post Date, Deliverables, and After Post)
   const availablePlatforms = ['Instagram', 'YouTube', 'Facebook'];
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(() => {
     if (Array.isArray(existingData.selected_platforms) && existingData.selected_platforms.length > 0) {
@@ -13673,9 +13171,70 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       const parts = existingData.platform.split(' + ').map((s: string) => s.trim()).filter(Boolean);
       if (parts.length > 0) return parts;
     }
+    const draftStepKey = videoNumber === 1 ? 'draft_video' : `draft_v${videoNumber}`;
+    const draftData = record.status_data?.[draftStepKey] || record.status_data?.draft || {};
+    const draftLatestAttempt = Array.isArray(draftData.attempts) && draftData.attempts.length > 0 
+      ? draftData.attempts[draftData.attempts.length - 1] 
+      : null;
+    if (Array.isArray(draftLatestAttempt?.selected_platforms) && draftLatestAttempt.selected_platforms.length > 0) {
+      return draftLatestAttempt.selected_platforms;
+    }
+    if (Array.isArray(draftData?.selected_platforms) && draftData.selected_platforms.length > 0) {
+      return draftData.selected_platforms;
+    }
     return ['Instagram'];
   });
 
+  // Resolve assigned product for this video
+  const resolvedProductInfo = useMemo(() => {
+    return getResolvedProductForVideo(record.influencer, videoNumber);
+  }, [record.influencer, videoNumber]);
+
+  const assignedProductName = useMemo(() => {
+    if (resolvedProductInfo.isAssigned && resolvedProductInfo.productName) {
+      return resolvedProductInfo.productName;
+    }
+    if (record.dispatch?.product_name) {
+      return record.dispatch.product_name;
+    }
+    if (videoNumber === 1 && record.ref_concept) {
+      return record.ref_concept;
+    }
+    return '';
+  }, [resolvedProductInfo, record.dispatch?.product_name, record.ref_concept, videoNumber]);
+
+  // Multi-platform deliverables mapping
+  const [platformDeliverables, setPlatformDeliverables] = useState<Record<string, PlatformDeliverableInfo>>(() => {
+    if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
+      return existingData.platform_deliverables;
+    }
+    const draftStepKey = videoNumber === 1 ? 'draft_video' : `draft_v${videoNumber}`;
+    const draftData = record.status_data?.[draftStepKey] || record.status_data?.draft || {};
+    const draftLatestAttempt = Array.isArray(draftData.attempts) && draftData.attempts.length > 0 
+      ? draftData.attempts[draftData.attempts.length - 1] 
+      : null;
+    if (draftLatestAttempt?.platform_deliverables && Object.keys(draftLatestAttempt.platform_deliverables).length > 0) {
+      return draftLatestAttempt.platform_deliverables;
+    }
+    if (draftData?.platform_deliverables && Object.keys(draftData.platform_deliverables).length > 0) {
+      return draftData.platform_deliverables;
+    }
+    const legacyLink = existingData?.final_post_link || existingData?.finalL || draftLatestAttempt?.final_product_link || draftData?.finalL || '';
+    const legacyDesc = existingData?.final_description || existingData?.finalD || draftLatestAttempt?.final_description || draftData?.finalD || '';
+    if (legacyLink || legacyDesc) {
+      return {
+        'Instagram': {
+          platform: 'Instagram',
+          final_post_link: legacyLink,
+          final_description: legacyDesc,
+          status: legacyLink ? 'generated' : 'not_generated'
+        }
+      };
+    }
+    return {};
+  });
+
+  const [isGeneratingDeliverables, setIsGeneratingDeliverables] = useState(false);
   const postDateInputRef = useRef<HTMLInputElement>(null);
 
   // History list
@@ -13696,6 +13255,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       if (parts.length > 0) setSelectedPlatforms(parts);
     }
 
+    if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
+      setPlatformDeliverables(existingData.platform_deliverables);
+    }
+
     // Video-specific thumbnail synchronization
     const thumbUrl = existingData.thumbnail_url || existingData.thumbnail_path || scheduleEntry?.thumbnail_url || scheduleEntry?.thumbnail_path || '';
     const thumbPath = existingData.thumbnail_path || scheduleEntry?.thumbnail_path || '';
@@ -13712,9 +13275,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     existingData.thumbnail_url,
     existingData.thumbnail_path,
     existingData.thumbnail_file_name,
+    existingData.platform_deliverables,
     scheduleEntry?.post_date, 
-    scheduleEntry?.thumbnail_url,
-    scheduleEntry?.thumbnail_path,
+    scheduleEntry?.thumbnail_url, 
+    scheduleEntry?.thumbnail_path, 
     isStepConfirmed, 
     existingData.platform, 
     existingData.selected_platforms
@@ -13728,6 +13292,137 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         return [...prev, platform];
       }
     });
+  };
+
+  const handleUpdateDeliverable = (platId: string, field: 'final_post_link' | 'final_description', val: string) => {
+    setPlatformDeliverables(prev => {
+      const existing = prev[platId] || {
+        platform: platId,
+        final_post_link: '',
+        final_description: '',
+        status: 'not_generated'
+      };
+      return {
+        ...prev,
+        [platId]: {
+          ...existing,
+          [field]: val
+        }
+      };
+    });
+  };
+
+  const handleGenerateLinkAndDescription = async () => {
+    if (!isDraftApproved) {
+      toast.error('Draft must be marked as Approved before generating deliverables.');
+      return;
+    }
+    if (selectedPlatforms.length === 0) {
+      toast.error('Please select at least one social platform.');
+      return;
+    }
+
+    setIsGeneratingDeliverables(true);
+    try {
+      const campaignId = record.campaign_id;
+      const [allTrackingLinks, allDescriptions] = await Promise.all([
+        fetchInfluencerTrackingLinks(campaignId),
+        fetchCampaignDescriptions(campaignId)
+      ]);
+
+      const prodName = assignedProductName.trim();
+      const normProd = prodName.toLowerCase();
+
+      // Find matching description for this product from Description Management
+      const matchedDesc = allDescriptions.find(d => {
+        const dp = (d.product || '').trim().toLowerCase();
+        return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
+      });
+
+      const updatedDeliverables: Record<string, PlatformDeliverableInfo> = { ...platformDeliverables };
+      const missingWarnings: string[] = [];
+      let successCount = 0;
+
+      for (const plat of selectedPlatforms) {
+        const normPlat = plat.trim().toLowerCase();
+
+        // Exact lookup in Tracking Link department
+        const matchedLink = allTrackingLinks.find(link => {
+          // 1. Influencer matching
+          const matchInf = String(link.influencer_id) === String(record.influencer_id) ||
+            (link.influencer_code && (link.influencer_code.toLowerCase() === (record.influencer?.code || '').toLowerCase() || link.influencer_code.toLowerCase() === (record.dispatch?.influencer_code || '').toLowerCase())) ||
+            (link.creator_code && (link.creator_code.toLowerCase() === (record.influencer?.code || '').toLowerCase() || link.creator_code.toLowerCase() === (record.dispatch?.influencer_code || '').toLowerCase()));
+          if (!matchInf) return false;
+
+          // 2. Video matching
+          const linkVidNum = (link.video_number || '').toLowerCase();
+          const linkUtmContent = (link.utm_content || '').toLowerCase();
+          const matchVideo =
+            linkVidNum === `video ${videoNumber}`.toLowerCase() ||
+            linkVidNum === String(videoNumber) ||
+            linkUtmContent === `v${videoNumber}`.toLowerCase() ||
+            (videoNumber === 1 && (!link.video_number || link.video_number === 'Video 1'));
+          if (!matchVideo) return false;
+
+          // 3. Platform matching
+          const linkPlat = (link.platform || '').trim().toLowerCase();
+          const linkUtmSource = (link.utm_source || '').trim().toLowerCase();
+          const matchPlat = linkPlat === normPlat || linkUtmSource === normPlat;
+          if (!matchPlat) return false;
+
+          // 4. Product matching
+          if (normProd && link.product) {
+            const lp = link.product.trim().toLowerCase();
+            const matchProd = lp === normProd || normalizeScriptMatch(lp) === normalizeScriptMatch(normProd);
+            if (!matchProd) return false;
+          }
+
+          return true;
+        });
+
+        const hasLink = Boolean(matchedLink?.tracking_url);
+        const hasDesc = Boolean(matchedDesc?.description);
+
+        let status: PlatformDeliverableInfo['status'] = 'generated';
+        if (!hasLink && !hasDesc) {
+          status = 'missing';
+          missingWarnings.push(`${plat}: Tracking Link and Description missing`);
+        } else if (!hasLink) {
+          status = 'link_missing';
+          missingWarnings.push(`${plat}: Tracking Link missing`);
+        } else if (!hasDesc) {
+          status = 'desc_missing';
+          missingWarnings.push(`${plat}: Description missing for "${prodName || 'assigned product'}"`);
+        } else {
+          successCount++;
+        }
+
+        updatedDeliverables[plat] = {
+          platform: plat,
+          final_post_link: hasLink ? matchedLink!.tracking_url : (updatedDeliverables[plat]?.final_post_link || ''),
+          final_description: hasDesc ? matchedDesc!.description : (updatedDeliverables[plat]?.final_description || ''),
+          status,
+          generated_at: new Date().toISOString(),
+          tracking_link_id: matchedLink?.id,
+          description_id: matchedDesc?.id
+        };
+      }
+
+      setPlatformDeliverables(updatedDeliverables);
+
+      if (missingWarnings.length === 0) {
+        toast.success('✓ Link and Description generated successfully.');
+      } else if (successCount > 0) {
+        toast.success(`Generated for ${successCount} platform(s). Check notices below.`);
+      } else {
+        toast.error('Cannot generate final post information. Missing required data in Tracking Links or Description Management.');
+      }
+    } catch (err: any) {
+      console.error('Error generating link and description:', err);
+      toast.error('Failed to generate link and description: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsGeneratingDeliverables(false);
+    }
   };
 
   const handleStartEditDate = () => {
@@ -13744,7 +13439,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     }
   };
 
-  // Thumbnail File Upload handler
+  // Thumbnail File Upload handler (Optional)
   const handleThumbnailFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -13773,7 +13468,6 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       const infId = record.influencer_id || 'inf';
       const timestamp = Date.now();
       const uniqueKey = Math.random().toString(36).substring(2, 8);
-      // Path format: campaign/{campaign_id}/influencer/{influencer_id}/video/{video_number}/thumbnail/{unique_filename}
       const storagePath = `campaign/${campId}/influencer/${infId}/video/${videoNumber}/thumbnail/thumb_${timestamp}_${uniqueKey}.${ext}`;
 
       const { error: uploadErr } = await supabaseAdmin.storage
@@ -13815,13 +13509,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     toast.success('Thumbnail removed.');
   };
 
-  const isPaymentCompleted = isInfluencerPaymentCompleted(record, videoNumber);
-
-  // Field validations
+  // Field validations (Thumbnail is explicitly OPTIONAL)
   const isPlatformValid = selectedPlatforms.length > 0;
   const isDateValid = Boolean(tempPostDate && tempPostDate.trim());
-  const isThumbnailValid = Boolean(thumbnailUrl && thumbnailUrl.trim());
-  const isFormValid = isPlatformValid && isDateValid && isThumbnailValid;
+  const isFormValid = isPlatformValid && isDateValid;
 
   const handleSavePostDate = async () => {
     if (!isPaymentCompleted) {
@@ -13836,11 +13527,6 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
 
     if (!isDateValid) {
       toast.error('Post date required');
-      return;
-    }
-
-    if (!isThumbnailValid) {
-      toast.error('Thumbnail required. Please upload a thumbnail image.');
       return;
     }
 
@@ -13862,6 +13548,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       };
 
       const updatedHistory = [changeEntry, ...historyList];
+      const primaryPlat = selectedPlatforms[0];
+      const primaryDeliverable = primaryPlat ? platformDeliverables[primaryPlat] : null;
+      const finalPostLink = primaryDeliverable?.final_post_link || existingData.final_post_link || existingData.finalL || '';
+      const finalDescription = primaryDeliverable?.final_description || existingData.final_description || existingData.finalD || '';
 
       // 1. Sync Supabase tables: influencer_post_dates_rows & influencers_info_rows
       const syncRes = await syncInfluencerPostDate({
@@ -13871,8 +13561,8 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         newPostDate: normalizedNewYmd,
         platform: platformString,
         selectedPlatforms,
-        thumbnailUrl,
-        thumbnailPath
+        thumbnailUrl: thumbnailUrl || '',
+        thumbnailPath: thumbnailPath || ''
       });
 
       if (!syncRes.success) {
@@ -13881,16 +13571,21 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         return;
       }
 
-      // 2. Save to Status Tracking workflow step (COMPLETED = true when post date, platform, and thumbnail are set!)
+      // 2. Save to Status Tracking workflow step (COMPLETED = true when post date and platform are set!)
       const saveRes = await onSave({
         ...existingData,
         selected_platforms: selectedPlatforms,
         platform: platformString,
         scheduled_post_date: normalizedNewYmd,
         post_date: normalizedNewYmd,
-        thumbnail_url: thumbnailUrl,
-        thumbnail_path: thumbnailPath,
-        thumbnail_file_name: thumbnailFileName,
+        thumbnail_url: thumbnailUrl || '',
+        thumbnail_path: thumbnailPath || '',
+        thumbnail_file_name: thumbnailFileName || '',
+        platform_deliverables: platformDeliverables,
+        final_post_link: finalPostLink,
+        final_description: finalDescription,
+        finalL: finalPostLink,
+        finalD: finalDescription,
         history: updatedHistory,
         post_date_confirmed: true,
         completed: true,
@@ -13915,8 +13610,8 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         post_date: normalizedNewYmd,
         platform: platformString,
         selected_platforms: selectedPlatforms,
-        thumbnail_url: thumbnailUrl,
-        thumbnail_path: thumbnailPath
+        thumbnail_url: thumbnailUrl || '',
+        thumbnail_path: thumbnailPath || ''
       };
       if (existingPdIdx >= 0) {
         record.postDates[existingPdIdx] = { ...record.postDates[existingPdIdx], ...newPdEntry };
@@ -13928,7 +13623,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       logActivity({
         department: 'Marketing',
         action: 'Post Date Saved',
-        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date saved as ${newDateFormatted} (${platformString}) with Thumbnail`,
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date saved as ${newDateFormatted} (${platformString})${thumbnailUrl ? ' with Thumbnail' : ''}`,
         metadata: { 
           video_number: videoNumber, 
           old_date: previousDateFormatted, 
@@ -13942,7 +13637,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       setEffectivePostDate(normalizedNewYmd);
       setEffectiveThumbnailUrl(thumbnailUrl);
       setIsEditingDate(false);
-      toast.success(`Video ${videoNumber} Post Date & Thumbnail saved successfully: ${newDateFormatted} (${platformString})!`);
+      toast.success(`Video ${videoNumber} Post Date saved successfully: ${newDateFormatted} (${platformString})!`);
 
       if (onAdvanceStep) {
         onAdvanceStep();
@@ -13970,7 +13665,331 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         </div>
       )}
 
-      {/* 1. MANUAL POST DATE & THUMBNAIL CARD */}
+      {/* 1. CREATOR INFORMATION */}
+      <div className="p-4 bg-[#0b1329] border border-slate-800 rounded-xl shadow-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-xs">
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Creator Name</span>
+            <span className="text-white font-semibold text-sm truncate block mt-0.5" title={influencerName}>{influencerName}</span>
+          </div>
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Creator Code</span>
+            <span className="text-purple-400 font-mono font-bold text-sm block mt-0.5">{creatorCode}</span>
+          </div>
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">User ID / Handle</span>
+            <span className="text-slate-300 font-mono text-xs block mt-0.5 truncate" title={userId}>{userId}</span>
+          </div>
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Product</span>
+            <span className="text-cyan-300 font-semibold text-xs block mt-0.5 truncate" title={assignedProductName}>
+              {assignedProductName || 'Standard'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. APPROVED DELIVERABLE INFO SECTION */}
+      {isDraftApproved ? (
+        <div className="animate-fade-in space-y-5 bg-[#0b1329] p-5 sm:p-6 rounded-2xl border border-slate-800 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <Check size={14} strokeWidth={2.5} />
+              </div>
+              <h6 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                Approved Deliverable Info
+              </h6>
+            </div>
+            <span className="text-[11px] text-slate-400">
+              Source of Truth: Influencer Tracking Links & Description Management
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Draft approved. Select the platforms for the final post and generate the influencer tracking link and description.
+          </p>
+
+          {/* Unified Platform Multi-Select & Action Row */}
+          <div className="space-y-3 bg-[#070c18] p-4 rounded-xl border border-slate-800/90">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                  Select Platform <span className="text-purple-400">*</span>
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  Select the required platforms. The final post links will be taken from Influencer Tracking Links and the caption will be taken from Description Management.
+                </p>
+              </div>
+
+              {/* Generate Link and Description Action Button */}
+              <button
+                type="button"
+                onClick={handleGenerateLinkAndDescription}
+                disabled={isGeneratingDeliverables || selectedPlatforms.length === 0}
+                className="self-start sm:self-center flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:from-purple-700 active:to-indigo-700 text-white transition-all shadow-md shadow-purple-900/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+              >
+                {isGeneratingDeliverables ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin text-white" />
+                    <span>Generating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} className="text-amber-300" />
+                    <span>Generate Link and Description</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Multi-select Platform Chips (Instagram, YouTube, Facebook) */}
+            <div className="flex items-center gap-2.5 flex-wrap pt-1">
+              {availablePlatforms.map((plat) => {
+                const isSelected = selectedPlatforms.includes(plat);
+                return (
+                  <button
+                    key={plat}
+                    type="button"
+                    onClick={() => handleTogglePlatform(plat)}
+                    className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-purple-600/20 border-purple-500/80 text-white shadow-sm'
+                        : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className={`w-4 h-4 rounded-md flex items-center justify-center border text-[10px] ${
+                      isSelected
+                        ? 'bg-purple-600 border-purple-500 text-white'
+                        : 'border-slate-700 bg-slate-900/50 text-transparent'
+                    }`}>
+                      <Check size={11} strokeWidth={3} />
+                    </span>
+                    <SocialPlatformIcon platform={plat} />
+                    <span>{plat}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Platform Deliverable Sections (One per selected platform) */}
+          {selectedPlatforms.length === 0 ? (
+            <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center bg-[#070c18]/50">
+              <p className="text-xs text-slate-400">
+                Please select at least one social platform (Instagram, YouTube, or Facebook) above to generate deliverable links and captions.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4 pt-1">
+              {selectedPlatforms.map((platId) => {
+                const deliverable = platformDeliverables[platId] || {
+                  platform: platId,
+                  final_post_link: '',
+                  final_description: '',
+                  status: 'not_generated'
+                };
+
+                return (
+                  <div
+                    key={platId}
+                    className="bg-[#070c18] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4.5 sm:p-5 space-y-4 shadow-sm transition-all"
+                  >
+                    {/* Header Bar */}
+                    <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                      <div className="flex items-center gap-2.5">
+                        <SocialPlatformIcon platform={platId} />
+                        <span className="text-sm font-bold text-white tracking-wide uppercase">
+                          {platId}
+                        </span>
+                      </div>
+                      {/* Status Badge */}
+                      {deliverable.status === 'generated' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                          <Check size={12} strokeWidth={2.5} />
+                          <span>Generated</span>
+                        </span>
+                      ) : deliverable.status === 'link_missing' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                          <AlertTriangle size={12} />
+                          <span>Link Missing</span>
+                        </span>
+                      ) : deliverable.status === 'desc_missing' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                          <AlertTriangle size={12} />
+                          <span>Description Missing</span>
+                        </span>
+                      ) : deliverable.status === 'missing' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                          <AlertTriangle size={12} />
+                          <span>Link & Description Missing</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700/60">
+                          <span>Not Generated</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Notices if Missing */}
+                    {deliverable.status === 'link_missing' && (
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle size={14} className="shrink-0" />
+                          <span>Tracking link not found for <strong>{platId}</strong> (Video {videoNumber}, {assignedProductName || 'assigned product'}).</span>
+                        </div>
+                        <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Influencer Tracking Link</span>
+                      </div>
+                    )}
+                    {deliverable.status === 'desc_missing' && (
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle size={14} className="shrink-0" />
+                          <span>Description not found for <strong>{assignedProductName || 'assigned product'}</strong>.</span>
+                        </div>
+                        <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Description Management</span>
+                      </div>
+                    )}
+                    {deliverable.status === 'missing' && (
+                      <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs space-y-1">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle size={14} className="shrink-0" />
+                          <span>Cannot generate complete information. Both tracking link and product description are missing.</span>
+                        </div>
+                        <p className="text-[11px] text-rose-400/80 pl-5">
+                          Please ensure tracking link exists in Tracking Links and product description exists in Description Management.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* 1. FINAL POST LINK */}
+                    <div className="w-full">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                          Final Post Link
+                        </label>
+                        {deliverable.final_post_link && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(deliverable.final_post_link);
+                                toast.success(`${platId} link copied!`);
+                              }}
+                              className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <Copy size={11} />
+                              <span>Copy Link</span>
+                            </button>
+                            <a
+                              href={deliverable.final_post_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                            >
+                              <ExternalLink size={11} />
+                              <span>Open</span>
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                      <input
+                        type="url"
+                        value={deliverable.final_post_link}
+                        onChange={(e) => handleUpdateDeliverable(platId, 'final_post_link', e.target.value)}
+                        placeholder="https://..."
+                        className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none transition-colors font-mono"
+                      />
+                    </div>
+
+                    {/* 2. FINAL CAPTION / DESCRIPTION */}
+                    <div className="w-full">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                          Final Caption / Description
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] text-slate-500 hidden sm:inline">
+                            Multi-line supported • Preserves formatting
+                          </span>
+                          {deliverable.final_description && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(deliverable.final_description);
+                                toast.success(`${platId} caption copied!`);
+                              }}
+                              className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <Copy size={11} />
+                              <span>Copy Caption</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <textarea
+                        value={deliverable.final_description}
+                        onChange={(e) => handleUpdateDeliverable(platId, 'final_description', e.target.value)}
+                        placeholder={`Enter complete caption and description for ${platId}...`}
+                        rows={5}
+                        style={{
+                          minHeight: '120px',
+                          height: '140px',
+                          resize: 'vertical',
+                          whiteSpace: 'pre-wrap',
+                          overflowWrap: 'break-word',
+                          wordBreak: 'break-word'
+                        }}
+                        className="w-full bg-[#050811] border border-slate-800 focus:border-purple-500 rounded-xl p-3.5 text-xs text-white placeholder:text-slate-600 focus:outline-none leading-relaxed transition-colors shadow-inner font-sans block resize-y"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* Notice when Draft is not yet approved */
+        <div className="p-4 rounded-xl bg-purple-950/30 border border-purple-800/40 text-purple-200 text-xs space-y-3">
+          <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-purple-300">
+            <Sparkles size={14} className="text-amber-300 shrink-0" />
+            <span>Approved Deliverable Info</span>
+          </div>
+          <p className="text-purple-200/80 leading-relaxed">
+            Draft is not yet approved for Video {videoNumber}. Select platforms below to configure post date; tracking link and description generation will unlock once the draft is marked as Approved.
+          </p>
+          <div className="flex items-center gap-2.5 flex-wrap pt-1">
+            {availablePlatforms.map((plat) => {
+              const isSelected = selectedPlatforms.includes(plat);
+              return (
+                <button
+                  key={plat}
+                  type="button"
+                  onClick={() => handleTogglePlatform(plat)}
+                  className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-purple-600/20 border-purple-500/80 text-white shadow-sm'
+                      : 'bg-[#0b1329] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                >
+                  <span className={`w-4 h-4 rounded-md flex items-center justify-center border text-[10px] ${
+                    isSelected
+                      ? 'bg-purple-600 border-purple-500 text-white'
+                      : 'border-slate-700 bg-slate-900/50 text-transparent'
+                  }`}>
+                    <Check size={11} strokeWidth={3} />
+                  </span>
+                  <SocialPlatformIcon platform={plat} />
+                  <span>{plat}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 3. POST DATE & THUMBNAIL CARD */}
       <div>
         <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
           POST DATE & PLATFORM (Video {videoNumber})
@@ -13998,7 +14017,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               ) : (
                 <div className="w-16 h-16 rounded-lg bg-[#070c18] border border-dashed border-slate-700 flex flex-col items-center justify-center text-slate-500 shrink-0 p-1 text-center">
                   <ImageIcon size={18} />
-                  <span className="text-[9px] mt-0.5 leading-tight font-medium">No Thumbnail</span>
+                  <span className="text-[9px] mt-0.5 leading-tight font-medium">No Thumbnail (Optional)</span>
                 </div>
               )}
 
@@ -14017,8 +14036,8 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
                       Thumbnail Attached
                     </span>
                   ) : (
-                    <span className="text-[11px] font-bold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-md">
-                      Thumbnail Missing
+                    <span className="text-[11px] font-medium text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-md">
+                      No Thumbnail (Optional)
                     </span>
                   )}
                 </div>
@@ -14053,47 +14072,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               </span>
             </div>
 
-            {/* 1. SELECT PLATFORM * (Required) */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  SELECT PLATFORM *
-                </label>
-                <span className="text-[11px] font-semibold">
-                  {selectedPlatforms.length > 0 ? (
-                    <span className="text-blue-400 font-bold">Selected: {selectedPlatforms.join(' + ')}</span>
-                  ) : (
-                    <span className="text-rose-400 font-bold">At least 1 platform required</span>
-                  )}
-                </span>
-              </div>
-              <div className="flex gap-2.5 flex-wrap">
-                {availablePlatforms.map(p => {
-                  const isSelected = selectedPlatforms.includes(p);
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => handleTogglePlatform(p)}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-2 cursor-pointer ${
-                        isSelected
-                          ? 'bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-500/20'
-                          : 'bg-[#070c18] border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'
-                      }`}
-                    >
-                      <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-[10px] ${
-                        isSelected ? 'bg-white border-white text-blue-600 font-black' : 'border-slate-500'
-                      }`}>
-                        {isSelected && '✓'}
-                      </span>
-                      <span>{p}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 2. POST DATE * (Required) */}
+            {/* 1. POST DATE * (Required) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
@@ -14125,17 +14104,17 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               </div>
             </div>
 
-            {/* 3. UPLOAD THUMBNAIL * (Required) */}
+            {/* 2. UPLOAD THUMBNAIL (OPTIONAL) */}
             <div className="space-y-2 pt-1">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  UPLOAD THUMBNAIL *
+                  UPLOAD THUMBNAIL (OPTIONAL)
                 </label>
                 <span className="text-[11px] font-semibold">
                   {thumbnailUrl ? (
                     <span className="text-emerald-400 font-bold">Thumbnail uploaded</span>
                   ) : (
-                    <span className="text-rose-400 font-bold">Thumbnail required</span>
+                    <span className="text-slate-400">Optional</span>
                   )}
                 </span>
               </div>
@@ -14215,14 +14194,14 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
                   </div>
                 </div>
               ) : (
-                /* No Thumbnail Selected Box */
+                /* No Thumbnail Selected Box (Optional) */
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-[#070c18] border border-dashed border-slate-700 hover:border-slate-600 rounded-xl gap-3 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-lg bg-slate-800/80 border border-slate-700 flex items-center justify-center text-slate-400 shrink-0">
                       <ImageIcon size={22} />
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-slate-300">No thumbnail selected</p>
+                      <p className="text-xs font-bold text-slate-300">No thumbnail uploaded (Optional)</p>
                       <p className="text-[11px] text-slate-500 mt-0.5">
                         Supported formats: JPG, JPEG, PNG, WEBP (Max 15MB)
                       </p>
@@ -14251,13 +14230,13 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               )}
             </div>
 
-            {/* 4. ACTIONS & SAVE BUTTON */}
+            {/* 3. ACTIONS & SAVE BUTTON */}
             <div className="flex items-center gap-2.5 pt-2">
               <button
                 type="button"
                 onClick={handleSavePostDate}
                 disabled={isSavingDate || isUploadingThumbnail || !isFormValid || !isPaymentCompleted}
-                title={!isPaymentCompleted ? 'Payment must be completed first' : (!isFormValid ? 'Select platform, pick date, and upload thumbnail to save' : 'Save Post Date')}
+                title={!isPaymentCompleted ? 'Payment must be completed first' : (!isFormValid ? 'Select platform and pick date to save' : 'Save Post Date')}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
               >
                 {isSavingDate ? (
@@ -14285,7 +14264,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
             </div>
 
             <p className="text-[11px] text-slate-400">
-              Select one or multiple platforms, pick the post date, and upload the approved thumbnail. This date, platform, and thumbnail will be stored for this influencer's Video {videoNumber} and shown in the Campaign Calendar.
+              Select one or multiple platforms and pick the post date (thumbnail optional). This date and platform will be stored for this influencer's Video {videoNumber} and shown in the Campaign Calendar.
             </p>
           </div>
         )}
