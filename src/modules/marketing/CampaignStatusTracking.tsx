@@ -13707,31 +13707,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         </div>
       )}
 
-      {/* 1. CREATOR INFORMATION */}
-      <div className="p-4 bg-[#0b1329] border border-slate-800 rounded-xl shadow-sm">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-xs">
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Creator Name</span>
-            <span className="text-white font-semibold text-sm truncate block mt-0.5" title={influencerName}>{influencerName}</span>
-          </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Creator Code</span>
-            <span className="text-purple-400 font-mono font-bold text-sm block mt-0.5">{creatorCode}</span>
-          </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">User ID / Handle</span>
-            <span className="text-slate-300 font-mono text-xs block mt-0.5 truncate" title={userId}>{userId}</span>
-          </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Product</span>
-            <span className="text-cyan-300 font-semibold text-xs block mt-0.5 truncate" title={assignedProductName}>
-              {assignedProductName || 'Standard'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 2. APPROVED DELIVERABLE INFO SECTION */}
+      {/* 1. APPROVED DELIVERABLE INFO SECTION */}
       <div className="animate-fade-in space-y-5 bg-[#0b1329] p-5 sm:p-6 rounded-2xl border border-slate-800 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
           <div className="flex items-center gap-2">
