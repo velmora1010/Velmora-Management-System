@@ -3,7 +3,7 @@ import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStat
 import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
 import { getCanonicalInfluencerPostDates, formatDisplayDateLocal } from '../../utils/influencerDateUtils';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
-import { getVideoWorkflow, isInfluencerDraftApproved, getInfluencerDraftStatus } from './CampaignStatusTracking';
+import { getVideoWorkflow, isInfluencerDraftApproved, getInfluencerDraftStatus, formatDisplayTimeLocal } from './CampaignStatusTracking';
 import { isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
 import { shipmentAttemptService, type ShipmentAttempt } from '../../services/shipmentAttemptService';
 import type { Campaign, CampaignInfluencer } from '../../types';
@@ -48,6 +48,7 @@ interface CalendarEvent {
   videoNumber?: number;
   postDateStr?: string | null;
   draftDateStr?: string | null;
+  timeStr?: string | null;
 }
 
 const createFallbackRecord = (inf: CampaignInfluencer, campaign: Campaign): StatusTrackingRecord => {
@@ -524,12 +525,14 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
 
       for (let vNum = 1; vNum <= 6; vNum++) {
         let manualDraftDate = '';
+        let manualDraftTime: string | null = null;
         let manualPostDate = '';
         let postPlatforms = '';
         let isPostConfirmed = false;
         let isApproved = false;
         let isReDraft = false;
         let reDraftDate = '';
+        let reDraftTime: string | null = null;
 
         try {
           const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
@@ -551,6 +554,16 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               '';
             if (rawDraftSubmit) {
               manualDraftDate = parseDateOnly(rawDraftSubmit, 2026);
+            }
+            const rawDraftTime = approvedAttempt?.draft_submit_time || 
+              approvedAttempt?.draft_submission_time || 
+              approvedAttempt?.submission_time || 
+              dStep?.data?.draft_submit_time || 
+              dStep?.data?.draft_submission_time || 
+              dStep?.data?.submission_time || 
+              null;
+            if (rawDraftTime) {
+              manualDraftTime = formatDisplayTimeLocal(rawDraftTime);
             }
           }
 
@@ -575,6 +588,16 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
                 '';
               if (reDraftDateRaw) {
                 reDraftDate = parseDateOnly(reDraftDateRaw, 2026);
+              }
+              const rawReDraftTime = activeAttempt?.re_draft_submit_time || 
+                activeAttempt?.draft_submit_time || 
+                activeAttempt?.draft_submission_time || 
+                activeAttempt?.submission_time || 
+                dStep?.data?.re_draft_submit_time || 
+                dStep?.data?.draft_submit_time || 
+                null;
+              if (rawReDraftTime) {
+                reDraftTime = formatDisplayTimeLocal(rawReDraftTime);
               }
             }
           }
@@ -605,10 +628,11 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               id: `draft-${infId}-v${vNum}`,
               recordId: infId,
               type: 'Draft',
-              label: `🟢 Draft Approved • ${influencerName || influencerCode} • Video ${vNum}`,
+              label: `🟢 Draft Approved • ${influencerName || influencerCode} • Video ${vNum}${manualDraftTime ? ` (${manualDraftTime})` : ''}`,
               icon: '🎬',
               colorClass: 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400',
               dateStr: manualDraftDate,
+              timeStr: manualDraftTime || null,
               influencerName,
               influencerUsername,
               influencerCode,
@@ -631,10 +655,11 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               id: `redraft-${infId}-v${vNum}`,
               recordId: infId,
               type: 'Re-Draft',
-              label: `🔴 Re-Draft • ${influencerName || influencerCode} • Video ${vNum}`,
+              label: `🔴 Re-Draft • ${influencerName || influencerCode} • Video ${vNum}${reDraftTime ? ` (${reDraftTime})` : ''}`,
               icon: '🔄',
               colorClass: 'bg-rose-500/10 border border-rose-500/30 text-rose-400',
               dateStr: reDraftDate,
+              timeStr: reDraftTime || null,
               influencerName,
               influencerUsername,
               influencerCode,

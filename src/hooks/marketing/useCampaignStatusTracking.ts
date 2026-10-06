@@ -100,9 +100,15 @@ export interface StatusTrackingRecord {
   };
   postDates?: Array<{
     id?: any;
+    influencer_id?: any;
+    campaign_id?: any;
     video_number: number;
     post_date?: string | null;
     draft_date?: string | null;
+    thumbnail_url?: string | null;
+    thumbnail_path?: string | null;
+    platform?: string | null;
+    selected_platforms?: string[] | null;
   }>;
   influencer?: any;
   videoPayments?: InfluencerVideoPayment[];
@@ -311,7 +317,11 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 postDatesMap.set(vNum, {
                   video_number: vNum,
                   post_date: postYmd || pd.post_date || null,
-                  draft_date: draftYmd || null
+                  draft_date: draftYmd || null,
+                  thumbnail_url: pd.thumbnail_url || pd.thumbnail_path || null,
+                  thumbnail_path: pd.thumbnail_path || null,
+                  platform: pd.platform || null,
+                  selected_platforms: pd.selected_platforms || null
                 });
               }
             });
@@ -331,13 +341,18 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
               const draftYmd = hasDraft
                 ? parseToYMD(pd.draft_date, 2026)
                 : (postYmd ? calculateDraftDate(postYmd, 2026) : '');
+              const existingMapItem = postDatesMap.get(vNum);
               postDatesMap.set(vNum, {
                 id: pd.id,
                 influencer_id: pd.influencer_id,
                 campaign_id: pd.campaign_id,
                 video_number: vNum,
                 post_date: postYmd || pd.post_date || null,
-                draft_date: draftYmd || null
+                draft_date: draftYmd || null,
+                thumbnail_url: pd.thumbnail_url || pd.thumbnail_path || existingMapItem?.thumbnail_url || null,
+                thumbnail_path: pd.thumbnail_path || existingMapItem?.thumbnail_path || null,
+                platform: pd.platform || existingMapItem?.platform || null,
+                selected_platforms: pd.selected_platforms || existingMapItem?.selected_platforms || null
               });
             }
           });
@@ -350,7 +365,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           return {
             ...pd,
             post_date: postYmd || pd.post_date || null,
-            draft_date: draftYmd || null
+            draft_date: draftYmd || null,
+            thumbnail_url: pd.thumbnail_url || null,
+            thumbnail_path: pd.thumbnail_path || null
           };
         }).sort((a: any, b: any) => (a.video_number || 0) - (b.video_number || 0));
 

@@ -10,7 +10,7 @@ import {
   History, RotateCcw, AlertTriangle, Lock, RefreshCw, Play, Pause, Edit3, Loader2,
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Activity, Truck, Share2, Globe, GitBranch,
   Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward,
-  FilePlus, CheckCircle2, Save, Sparkles, Radio
+  FilePlus, CheckCircle2, Save, Sparkles, Radio, Image as ImageIcon, Upload
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -219,6 +219,39 @@ export const formatDisplayDateLocal = (dateStr: string | null | undefined): stri
   const monthName = months[month - 1] || '';
   const dd = String(day).padStart(2, '0');
   return `${dd} ${monthName} ${year}`;
+};
+
+export const formatDisplayTimeLocal = (timeStr: string | null | undefined): string => {
+  if (!timeStr || !timeStr.trim()) return '';
+  const clean = timeStr.trim();
+  if (/am|pm/i.test(clean)) return clean;
+  const parts = clean.split(':');
+  if (parts.length >= 2) {
+    let hours = parseInt(parts[0], 10);
+    const mins = parseInt(parts[1], 10);
+    if (!isNaN(hours) && !isNaN(mins)) {
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      const mmStr = String(mins).padStart(2, '0');
+      const hhStr = String(hours).padStart(2, '0');
+      return `${hhStr}:${mmStr} ${ampm}`;
+    }
+  }
+  return clean;
+};
+
+export const formatSubmissionDateTime = (
+  dateStr: string | null | undefined, 
+  timeStr?: string | null | undefined
+): string => {
+  if (!dateStr || !dateStr.trim()) return 'Not Assigned';
+  const formattedDate = formatDisplayDateLocal(dateStr);
+  const formattedTime = formatDisplayTimeLocal(timeStr);
+  if (formattedTime) {
+    return `${formattedDate}, ${formattedTime}`;
+  }
+  return formattedDate;
 };
 
 // =========================================================================
@@ -934,7 +967,11 @@ export interface DraftAttempt {
   corrections?: string;
   draft_submission_date?: string;
   draft_submit_date?: string;
+  draft_submit_time?: string | null;
+  draft_submission_time?: string | null;
+  submission_time?: string | null;
   re_draft_submit_date?: string;
+  re_draft_submit_time?: string | null;
   expected_submit_date?: string;
   final_product_link?: string;
   final_description?: string;
@@ -1061,16 +1098,22 @@ export const syncInfluencerPostDate = async ({
   videoNumber,
   newPostDate,
   newDraftDate,
+  newDraftTime,
   platform,
-  selectedPlatforms
+  selectedPlatforms,
+  thumbnailUrl,
+  thumbnailPath
 }: {
   influencerId: string | number;
   campaignId?: string;
   videoNumber: number;
   newPostDate: string;
   newDraftDate?: string;
+  newDraftTime?: string | null;
   platform?: string;
   selectedPlatforms?: string[];
+  thumbnailUrl?: string;
+  thumbnailPath?: string;
 }): Promise<{ success: boolean; error?: string }> => {
   const numericInfId = parseInt(String(influencerId), 10);
   if (isNaN(numericInfId)) {
@@ -1099,11 +1142,20 @@ export const syncInfluencerPostDate = async ({
       if (newDraftDate) {
         updateData.draft_date = newDraftDate;
       }
+      if (newDraftTime !== undefined) {
+        updateData.draft_time = newDraftTime || null;
+      }
       if (platform) {
         updateData.platform = platform;
       }
       if (selectedPlatforms) {
         updateData.selected_platforms = selectedPlatforms;
+      }
+      if (thumbnailUrl !== undefined) {
+        updateData.thumbnail_url = thumbnailUrl || null;
+      }
+      if (thumbnailPath !== undefined) {
+        updateData.thumbnail_path = thumbnailPath || null;
       }
       const { error: updatePdErr } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerPostDates)
@@ -1111,8 +1163,25 @@ export const syncInfluencerPostDate = async ({
         .eq('id', existingRows[0].id);
 
       if (updatePdErr) {
-        console.error('Error updating influencer_post_dates_rows:', updatePdErr);
-        return { success: false, error: updatePdErr.message || 'Failed to update post dates table' };
+        if (updatePdErr.message?.includes('thumbnail') || updatePdErr.message?.includes('draft_time')) {
+          if (updatePdErr.message?.includes('thumbnail')) {
+            delete updateData.thumbnail_url;
+            delete updateData.thumbnail_path;
+          }
+          if (updatePdErr.message?.includes('draft_time')) {
+            delete updateData.draft_time;
+          }
+          const { error: retryErr } = await supabaseAdmin
+            .from(SUPABASE_TABLES.influencerPostDates)
+            .update(updateData)
+            .eq('id', existingRows[0].id);
+          if (retryErr) {
+            console.error('Error updating influencer_post_dates_rows on retry:', retryErr);
+          }
+        } else {
+          console.error('Error updating influencer_post_dates_rows:', updatePdErr);
+          return { success: false, error: updatePdErr.message || 'Failed to update post dates table' };
+        }
       }
     } else {
       let nextId = Date.now();
@@ -1125,22 +1194,49 @@ export const syncInfluencerPostDate = async ({
         if (maxRows && maxRows[0]?.id) nextId = Number(maxRows[0].id) + 1;
       } catch (e) {}
 
+      const insertData: any = {
+        id: nextId,
+        influencer_id: numericInfId,
+        campaign_id: campaignId || null,
+        video_number: videoNumber,
+        post_date: newPostDate,
+        draft_date: newDraftDate || null,
+        platform: platform || null,
+        selected_platforms: selectedPlatforms || null
+      };
+      if (newDraftTime !== undefined) {
+        insertData.draft_time = newDraftTime || null;
+      }
+      if (thumbnailUrl !== undefined) {
+        insertData.thumbnail_url = thumbnailUrl || null;
+      }
+      if (thumbnailPath !== undefined) {
+        insertData.thumbnail_path = thumbnailPath || null;
+      }
+
       const { error: insertPdErr } = await supabaseAdmin
         .from(SUPABASE_TABLES.influencerPostDates)
-        .insert([{
-          id: nextId,
-          influencer_id: numericInfId,
-          campaign_id: campaignId || null,
-          video_number: videoNumber,
-          post_date: newPostDate,
-          draft_date: newDraftDate || null,
-          platform: platform || null,
-          selected_platforms: selectedPlatforms || null
-        }]);
+        .insert([insertData]);
 
       if (insertPdErr) {
-        console.error('Error inserting into influencer_post_dates_rows:', insertPdErr);
-        return { success: false, error: insertPdErr.message || 'Failed to insert post dates table' };
+        if (insertPdErr.message?.includes('thumbnail') || insertPdErr.message?.includes('draft_time')) {
+          if (insertPdErr.message?.includes('thumbnail')) {
+            delete insertData.thumbnail_url;
+            delete insertData.thumbnail_path;
+          }
+          if (insertPdErr.message?.includes('draft_time')) {
+            delete insertData.draft_time;
+          }
+          const { error: retryInsertErr } = await supabaseAdmin
+            .from(SUPABASE_TABLES.influencerPostDates)
+            .insert([insertData]);
+          if (retryInsertErr) {
+            console.error('Error inserting into influencer_post_dates_rows on retry:', retryInsertErr);
+          }
+        } else {
+          console.error('Error inserting into influencer_post_dates_rows:', insertPdErr);
+          return { success: false, error: insertPdErr.message || 'Failed to insert post dates table' };
+        }
       }
     }
 
@@ -1182,19 +1278,31 @@ export const syncInfluencerPostDate = async ({
         if (newDraftDate) {
           pdItem.draft_date = newDraftDate;
         }
+        if (newDraftTime !== undefined) {
+          pdItem.draft_time = newDraftTime || null;
+        }
         if (platform) {
           pdItem.platform = platform;
         }
         if (selectedPlatforms) {
           pdItem.selected_platforms = selectedPlatforms;
         }
+        if (thumbnailUrl !== undefined) {
+          pdItem.thumbnail_url = thumbnailUrl;
+        }
+        if (thumbnailPath !== undefined) {
+          pdItem.thumbnail_path = thumbnailPath;
+        }
       } else {
         viewsJson.post_dates.push({
           video_number: videoNumber,
           post_date: newPostDate,
           draft_date: newDraftDate || null,
+          draft_time: newDraftTime || null,
           platform: platform || null,
-          selected_platforms: selectedPlatforms || null
+          selected_platforms: selectedPlatforms || null,
+          thumbnail_url: thumbnailUrl || null,
+          thumbnail_path: thumbnailPath || null
         });
       }
 
@@ -1471,6 +1579,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
       } else if (cfg.id === 'post_date') {
         const postData = st.data || {};
         const effPostDate = postData.scheduled_post_date || postData.post_date || scheduledPostDate || '';
+        const effThumbnailUrl = postData.thumbnail_url || postData.thumbnail_path || scheduleEntry?.thumbnail_url || scheduleEntry?.thumbnail_path || '';
+        const effThumbnailPath = postData.thumbnail_path || scheduleEntry?.thumbnail_path || '';
+        const effThumbnailName = postData.thumbnail_file_name || '';
         const isPostDone = Boolean(st.completed === true || st.status === 'COMPLETED' || postData.post_date_confirmed === true);
         steps[cfg.id] = {
           ...st,
@@ -1479,6 +1590,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           data: {
             ...postData,
             scheduled_post_date: effPostDate,
+            thumbnail_url: effThumbnailUrl,
+            thumbnail_path: effThumbnailPath,
+            thumbnail_file_name: effThumbnailName,
             history: Array.isArray(postData.history) ? postData.history : []
           }
         };
@@ -1694,6 +1808,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         completed = false;
         data = {
           scheduled_post_date: scheduledPostDate || '',
+          thumbnail_url: scheduleEntry?.thumbnail_url || scheduleEntry?.thumbnail_path || '',
+          thumbnail_path: scheduleEntry?.thumbnail_path || '',
+          thumbnail_file_name: '',
           history: []
         };
       } else if (cfg.id === 'after_post') {
@@ -1771,6 +1888,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         completed = false;
         data = {
           scheduled_post_date: scheduledPostDate || '',
+          thumbnail_url: scheduleEntry?.thumbnail_url || scheduleEntry?.thumbnail_path || '',
+          thumbnail_path: scheduleEntry?.thumbnail_path || '',
+          thumbnail_file_name: '',
           history: []
         };
       } else if (cfg.id === 'after_post') {
@@ -5335,7 +5455,24 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           }
         }
       } else if (stepId === 'post_date') {
-        // Post date is manual date only
+        if (!record.postDates) record.postDates = [];
+        const existingPdIdx = record.postDates.findIndex((p: any) => Number(p.video_number) === Number(videoNumber));
+        const pdItem = {
+          id: (record.postDates[existingPdIdx] as any)?.id,
+          influencer_id: record.influencer_id,
+          campaign_id: record.campaign_id,
+          video_number: videoNumber,
+          post_date: stepData.scheduled_post_date || stepData.post_date,
+          platform: stepData.platform,
+          selected_platforms: stepData.selected_platforms,
+          thumbnail_url: stepData.thumbnail_url || null,
+          thumbnail_path: stepData.thumbnail_path || null
+        };
+        if (existingPdIdx >= 0) {
+          record.postDates[existingPdIdx] = { ...record.postDates[existingPdIdx], ...pdItem };
+        } else {
+          record.postDates.push(pdItem);
+        }
       } else if (stepId === 'after_post') {
         if (videoNumber === 1) {
           updates.final_post_completed = isStepCompleted;
@@ -10748,9 +10885,12 @@ const DraftForm: React.FC<DraftFormProps> = ({
     }
   };
 
-  // Manual Draft Submit Date (Required for approval)
+  // Manual Draft Submit Date & Time (Required date for approval, optional time)
   const [draftSubmitDate, setDraftSubmitDate] = useState<string>(
     activeAttempt?.draft_submit_date || existingData.draft_submit_date || ''
+  );
+  const [draftSubmitTime, setDraftSubmitTime] = useState<string>(
+    activeAttempt?.draft_submit_time || activeAttempt?.draft_submission_time || activeAttempt?.submission_time || existingData.draft_submit_time || existingData.draft_submission_time || existingData.submission_time || ''
   );
 
   useEffect(() => {
@@ -10759,7 +10899,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
     } else if (existingData.draft_submit_date) {
       setDraftSubmitDate(existingData.draft_submit_date);
     }
-  }, [activeAttempt?.draft_submit_date, existingData.draft_submit_date]);
+    const aTime = activeAttempt?.draft_submit_time || activeAttempt?.draft_submission_time || activeAttempt?.submission_time || existingData.draft_submit_time || existingData.draft_submission_time || existingData.submission_time;
+    if (aTime !== undefined) {
+      setDraftSubmitTime(aTime || '');
+    }
+  }, [activeAttempt?.draft_submit_date, activeAttempt?.draft_submit_time, activeAttempt?.draft_submission_time, activeAttempt?.submission_time, existingData.draft_submit_date, existingData.draft_submit_time]);
 
   // Re-Draft Submit Date for Not Approved
   const [reDraftSubmitDate, setReDraftSubmitDate] = useState<string>(
@@ -10783,6 +10927,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [reDraftTamilFile, setReDraftTamilFile] = useState<File | null>(null);
   const [reDraftTamilUrl, setReDraftTamilUrl] = useState('');
   const [reDraftSubmissionDate, setReDraftSubmissionDate] = useState<string>('');
+  const [reDraftSubmissionTime, setReDraftSubmissionTime] = useState<string>('');
 
   // Initial Draft Upload State (Attempt 1)
   const [initialOriginalFile, setInitialOriginalFile] = useState<File | null>(null);
@@ -10791,6 +10936,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [initialTamilUrl, setInitialTamilUrl] = useState(activeAttempt?.tamil_video_url || existingData.tamil_video_url || '');
   const [initialDraftDate, setInitialDraftDate] = useState<string>(
     activeAttempt?.draft_submission_date || activeAttempt?.draft_submit_date || existingData.draft_submission_date || existingData.draft_submit_date || ''
+  );
+  const [initialDraftTime, setInitialDraftTime] = useState<string>(
+    activeAttempt?.draft_submit_time || activeAttempt?.draft_submission_time || activeAttempt?.submission_time || existingData.draft_submit_time || existingData.draft_submission_time || existingData.submission_time || ''
   );
 
   // Hidden File Input Refs
@@ -10801,10 +10949,13 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const activeOriginalReplaceInputRef = useRef<HTMLInputElement>(null);
   const activeTamilReplaceInputRef = useRef<HTMLInputElement>(null);
 
-  // Date picker refs
+  // Date & Time picker refs
   const initialDateInputRef = useRef<HTMLInputElement>(null);
+  const initialTimeInputRef = useRef<HTMLInputElement>(null);
   const reDraftDateInputRef = useRef<HTMLInputElement>(null);
+  const reDraftTimeInputRef = useRef<HTMLInputElement>(null);
   const draftSubmitDateInputRef = useRef<HTMLInputElement>(null);
+  const draftSubmitTimeInputRef = useRef<HTMLInputElement>(null);
   const reDraftDueDateInputRef = useRef<HTMLInputElement>(null);
 
   const [isUploading, setIsUploading] = useState(false);
@@ -10907,6 +11058,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
       return;
     }
 
+    const savedDraftTime = initialDraftTime?.trim() || null;
     const firstAttempt: DraftAttempt = {
       attempt_number: 1,
       video_url: finalOriginalUrl,
@@ -10915,6 +11067,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
       tamil_file_name: finalTamilUrl ? (initialTamilFile?.name || finalTamilUrl?.split('/').pop()?.split('?')[0] || 'tamil_translation.mp4') : undefined,
       draft_submission_date: initialDraftDate.trim(),
       draft_submit_date: initialDraftDate.trim(),
+      draft_submit_time: savedDraftTime,
+      draft_submission_time: savedDraftTime,
+      submission_time: savedDraftTime,
       submitted_at: new Date().toISOString(),
       approval_status: 'Pending Approval',
       timing_status: calculatedTiming,
@@ -10956,7 +11111,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
         campaignId: record.campaign_id,
         videoNumber,
         newPostDate: '',
-        newDraftDate: initialDraftDate.trim()
+        newDraftDate: initialDraftDate.trim(),
+        newDraftTime: savedDraftTime
       });
     } catch (sErr) {
       console.warn('Sync draft date to post dates error:', sErr);
@@ -10971,6 +11127,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
       approval_status: 'Pending Approval',
       draft_submission_date: initialDraftDate.trim(),
       draft_submit_date: initialDraftDate.trim(),
+      draft_submit_time: savedDraftTime,
+      draft_submission_time: savedDraftTime,
+      submission_time: savedDraftTime,
       vid: finalOriginalUrl,
       original_file_name: firstAttempt.original_file_name,
       tamil_video_url: firstAttempt.tamil_video_url,
@@ -10981,6 +11140,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     setInitialOriginalFile(null);
     setInitialTamilFile(null);
     setDraftSubmitDate(initialDraftDate.trim());
+    setDraftSubmitTime(savedDraftTime || '');
     setAppStat('Pending Approval');
     setIsUploading(false);
     toast.success('Draft submission saved! Status: Pending Approval 🟡');
@@ -11022,6 +11182,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     }
 
     const expectedSubmit = activeAttempt?.re_draft_submit_date || existingData.latest_re_draft_submit_date || existingData.re_draft_submit_date || '';
+    const redraftTime = reDraftSubmissionTime?.trim() || null;
     const newAttempt: DraftAttempt = {
       attempt_number: nextAttemptNumber,
       video_url: finalOriginalUrl,
@@ -11030,6 +11191,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
       tamil_file_name: finalTamilUrl ? (reDraftTamilFile?.name || finalTamilUrl.split('/').pop()?.split('?')[0] || 'tamil_translation.mp4') : undefined,
       draft_submission_date: reDraftSubmissionDate.trim(),
       draft_submit_date: reDraftSubmissionDate.trim(),
+      draft_submit_time: redraftTime,
+      draft_submission_time: redraftTime,
+      submission_time: redraftTime,
+      re_draft_submit_time: redraftTime,
       submitted_at: new Date().toISOString(),
       approval_status: 'Pending Approval',
       timing_status: calculatedTiming,
@@ -11074,7 +11239,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
         campaignId: record.campaign_id,
         videoNumber,
         newPostDate: '',
-        newDraftDate: reDraftSubmissionDate.trim()
+        newDraftDate: reDraftSubmissionDate.trim(),
+        newDraftTime: redraftTime
       });
     } catch (sErr) {
       console.warn('Sync re-draft date to post dates error:', sErr);
@@ -11086,6 +11252,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
       approval_status: 'Pending Approval',
       draft_submission_date: reDraftSubmissionDate.trim(),
       draft_submit_date: reDraftSubmissionDate.trim(),
+      draft_submit_time: redraftTime,
+      draft_submission_time: redraftTime,
+      submission_time: redraftTime,
+      re_draft_submit_time: redraftTime,
       vid: finalOriginalUrl,
       original_file_name: newAttempt.original_file_name,
       tamil_video_url: newAttempt.tamil_video_url,
@@ -11101,7 +11271,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
     setReDraftTamilFile(null);
     setReDraftTamilUrl('');
     setReDraftSubmissionDate('');
+    setReDraftSubmissionTime('');
     setDraftSubmitDate(reDraftSubmissionDate.trim());
+    setDraftSubmitTime(redraftTime || '');
     toast.success(`Re-Draft Attempt ${nextAttemptNumber} submitted! Status: Re-Draft Submitted 🟢`);
     if (onNavigateToStep) {
       onNavigateToStep('re_draft_submitted');
@@ -11258,7 +11430,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
           platform_deliverables: prevAttempt.platform_deliverables || {},
           draft_submission_date: prevAttempt.draft_submission_date || prevAttempt.draft_submit_date || '',
           draft_submit_date: prevAttempt.draft_submit_date || prevAttempt.draft_submission_date || '',
+          draft_submit_time: prevAttempt.draft_submit_time || prevAttempt.submission_time || prevAttempt.draft_submission_time || null,
+          draft_submission_time: prevAttempt.draft_submission_time || prevAttempt.draft_submit_time || prevAttempt.submission_time || null,
+          submission_time: prevAttempt.submission_time || prevAttempt.draft_submit_time || prevAttempt.draft_submission_time || null,
           re_draft_submit_date: prevAttempt.re_draft_submit_date || '',
+          re_draft_submit_time: prevAttempt.re_draft_submit_time || null,
           latest_re_draft_submit_date: prevAttempt.re_draft_submit_date || ''
         };
         await onSave(rollbackPayload, isPrevApproved);
@@ -11271,6 +11447,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
         setPlatformDeliverables(prevAttempt.platform_deliverables || {});
         setCalculatedTiming(prevAttempt.timing_status || 'On Time');
         setDraftSubmitDate(prevAttempt.draft_submission_date || prevAttempt.draft_submit_date || '');
+        setDraftSubmitTime(prevAttempt.draft_submit_time || prevAttempt.submission_time || prevAttempt.draft_submission_time || '');
         setReDraftSubmitDate(prevAttempt.re_draft_submit_date || '');
         setAttemptToDelete(null);
         setPreviewModalAsset(null);
@@ -11325,6 +11502,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
     setIsUploading(true);
     const userName = await getCurrentUserName();
     const nowIso = new Date().toISOString();
+    const approvedTime = draftSubmitTime?.trim() || null;
 
     const isApproved = appStat === 'Approved' && calculatedTiming !== 'Not Submit' && !!draftSubmitDate;
     const primaryPlat = selectedPlatforms[0];
@@ -11340,6 +11518,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
           corrections: appStat === 'Not Approved' ? corr : (appStat === 'Approved' ? '' : att.corrections),
           draft_submission_date: draftSubmitDate || att.draft_submission_date || att.draft_submit_date,
           draft_submit_date: draftSubmitDate || att.draft_submit_date,
+          draft_submit_time: approvedTime,
+          draft_submission_time: approvedTime,
+          submission_time: approvedTime,
           re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : undefined,
           final_product_link: isApproved ? (primaryDeliverable?.final_post_link || finalL) : att.final_product_link,
           final_description: isApproved ? (primaryDeliverable?.final_description || finalD) : att.final_description,
@@ -11366,6 +11547,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
       timing: calculatedTiming,
       draft_submission_date: draftSubmitDate,
       draft_submit_date: draftSubmitDate,
+      draft_submit_time: approvedTime,
+      draft_submission_time: approvedTime,
+      submission_time: approvedTime,
       corr: appStat === 'Not Approved' ? corr : '',
       re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : '',
       latest_re_draft_submit_date: appStat === 'Not Approved' ? reDraftSubmitDate : (existingData.latest_re_draft_submit_date || ''),
@@ -11388,7 +11572,8 @@ const DraftForm: React.FC<DraftFormProps> = ({
           campaignId: record.campaign_id,
           videoNumber,
           newPostDate: '',
-          newDraftDate: draftSubmitDate.trim()
+          newDraftDate: draftSubmitDate.trim(),
+          newDraftTime: approvedTime
         });
       } catch (sErr) {
         console.warn('Sync draft date to post dates error:', sErr);
@@ -11530,7 +11715,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 </h5>
                 {(rejectedAttempt.draft_submission_date || rejectedAttempt.draft_submit_date) && (
                   <span className="text-xs font-mono text-slate-400">
-                    Submitted: {formatDisplayDateLocal(rejectedAttempt.draft_submission_date || rejectedAttempt.draft_submit_date || '')}
+                    Submitted: {formatSubmissionDateTime(
+                      rejectedAttempt.draft_submission_date || rejectedAttempt.draft_submit_date,
+                      rejectedAttempt.draft_submit_time || rejectedAttempt.submission_time || rejectedAttempt.draft_submission_time
+                    )}
                   </span>
                 )}
               </div>
@@ -11717,37 +11905,73 @@ const DraftForm: React.FC<DraftFormProps> = ({
               </div>
             )}
 
-            {/* Required Re-Draft Submission Date */}
-            <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
-                  RE-DRAFT SUBMISSION DATE *
-                </label>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
-                  Required
-                </span>
+            {/* Required Re-Draft Submission Date & Optional Time */}
+            <div className="p-4 bg-[#070c18] border border-blue-500/40 rounded-xl space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Date */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                      RE-DRAFT SUBMISSION DATE *
+                    </label>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                      Required
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input 
+                      ref={reDraftDateInputRef}
+                      type="date"
+                      value={reDraftSubmissionDate}
+                      onChange={e => setReDraftSubmissionDate(e.target.value)}
+                      style={{ colorScheme: 'dark' }}
+                      className="w-full bg-[#0b1329] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => reDraftDateInputRef.current?.showPicker?.()}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                      title="Open calendar"
+                    >
+                      <Calendar size={18} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Time */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      SUBMISSION TIME (OPTIONAL)
+                    </label>
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60 uppercase">
+                      Optional
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input 
+                      ref={reDraftTimeInputRef}
+                      type="time"
+                      value={reDraftSubmissionTime}
+                      onChange={e => setReDraftSubmissionTime(e.target.value)}
+                      style={{ colorScheme: 'dark' }}
+                      className="w-full bg-[#0b1329] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => reDraftTimeInputRef.current?.showPicker?.()}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                      title="Open time picker"
+                    >
+                      <Clock size={18} />
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="relative">
-                <input 
-                  ref={reDraftDateInputRef}
-                  type="date"
-                  value={reDraftSubmissionDate}
-                  onChange={e => setReDraftSubmissionDate(e.target.value)}
-                  style={{ colorScheme: 'dark' }}
-                  className="w-full bg-[#0b1329] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => reDraftDateInputRef.current?.showPicker?.()}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
-                  title="Open calendar"
-                >
-                  <Calendar size={18} />
-                </button>
-              </div>
+
               <span className="text-[11px] text-slate-400 block">
-                Enter the date when this revised re-draft was submitted. This date will be saved to Supabase and the Campaign Calendar.
+                Enter the date (and optional time) when this revised re-draft was submitted. This information will be saved to Supabase and the Campaign Calendar.
               </span>
             </div>
 
@@ -12082,7 +12306,10 @@ const DraftForm: React.FC<DraftFormProps> = ({
             <div className="flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 pt-2 sm:pt-0 border-current/20">
               <span className="text-[10px] uppercase font-bold opacity-75">Submission Date</span>
               <span className="text-xs font-mono font-bold">
-                {formatDisplayDateLocal(activeAttempt.draft_submission_date || activeAttempt.draft_submit_date || '')}
+                {formatSubmissionDateTime(
+                  activeAttempt.draft_submission_date || activeAttempt.draft_submit_date,
+                  activeAttempt.draft_submit_time || activeAttempt.submission_time || activeAttempt.draft_submission_time
+                )}
               </span>
             </div>
           )}
@@ -12464,38 +12691,75 @@ const DraftForm: React.FC<DraftFormProps> = ({
             </div>
           )}
 
-          {/* DRAFT SUBMISSION DATE REQUIRED (Shown always for First-time setup) */}
+          {/* DRAFT SUBMISSION DATE REQUIRED & OPTIONAL TIME (Shown always for First-time setup) */}
           <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-3 animate-fade-in">
-            <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
-                DRAFT SUBMISSION DATE *
-              </label>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
-                Required
-              </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Date */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                    DRAFT SUBMISSION DATE *
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                    Required
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <input 
+                    ref={initialDateInputRef}
+                    type="date"
+                    value={initialDraftDate}
+                    onChange={e => setInitialDraftDate(e.target.value)}
+                    style={{ colorScheme: 'dark' }}
+                    className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => initialDateInputRef.current?.showPicker?.()}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                    title="Open calendar"
+                  >
+                    <Calendar size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Time */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    SUBMISSION TIME (OPTIONAL)
+                  </label>
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60 uppercase">
+                    Optional
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <input 
+                    ref={initialTimeInputRef}
+                    type="time"
+                    value={initialDraftTime}
+                    onChange={e => setInitialDraftTime(e.target.value)}
+                    style={{ colorScheme: 'dark' }}
+                    className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => initialTimeInputRef.current?.showPicker?.()}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                    title="Open time picker"
+                  >
+                    <Clock size={18} />
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="relative">
-              <input 
-                ref={initialDateInputRef}
-                type="date"
-                value={initialDraftDate}
-                onChange={e => setInitialDraftDate(e.target.value)}
-                style={{ colorScheme: 'dark' }}
-                className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => initialDateInputRef.current?.showPicker?.()}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
-                title="Open calendar"
-              >
-                <Calendar size={18} />
-              </button>
-            </div>
             <span className="text-[11px] text-slate-400 block">
-              Enter the date when this draft video was submitted. This date will be saved to the database and displayed on the Campaign Calendar.
+              Enter the date (and optional time) when this draft video was submitted. This information will be saved to the database and displayed on the Campaign Calendar.
             </span>
 
             <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
@@ -12680,9 +12944,12 @@ const DraftForm: React.FC<DraftFormProps> = ({
                         <span>
                           Uploaded: {formatHistoryTimestamp(att.uploaded_at)}
                         </span>
-                        {att.draft_submit_date && (
+                        {(att.draft_submission_date || att.draft_submit_date) && (
                           <span className="text-emerald-300 font-semibold bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded">
-                            Submitted: {formatDisplayDateLocal(att.draft_submit_date)}
+                            Submitted: {formatSubmissionDateTime(
+                              att.draft_submission_date || att.draft_submit_date,
+                              att.draft_submit_time || att.submission_time || att.draft_submission_time
+                            )}
                           </span>
                         )}
                         {att.expected_submit_date && (
@@ -12749,35 +13016,72 @@ const DraftForm: React.FC<DraftFormProps> = ({
       {(isReDraftSubmittedView || (isStandardDraftView && activeAttempt)) && !isReDraftMode && (
         <div className="space-y-6 pt-2 border-t border-slate-800 animate-fade-in">
           {/* Manual Draft Submit Date Picker */}
-          <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
-                DRAFT SUBMIT DATE *
-              </label>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
-                Manual Date
-              </span>
+          {/* Draft Submit Date & Optional Time */}
+          <div className="p-4 bg-[#0b1329] border border-blue-500/40 rounded-xl space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Date */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-blue-300 uppercase tracking-wider">
+                    DRAFT SUBMIT DATE *
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 uppercase">
+                    Manual Date
+                  </span>
+                </div>
+                <div className="relative">
+                  <input 
+                    ref={draftSubmitDateInputRef}
+                    type="date"
+                    value={draftSubmitDate}
+                    onChange={e => setDraftSubmitDate(e.target.value)}
+                    style={{ colorScheme: 'dark' }}
+                    className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => draftSubmitDateInputRef.current?.showPicker?.()}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                    title="Open calendar"
+                  >
+                    <Calendar size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Time */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    SUBMISSION TIME (OPTIONAL)
+                  </label>
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-800/80 text-slate-400 border border-slate-700/60 uppercase">
+                    Optional
+                  </span>
+                </div>
+                <div className="relative">
+                  <input 
+                    ref={draftSubmitTimeInputRef}
+                    type="time"
+                    value={draftSubmitTime}
+                    onChange={e => setDraftSubmitTime(e.target.value)}
+                    style={{ colorScheme: 'dark' }}
+                    className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => draftSubmitTimeInputRef.current?.showPicker?.()}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                    title="Open time picker"
+                  >
+                    <Clock size={18} />
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="relative">
-              <input 
-                ref={draftSubmitDateInputRef}
-                type="date"
-                value={draftSubmitDate}
-                onChange={e => setDraftSubmitDate(e.target.value)}
-                style={{ colorScheme: 'dark' }}
-                className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors"
-              />
-              <button
-                type="button"
-                onClick={() => draftSubmitDateInputRef.current?.showPicker?.()}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
-                title="Open calendar"
-              >
-                <Calendar size={18} />
-              </button>
-            </div>
+
             <span className="text-[11px] text-slate-400 block">
-              Enter the date when this draft video was submitted. This date will be saved to the database and displayed on the Campaign Calendar.
+              Enter the date and optional time when this draft video was submitted. This information will be saved to the database and displayed on the Campaign Calendar.
             </span>
           </div>
 
@@ -13330,22 +13634,34 @@ const DraftForm: React.FC<DraftFormProps> = ({
   );
 };
 
-// --- STEP: Post Date (For Any Video 1 to 6 - Manual Post Date & Multi-Platform Selection) ---
+// --- STEP: Post Date (For Any Video 1 to 6 - Manual Post Date, Multi-Platform Selection & Upload Thumbnail) ---
 const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvanceStep }: any) => {
   // Strict match for Video N from record.postDates or existingData
   const scheduleEntry = (record.postDates || []).find(
     (pd: any) => Number(pd.video_number) === Number(videoNumber)
   );
-  let initialPostDate = existingData.scheduled_post_date || existingData.post_date || scheduleEntry?.post_date || '';
+  const initialPostDate = existingData.scheduled_post_date || existingData.post_date || scheduleEntry?.post_date || '';
+  const initialThumbnailUrl = existingData.thumbnail_url || existingData.thumbnail_path || scheduleEntry?.thumbnail_url || scheduleEntry?.thumbnail_path || '';
+  const initialThumbnailPath = existingData.thumbnail_path || scheduleEntry?.thumbnail_path || '';
+  const initialThumbnailName = existingData.thumbnail_file_name || '';
 
   const isStepConfirmed = Boolean(existingData.post_date_confirmed === true || existingData.completed === true);
 
   const [effectivePostDate, setEffectivePostDate] = useState<string>(initialPostDate);
+  const [effectiveThumbnailUrl, setEffectiveThumbnailUrl] = useState<string>(initialThumbnailUrl);
   const [isEditingDate, setIsEditingDate] = useState<boolean>(!initialPostDate || !isStepConfirmed);
   const [tempPostDate, setTempPostDate] = useState<string>(
     parseToYMD(initialPostDate, 2026) || initialPostDate || ''
   );
   const [isSavingDate, setIsSavingDate] = useState<boolean>(false);
+
+  // Thumbnail State
+  const [thumbnailUrl, setThumbnailUrl] = useState<string>(initialThumbnailUrl);
+  const [thumbnailPath, setThumbnailPath] = useState<string>(initialThumbnailPath);
+  const [thumbnailFileName, setThumbnailFileName] = useState<string>(initialThumbnailName);
+  const [isUploadingThumbnail, setIsUploadingThumbnail] = useState<boolean>(false);
+  const [showThumbnailModal, setShowThumbnailModal] = useState<boolean>(false);
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
 
   // Multi-Platform selection (Instagram, YouTube, Facebook - supports any combination)
   const availablePlatforms = ['Instagram', 'YouTube', 'Facebook'];
@@ -13365,7 +13681,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   // History list
   const historyList: PostDateHistoryEntry[] = Array.isArray(existingData.history) ? existingData.history : [];
 
-  // Synchronize state if props change
+  // Synchronize state if props change or video tab switches
   useEffect(() => {
     const eff = existingData.scheduled_post_date || existingData.post_date || scheduleEntry?.post_date || '';
     setEffectivePostDate(eff);
@@ -13379,7 +13695,30 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       const parts = existingData.platform.split(' + ').map((s: string) => s.trim()).filter(Boolean);
       if (parts.length > 0) setSelectedPlatforms(parts);
     }
-  }, [videoNumber, record.id, existingData.scheduled_post_date, existingData.post_date, scheduleEntry?.post_date, isStepConfirmed, existingData.platform, existingData.selected_platforms]);
+
+    // Video-specific thumbnail synchronization
+    const thumbUrl = existingData.thumbnail_url || existingData.thumbnail_path || scheduleEntry?.thumbnail_url || scheduleEntry?.thumbnail_path || '';
+    const thumbPath = existingData.thumbnail_path || scheduleEntry?.thumbnail_path || '';
+    const thumbName = existingData.thumbnail_file_name || '';
+    setThumbnailUrl(thumbUrl);
+    setEffectiveThumbnailUrl(thumbUrl);
+    setThumbnailPath(thumbPath);
+    setThumbnailFileName(thumbName);
+  }, [
+    videoNumber, 
+    record.id, 
+    existingData.scheduled_post_date, 
+    existingData.post_date, 
+    existingData.thumbnail_url,
+    existingData.thumbnail_path,
+    existingData.thumbnail_file_name,
+    scheduleEntry?.post_date, 
+    scheduleEntry?.thumbnail_url,
+    scheduleEntry?.thumbnail_path,
+    isStepConfirmed, 
+    existingData.platform, 
+    existingData.selected_platforms
+  ]);
 
   const handleTogglePlatform = (platform: string) => {
     setSelectedPlatforms(prev => {
@@ -13393,17 +13732,96 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
 
   const handleStartEditDate = () => {
     setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
+    setThumbnailUrl(effectiveThumbnailUrl || thumbnailUrl || '');
     setIsEditingDate(true);
   };
 
   const handleCancelEditDate = () => {
     if (effectivePostDate && isStepConfirmed) {
       setTempPostDate(parseToYMD(effectivePostDate, 2026) || effectivePostDate || '');
+      setThumbnailUrl(effectiveThumbnailUrl || '');
       setIsEditingDate(false);
     }
   };
 
+  // Thumbnail File Upload handler
+  const handleThumbnailFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate format: JPG, JPEG, PNG, WEBP
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const validExts = ['jpg', 'jpeg', 'png', 'webp'];
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!validExts.includes(ext) && !validTypes.includes(file.type)) {
+      toast.error('Invalid file format. Please upload JPG, JPEG, PNG, or WEBP.');
+      if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
+      return;
+    }
+
+    // Validate size: 15MB limit
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error('File size exceeds 15MB. Please upload a smaller image.');
+      if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
+      return;
+    }
+
+    setIsUploadingThumbnail(true);
+    const toastId = toast.loading(`Uploading thumbnail: ${file.name}...`);
+    try {
+      const campId = record.campaign_id || 'general';
+      const infId = record.influencer_id || 'inf';
+      const timestamp = Date.now();
+      const uniqueKey = Math.random().toString(36).substring(2, 8);
+      // Path format: campaign/{campaign_id}/influencer/{influencer_id}/video/{video_number}/thumbnail/{unique_filename}
+      const storagePath = `campaign/${campId}/influencer/${infId}/video/${videoNumber}/thumbnail/thumb_${timestamp}_${uniqueKey}.${ext}`;
+
+      const { error: uploadErr } = await supabaseAdmin.storage
+        .from('influencer-profiles')
+        .upload(storagePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadErr) {
+        console.error('Storage upload error:', uploadErr);
+        throw uploadErr;
+      }
+
+      const { data: publicData } = supabaseAdmin.storage
+        .from('influencer-profiles')
+        .getPublicUrl(storagePath);
+
+      const publicUrl = publicData.publicUrl;
+
+      setThumbnailUrl(publicUrl);
+      setThumbnailPath(storagePath);
+      setThumbnailFileName(file.name);
+
+      toast.success('Thumbnail uploaded successfully!', { id: toastId });
+    } catch (err: any) {
+      console.error('Error uploading thumbnail:', err);
+      toast.error('Failed to upload thumbnail: ' + (err?.message || 'Storage error'), { id: toastId });
+    } finally {
+      setIsUploadingThumbnail(false);
+      if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteThumbnail = () => {
+    setThumbnailUrl('');
+    setThumbnailPath('');
+    setThumbnailFileName('');
+    toast.success('Thumbnail removed.');
+  };
+
   const isPaymentCompleted = isInfluencerPaymentCompleted(record, videoNumber);
+
+  // Field validations
+  const isPlatformValid = selectedPlatforms.length > 0;
+  const isDateValid = Boolean(tempPostDate && tempPostDate.trim());
+  const isThumbnailValid = Boolean(thumbnailUrl && thumbnailUrl.trim());
+  const isFormValid = isPlatformValid && isDateValid && isThumbnailValid;
 
   const handleSavePostDate = async () => {
     if (!isPaymentCompleted) {
@@ -13411,13 +13829,18 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       return;
     }
 
-    if (selectedPlatforms.length === 0) {
-      toast.error('Please select at least one platform (Instagram, YouTube, or Facebook).');
+    if (!isPlatformValid) {
+      toast.error('At least 1 platform required');
       return;
     }
 
-    if (!tempPostDate || !tempPostDate.trim()) {
-      toast.error('Please pick a valid Post Date.');
+    if (!isDateValid) {
+      toast.error('Post date required');
+      return;
+    }
+
+    if (!isThumbnailValid) {
+      toast.error('Thumbnail required. Please upload a thumbnail image.');
       return;
     }
 
@@ -13447,7 +13870,9 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         videoNumber,
         newPostDate: normalizedNewYmd,
         platform: platformString,
-        selectedPlatforms
+        selectedPlatforms,
+        thumbnailUrl,
+        thumbnailPath
       });
 
       if (!syncRes.success) {
@@ -13456,13 +13881,16 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         return;
       }
 
-      // 2. Save to Status Tracking workflow step (COMPLETED = true when post date and platform are set!)
+      // 2. Save to Status Tracking workflow step (COMPLETED = true when post date, platform, and thumbnail are set!)
       const saveRes = await onSave({
         ...existingData,
         selected_platforms: selectedPlatforms,
         platform: platformString,
         scheduled_post_date: normalizedNewYmd,
         post_date: normalizedNewYmd,
+        thumbnail_url: thumbnailUrl,
+        thumbnail_path: thumbnailPath,
+        thumbnail_file_name: thumbnailFileName,
         history: updatedHistory,
         post_date_confirmed: true,
         completed: true,
@@ -13476,17 +13904,45 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         return;
       }
 
-      // 3. Log activity
+      // 3. Update in-memory record.postDates for instant tab consistency
+      if (!record.postDates) record.postDates = [];
+      const existingPdIdx = record.postDates.findIndex((p: any) => Number(p.video_number) === Number(videoNumber));
+      const newPdEntry = {
+        id: (record.postDates[existingPdIdx] as any)?.id,
+        influencer_id: record.influencer_id,
+        campaign_id: record.campaign_id,
+        video_number: videoNumber,
+        post_date: normalizedNewYmd,
+        platform: platformString,
+        selected_platforms: selectedPlatforms,
+        thumbnail_url: thumbnailUrl,
+        thumbnail_path: thumbnailPath
+      };
+      if (existingPdIdx >= 0) {
+        record.postDates[existingPdIdx] = { ...record.postDates[existingPdIdx], ...newPdEntry };
+      } else {
+        record.postDates.push(newPdEntry);
+      }
+
+      // 4. Log activity
       logActivity({
         department: 'Marketing',
         action: 'Post Date Saved',
-        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date saved as ${newDateFormatted} (${platformString})`,
-        metadata: { video_number: videoNumber, old_date: previousDateFormatted, new_date: newDateFormatted, platform: platformString, selected_platforms: selectedPlatforms }
+        description: `Influencer ${record.dispatch?.influencer_code || record.influencer_id} Video ${videoNumber} Post Date saved as ${newDateFormatted} (${platformString}) with Thumbnail`,
+        metadata: { 
+          video_number: videoNumber, 
+          old_date: previousDateFormatted, 
+          new_date: newDateFormatted, 
+          platform: platformString, 
+          selected_platforms: selectedPlatforms,
+          thumbnail_path: thumbnailPath 
+        }
       });
 
       setEffectivePostDate(normalizedNewYmd);
+      setEffectiveThumbnailUrl(thumbnailUrl);
       setIsEditingDate(false);
-      toast.success(`Video ${videoNumber} Post Date saved successfully: ${newDateFormatted} (${platformString})!`);
+      toast.success(`Video ${videoNumber} Post Date & Thumbnail saved successfully: ${newDateFormatted} (${platformString})!`);
 
       if (onAdvanceStep) {
         onAdvanceStep();
@@ -13498,8 +13954,6 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       setIsSavingDate(false);
     }
   };
-
-  const isFormValid = selectedPlatforms.length > 0 && Boolean(tempPostDate && tempPostDate.trim());
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
@@ -13516,45 +13970,80 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         </div>
       )}
 
-      {/* 1. MANUAL POST DATE CARD */}
+      {/* 1. MANUAL POST DATE & THUMBNAIL CARD */}
       <div>
         <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
           POST DATE & PLATFORM (Video {videoNumber})
         </label>
 
         {!isEditingDate && effectivePostDate && isStepConfirmed ? (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b1329] border border-slate-800 rounded-xl gap-3">
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-base sm:text-lg font-bold font-mono tracking-wide text-white">
-                  {formatDisplayDateLocal(effectivePostDate)}
-                </span>
-                <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2.5 py-0.5 rounded-md flex items-center gap-1">
-                  <Check size={12} strokeWidth={2.5} />
-                  Post Date Set
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase">Platform:</span>
-                {selectedPlatforms.map(p => (
-                  <span key={p} className="text-[11px] font-bold px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60">
-                    {p}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#0b1329] border border-slate-800 rounded-xl gap-4">
+            <div className="flex items-start sm:items-center gap-4 min-w-0">
+              {/* Thumbnail Display */}
+              {effectiveThumbnailUrl ? (
+                <div 
+                  onClick={() => setShowThumbnailModal(true)}
+                  className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 group cursor-pointer shadow-md"
+                  title="Click to view full thumbnail"
+                >
+                  <img 
+                    src={effectiveThumbnailUrl} 
+                    alt={`Video ${videoNumber} Thumbnail`} 
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
+                  />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                    <Eye size={16} className="text-white" />
+                  </div>
+                </div>
+              ) : (
+                <div className="w-16 h-16 rounded-lg bg-[#070c18] border border-dashed border-slate-700 flex flex-col items-center justify-center text-slate-500 shrink-0 p-1 text-center">
+                  <ImageIcon size={18} />
+                  <span className="text-[9px] mt-0.5 leading-tight font-medium">No Thumbnail</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5 min-w-0">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="text-base sm:text-lg font-bold font-mono tracking-wide text-white">
+                    {formatDisplayDateLocal(effectivePostDate)}
                   </span>
-                ))}
+                  <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2.5 py-0.5 rounded-md flex items-center gap-1">
+                    <Check size={12} strokeWidth={2.5} />
+                    Post Date Set
+                  </span>
+                  {effectiveThumbnailUrl ? (
+                    <span className="text-[11px] font-bold text-blue-300 bg-blue-950/70 border border-blue-800/60 px-2 py-0.5 rounded-md flex items-center gap-1">
+                      <ImageIcon size={12} />
+                      Thumbnail Attached
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-bold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-md">
+                      Thumbnail Missing
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase">Platform:</span>
+                  {selectedPlatforms.map(p => (
+                    <span key={p} className="text-[11px] font-bold px-2 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800/60">
+                      {p}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
 
             <button
               type="button"
               onClick={handleStartEditDate}
-              className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+              className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-blue-400 hover:text-blue-300 rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 self-start sm:self-auto cursor-pointer shrink-0"
             >
               <Edit3 size={13} />
               Change Date & Platform
             </button>
           </div>
         ) : (
-          <div className="p-4 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-4 animate-fade-in">
+          <div className="p-5 bg-[#0b1329] border border-blue-500/60 rounded-xl space-y-5 animate-fade-in">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-blue-400 uppercase tracking-wider block">
                 {effectivePostDate ? `Change Post Date (Video ${videoNumber})` : `Set Post Date (Video ${videoNumber}) *`}
@@ -13564,7 +14053,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               </span>
             </div>
 
-            {/* Platform Selector (Required before saving) */}
+            {/* 1. SELECT PLATFORM * (Required) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
@@ -13604,70 +14093,261 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               </div>
             </div>
 
-            {/* Post Date Picker with Visible Calendar Icon */}
+            {/* 2. POST DATE * (Required) */}
             <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-                POST DATE *
-              </label>
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                <div className="relative flex-1">
-                  <input 
-                    ref={postDateInputRef}
-                    type="date" 
-                    value={tempPostDate} 
-                    onChange={e => setTempPostDate(e.target.value)} 
-                    style={{ colorScheme: 'dark' }}
-                    className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors" 
-                  />
-                  <button
-                    type="button"
-                    onClick={() => postDateInputRef.current?.showPicker?.()}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
-                    title="Open calendar"
-                  >
-                    <Calendar size={18} />
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSavePostDate}
-                    disabled={isSavingDate || !isFormValid || !isPaymentCompleted}
-                    title={!isPaymentCompleted ? 'Payment must be completed first' : 'Save Post Date'}
-                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {isSavingDate ? (
-                      <>
-                        <Loader2 size={13} className="animate-spin" />
-                        <span>Saving...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Check size={14} strokeWidth={2.5} />
-                        <span>Save Post Date</span>
-                      </>
-                    )}
-                  </button>
-                  {effectivePostDate && (
-                    <button
-                      type="button"
-                      onClick={handleCancelEditDate}
-                      disabled={isSavingDate}
-                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  POST DATE *
+                </label>
+                {!isDateValid && (
+                  <span className="text-[11px] font-bold text-rose-400">
+                    Post date required
+                  </span>
+                )}
+              </div>
+              <div className="relative">
+                <input 
+                  ref={postDateInputRef}
+                  type="date" 
+                  value={tempPostDate} 
+                  onChange={e => setTempPostDate(e.target.value)} 
+                  style={{ colorScheme: 'dark' }}
+                  className="w-full bg-[#070c18] border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 pr-10 text-sm text-white focus:outline-none transition-colors" 
+                />
+                <button
+                  type="button"
+                  onClick={() => postDateInputRef.current?.showPicker?.()}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-cyan-300 p-1 cursor-pointer transition-colors"
+                  title="Open calendar"
+                >
+                  <Calendar size={18} />
+                </button>
               </div>
             </div>
 
+            {/* 3. UPLOAD THUMBNAIL * (Required) */}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  UPLOAD THUMBNAIL *
+                </label>
+                <span className="text-[11px] font-semibold">
+                  {thumbnailUrl ? (
+                    <span className="text-emerald-400 font-bold">Thumbnail uploaded</span>
+                  ) : (
+                    <span className="text-rose-400 font-bold">Thumbnail required</span>
+                  )}
+                </span>
+              </div>
+
+              {/* Hidden file input */}
+              <input
+                ref={thumbnailInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/jpg"
+                onChange={handleThumbnailFileSelect}
+                className="hidden"
+              />
+
+              {thumbnailUrl ? (
+                /* Thumbnail Preview Box */
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 bg-[#070c18] border border-slate-700 rounded-xl gap-3">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div 
+                      onClick={() => setShowThumbnailModal(true)} 
+                      className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 group cursor-pointer shadow-md"
+                      title="Click to view full image"
+                    >
+                      <img 
+                        src={thumbnailUrl} 
+                        alt={`Video ${videoNumber} Thumbnail`} 
+                        className="w-full h-full object-cover transition-transform group-hover:scale-105" 
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <Eye size={16} className="text-white" />
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-white truncate max-w-[220px]">
+                          {thumbnailFileName || `Video ${videoNumber} Thumbnail`}
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/60">
+                          Ready
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Approved thumbnail for Video {videoNumber}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowThumbnailModal(true)}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="View full-size thumbnail"
+                    >
+                      <Eye size={13} />
+                      <span>View</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => thumbnailInputRef.current?.click()}
+                      disabled={isUploadingThumbnail}
+                      className="px-3 py-1.5 bg-blue-950/60 hover:bg-blue-900/60 border border-blue-800/60 text-blue-300 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                      title="Replace thumbnail"
+                    >
+                      <Upload size={13} />
+                      <span>Replace</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteThumbnail}
+                      disabled={isUploadingThumbnail}
+                      className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/40 border border-rose-800/50 text-rose-300 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Delete thumbnail"
+                    >
+                      <Trash2 size={13} />
+                      <span>Delete</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* No Thumbnail Selected Box */
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-[#070c18] border border-dashed border-slate-700 hover:border-slate-600 rounded-xl gap-3 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-lg bg-slate-800/80 border border-slate-700 flex items-center justify-center text-slate-400 shrink-0">
+                      <ImageIcon size={22} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-300">No thumbnail selected</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Supported formats: JPG, JPEG, PNG, WEBP (Max 15MB)
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => thumbnailInputRef.current?.click()}
+                    disabled={isUploadingThumbnail}
+                    className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer self-start sm:self-auto disabled:opacity-50"
+                  >
+                    {isUploadingThumbnail ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={14} />
+                        <span>Upload Thumbnail</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 4. ACTIONS & SAVE BUTTON */}
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={handleSavePostDate}
+                disabled={isSavingDate || isUploadingThumbnail || !isFormValid || !isPaymentCompleted}
+                title={!isPaymentCompleted ? 'Payment must be completed first' : (!isFormValid ? 'Select platform, pick date, and upload thumbnail to save' : 'Save Post Date')}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
+              >
+                {isSavingDate ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={14} strokeWidth={2.5} />
+                    <span>Save Post Date</span>
+                  </>
+                )}
+              </button>
+              {effectivePostDate && (
+                <button
+                  type="button"
+                  onClick={handleCancelEditDate}
+                  disabled={isSavingDate || isUploadingThumbnail}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+
             <p className="text-[11px] text-slate-400">
-              Select one or multiple platforms and pick the post date. This date and platform will be stored for this influencer's Video {videoNumber} and shown in the Campaign Calendar.
+              Select one or multiple platforms, pick the post date, and upload the approved thumbnail. This date, platform, and thumbnail will be stored for this influencer's Video {videoNumber} and shown in the Campaign Calendar.
             </p>
           </div>
         )}
       </div>
+
+      {/* Thumbnail Full-View Modal */}
+      {showThumbnailModal && (thumbnailUrl || effectiveThumbnailUrl) && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setShowThumbnailModal(false)}
+        >
+          <div 
+            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-2xl w-full p-4 sm:p-5 space-y-3.5 shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                  <ImageIcon size={18} className="text-blue-400" />
+                  <span>Video {videoNumber} Thumbnail Preview</span>
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Influencer {record.dispatch?.influencer_code || record.influencer_id} • Video {videoNumber}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowThumbnailModal(false)}
+                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="w-full max-h-[70vh] bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center shadow-inner">
+              <img 
+                src={thumbnailUrl || effectiveThumbnailUrl} 
+                alt={`Video ${videoNumber} Thumbnail`} 
+                className="w-full h-auto max-h-[68vh] object-contain"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+              <a 
+                href={thumbnailUrl || effectiveThumbnailUrl} 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-blue-400 hover:text-blue-300 underline font-medium flex items-center gap-1"
+              >
+                <ExternalLink size={12} /> Open in new tab
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowThumbnailModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-semibold transition-colors cursor-pointer"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. POST DATE HISTORY SECTION */}
       {historyList.length > 0 && (
@@ -13783,6 +14463,24 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
     }
     return '';
   }, [postDateData, record, videoNumber]);
+
+  // Extract selected thumbnail from Post Date step
+  const plannedThumbnail = useMemo(() => {
+    if (postDateData?.thumbnail_url) return postDateData.thumbnail_url;
+    if (postDateData?.thumbnail_path) return postDateData.thumbnail_path;
+    try {
+      const vWorkflow = getVideoWorkflow(record, videoNumber);
+      const pd = vWorkflow?.steps?.post_date?.data;
+      if (pd?.thumbnail_url) return pd.thumbnail_url;
+      if (pd?.thumbnail_path) return pd.thumbnail_path;
+    } catch (e) {}
+    const scheduleEntry = (record.postDates || []).find((p: any) => Number(p.video_number) === Number(videoNumber));
+    if (scheduleEntry?.thumbnail_url) return scheduleEntry.thumbnail_url;
+    if (scheduleEntry?.thumbnail_path) return scheduleEntry.thumbnail_path;
+    return '';
+  }, [postDateData, record, videoNumber]);
+
+  const [showThumbnailModal, setShowThumbnailModal] = useState(false);
 
   // Resolver for each platform's initial state
   const resolveInitialPlatformEntry = useCallback((platform: string, idx: number, existingMap: any): PlatformEntryState => {
@@ -14052,10 +14750,25 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
         )}
       </div>
 
-      {/* Summary Banner showing inherited platforms */}
+      {/* Summary Banner showing inherited platforms & thumbnail */}
       <div className="p-3.5 bg-[#0b1329] border border-slate-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <Globe size={18} className="text-blue-400 shrink-0" />
+        <div className="flex items-center gap-3">
+          {plannedThumbnail && (
+            <div 
+              onClick={() => setShowThumbnailModal(true)}
+              className="relative w-12 h-12 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 group cursor-pointer shadow-md"
+              title="Click to view approved thumbnail"
+            >
+              <img 
+                src={plannedThumbnail} 
+                alt={`Video ${videoNumber} Thumbnail`} 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
+              />
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                <Eye size={14} className="text-white" />
+              </div>
+            </div>
+          )}
           <div>
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
               Required Platforms (Inherited from Post Date)
@@ -14249,6 +14962,64 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
           )}
         </button>
       </div>
+
+      {/* Thumbnail Full-View Modal */}
+      {showThumbnailModal && plannedThumbnail && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setShowThumbnailModal(false)}
+        >
+          <div 
+            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-2xl w-full p-4 sm:p-5 space-y-3.5 shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                  <ImageIcon size={18} className="text-blue-400" />
+                  <span>Video {videoNumber} Approved Thumbnail</span>
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Influencer {record.dispatch?.influencer_code || record.influencer_id} • Video {videoNumber}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowThumbnailModal(false)}
+                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="w-full max-h-[70vh] bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center shadow-inner">
+              <img 
+                src={plannedThumbnail} 
+                alt={`Video ${videoNumber} Thumbnail`} 
+                className="w-full h-auto max-h-[68vh] object-contain"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+              <a 
+                href={plannedThumbnail} 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-blue-400 hover:text-blue-300 underline font-medium flex items-center gap-1"
+              >
+                <ExternalLink size={12} /> Open in new tab
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowThumbnailModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-semibold transition-colors cursor-pointer"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
