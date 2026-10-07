@@ -3258,11 +3258,6 @@ export const getStepVisualState = (
     return 'skipped';
   }
 
-  // If Delivery is not confirmed, subsequent steps CANNOT be in progress or pending!
-  if (!isDelivered) {
-    return 'not_started';
-  }
-
   const vData = getVideoWorkflow(record, videoNumber);
   const stepObj = vData.steps[stepId];
   const stepData = stepObj?.data || {};
@@ -3832,26 +3827,11 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                       });
                       return;
                     }
-                    if (!isDelivered) {
-                      toast.error('Please complete Delivery Confirmation first.');
-                      onOpenDeliveryModal({
-                        id: 'delivery-initial',
-                        type: 'initial_delivery',
-                        label: 'Delivered',
-                        isCompleted: isDelivered,
-                        isPending: isPendingReDispatch,
-                        modalMode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery',
-                        title: 'Delivery Confirmation'
-                      });
-                      return;
-                    }
                     onOpenVideoModal(cfg.id);
                   }}
                   title={
                     cfg.id === 'delivered'
                       ? `Delivery Confirmation: ${isDelivered ? 'Completed' : 'Not Confirmed'}`
-                      : !isDelivered
-                      ? 'Requires Delivery Confirmation first'
                       : `${cfg.label} (${
                           visualState === 'completed'
                             ? 'Completed'
@@ -4700,31 +4680,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           );
           if (!matches) return false;
         } else {
-          const vData = getVideoWorkflow(record, selectedVideoNumber);
-          const activeStepId = vData.activeStepId;
           const matches = activeFilters.workflowStatuses.some(st => {
             const norm = normalizeWorkflowStepId(st);
-            if (norm === 'draft_pending') {
-              return isInfluencerDraftPending(record, selectedVideoNumber);
-            }
-            if (norm === 'draft_approval_pending') {
-              return isInfluencerDraftApprovalPending(record, selectedVideoNumber);
-            }
-            if (norm === 're_draft_submitted') {
-              return isInfluencerReDraftSubmitted(record, selectedVideoNumber);
-            }
-            if (norm === 'draft') {
-              return isInfluencerDraftApproved(record, selectedVideoNumber);
-            }
-            if (norm === 're_draft') {
-              return isInfluencerReDraftRequired(record, selectedVideoNumber);
-            }
-            if (norm === activeStepId) return true;
-            if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
-            if (norm === 'pay_advance' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
-            const cfg = vData.configs.find(c => c.id === norm || areFilterValuesEqual(c.label, st) || areFilterValuesEqual(c.shortLabel, st));
-            if (cfg && cfg.id === activeStepId) return true;
-            return false;
+            return isStepFilterMatch(norm, record, selectedVideoNumber);
           });
           if (!matches) return false;
         }
@@ -5072,10 +5030,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
     const base = configs.map(cfg => {
       const label = cfg.id === 'draft' ? 'Draft Approved' : (cfg.id === 'pay_advance' ? 'Pay Advance' : (cfg.id === 'timeline' ? 'Timeline' : (cfg.id === 'call_explain' ? 'Call & Explain' : cfg.label)));
+      const stepCount = baseFilteredRecords.filter(r => isStepFilterMatch(cfg.id, r, selectedVideoNumber)).length;
       return {
         id: cfg.id,
         label,
-        count: cfg.id === 'draft' ? draftApprovedCount : (activeStepCounts[cfg.id] || 0),
+        count: stepCount,
         icon: cfg.icon
       };
     });
@@ -5155,30 +5114,9 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           areFilterValuesEqual(st, delStatus) || areFilterValuesEqual(normalizeWorkflowStepId(st), delStatus)
         );
       } else {
-        const vData = getVideoWorkflow(record, selectedVideoNumber);
-        const activeStepId = vData.activeStepId;
         return activeFilters.workflowStatuses.some(st => {
           const norm = normalizeWorkflowStepId(st);
-          if (norm === 'draft_pending') {
-            return isInfluencerDraftPending(record, selectedVideoNumber);
-          }
-          if (norm === 'draft_approval_pending') {
-            return isInfluencerDraftApprovalPending(record, selectedVideoNumber);
-          }
-          if (norm === 're_draft_submitted') {
-            return isInfluencerReDraftSubmitted(record, selectedVideoNumber);
-          }
-          if (norm === 'draft') {
-            return isInfluencerDraftApproved(record, selectedVideoNumber);
-          }
-          if (norm === 're_draft') {
-            return isInfluencerReDraftRequired(record, selectedVideoNumber);
-          }
-          if (norm === activeStepId) return true;
-          if (norm === 'payment' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
-          if (norm === 'pay_advance' && (activeStepId === 'payment' || activeStepId === 'pay_advance')) return true;
-          const cfg = vData.configs.find(c => c.id === norm || areFilterValuesEqual(c.label, st) || areFilterValuesEqual(c.shortLabel, st));
-          return !!(cfg && cfg.id === activeStepId);
+          return isStepFilterMatch(norm, record, selectedVideoNumber);
         });
       }
     }).length;
@@ -5539,28 +5477,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     if (!record) {
       console.error('handleSaveVideoStep: record not found for id', recordId);
       return { success: false, error: 'Tracking record not found' };
-    }
-
-    // MANDATORY STEP SKIPPING GUARDS: Prevent completing steps prematurely
-    if (stepId === 'payment' && isStepCompleted) {
-      if (!isInfluencerDraftApproved(record, videoNumber)) {
-        toast.error(`Draft must be Approved before completing Payment for Video ${videoNumber}.`);
-        return { success: false, error: 'Draft must be approved before completing Payment' };
-      }
-    }
-
-    if (stepId === 'post_date' && isStepCompleted) {
-      if (!isInfluencerPaymentCompleted(record, videoNumber)) {
-        toast.error(`Payment must be completed before confirming Post Date for Video ${videoNumber}.`);
-        return { success: false, error: 'Payment must be completed before confirming Post Date' };
-      }
-    }
-
-    if (stepId === 'after_post' && isStepCompleted) {
-      if (!isInfluencerPostDateCompleted(record, videoNumber)) {
-        toast.error(`Post Date must be confirmed before completing After Post for Video ${videoNumber}.`);
-        return { success: false, error: 'Post Date must be confirmed before completing After Post' };
-      }
     }
 
     let metadata: any = {};
@@ -6873,15 +6789,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             <button 
                               onClick={() => {
                                 setOpenMenuId(null);
-                                if (!isDelivered) {
-                                  toast.error('Please complete Delivery Confirmation first.');
-                                  setActiveModal({
-                                    recordId: record.id,
-                                    stageId: 'delivered',
-                                    mode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery'
-                                  });
-                                  return;
-                                }
                                 handleOpenVideo(record, selectedVideoNumber);
                               }}
                               className="w-full px-3.5 py-2 text-left text-slate-300 hover:bg-slate-800/80 hover:text-white flex items-center gap-2 transition-colors"
@@ -13858,6 +13765,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   }, [selectedPlatforms, platformDeliverables]);
 
   const handleGenerateLinkAndDescription = async () => {
+    if (!isDraftApproved) {
+      toast.error(`Draft for Video ${videoNumber} must be Approved before generating final link and description.`);
+      return;
+    }
     if (selectedPlatforms.length === 0) {
       toast.error('Please select at least one social platform.');
       return;
@@ -14097,11 +14008,6 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   const isFormValid = isPlatformValid && isDateValid;
 
   const handleSavePostDate = async () => {
-    if (!isPaymentCompleted) {
-      toast.error(`Cannot save Post Date for Video ${videoNumber}: Payment must be completed first.`);
-      return;
-    }
-
     if (!isPlatformValid) {
       toast.error('At least 1 platform required');
       return;
@@ -14239,18 +14145,6 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 space-y-6">
-      {/* Prerequisite Alert Banner */}
-      {!isPaymentCompleted && (
-        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-600/60 text-amber-200 flex items-start gap-3 text-xs shadow-md">
-          <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
-          <div>
-            <h5 className="font-bold text-amber-300 uppercase tracking-wider">Prerequisite Required: Payment Incomplete</h5>
-            <p className="mt-0.5 text-amber-200/90 leading-relaxed">
-              Payment for Video {videoNumber} must be completed before configuring and saving the Post Date. Please navigate to the Payment step first.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* 1. APPROVED DELIVERABLE INFO SECTION */}
       <div className="animate-fade-in space-y-5 bg-[#0b1329] p-5 sm:p-6 rounded-2xl border border-slate-800 shadow-sm">
@@ -14794,8 +14688,8 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               <button
                 type="button"
                 onClick={handleSavePostDate}
-                disabled={isSavingDate || isUploadingThumbnail || !isFormValid || !isPaymentCompleted}
-                title={!isPaymentCompleted ? 'Payment must be completed first' : (!isFormValid ? 'Select platform and pick date to save' : 'Save Post Date')}
+                disabled={isSavingDate || isUploadingThumbnail || !isFormValid}
+                title={!isFormValid ? 'Select platform and pick date to save' : 'Save Post Date'}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
               >
                 {isSavingDate ? (
@@ -15007,12 +14901,8 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
       const split = existingData.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
       if (split.length > 0) return sanitizePlatforms(split);
     }
-    // 7. Backward compatibility for legacy single-platform data if already completed or has link/postedAt
-    if (existingData.link || existingData.postedAt || (videoNumber === 1 && record.final_post_link) || isInfluencerPostDateCompleted(record, videoNumber)) {
-      return ['Instagram'];
-    }
-    // 8. Safely return empty array when no platforms selected in Post Date
-    return [];
+    // 7. Default to Instagram so After Post is immediately configurable
+    return ['Instagram'];
   }, [existingData, postDateData, record, videoNumber]);
 
   // Extract planned Post Date from Post Date step
@@ -15209,11 +15099,6 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
   const isAlreadyCompleted = Boolean(existingData.confirmed_live === true || existingData.completed === true) && allPlatformsCompleted;
 
   const handleSaveAfterPost = async () => {
-    if (!isPostDateCompleted) {
-      toast.error(`Cannot complete After Post for Video ${videoNumber}: Post Date has not been confirmed yet.`);
-      return;
-    }
-
     if (!Array.isArray(targetPlatforms) || targetPlatforms.length === 0) {
       toast.error('Select at least one platform in Post Date before completing After Post.');
       return;
@@ -15299,18 +15184,6 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-6">
-      {/* Prerequisite Alert Banner */}
-      {!isPostDateCompleted && (
-        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-600/60 text-amber-200 flex items-start gap-3 text-xs shadow-md">
-          <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
-          <div>
-            <h5 className="font-bold text-amber-300 uppercase tracking-wider">Prerequisite Required: Post Date Incomplete</h5>
-            <p className="mt-0.5 text-amber-200/90 leading-relaxed">
-              Post Date for Video {videoNumber} must be assigned and confirmed before completing After Post. Please configure the Post Date step first.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Header Info */}
       <div className="flex items-center justify-between pb-4 border-b border-slate-800">
@@ -15548,12 +15421,10 @@ const AfterPostForm: React.FC<AfterPostFormProps> = ({
         <button 
           type="button"
           onClick={handleSaveAfterPost} 
-          disabled={isSaving || !allPlatformsCompleted || !isPostDateCompleted || targetPlatforms.length === 0}
+          disabled={isSaving || !allPlatformsCompleted || targetPlatforms.length === 0}
           title={
-            !isPostDateCompleted 
-              ? 'Post Date must be confirmed first' 
-              : targetPlatforms.length === 0
-              ? 'Select at least one platform in Post Date before completing After Post'
+            targetPlatforms.length === 0
+              ? 'Select at least one platform before completing After Post'
               : !allPlatformsCompleted
               ? 'Enter valid live post URLs and posted date for all platforms'
               : 'Mark as Live / Completed'
@@ -15747,11 +15618,6 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
   const isDraftApproved = isInfluencerDraftApproved(record, videoNumber);
 
   const handleSave = async () => {
-    if (!isDraftApproved) {
-      toast.error(`Cannot complete payment for Video ${videoNumber}: Draft must be Approved first.`);
-      return;
-    }
-
     if (!amount) {
       toast.error(`Please enter the payment amount for Video ${videoNumber}.`);
       return;
@@ -15814,18 +15680,6 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
 
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-6 flex flex-col space-y-6">
-      {/* Prerequisite Alert Banner */}
-      {!isDraftApproved && (
-        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-600/60 text-amber-200 flex items-start gap-3 text-xs shadow-md">
-          <AlertTriangle className="text-amber-400 shrink-0 mt-0.5" size={18} />
-          <div>
-            <h5 className="font-bold text-amber-300 uppercase tracking-wider">Prerequisite Required: Draft Not Approved</h5>
-            <p className="mt-0.5 text-amber-200/90 leading-relaxed">
-              Video {videoNumber} draft must be verified and marked as <strong>Approved</strong> before confirming payment. Please navigate to the Draft step to approve the video first.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Compact Payment Details Card from Campaign Influencer */}
       <StatusTrackingPaymentCard 
@@ -15963,8 +15817,8 @@ const VideoPaymentForm = ({ videoNumber, record, existingData = {}, onSave }: an
       <div className="flex justify-end pt-4 border-t border-slate-800">
         <button 
           onClick={handleSave} 
-          disabled={isUploading || !isDraftApproved}
-          title={!isDraftApproved ? 'Draft must be approved first' : 'Confirm payment'}
+          disabled={isUploading}
+          title="Confirm payment"
           className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer"
         >
           {isUploading ? (
