@@ -2835,6 +2835,32 @@ export interface ScheduledPostItem {
   postTime: string;
 }
 
+/**
+ * Evaluates whether an influencer's video draft is strictly approved and ready for posting.
+ * Requires:
+ * 1. Draft step is approved (valid video URL + approval status === 'approved' + valid timing)
+ * 2. Latest draft attempt is approved (not pending, not rejected)
+ * 3. Not currently in re-draft required or re-draft submitted state
+ */
+export const isInfluencerDraftApprovedForPosting = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): boolean => {
+  if (!record) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vWorkflow = getVideoWorkflow(record, videoNumber);
+  if (vWorkflow.isReDraftRequired) return false;
+
+  if (isInfluencerReDraftRequired(record, videoNumber)) return false;
+  if (isInfluencerReDraftSubmitted(record, videoNumber)) return false;
+
+  return isInfluencerDraftApproved(record, videoNumber);
+};
+
 export const getScheduledPostsForDate = (
   records: StatusTrackingRecord[],
   targetVideoNumber: number | null,
@@ -2852,6 +2878,11 @@ export const getScheduledPostsForDate = (
       : (assignedVideos.includes(targetVideoNumber) ? [targetVideoNumber] : []);
 
     for (const vNum of videoNumbersToCheck) {
+      // Must be strictly approved and eligible for posting
+      if (!isInfluencerDraftApprovedForPosting(record, vNum)) {
+        continue;
+      }
+
       const scheduleEntry = (record.postDates || []).find(
         (pd: any) => Number(pd.video_number) === Number(vNum)
       );
@@ -2859,7 +2890,7 @@ export const getScheduledPostsForDate = (
       const vWorkflow = getVideoWorkflow(record, vNum);
       const postStepData = vWorkflow.steps['post_date']?.data || {};
 
-      let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || '';
+      let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || (vNum === 1 ? ((record as any).scheduled_post_date || record.post_date) : '') || '';
       if (!rawPostDate && Array.isArray((record.dispatch as any)?.languages)) {
         const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
         if (matchViews) {
@@ -2891,26 +2922,24 @@ export const getScheduledPostsForDate = (
       } else if (Array.isArray(scheduleEntry?.selected_platforms) && scheduleEntry.selected_platforms.length > 0) {
         platforms = scheduleEntry.selected_platforms;
       } else if (postStepData.platform) {
-        platforms = postStepData.platform.split(' + ').map((s: string) => s.trim()).filter(Boolean);
+        platforms = postStepData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
       } else if (scheduleEntry?.platform) {
-        platforms = scheduleEntry.platform.split(' + ').map((s: string) => s.trim()).filter(Boolean);
+        platforms = scheduleEntry.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
       }
       if (platforms.length === 0) {
         platforms = ['Instagram'];
       }
 
-      for (const plat of platforms) {
-        results.push({
-          record,
-          videoNumber: vNum,
-          creatorCode,
-          influencerName,
-          productName,
-          platform: plat,
-          postDate: parsedPostDate,
-          postTime: rawPostTime
-        });
-      }
+      results.push({
+        record,
+        videoNumber: vNum,
+        creatorCode,
+        influencerName,
+        productName,
+        platform: platforms.join(' + '),
+        postDate: parsedPostDate,
+        postTime: rawPostTime
+      });
     }
   }
 
@@ -2928,13 +2957,18 @@ export const isInfluencerScheduledForDate = (
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
 
+  // Must be strictly approved and eligible for posting
+  if (!isInfluencerDraftApprovedForPosting(record, videoNumber)) {
+    return false;
+  }
+
   const scheduleEntry = (record.postDates || []).find(
     (pd: any) => Number(pd.video_number) === Number(videoNumber)
   );
   const vWorkflow = getVideoWorkflow(record, videoNumber);
   const postStepData = vWorkflow.steps['post_date']?.data || {};
 
-  let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || '';
+  let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || (videoNumber === 1 ? ((record as any).scheduled_post_date || record.post_date) : '') || '';
   if (!rawPostDate && Array.isArray((record.dispatch as any)?.languages)) {
     const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
     if (matchViews) {
