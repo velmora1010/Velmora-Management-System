@@ -6693,24 +6693,20 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       </div>
 
                       {/* Influencer Name & Selected Platforms (Post Date source of truth) */}
-                      <div className="min-w-0 max-w-[140px] sm:max-w-[175px] xl:max-w-[200px] flex flex-col justify-center">
-                        <h4 className="text-white font-bold text-xs sm:text-[13.5px] leading-tight truncate" title={influencerName}>
+                      <div className="min-w-0 max-w-[150px] sm:max-w-[185px] xl:max-w-[215px] flex flex-col justify-center">
+                        <h4 className="text-white font-bold text-[13px] sm:text-[14px] leading-tight truncate" title={influencerName}>
                           {influencerName}
                         </h4>
-                        <div className="mt-1.5 sm:mt-2 min-w-0">
+                        <div className="mt-1.5 min-w-0">
                           {formattedPlatforms ? (
                             <span 
-                              className={`font-medium tracking-wide truncate block text-purple-200 ${
-                                selectedPlatforms.length >= 3 
-                                  ? 'text-[9.5px] sm:text-[10px]' 
-                                  : 'text-[10px] sm:text-[11px]'
-                              }`} 
+                              className="text-cyan-400 font-semibold text-[12px] sm:text-[12.5px] leading-tight tracking-tight sm:tracking-normal truncate block"
                               title={formattedPlatforms}
                             >
                               {formattedPlatforms}
                             </span>
                           ) : (
-                            <span className="text-slate-400 text-[10px] sm:text-[11px] italic block truncate">
+                            <span className="text-slate-400 text-xs italic leading-tight block truncate">
                               Not selected
                             </span>
                           )}
