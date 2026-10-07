@@ -6693,17 +6693,28 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       </div>
 
                       {/* Influencer Name & Selected Platforms (Post Date source of truth) */}
-                      <div className="truncate min-w-0 max-w-[130px] sm:max-w-[160px] xl:max-w-[185px]">
+                      <div className="min-w-0 max-w-[140px] sm:max-w-[175px] xl:max-w-[200px] flex flex-col justify-center">
                         <h4 className="text-white font-bold text-xs sm:text-[13.5px] leading-tight truncate" title={influencerName}>
                           {influencerName}
                         </h4>
-                        <p className="text-slate-400 text-[10px] sm:text-[11px] font-medium mt-0.5 truncate" title={formattedPlatforms || 'Not selected'}>
+                        <div className="mt-1.5 sm:mt-2 min-w-0">
                           {formattedPlatforms ? (
-                            <span className="text-purple-300 font-semibold">{formattedPlatforms}</span>
+                            <span 
+                              className={`font-medium tracking-wide truncate block text-purple-200 ${
+                                selectedPlatforms.length >= 3 
+                                  ? 'text-[9.5px] sm:text-[10px]' 
+                                  : 'text-[10px] sm:text-[11px]'
+                              }`} 
+                              title={formattedPlatforms}
+                            >
+                              {formattedPlatforms}
+                            </span>
                           ) : (
-                            <span className="text-slate-500 italic">Not selected</span>
+                            <span className="text-slate-400 text-[10px] sm:text-[11px] italic block truncate">
+                              Not selected
+                            </span>
                           )}
-                        </p>
+                        </div>
                       </div>
                     </div>
 
