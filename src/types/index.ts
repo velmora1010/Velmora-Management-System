@@ -254,6 +254,14 @@ export interface CampaignDescription {
   updated_at?: string;
 }
 
+export interface InfluencerConversation {
+  id: string;
+  campaign_id: string;
+  conversation: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface InfluencerTrackingLink {
   id: string;
   campaign_id: string;

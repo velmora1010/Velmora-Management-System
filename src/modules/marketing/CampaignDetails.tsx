@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2, FileText, Link2 } from 'lucide-react';
+import { Users, Package, Settings, LayoutDashboard, BarChart2, Edit, Calendar, Archive, ArchiveRestore, Trash2, FileText, Link2, MessageSquare } from 'lucide-react';
 import type { Campaign, CampaignInfluencer } from '../../types';
 import { AddCampaignInfluencer } from './AddCampaignInfluencer';
 import { CampaignInfluencerList } from './CampaignInfluencerList';
@@ -8,6 +8,7 @@ import { CampaignStatusTracking } from './CampaignStatusTracking';
 import { CampaignScriptSection } from './CampaignScriptSection';
 import { CampaignDescriptionSection } from './CampaignDescriptionSection';
 import { CampaignTrackingLinkSection } from './CampaignTrackingLinkSection';
+import { CampaignConversationSection } from './CampaignConversationSection';
 import { CampaignAnalytics } from './CampaignAnalytics';
 import { CampaignCalendar } from './CampaignCalendar';
 import { CampaignInfoTab } from './CampaignInfoTab';
@@ -30,7 +31,7 @@ interface CampaignDetailsProps {
   onCampaignUpdate?: (campaign: Campaign) => void;
 }
 
-type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'script' | 'calendar' | 'analytics' | 'description' | 'tracking-link';
+type CampaignView = 'overview' | 'add-influencer' | 'influencer-list' | 'dispatched-list' | 'status-tracking' | 'script' | 'calendar' | 'analytics' | 'description' | 'tracking-link' | 'conversation';
 
 interface NavItem {
   key: CampaignView;
@@ -46,7 +47,8 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'script', label: 'Script', icon: <FileText size={14} /> },
   { key: 'calendar', label: 'Calendar', icon: <Calendar size={14} /> },
   { key: 'description', label: 'Description', icon: <FileText size={14} /> },
-  { key: 'tracking-link', label: 'Influencer Tracking Link', icon: <Link2 size={14} /> }
+  { key: 'tracking-link', label: 'Influencer Tracking Link', icon: <Link2 size={14} /> },
+  { key: 'conversation', label: 'Influencer Conversation', icon: <MessageSquare size={14} /> }
 ];
 
 import { isArchived, isActiveStatus } from '../../utils/marketingUtils';
@@ -55,7 +57,7 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
   const [searchParams, setSearchParams] = useSearchParams();
 
   const subviewParam = searchParams.get('subview');
-  const validSubviews: CampaignView[] = ['overview', 'add-influencer', 'influencer-list', 'dispatched-list', 'status-tracking', 'script', 'calendar', 'analytics', 'description', 'tracking-link'];
+  const validSubviews: CampaignView[] = ['overview', 'add-influencer', 'influencer-list', 'dispatched-list', 'status-tracking', 'script', 'calendar', 'analytics', 'description', 'tracking-link', 'conversation'];
   const currentView: CampaignView = (subviewParam && validSubviews.includes(subviewParam as CampaignView))
     ? (subviewParam as CampaignView)
     : 'overview';
@@ -431,6 +433,8 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
         return <CampaignDescriptionSection campaign={campaign} onBack={() => handleViewChange('overview')} />;
       case 'tracking-link':
         return <CampaignTrackingLinkSection campaign={campaign} onBack={() => handleViewChange('overview')} />;
+      case 'conversation':
+        return <CampaignConversationSection campaign={campaign} onBack={() => handleViewChange('overview')} />;
       case 'calendar':
         return <CampaignCalendar campaign={campaign} onBack={() => handleViewChange('overview')} onNavigateToStatusTracking={() => handleViewChange('status-tracking')} />;
       case 'analytics':

@@ -3,7 +3,15 @@ import { useCampaignStatusTracking } from '../../hooks/marketing/useCampaignStat
 import { useCampaignInfluencers, parseToYMD, calculateDraftDate } from '../../hooks/marketing/useCampaignInfluencers';
 import { getCanonicalInfluencerPostDates, formatDisplayDateLocal } from '../../utils/influencerDateUtils';
 import type { StatusTrackingRecord } from '../../hooks/marketing/useCampaignStatusTracking';
-import { getVideoWorkflow, isInfluencerDraftApproved, getInfluencerDraftStatus, formatDisplayTimeLocal } from './CampaignStatusTracking';
+import { 
+  getVideoWorkflow, 
+  isInfluencerDraftApproved, 
+  isInfluencerDraftApprovedForPosting, 
+  getInfluencerDraftStatus, 
+  formatDisplayTimeLocal,
+  getApplicableAgreedAmountForInfluencerVideo,
+  getInfluencerAssignedVideos
+} from './CampaignStatusTracking';
 import { isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
 import { shipmentAttemptService, type ShipmentAttempt } from '../../services/shipmentAttemptService';
 import type { Campaign, CampaignInfluencer } from '../../types';
@@ -21,7 +29,8 @@ import {
   Loader2,
   ArrowLeft,
   Eye,
-  RotateCcw
+  RotateCcw,
+  DollarSign
 } from 'lucide-react';
 
 interface CampaignCalendarProps {
@@ -50,6 +59,126 @@ interface CalendarEvent {
   draftDateStr?: string | null;
   timeStr?: string | null;
 }
+
+export interface ScheduledDayPostItem {
+  record: StatusTrackingRecord;
+  videoNumber: number;
+  influencerId: string;
+  influencerName: string;
+  influencerCode: string;
+  productName: string;
+  platform: string;
+  postDate: string;
+  postTime: string;
+  agreedAmount: number;
+}
+
+export interface ScheduledDayPostSummary {
+  eligiblePosts: ScheduledDayPostItem[];
+  totalPosts: number;
+  uniqueInfluencers: number;
+  totalPayment: number;
+}
+
+export const getScheduledPostsAndPaymentForDate = (
+  records: StatusTrackingRecord[],
+  targetDateStr: string | null
+): ScheduledDayPostSummary => {
+  if (!targetDateStr) {
+    return { eligiblePosts: [], totalPosts: 0, uniqueInfluencers: 0, totalPayment: 0 };
+  }
+
+  const posts: ScheduledDayPostItem[] = [];
+  const seenPaymentKeys = new Set<string>(); // influencerId + videoNumber
+  const seenInfluencers = new Set<string>();
+  let totalPayment = 0;
+
+  for (const record of records) {
+    if (!record) continue;
+    const assignedVideos = getInfluencerAssignedVideos(record);
+    const infId = String(record.influencer_id || record.id);
+
+    for (const vNum of assignedVideos) {
+      // 1. Strict Eligibility: Current/latest draft MUST be approved/completed
+      if (!isInfluencerDraftApprovedForPosting(record, vNum)) {
+        continue;
+      }
+
+      // 2. Extract Post Date
+      const scheduleEntry = (record.postDates || []).find(
+        (pd: any) => Number(pd.video_number) === Number(vNum)
+      );
+      const vWorkflow = getVideoWorkflow(record, vNum);
+      const postStepData = vWorkflow.steps?.['post_date']?.data || {};
+
+      let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || (vNum === 1 ? ((record as any).scheduled_post_date || record.post_date || record.final_post_expected_date) : '') || '';
+      if (!rawPostDate && Array.isArray((record.dispatch as any)?.languages)) {
+        const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+        if (matchViews) {
+          try {
+            const vJson = JSON.parse(matchViews.substring('views_data:'.length));
+            const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(vNum));
+            if (found?.post_date) rawPostDate = found.post_date;
+          } catch (e) {}
+        }
+      }
+
+      const parsedPostDate = parseToYMD(rawPostDate, 2026);
+      if (!parsedPostDate || parsedPostDate !== targetDateStr) {
+        continue;
+      }
+
+      // Eligible scheduled post!
+      const rawPostTime = postStepData.post_time || scheduleEntry?.post_time || '';
+      const creatorCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || (record.influencer_id ? `#${record.influencer_id}` : '—');
+      const influencerName = record.influencer?.name || record.influencer_name || record.dispatch?.influencer_name || 'Creator';
+      const productName = record.dispatch?.product_name || (vNum === 1 ? record.ref_concept : '') || '—';
+
+      let platforms: string[] = [];
+      if (Array.isArray(postStepData.selected_platforms) && postStepData.selected_platforms.length > 0) {
+        platforms = postStepData.selected_platforms;
+      } else if (Array.isArray(scheduleEntry?.selected_platforms) && scheduleEntry.selected_platforms.length > 0) {
+        platforms = scheduleEntry.selected_platforms;
+      } else if (postStepData.platform) {
+        platforms = postStepData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
+      } else if (scheduleEntry?.platform) {
+        platforms = scheduleEntry.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
+      }
+      if (platforms.length === 0) platforms = ['Instagram'];
+
+      const agreedAmt = getApplicableAgreedAmountForInfluencerVideo(record, vNum);
+
+      // Payment deduplication: ONLY ONCE PER (INFLUENCER + VIDEO)
+      const paymentKey = `${infId}_v${vNum}`;
+      if (!seenPaymentKeys.has(paymentKey)) {
+        seenPaymentKeys.add(paymentKey);
+        totalPayment += agreedAmt;
+      }
+
+      seenInfluencers.add(infId);
+
+      posts.push({
+        record,
+        videoNumber: vNum,
+        influencerId: infId,
+        influencerName,
+        influencerCode: creatorCode,
+        productName,
+        platform: platforms.join(' + '),
+        postDate: parsedPostDate,
+        postTime: rawPostTime,
+        agreedAmount: agreedAmt
+      });
+    }
+  }
+
+  return {
+    eligiblePosts: posts,
+    totalPosts: posts.length,
+    uniqueInfluencers: seenInfluencers.size,
+    totalPayment
+  };
+};
 
 const createFallbackRecord = (inf: CampaignInfluencer, campaign: Campaign): StatusTrackingRecord => {
   const canonicalDates = getCanonicalInfluencerPostDates(inf, 2026);
@@ -602,14 +731,21 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             }
           }
 
-          // 3. FINAL POST CHECK (Only if confirmed and date exists)
-          isPostConfirmed = Boolean(
-            pdStep?.completed === true || 
-            pdStep?.status === 'COMPLETED' || 
-            pdStep?.data?.post_date_confirmed === true
-          );
-          const rawPostDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date || (vNum === 1 ? matchingRecord.final_post_expected_date : '') || '';
-          if (rawPostDate && isPostConfirmed) {
+          // 3. FINAL POST CHECK (Only if draft is approved and real date exists)
+          const isEligibleForPost = isInfluencerDraftApprovedForPosting(matchingRecord, vNum);
+          const scheduleEntry = (matchingRecord.postDates || []).find((pd: any) => Number(pd.video_number) === Number(vNum));
+          let rawPostDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date || scheduleEntry?.post_date || (vNum === 1 ? ((matchingRecord as any).scheduled_post_date || matchingRecord.post_date || matchingRecord.final_post_expected_date) : '') || '';
+          if (!rawPostDate && Array.isArray((matchingRecord.dispatch as any)?.languages)) {
+            const matchViews = (matchingRecord.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+            if (matchViews) {
+              try {
+                const vJson = JSON.parse(matchViews.substring('views_data:'.length));
+                const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(vNum));
+                if (found?.post_date) rawPostDate = found.post_date;
+              } catch (e) {}
+            }
+          }
+          if (rawPostDate && isEligibleForPost) {
             manualPostDate = parseDateOnly(rawPostDate, 2026);
           }
 
@@ -673,8 +809,8 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
           }
         }
 
-        // Push Final Post milestone ONLY if confirmed and real date exists
-        if (isPostConfirmed && manualPostDate) {
+        // Push Final Post milestone ONLY if draft is approved and real date exists
+        if (isEligibleForPost && manualPostDate) {
           const key = `${infId}_v${vNum}_PostDate`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
@@ -838,6 +974,16 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
     return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   }, [selectedDateStr]);
 
+  // Dynamic scheduled posts & total payment calculation for selected date
+  const selectedDayPaymentSummary = useMemo(() => {
+    return getScheduledPostsAndPaymentForDate(activeTrackingRecords, selectedDateStr);
+  }, [activeTrackingRecords, selectedDateStr]);
+
+  // Today scheduled posts & total payment calculation
+  const todayPaymentSummary = useMemo(() => {
+    return getScheduledPostsAndPaymentForDate(activeTrackingRecords, todayStr);
+  }, [activeTrackingRecords, todayStr]);
+
   const handleToggleTodayFilter = (type: CampaignFilterType) => {
     if (filterType === type) {
       setFilterType('All');
@@ -982,10 +1128,34 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               <p className="text-[11px] text-slate-400 mt-0.5">Visual planner details and workflow stages for this day.</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Scheduled Posts Badge */}
+            <div 
+              className="px-3.5 py-1.5 rounded-xl bg-[#0b1329] border border-slate-700/80 flex items-center gap-2 shadow-xs"
+              title={`${selectedDayPaymentSummary.totalPosts} scheduled post${selectedDayPaymentSummary.totalPosts === 1 ? '' : 's'} scheduled for this date`}
+            >
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Posts:</span>
+              <span className="text-sm font-black text-white">{selectedDayPaymentSummary.totalPosts}</span>
+              {selectedDayPaymentSummary.uniqueInfluencers > 0 && selectedDayPaymentSummary.uniqueInfluencers !== selectedDayPaymentSummary.totalPosts && (
+                <span className="text-[10px] text-slate-400 font-medium">({selectedDayPaymentSummary.uniqueInfluencers} Influencers)</span>
+              )}
+            </div>
+
+            {/* Total Payment Badge */}
+            <div 
+              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500/10 via-emerald-500/15 to-emerald-500/10 border border-emerald-500/40 flex items-center gap-2 shadow-xs"
+              title={`Total agreed payment amount for influencers scheduled on ${selectedDateLabel}`}
+            >
+              <DollarSign size={15} className="text-emerald-400" />
+              <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider">TOTAL PAYMENT:</span>
+              <span className="text-sm sm:text-base font-black text-white tracking-tight">
+                ₹{selectedDayPaymentSummary.totalPayment.toLocaleString('en-IN')}
+              </span>
+            </div>
+
             <button 
               onClick={onBack} 
-              className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm cursor-pointer"
+              className="px-4 py-2 border border-slate-600 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors text-sm cursor-pointer ml-1"
             >
               Back to Overview
             </button>
@@ -1491,7 +1661,12 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
               </div>
               <div>
                 <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{todaySummaryStats.card3Title}</h4>
-                <p className="text-xl font-bold text-slate-200 mt-0.5">{todaySummaryStats.card3Val}</p>
+                <div className="flex items-baseline gap-2 mt-0.5">
+                  <p className="text-xl font-bold text-slate-200">{todaySummaryStats.card3Val}</p>
+                  <span className="text-[11px] font-extrabold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 shadow-xs" title="Total agreed payment for posts scheduled today">
+                    ₹{todayPaymentSummary.totalPayment.toLocaleString('en-IN')}
+                  </span>
+                </div>
               </div>
             </div>
             {filterType === todaySummaryStats.card3Type && (

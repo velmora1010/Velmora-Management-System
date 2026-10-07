@@ -2720,6 +2720,77 @@ export const getConfirmedPaidForRecordVideo = (
 };
 
 /**
+ * Resolves the applicable agreed amount for an influencer and video number.
+ * Used for Calendar and scheduling payment totals.
+ * Sources (in priority order):
+ * 1. Explicit agreed_amount in videoPayments records (advance or final)
+ * 2. Agreed amount in pay_advance or payment workflow step data
+ * 3. Resolved per-video price in influencer pricing (via getInfluencerVideoPrice)
+ * 4. Fallback: record advance_total_amount (for video 1) or pricing final_price / total_videos
+ */
+export const getApplicableAgreedAmountForInfluencerVideo = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): number => {
+  if (!record) return 0;
+
+  // 1. Primary data source: videoPayments records
+  const videoPayments = record.videoPayments || [];
+  const advPayment = videoPayments.find(
+    (vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'advance'
+  );
+  const finalPayment = videoPayments.find(
+    (vp: any) => Number(vp.video_number) === Number(videoNumber) && vp.payment_type === 'final'
+  );
+
+  if (advPayment?.agreed_amount && Number(advPayment.agreed_amount) > 0) {
+    return Number(advPayment.agreed_amount);
+  }
+  if (finalPayment?.agreed_amount && Number(finalPayment.agreed_amount) > 0) {
+    return Number(finalPayment.agreed_amount);
+  }
+
+  // 2. Step data metadata for pay_advance or payment
+  try {
+    const vWorkflow = getVideoWorkflow(record, videoNumber);
+    const advStepData = vWorkflow.steps?.pay_advance?.data;
+    const finalStepData = vWorkflow.steps?.payment?.data;
+
+    const stepAgreed = Number(advStepData?.total || advStepData?.agreed_amount || finalStepData?.total || finalStepData?.agreed_amount || 0);
+    if (!isNaN(stepAgreed) && stepAgreed > 0) {
+      return stepAgreed;
+    }
+  } catch (e) {}
+
+  // 3. Influencer pricing per video
+  const influencer = record.influencer || (record as any);
+  const vPrice = getInfluencerVideoPrice(influencer, videoNumber);
+  if (vPrice !== null && !isNaN(vPrice) && vPrice > 0) {
+    return vPrice;
+  }
+
+  // 4. Fallback: video 1 advance_total_amount
+  if (videoNumber === 1 && record.advance_total_amount) {
+    const parsedAdvTotal = parseFloat(String(record.advance_total_amount));
+    if (!isNaN(parsedAdvTotal) && parsedAdvTotal > 0) {
+      return parsedAdvTotal;
+    }
+  }
+
+  // 5. Fallback: check pricing final_price / total_videos
+  const pricingObj = influencer?.pricing || (record as any).pricing || {};
+  if (pricingObj.final_price && Number(pricingObj.final_price) > 0) {
+    const totalVideos = Number(pricingObj.total_videos) || 1;
+    const perVideoAvg = Math.round(Number(pricingObj.final_price) / (totalVideos > 0 ? totalVideos : 1));
+    if (perVideoAvg > 0) {
+      return perVideoAvg;
+    }
+  }
+
+  return 0;
+};
+
+/**
  * Checks if all workflow steps for an influencer in a given video number are completed.
  */
 export const isInfluencerVideoCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
