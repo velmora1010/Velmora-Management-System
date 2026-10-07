@@ -2932,6 +2932,60 @@ export const isInfluencerDraftApprovedForPosting = (
   return isInfluencerDraftApproved(record, videoNumber);
 };
 
+/**
+ * Resolves the scheduled post date (YYYY-MM-DD) for a specific influencer video.
+ */
+export const getInfluencerResolvedPostDateYMD = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): string | null => {
+  if (!record) return null;
+  const scheduleEntry = (record.postDates || []).find(
+    (pd: any) => Number(pd.video_number) === Number(videoNumber)
+  );
+  const vWorkflow = getVideoWorkflow(record, videoNumber);
+  const postStepData = vWorkflow.steps['post_date']?.data || {};
+
+  let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || (videoNumber === 1 ? ((record as any).scheduled_post_date || record.post_date) : '') || '';
+  if (!rawPostDate && Array.isArray((record.dispatch as any)?.languages)) {
+    const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+    if (matchViews) {
+      try {
+        const vJson = JSON.parse(matchViews.substring('views_data:'.length));
+        const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
+        if (found?.post_date) rawPostDate = found.post_date;
+      } catch (e) {}
+    }
+  }
+
+  return parseToYMD(rawPostDate, 2026);
+};
+
+/**
+ * Checks whether an influencer video is strictly eligible to appear as a scheduled/final post.
+ * Requirements:
+ * 1. Influencer is not in re-dispatch.
+ * 2. Video number is assigned to this influencer.
+ * 3. Latest/relevant draft is approved and not superseded by re-draft (isInfluencerDraftApprovedForPosting).
+ * 4. A valid scheduled Post Date exists.
+ */
+export const isEligibleForPost = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): boolean => {
+  if (!record) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  if (!isInfluencerDraftApprovedForPosting(record, videoNumber)) {
+    return false;
+  }
+
+  const postDateYMD = getInfluencerResolvedPostDateYMD(record, videoNumber);
+  return Boolean(postDateYMD);
+};
+
 export const getScheduledPostsForDate = (
   records: StatusTrackingRecord[],
   targetVideoNumber: number | null,
@@ -2949,34 +3003,21 @@ export const getScheduledPostsForDate = (
       : (assignedVideos.includes(targetVideoNumber) ? [targetVideoNumber] : []);
 
     for (const vNum of videoNumbersToCheck) {
-      // Must be strictly approved and eligible for posting
-      if (!isInfluencerDraftApprovedForPosting(record, vNum)) {
+      // Must be strictly eligible for posting
+      if (!isEligibleForPost(record, vNum)) {
+        continue;
+      }
+
+      const parsedPostDate = getInfluencerResolvedPostDateYMD(record, vNum);
+      if (!parsedPostDate || parsedPostDate !== targetDateYMD) {
         continue;
       }
 
       const scheduleEntry = (record.postDates || []).find(
         (pd: any) => Number(pd.video_number) === Number(vNum)
       );
-
       const vWorkflow = getVideoWorkflow(record, vNum);
       const postStepData = vWorkflow.steps['post_date']?.data || {};
-
-      let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || (vNum === 1 ? ((record as any).scheduled_post_date || record.post_date) : '') || '';
-      if (!rawPostDate && Array.isArray((record.dispatch as any)?.languages)) {
-        const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
-        if (matchViews) {
-          try {
-            const vJson = JSON.parse(matchViews.substring('views_data:'.length));
-            const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(vNum));
-            if (found?.post_date) rawPostDate = found.post_date;
-          } catch (e) {}
-        }
-      }
-
-      const parsedPostDate = parseToYMD(rawPostDate, 2026);
-      if (!parsedPostDate || parsedPostDate !== targetDateYMD) {
-        continue;
-      }
 
       const rawPostTime = postStepData.post_time || scheduleEntry?.post_time || '';
       const creatorCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || (record.influencer_id ? `#${record.influencer_id}` : '—');
@@ -3023,36 +3064,11 @@ export const isInfluencerScheduledForDate = (
   mode: 'today' | 'tomorrow'
 ): boolean => {
   const targetDateYMD = mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD();
-  if (!record) return false;
-  if (isInfluencerInReDispatch(record)) return false;
-  const assigned = getInfluencerAssignedVideos(record);
-  if (!assigned.includes(videoNumber)) return false;
-
-  // Must be strictly approved and eligible for posting
-  if (!isInfluencerDraftApprovedForPosting(record, videoNumber)) {
+  if (!isEligibleForPost(record, videoNumber)) {
     return false;
   }
-
-  const scheduleEntry = (record.postDates || []).find(
-    (pd: any) => Number(pd.video_number) === Number(videoNumber)
-  );
-  const vWorkflow = getVideoWorkflow(record, videoNumber);
-  const postStepData = vWorkflow.steps['post_date']?.data || {};
-
-  let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || (videoNumber === 1 ? ((record as any).scheduled_post_date || record.post_date) : '') || '';
-  if (!rawPostDate && Array.isArray((record.dispatch as any)?.languages)) {
-    const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
-    if (matchViews) {
-      try {
-        const vJson = JSON.parse(matchViews.substring('views_data:'.length));
-        const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
-        if (found?.post_date) rawPostDate = found.post_date;
-      } catch (e) {}
-    }
-  }
-
-  const parsed = parseToYMD(rawPostDate, 2026);
-  return Boolean(parsed && parsed === targetDateYMD);
+  const parsedPostDate = getInfluencerResolvedPostDateYMD(record, videoNumber);
+  return Boolean(parsedPostDate && parsedPostDate === targetDateYMD);
 };
 
 /**

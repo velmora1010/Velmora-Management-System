@@ -464,8 +464,8 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           </span>
         </div>
 
-        {/* Navigation Bar: All 8 items in ONE horizontal row without scrollbar or dropdown */}
-        <div className="w-full max-w-full flex items-center justify-start gap-1.5 lg:gap-2 flex-nowrap">
+        {/* Navigation Bar: Responsive items wrapping cleanly without scrollbar or dropdown */}
+        <div className="w-full max-w-full flex flex-wrap items-center justify-start gap-1.5 lg:gap-2">
           {NAV_ITEMS.map(item => (
             <button 
               key={item.key}

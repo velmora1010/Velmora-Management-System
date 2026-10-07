@@ -10,7 +10,9 @@ import {
   getInfluencerDraftStatus, 
   formatDisplayTimeLocal,
   getApplicableAgreedAmountForInfluencerVideo,
-  getInfluencerAssignedVideos
+  getInfluencerAssignedVideos,
+  isEligibleForPost,
+  getInfluencerResolvedPostDateYMD
 } from './CampaignStatusTracking';
 import { isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
 import { shipmentAttemptService, type ShipmentAttempt } from '../../services/shipmentAttemptService';
@@ -99,34 +101,22 @@ export const getScheduledPostsAndPaymentForDate = (
     const infId = String(record.influencer_id || record.id);
 
     for (const vNum of assignedVideos) {
-      // 1. Strict Eligibility: Current/latest draft MUST be approved/completed
-      if (!isInfluencerDraftApprovedForPosting(record, vNum)) {
+      // 1. Strict Eligibility: Current/latest draft MUST be approved/completed and post date exists
+      if (!isEligibleForPost(record, vNum)) {
         continue;
       }
 
       // 2. Extract Post Date
+      const parsedPostDate = getInfluencerResolvedPostDateYMD(record, vNum);
+      if (!parsedPostDate || parsedPostDate !== targetDateStr) {
+        continue;
+      }
+
       const scheduleEntry = (record.postDates || []).find(
         (pd: any) => Number(pd.video_number) === Number(vNum)
       );
       const vWorkflow = getVideoWorkflow(record, vNum);
       const postStepData = vWorkflow.steps?.['post_date']?.data || {};
-
-      let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || (vNum === 1 ? ((record as any).scheduled_post_date || record.post_date || record.final_post_expected_date) : '') || '';
-      if (!rawPostDate && Array.isArray((record.dispatch as any)?.languages)) {
-        const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
-        if (matchViews) {
-          try {
-            const vJson = JSON.parse(matchViews.substring('views_data:'.length));
-            const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(vNum));
-            if (found?.post_date) rawPostDate = found.post_date;
-          } catch (e) {}
-        }
-      }
-
-      const parsedPostDate = parseToYMD(rawPostDate, 2026);
-      if (!parsedPostDate || parsedPostDate !== targetDateStr) {
-        continue;
-      }
 
       // Eligible scheduled post!
       const rawPostTime = postStepData.post_time || scheduleEntry?.post_time || '';
@@ -662,6 +652,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         let isReDraft = false;
         let reDraftDate = '';
         let reDraftTime: string | null = null;
+        let isPostEligible = false;
 
         try {
           const vWorkflow = getVideoWorkflow(matchingRecord, vNum);
@@ -731,22 +722,13 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
             }
           }
 
-          // 3. FINAL POST CHECK (Only if draft is approved and real date exists)
-          const isEligibleForPost = isInfluencerDraftApprovedForPosting(matchingRecord, vNum);
-          const scheduleEntry = (matchingRecord.postDates || []).find((pd: any) => Number(pd.video_number) === Number(vNum));
-          let rawPostDate = pdStep?.data?.scheduled_post_date || pdStep?.data?.post_date || scheduleEntry?.post_date || (vNum === 1 ? ((matchingRecord as any).scheduled_post_date || matchingRecord.post_date || matchingRecord.final_post_expected_date) : '') || '';
-          if (!rawPostDate && Array.isArray((matchingRecord.dispatch as any)?.languages)) {
-            const matchViews = (matchingRecord.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
-            if (matchViews) {
-              try {
-                const vJson = JSON.parse(matchViews.substring('views_data:'.length));
-                const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(vNum));
-                if (found?.post_date) rawPostDate = found.post_date;
-              } catch (e) {}
+          // 3. FINAL POST CHECK (Only if draft is approved and real post date exists)
+          isPostEligible = isEligibleForPost(matchingRecord, vNum);
+          if (isPostEligible) {
+            const resolved = getInfluencerResolvedPostDateYMD(matchingRecord, vNum);
+            if (resolved) {
+              manualPostDate = resolved;
             }
-          }
-          if (rawPostDate && isEligibleForPost) {
-            manualPostDate = parseDateOnly(rawPostDate, 2026);
           }
 
           // Platforms
@@ -810,7 +792,7 @@ export const CampaignCalendar: React.FC<CampaignCalendarProps> = ({
         }
 
         // Push Final Post milestone ONLY if draft is approved and real date exists
-        if (isEligibleForPost && manualPostDate) {
+        if (isPostEligible && manualPostDate) {
           const key = `${infId}_v${vNum}_PostDate`;
           if (!seenEventKeys.has(key)) {
             seenEventKeys.add(key);
