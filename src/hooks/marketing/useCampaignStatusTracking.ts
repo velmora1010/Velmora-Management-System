@@ -104,7 +104,9 @@ export interface StatusTrackingRecord {
     campaign_id?: any;
     video_number: number;
     post_date?: string | null;
+    post_time?: string | null;
     draft_date?: string | null;
+    draft_time?: string | null;
     thumbnail_url?: string | null;
     thumbnail_path?: string | null;
     platform?: string | null;
@@ -317,7 +319,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 postDatesMap.set(vNum, {
                   video_number: vNum,
                   post_date: postYmd || pd.post_date || null,
+                  post_time: pd.post_time || null,
                   draft_date: draftYmd || null,
+                  draft_time: pd.draft_time || null,
                   thumbnail_url: pd.thumbnail_url || pd.thumbnail_path || null,
                   thumbnail_path: pd.thumbnail_path || null,
                   platform: pd.platform || null,
@@ -348,7 +352,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
                 campaign_id: pd.campaign_id,
                 video_number: vNum,
                 post_date: postYmd || pd.post_date || null,
+                post_time: pd.post_time || existingMapItem?.post_time || null,
                 draft_date: draftYmd || null,
+                draft_time: pd.draft_time || existingMapItem?.draft_time || null,
                 thumbnail_url: pd.thumbnail_url || pd.thumbnail_path || existingMapItem?.thumbnail_url || null,
                 thumbnail_path: pd.thumbnail_path || existingMapItem?.thumbnail_path || null,
                 platform: pd.platform || existingMapItem?.platform || null,
@@ -365,7 +371,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           return {
             ...pd,
             post_date: postYmd || pd.post_date || null,
+            post_time: pd.post_time || null,
             draft_date: draftYmd || null,
+            draft_time: pd.draft_time || null,
             thumbnail_url: pd.thumbnail_url || null,
             thumbnail_path: pd.thumbnail_path || null
           };
