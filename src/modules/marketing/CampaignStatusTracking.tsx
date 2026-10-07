@@ -4167,42 +4167,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const [detailsRecord, setDetailsRecord] = useState<StatusTrackingRecord | null>(null);
   const [viewAllModalRecord, setViewAllModalRecord] = useState<StatusTrackingRecord | null>(null);
 
-  // Undo Step Modal State
-  const [undoModalState, setUndoModalState] = useState<{
-    isOpen: boolean;
-    record: StatusTrackingRecord;
-    stepInfo: StepUndoInfo;
-  } | null>(null);
-  const [isUndoingStep, setIsUndoingStep] = useState<boolean>(false);
-
-  // Scheduled Posts (Today / Tomorrow) Modal State
-  const [scheduledPostsModalMode, setScheduledPostsModalMode] = useState<'today' | 'tomorrow' | null>(null);
-  const [modalVideoNumber, setModalVideoNumber] = useState<number | null>(selectedVideoNumber);
-
-  useEffect(() => {
-    if (!scheduledPostsModalMode) {
-      setModalVideoNumber(selectedVideoNumber);
-    }
-  }, [selectedVideoNumber, scheduledPostsModalMode]);
-
-  const modalScheduledPosts = useMemo(() => {
-    if (!scheduledPostsModalMode) return [];
-    return getScheduledPostsForDate(baseFilteredRecords, modalVideoNumber, scheduledPostsModalMode);
-  }, [baseFilteredRecords, modalVideoNumber, scheduledPostsModalMode]);
-
-  const handleOpenUndoModal = (record: StatusTrackingRecord) => {
-    const stepInfo = getInfluencerLatestReversibleStep(record, selectedVideoNumber);
-    if (!stepInfo) {
-      toast.error(`No completed steps found for ${record.influencer?.code || (record as any).code || 'this influencer'} in Video ${selectedVideoNumber} to undo.`);
-      return;
-    }
-    setUndoModalState({
-      isOpen: true,
-      record,
-      stepInfo
-    });
-  };
-
   // LEVEL 1 WORKFLOW SELECTION STATE (Video 1 to Video 6)
   const [selectedWorkflowStep, setSelectedWorkflowStep] = useState<WorkflowStepKey>('video1');
 
@@ -4227,6 +4191,37 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       }
     }
   }, [selectedVideoNumber, selectedSummaryStep]);
+
+  // Undo Step Modal State
+  const [undoModalState, setUndoModalState] = useState<{
+    isOpen: boolean;
+    record: StatusTrackingRecord;
+    stepInfo: StepUndoInfo;
+  } | null>(null);
+  const [isUndoingStep, setIsUndoingStep] = useState<boolean>(false);
+
+  const handleOpenUndoModal = (record: StatusTrackingRecord) => {
+    const stepInfo = getInfluencerLatestReversibleStep(record, selectedVideoNumber);
+    if (!stepInfo) {
+      toast.error(`No completed steps found for ${record.influencer?.code || (record as any).code || 'this influencer'} in Video ${selectedVideoNumber} to undo.`);
+      return;
+    }
+    setUndoModalState({
+      isOpen: true,
+      record,
+      stepInfo
+    });
+  };
+
+  // Scheduled Posts (Today / Tomorrow) Modal State
+  const [scheduledPostsModalMode, setScheduledPostsModalMode] = useState<'today' | 'tomorrow' | null>(null);
+  const [modalVideoNumber, setModalVideoNumber] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (scheduledPostsModalMode && modalVideoNumber === null) {
+      setModalVideoNumber(selectedVideoNumber);
+    }
+  }, [scheduledPostsModalMode, selectedVideoNumber, modalVideoNumber]);
 
   // LEVEL 2 VIEW STATE: null = Main List View; object = Video Detail View
   // Initialized from URL query params (stInfluencer, stVideo, stStep)
@@ -4669,6 +4664,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const workflowStepCounts = useMemo(() => {
     return validateFilterCounts(baseFilteredRecords, selectedVideoNumber);
   }, [baseFilteredRecords, selectedVideoNumber]);
+
+  // Scheduled Posts (Today / Tomorrow) list for modal popup
+  const modalScheduledPosts = useMemo(() => {
+    if (!scheduledPostsModalMode) return [];
+    return getScheduledPostsForDate(baseFilteredRecords, modalVideoNumber, scheduledPostsModalMode);
+  }, [baseFilteredRecords, modalVideoNumber, scheduledPostsModalMode]);
 
   // Bulk Sync New Scripts across all active influencers safely without overwriting manual customizations
   const [isSyncingScripts, setIsSyncingScripts] = useState<boolean>(false);
@@ -6311,11 +6312,13 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       type="button"
                       onClick={() => {
                         if (step.id === 'today') {
+                          setModalVideoNumber(selectedVideoNumber);
                           setScheduledPostsModalMode('today');
                           setSelectedSummaryStep(prev => prev === 'today' ? null : 'today');
                           return;
                         }
                         if (step.id === 'tomorrow') {
+                          setModalVideoNumber(selectedVideoNumber);
                           setScheduledPostsModalMode('tomorrow');
                           setSelectedSummaryStep(prev => prev === 'tomorrow' ? null : 'tomorrow');
                           return;
