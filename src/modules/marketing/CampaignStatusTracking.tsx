@@ -92,6 +92,9 @@ export const normalizeWorkflowStepId = (val: string): string => {
   if (s.includes('advance') || s.includes('payadvance')) return 'pay_advance';
   if (s.includes('afterpost')) return 'after_post';
   if (s.includes('draft')) return 'draft';
+  if (s.includes('yesterday')) return 'yesterday';
+  if (s.includes('today')) return 'today';
+  if (s.includes('tomorrow')) return 'tomorrow';
   if (s.includes('postdate') || s.includes('post')) return 'post_date';
   if (s.includes('payment') || s.includes('finalpayment')) return 'payment';
   if (s.includes('deliveryconfirmed')) return 'Delivery Confirmed';
@@ -112,6 +115,9 @@ export const normalizeWorkflowStepLabel = (val: string): string => {
     case 'pay_advance': return 'Pay Advance';
     case 'draft': return 'Draft Approved';
     case 'post_date': return 'Post Date';
+    case 'yesterday': return 'Yesterday Post';
+    case 'today': return 'Today Post';
+    case 'tomorrow': return 'Tomorrow Post';
     case 'payment': return 'Payment';
     case 'after_post': return 'After Post';
     default: return val;
@@ -168,8 +174,9 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 're_draft_submitted', label: 'Re-Draft Submitted', shortLabel: 'Re-Draft Submitted', icon: CheckCircle2 },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
-  { id: 'today', label: 'Today', shortLabel: 'Today', icon: CalendarCheck },
-  { id: 'tomorrow', label: 'Tomorrow', shortLabel: 'Tomorrow', icon: CalendarClock },
+  { id: 'yesterday', label: 'Yesterday Post', shortLabel: 'Yesterday Post', icon: History },
+  { id: 'today', label: 'Today Post', shortLabel: 'Today Post', icon: CalendarCheck },
+  { id: 'tomorrow', label: 'Tomorrow Post', shortLabel: 'Tomorrow Post', icon: CalendarClock },
   { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: CheckSquare },
 ];
 
@@ -256,6 +263,15 @@ export const formatSubmissionDateTime = (
     return `${formattedDate}, ${formattedTime}`;
   }
   return formattedDate;
+};
+
+export const getLocalYesterdayYMD = (): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 export const getLocalTodayYMD = (): string => {
@@ -2986,12 +3002,56 @@ export const isEligibleForPost = (
   return Boolean(postDateYMD);
 };
 
+export const getFormattedPlatformsShort = (platforms: string[]): string => {
+  if (!Array.isArray(platforms) || platforms.length === 0) return '';
+  const mapShort: Record<string, string> = {
+    instagram: 'Insta',
+    insta: 'Insta',
+    youtube: 'Ytube',
+    ytube: 'Ytube',
+    yt: 'Ytube',
+    facebook: 'FB',
+    fb: 'FB'
+  };
+  const shortNames = platforms.map(p => {
+    const key = p.trim().toLowerCase();
+    return mapShort[key] || p.trim();
+  }).filter(Boolean);
+  return shortNames.join(' • ');
+};
+
+export const getInfluencerSelectedPlatforms = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): string[] => {
+  if (!record) return [];
+  const scheduleEntry = (record.postDates || []).find(
+    (pd: any) => Number(pd.video_number) === Number(videoNumber)
+  );
+  const vWorkflow = getVideoWorkflow(record, videoNumber);
+  const postStepData = vWorkflow.steps?.['post_date']?.data || {};
+
+  let platforms: string[] = [];
+  if (Array.isArray(postStepData.selected_platforms) && postStepData.selected_platforms.length > 0) {
+    platforms = postStepData.selected_platforms;
+  } else if (Array.isArray(scheduleEntry?.selected_platforms) && scheduleEntry.selected_platforms.length > 0) {
+    platforms = scheduleEntry.selected_platforms;
+  } else if (postStepData.platform) {
+    platforms = postStepData.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
+  } else if (scheduleEntry?.platform) {
+    platforms = scheduleEntry.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
+  }
+  return platforms;
+};
+
 export const getScheduledPostsForDate = (
   records: StatusTrackingRecord[],
   targetVideoNumber: number | null,
-  mode: 'today' | 'tomorrow'
+  mode: 'yesterday' | 'today' | 'tomorrow'
 ): ScheduledPostItem[] => {
-  const targetDateYMD = mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD();
+  const targetDateYMD = mode === 'yesterday'
+    ? getLocalYesterdayYMD()
+    : (mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD());
   const results: ScheduledPostItem[] = [];
 
   for (const record of records) {
@@ -3019,7 +3079,7 @@ export const getScheduledPostsForDate = (
       const vWorkflow = getVideoWorkflow(record, vNum);
       const postStepData = vWorkflow.steps['post_date']?.data || {};
 
-      const rawPostTime = postStepData.post_time || scheduleEntry?.post_time || '';
+      const rawPostTime = postStepData.post_time || postStepData.scheduled_post_time || scheduleEntry?.post_time || '';
       const creatorCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || (record.influencer_id ? `#${record.influencer_id}` : '—');
       const influencerName = record.influencer?.name || record.influencer_name || record.dispatch?.influencer_name || 'Creator';
 
@@ -3028,19 +3088,8 @@ export const getScheduledPostsForDate = (
         ? prodInfo.productName 
         : (record.dispatch?.product_name || (vNum === 1 ? record.ref_concept : '') || '—');
 
-      let platforms: string[] = [];
-      if (Array.isArray(postStepData.selected_platforms) && postStepData.selected_platforms.length > 0) {
-        platforms = postStepData.selected_platforms;
-      } else if (Array.isArray(scheduleEntry?.selected_platforms) && scheduleEntry.selected_platforms.length > 0) {
-        platforms = scheduleEntry.selected_platforms;
-      } else if (postStepData.platform) {
-        platforms = postStepData.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
-      } else if (scheduleEntry?.platform) {
-        platforms = scheduleEntry.platform.split('+').map((s: string) => s.trim()).filter(Boolean);
-      }
-      if (platforms.length === 0) {
-        platforms = ['Instagram'];
-      }
+      const platforms = getInfluencerSelectedPlatforms(record, vNum);
+      const platformDisplay = platforms.length > 0 ? platforms.join(' + ') : 'Instagram';
 
       results.push({
         record,
@@ -3048,7 +3097,7 @@ export const getScheduledPostsForDate = (
         creatorCode,
         influencerName,
         productName,
-        platform: platforms.join(' + '),
+        platform: platformDisplay,
         postDate: parsedPostDate,
         postTime: rawPostTime
       });
@@ -3061,9 +3110,11 @@ export const getScheduledPostsForDate = (
 export const isInfluencerScheduledForDate = (
   record: StatusTrackingRecord,
   videoNumber: number,
-  mode: 'today' | 'tomorrow'
+  mode: 'yesterday' | 'today' | 'tomorrow'
 ): boolean => {
-  const targetDateYMD = mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD();
+  const targetDateYMD = mode === 'yesterday'
+    ? getLocalYesterdayYMD()
+    : (mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD());
   if (!isEligibleForPost(record, videoNumber)) {
     return false;
   }
@@ -3107,9 +3158,14 @@ export const isStepFilterMatch = (
       return isInfluencerPaymentCompleted(record, videoNumber);
     case 'post_date':
       return isInfluencerPostDateCompleted(record, videoNumber);
+    case 'yesterday':
+    case 'yesterday_post':
+      return isInfluencerScheduledForDate(record, videoNumber, 'yesterday');
     case 'today':
+    case 'today_post':
       return isInfluencerScheduledForDate(record, videoNumber, 'today');
     case 'tomorrow':
+    case 'tomorrow_post':
       return isInfluencerScheduledForDate(record, videoNumber, 'tomorrow');
     case 'after_post':
       return isInfluencerAfterPostCompleted(record, videoNumber);
@@ -3139,12 +3195,16 @@ export const validateFilterCounts = (
 
   for (const cfg of summaryConfigs) {
     if (cfg.id === 'all') continue;
-    if (cfg.id === 'today') {
-      counts.today = getScheduledPostsForDate(records, videoNumber, 'today').length;
+    if (cfg.id === 'yesterday' || cfg.id === 'yesterday_post') {
+      counts[cfg.id] = getScheduledPostsForDate(records, videoNumber, 'yesterday').length;
       continue;
     }
-    if (cfg.id === 'tomorrow') {
-      counts.tomorrow = getScheduledPostsForDate(records, videoNumber, 'tomorrow').length;
+    if (cfg.id === 'today' || cfg.id === 'today_post') {
+      counts[cfg.id] = getScheduledPostsForDate(records, videoNumber, 'today').length;
+      continue;
+    }
+    if (cfg.id === 'tomorrow' || cfg.id === 'tomorrow_post') {
+      counts[cfg.id] = getScheduledPostsForDate(records, videoNumber, 'tomorrow').length;
       continue;
     }
     counts[cfg.id] = assignedRecords.filter(r => isStepFilterMatch(cfg.id, r, videoNumber)).length;
@@ -4314,8 +4374,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     });
   };
 
-  // Scheduled Posts (Today / Tomorrow) Modal State
-  const [scheduledPostsModalMode, setScheduledPostsModalMode] = useState<'today' | 'tomorrow' | null>(null);
+  // Scheduled Posts (Yesterday / Today / Tomorrow) Modal State
+  const [scheduledPostsModalMode, setScheduledPostsModalMode] = useState<'yesterday' | 'today' | 'tomorrow' | null>(null);
   const [modalVideoNumber, setModalVideoNumber] = useState<number | null>(null);
 
   useEffect(() => {
@@ -6348,16 +6408,22 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       key={step.id}
                       type="button"
                       onClick={() => {
-                        if (step.id === 'today') {
+                        if (step.id === 'yesterday' || step.id === 'yesterday_post') {
                           setModalVideoNumber(selectedVideoNumber);
-                          setScheduledPostsModalMode('today');
-                          setSelectedSummaryStep(prev => prev === 'today' ? null : 'today');
+                          setScheduledPostsModalMode('yesterday');
+                          setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
                           return;
                         }
-                        if (step.id === 'tomorrow') {
+                        if (step.id === 'today' || step.id === 'today_post') {
+                          setModalVideoNumber(selectedVideoNumber);
+                          setScheduledPostsModalMode('today');
+                          setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
+                          return;
+                        }
+                        if (step.id === 'tomorrow' || step.id === 'tomorrow_post') {
                           setModalVideoNumber(selectedVideoNumber);
                           setScheduledPostsModalMode('tomorrow');
-                          setSelectedSummaryStep(prev => prev === 'tomorrow' ? null : 'tomorrow');
+                          setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
                           return;
                         }
                         setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
@@ -6367,7 +6433,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                           : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                       }`}
-                      title={`${step.id === 'today' || step.id === 'tomorrow' ? 'Click to view scheduled posts popup' : 'Filter by ' + step.label} (${count})`}
+                      title={`${step.id === 'yesterday' || step.id === 'today' || step.id === 'tomorrow' ? 'Click to view scheduled posts popup' : 'Filter by ' + step.label} (${count})`}
                     >
                       <div className="flex items-center justify-between gap-1 mb-1 w-full">
                         <span className={`text-[10.5px] sm:text-[11px] font-semibold whitespace-nowrap ${
@@ -6574,17 +6640,47 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 const currentVideoData = getVideoWorkflow(record, selectedVideoNumber);
                 const prerequisiteSteps = getInfluencerPrerequisiteSteps(record);
 
+                // 1. Current selected video price
+                const videoPrice = getApplicableAgreedAmountForInfluencerVideo(record, selectedVideoNumber);
+                const videoPriceFormatted = videoPrice > 0 ? `₹${videoPrice.toLocaleString('en-IN')}` : '₹—';
+
+                // 2. Selected platforms for current selected video (Post Date source of truth)
+                const selectedPlatforms = getInfluencerSelectedPlatforms(record, selectedVideoNumber);
+                const formattedPlatforms = getFormattedPlatformsShort(selectedPlatforms);
+
+                // 3. Product, Post Date, and Post Time for current selected video
+                const prodInfo = getResolvedProductForVideo(record.influencer, selectedVideoNumber);
+                const productName = prodInfo.isAssigned && prodInfo.productName 
+                  ? prodInfo.productName 
+                  : (record.dispatch?.product_name || (selectedVideoNumber === 1 ? record.ref_concept : '') || 'Product not set');
+
+                const postDateYMD = getInfluencerResolvedPostDateYMD(record, selectedVideoNumber);
+                const scheduledDateFormatted = postDateYMD ? formatDisplayDateLocal(postDateYMD) : 'Not scheduled';
+
+                const scheduleEntry = (record.postDates || []).find(
+                  (pd: any) => Number(pd.video_number) === Number(selectedVideoNumber)
+                );
+                const postStepData = currentVideoData.steps['post_date']?.data || {};
+                const draftStepData = currentVideoData.steps['draft']?.data || {};
+                const rawPostTime = postStepData.post_time || postStepData.scheduled_post_time || scheduleEntry?.post_time || draftStepData?.timing_time || '';
+                const scheduledTimeFormatted = formatDisplayTime12h(rawPostTime);
+
                 return (
                   <div 
                     key={record.id}
                     id={`st-card-${record.dispatch_id || record.id}`}
-                    className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-xl px-3.5 py-3 sm:px-4 sm:py-3.5 min-h-[86px] sm:min-h-[88px] transition-all duration-200 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-3 w-full min-w-0"
+                    className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-xl px-3.5 py-3 sm:px-4 sm:py-3.5 min-h-[86px] sm:min-h-[88px] transition-all duration-200 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-3 w-full min-w-0"
                   >
-                    {/* LEFT SECTION: Compact Code Badge, Profile, Name, Username */}
-                    <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 w-auto max-w-[200px] sm:max-w-[230px] xl:max-w-[250px] min-w-0">
-                      {/* Influencer Code Badge */}
-                      <div className="px-2 py-1 rounded-lg bg-[#070c18] border border-slate-700/80 text-white font-mono font-bold text-xs sm:text-[13px] tracking-wider shrink-0 shadow-sm text-center">
-                        {influencerCode}
+                    {/* LEFT SECTION: Compact Code Badge + Video Price, Profile Avatar, Name + Platforms */}
+                    <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 w-auto min-w-0">
+                      {/* Creator Code + Current Video Price */}
+                      <div className="flex flex-col items-center justify-center min-w-[64px] sm:min-w-[72px] px-2 py-1 rounded-lg bg-[#070c18] border border-slate-700/80 shrink-0 shadow-sm text-center">
+                        <span className="font-mono font-bold text-white text-xs sm:text-[13px] tracking-wider leading-tight">
+                          {influencerCode}
+                        </span>
+                        <span className="text-emerald-400 font-bold text-[11px] sm:text-xs leading-tight mt-0.5 font-mono">
+                          {videoPriceFormatted}
+                        </span>
                       </div>
 
                       {/* Profile Avatar */}
@@ -6596,13 +6692,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         )}
                       </div>
 
-                      {/* Influencer Name & Username */}
-                      <div className="truncate min-w-0 flex-1">
+                      {/* Influencer Name & Selected Platforms (Post Date source of truth) */}
+                      <div className="truncate min-w-0 max-w-[130px] sm:max-w-[160px] xl:max-w-[185px]">
                         <h4 className="text-white font-bold text-xs sm:text-[13.5px] leading-tight truncate" title={influencerName}>
                           {influencerName}
                         </h4>
-                        <p className="text-slate-400 text-[10px] sm:text-[11px] font-medium mt-0.5 truncate" title={username}>
-                          {username}
+                        <p className="text-slate-400 text-[10px] sm:text-[11px] font-medium mt-0.5 truncate" title={formattedPlatforms || 'Not selected'}>
+                          {formattedPlatforms ? (
+                            <span className="text-purple-300 font-semibold">{formattedPlatforms}</span>
+                          ) : (
+                            <span className="text-slate-500 italic">Not selected</span>
+                          )}
                         </p>
                       </div>
                     </div>
@@ -6634,18 +6734,36 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       />
                     </div>
 
-                    {/* RIGHT SECTION: Video Status, Manage Button & Three-Dot Menu */}
-                    <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 justify-end w-auto min-w-0">
-                      {/* Video Status Badge */}
-                      {(() => {
-                        const workflowState = getInfluencerCurrentWorkflowState(record, selectedVideoNumber);
-                        const hasMatchingScript = Boolean(findMatchingScriptForInfluencer(campaignScripts, record, selectedVideoNumber));
-                        const shareStep = currentVideoData.steps['share_script'];
-                        const isScriptLoaded = Boolean(
-                          shareStep?.data?.model_script || shareStep?.data?.script || shareStep?.data?.script_body || shareStep?.data?.script_link || shareStep?.data?.sourceScriptId
-                        );
-                        const isShareScriptDone = isInfluencerShareScriptCompleted(record, selectedVideoNumber);
+                    {/* RIGHT SECTION: Scheduled Post Information + Status Badge + Three-Dot Menu */}
+                    <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 justify-end w-auto min-w-0">
+                      {/* Scheduled Post Information (PRODUCT, POST DATE & TIME) */}
+                      <div className="flex flex-row items-center gap-3 sm:gap-3.5 shrink-0 px-3 py-1.5 rounded-xl bg-[#070c18]/90 border border-slate-800/80 text-left min-w-0">
+                        <div className="flex flex-col min-w-0 max-w-[100px] sm:max-w-[120px]">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
+                            PRODUCT
+                          </span>
+                          <span className="text-[11px] sm:text-xs font-semibold text-white truncate mt-1 leading-tight" title={productName}>
+                            {productName}
+                          </span>
+                        </div>
 
+                        <div className="w-[1px] h-7 bg-slate-800 shrink-0" />
+
+                        <div className="flex flex-col shrink-0">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
+                            POST DATE & TIME
+                          </span>
+                          <span className="text-[11px] sm:text-xs font-semibold text-purple-300 font-mono mt-1 leading-tight">
+                            {scheduledDateFormatted}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono leading-tight mt-0.5">
+                            {scheduledTimeFormatted}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Video Status Badge (Inline only - e.g. Re-Dispatch, On Hold, or Completed) */}
+                      {(() => {
                         if (overallStatus.key === 'RE_DISPATCH_REQUIRED' || isPendingReDispatch) {
                           return (
                             <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-amber-950/80 text-amber-300 border border-amber-600/60 animate-pulse flex items-center gap-1.5 whitespace-nowrap shadow-sm">
@@ -6667,77 +6785,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               <span>Completed</span>
                             </span>
                           );
-                        } else if (currentVideoData.isReDraftRequired) {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-amber-950/80 text-amber-400 border border-amber-600/60 animate-pulse flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <AlertTriangle size={13} />
-                              <span>Re-Draft Req</span>
-                            </span>
-                          );
-                        } else if (workflowState === 'delivered') {
-                          // Delivered is confirmed, next step is Share Script
-                          if (isScriptLoaded && !isShareScriptDone) {
-                            return null;
-                          } else if (hasMatchingScript && !isShareScriptDone) {
-                            return (
-                              <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-purple-950/80 text-purple-300 border border-purple-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                                <FileText size={12} className="text-purple-400" />
-                                <span>Script Available</span>
-                              </span>
-                            );
-                          } else {
-                            return (
-                              <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                                <Package size={12} className="text-emerald-400" />
-                                <span>Delivered</span>
-                              </span>
-                            );
-                          }
-                        } else if (workflowState === 'share_script') {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-                              <span>Share Script</span>
-                            </span>
-                          );
-                        } else if (workflowState === 'call_explain') {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-                              <span>Call Explain</span>
-                            </span>
-                          );
-                        } else if (workflowState === 'timeline') {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-                              <span>Time Line</span>
-                            </span>
-                          );
-                        } else if (workflowState === 'draft' || workflowState === 'draft_pending') {
-                          // Draft status badge removed from influencer row per requirements
-                          return null;
-                        } else if (workflowState === 'post_date') {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-                              <span>Post Date</span>
-                            </span>
-                          );
-                        } else if (workflowState === 'payment') {
-                          return (
-                            <span className="px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-blue-950/80 text-blue-400 border border-blue-600/60 flex items-center gap-1.5 whitespace-nowrap shadow-sm">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-                              <span>Payment</span>
-                            </span>
-                          );
-                        } else if (currentVideoData.status === 'IN_PROGRESS') {
-                          // In Progress badge removed from influencer row per requirements
-                          return null;
-                        } else {
-                          // Not Started badge removed from influencer row per requirements
-                          return null;
                         }
+                        return null;
                       })()}
 
                       {/* Three-Dot Menu */}
@@ -7193,23 +7242,43 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-5 border-b border-slate-800 bg-[#070c18] gap-3">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                  scheduledPostsModalMode === 'today'
+                  scheduledPostsModalMode === 'yesterday'
+                    ? 'bg-amber-500/15 border border-amber-500/40 text-amber-400'
+                    : scheduledPostsModalMode === 'today'
                     ? 'bg-purple-500/15 border border-purple-500/40 text-purple-400'
                     : 'bg-blue-500/15 border border-blue-500/40 text-blue-400'
                 }`}>
-                  {scheduledPostsModalMode === 'today' ? <CalendarCheck size={20} /> : <CalendarClock size={20} />}
+                  {scheduledPostsModalMode === 'yesterday' ? (
+                    <History size={20} />
+                  ) : scheduledPostsModalMode === 'today' ? (
+                    <CalendarCheck size={20} />
+                  ) : (
+                    <CalendarClock size={20} />
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center gap-2.5">
                     <h3 className="text-white font-bold text-base sm:text-lg tracking-tight">
-                      {scheduledPostsModalMode === 'today' ? "Today's Posts" : "Tomorrow's Posts"}
+                      {scheduledPostsModalMode === 'yesterday'
+                        ? "Yesterday's Posts"
+                        : scheduledPostsModalMode === 'today'
+                        ? "Today's Posts"
+                        : "Tomorrow's Posts"}
                     </h3>
                     <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-950/80 border border-purple-800/60 text-purple-300 font-mono">
-                      {formatDisplayDateLocal(scheduledPostsModalMode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD())}
+                      {formatDisplayDateLocal(
+                        scheduledPostsModalMode === 'yesterday'
+                          ? getLocalYesterdayYMD()
+                          : scheduledPostsModalMode === 'today'
+                          ? getLocalTodayYMD()
+                          : getLocalTomorrowYMD()
+                      )}
                     </span>
                   </div>
                   <p className="text-slate-400 text-xs mt-0.5">
-                    {scheduledPostsModalMode === 'today'
+                    {scheduledPostsModalMode === 'yesterday'
+                      ? 'Influencers with posts scheduled to go live yesterday'
+                      : scheduledPostsModalMode === 'today'
                       ? 'Influencers with posts scheduled to go live today'
                       : 'Influencers with posts scheduled to go live tomorrow'}
                   </p>
@@ -7268,17 +7337,37 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               {modalScheduledPosts.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center text-slate-400">
                   <div className="w-14 h-14 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-center text-slate-500 mb-3">
-                    {scheduledPostsModalMode === 'today' ? <CalendarCheck size={28} /> : <CalendarClock size={28} />}
+                    {scheduledPostsModalMode === 'yesterday' ? (
+                      <History size={28} />
+                    ) : scheduledPostsModalMode === 'today' ? (
+                      <CalendarCheck size={28} />
+                    ) : (
+                      <CalendarClock size={28} />
+                    )}
                   </div>
                   <h4 className="text-white font-bold text-sm sm:text-base">
-                    {scheduledPostsModalMode === 'today'
+                    {scheduledPostsModalMode === 'yesterday'
+                      ? 'No posts scheduled for yesterday'
+                      : scheduledPostsModalMode === 'today'
                       ? 'No posts scheduled for today'
                       : 'No posts scheduled for tomorrow'}
                   </h4>
                   <p className="text-xs text-slate-500 max-w-sm mt-1">
                     {modalVideoNumber !== null 
-                      ? `No Video ${modalVideoNumber} posts scheduled for ${scheduledPostsModalMode === 'today' ? 'today' : 'tomorrow'}. Try selecting "All Videos" or schedule new posts in the Post Date step.`
-                      : `No posts scheduled across any videos for ${scheduledPostsModalMode === 'today' ? 'today' : 'tomorrow'}.`}
+                      ? `No Video ${modalVideoNumber} posts scheduled for ${
+                          scheduledPostsModalMode === 'yesterday'
+                            ? 'yesterday'
+                            : scheduledPostsModalMode === 'today'
+                            ? 'today'
+                            : 'tomorrow'
+                        }. Try selecting "All Videos" or schedule new posts in the Post Date step.`
+                      : `No posts scheduled across any videos for ${
+                          scheduledPostsModalMode === 'yesterday'
+                            ? 'yesterday'
+                            : scheduledPostsModalMode === 'today'
+                            ? 'today'
+                            : 'tomorrow'
+                        }.`}
                   </p>
                 </div>
               ) : (
@@ -7349,7 +7438,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                             <button
                               type="button"
                               onClick={() => {
-                                handleOpenVideoDetail(item.record, item.videoNumber, 'post_date');
+                                handleOpenVideo(item.record, item.videoNumber, 'post_date');
                                 setScheduledPostsModalMode(null);
                               }}
                               className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] transition-colors shadow-sm cursor-pointer"
