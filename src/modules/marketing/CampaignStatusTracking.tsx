@@ -6810,15 +6810,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     id={`st-card-${record.dispatch_id || record.id}`}
                     className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-xl px-3.5 py-3 sm:px-4 sm:py-3.5 min-h-[86px] sm:min-h-[88px] transition-all duration-200 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-3 w-full min-w-0"
                   >
-                    {/* LEFT SECTION: Compact Code Badge + Video Price, Profile Avatar, Name + Platforms */}
+                    {/* LEFT SECTION: Compact Code Badge, Profile Avatar, Name + Price + Product */}
                     <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 w-auto min-w-0">
-                      {/* Creator Code + Current Video Price */}
-                      <div className="flex flex-col items-center justify-center min-w-[64px] sm:min-w-[72px] px-2 py-1 rounded-lg bg-[#070c18] border border-slate-700/80 shrink-0 shadow-sm text-center">
+                      {/* Creator Code Badge */}
+                      <div className="flex items-center justify-center min-w-[56px] sm:min-w-[64px] px-2.5 py-1.5 rounded-lg bg-[#070c18] border border-slate-700/80 shrink-0 shadow-sm text-center">
                         <span className="font-mono font-bold text-white text-xs sm:text-[13px] tracking-wider leading-tight">
                           {influencerCode}
-                        </span>
-                        <span className="text-emerald-400 font-bold text-[11px] sm:text-xs leading-tight mt-0.5 font-mono">
-                          {videoPriceFormatted}
                         </span>
                       </div>
 
@@ -6831,24 +6828,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         )}
                       </div>
 
-                      {/* Influencer Name & Selected Platforms & Product */}
+                      {/* Influencer Name & Video Price & Product */}
                       <div className="min-w-0 max-w-[160px] sm:max-w-[195px] xl:max-w-[225px] flex flex-col justify-center">
                         <h4 className="text-white font-bold text-[13px] sm:text-[14px] leading-tight truncate" title={influencerName}>
                           {influencerName}
                         </h4>
                         <div className="mt-1 min-w-0">
-                          {formattedPlatforms ? (
-                            <span 
-                              className="text-cyan-400 font-semibold text-[12px] sm:text-[12.5px] leading-tight tracking-tight sm:tracking-normal truncate block"
-                              title={formattedPlatforms}
-                            >
-                              {formattedPlatforms}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 text-xs italic leading-tight block truncate">
-                              Not selected
-                            </span>
-                          )}
+                          <span className="text-emerald-400 font-bold text-[11.5px] sm:text-xs leading-tight font-mono block truncate">
+                            {videoPriceFormatted}
+                          </span>
                         </div>
                         <div className="mt-1 min-w-0">
                           <span 
