@@ -3220,14 +3220,17 @@ export const isInfluencerScheduledForDate = (
   videoNumber: number,
   mode: 'yesterday' | 'today' | 'tomorrow'
 ): boolean => {
+  if (!record) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
   const targetDateYMD = mode === 'yesterday'
     ? getLocalYesterdayYMD()
     : (mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD());
-  if (!isEligibleForPost(record, videoNumber)) {
-    return false;
-  }
   const parsedPostDate = getInfluencerResolvedPostDateYMD(record, videoNumber);
-  return Boolean(parsedPostDate && parsedPostDate === targetDateYMD);
+  const normalizedPostDate = normalizePostDate(parsedPostDate);
+  return Boolean(normalizedPostDate && normalizedPostDate === targetDateYMD);
 };
 
 /**
@@ -3243,33 +3246,18 @@ export const isFullyCompletedPost = (
 };
 
 /**
- * Checks if an influencer's post for a target date is FULLY COMPLETED.
- * Condition:
- * 1. Post Date = target calendar date (yesterday / today / tomorrow) normalized without UTC shifts
- * 2. After Post step = COMPLETED (entire workflow through final step completed, verified via isFullyCompletedPost)
+ * Checks if an influencer's post for a target date is scheduled AND FULLY COMPLETED.
+ * Used for the secondary completed badge inside the date filter box (e.g. "✓ 5").
  */
 export const isInfluencerCompletedPostForDate = (
   record: StatusTrackingRecord,
   videoNumber: number,
   mode: 'yesterday' | 'today' | 'tomorrow'
 ): boolean => {
-  if (!record) return false;
-  if (isInfluencerInReDispatch(record)) return false;
-  const assigned = getInfluencerAssignedVideos(record);
-  if (!assigned.includes(videoNumber)) return false;
-
-  // 1. Single source of truth: Final workflow step After Post must be completed
-  if (!isFullyCompletedPost(record, videoNumber)) {
+  if (!isInfluencerScheduledForDate(record, videoNumber, mode)) {
     return false;
   }
-
-  // 2. Scheduled Post Date must match the target calendar date (strictly normalized, no UTC drift)
-  const targetDateYMD = mode === 'yesterday'
-    ? getLocalYesterdayYMD()
-    : (mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD());
-  const parsedPostDate = getInfluencerResolvedPostDateYMD(record, videoNumber);
-  const normalizedPostDate = normalizePostDate(parsedPostDate);
-  return Boolean(normalizedPostDate && normalizedPostDate === targetDateYMD);
+  return isFullyCompletedPost(record, videoNumber);
 };
 
 /**
@@ -3312,13 +3300,13 @@ export const isStepFilterMatch = (
       return isInfluencerBeforePostCompleted(record, videoNumber);
     case 'yesterday':
     case 'yesterday_post':
-      return isInfluencerCompletedPostForDate(record, videoNumber, 'yesterday');
+      return isInfluencerScheduledForDate(record, videoNumber, 'yesterday');
     case 'today':
     case 'today_post':
-      return isInfluencerCompletedPostForDate(record, videoNumber, 'today');
+      return isInfluencerScheduledForDate(record, videoNumber, 'today');
     case 'tomorrow':
     case 'tomorrow_post':
-      return isInfluencerCompletedPostForDate(record, videoNumber, 'tomorrow');
+      return isInfluencerScheduledForDate(record, videoNumber, 'tomorrow');
     case 'after_post':
     case 'completed':
       return isFullyCompletedPost(record, videoNumber);
@@ -3352,6 +3340,11 @@ export const validateFilterCounts = (
     counts[cfg.id] = assignedRecords.filter(r => isStepFilterMatch(cfg.id, r, videoNumber)).length;
   }
 
+  // Secondary completed counts for the 3 scheduled date filter boxes
+  counts.yesterday_completed = assignedRecords.filter(r => isInfluencerCompletedPostForDate(r, videoNumber, 'yesterday')).length;
+  counts.today_completed = assignedRecords.filter(r => isInfluencerCompletedPostForDate(r, videoNumber, 'today')).length;
+  counts.tomorrow_completed = assignedRecords.filter(r => isInfluencerCompletedPostForDate(r, videoNumber, 'tomorrow')).length;
+
   // Debug audit logging for date filters per user specification
   if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
     const todayYMD = getLocalTodayYMD();
@@ -3379,12 +3372,17 @@ export const validateFilterCounts = (
     if (nearRecords.length > 0) {
       console.debug(`[Status Tracking Date Audit - Video ${videoNumber}]`, {
         dates: { yesterday: yesterdayYMD, today: todayYMD, tomorrow: tomorrowYMD },
-        counts: {
+        scheduledCounts: {
           yesterday: counts['yesterday'],
           today: counts['today'],
-          tomorrow: counts['tomorrow'],
-          completed: counts['after_post']
+          tomorrow: counts['tomorrow']
         },
+        completedCounts: {
+          yesterday: counts.yesterday_completed,
+          today: counts.today_completed,
+          tomorrow: counts.tomorrow_completed
+        },
+        overallCompleted: counts['after_post'],
         records: nearRecords
       });
     }
@@ -6593,6 +6591,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   const isSelected = selectedSummaryStep === step.id;
                   const count = workflowStepCounts[step.id] || 0;
                   const StepIcon = step.icon;
+                  const isDateFilter = step.id === 'yesterday' || step.id === 'today' || step.id === 'tomorrow';
+                  const completedCount = isDateFilter ? (workflowStepCounts[`${step.id}_completed`] || 0) : 0;
 
                   return (
                     <button
@@ -6606,7 +6606,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                           : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                       }`}
-                      title={`Filter by ${step.label} (${count})`}
+                      title={
+                        isDateFilter
+                          ? `Filter by ${step.label} (${count} scheduled, ${completedCount} completed)`
+                          : `Filter by ${step.label} (${count})`
+                      }
                     >
                       <div className="flex items-center justify-between gap-1 mb-1 w-full min-w-0">
                         <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold truncate ${
@@ -6629,9 +6633,20 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
                           {count}
                         </span>
-                        {isSelected && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
-                        )}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {isDateFilter && (
+                            <span 
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-700/60 text-[9.5px] sm:text-[10px] font-bold text-emerald-400 leading-none shadow-sm"
+                              title={`${completedCount} completed of ${count} scheduled`}
+                            >
+                              <Check size={9} strokeWidth={2.5} />
+                              <span>{completedCount}</span>
+                            </span>
+                          )}
+                          {isSelected && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
+                          )}
+                        </div>
                       </div>
                     </button>
                   );
@@ -6783,7 +6798,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 <div className="text-4xl mb-3 opacity-60">🎯</div>
                 <h3 className="text-slate-300 text-base font-semibold mb-1">
                   {selectedSummaryStep === 'today' || selectedSummaryStep === 'yesterday' || selectedSummaryStep === 'tomorrow'
-                    ? 'No completed posts for this date.'
+                    ? 'No scheduled posts for this date.'
                     : (activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep
                       ? 'No influencers match the selected filters.'
                       : 'No matching status tracking records')}
