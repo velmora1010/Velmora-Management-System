@@ -6831,12 +6831,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         )}
                       </div>
 
-                      {/* Influencer Name & Selected Platforms (Post Date source of truth) */}
-                      <div className="min-w-0 max-w-[150px] sm:max-w-[185px] xl:max-w-[215px] flex flex-col justify-center">
+                      {/* Influencer Name & Selected Platforms & Product */}
+                      <div className="min-w-0 max-w-[160px] sm:max-w-[195px] xl:max-w-[225px] flex flex-col justify-center">
                         <h4 className="text-white font-bold text-[13px] sm:text-[14px] leading-tight truncate" title={influencerName}>
                           {influencerName}
                         </h4>
-                        <div className="mt-1.5 min-w-0">
+                        <div className="mt-1 min-w-0">
                           {formattedPlatforms ? (
                             <span 
                               className="text-cyan-400 font-semibold text-[12px] sm:text-[12.5px] leading-tight tracking-tight sm:tracking-normal truncate block"
@@ -6849,6 +6849,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                               Not selected
                             </span>
                           )}
+                        </div>
+                        <div className="mt-1 min-w-0">
+                          <span 
+                            className={`text-[11.5px] sm:text-xs leading-tight truncate block ${
+                              productName === 'Product not set' ? 'text-slate-500 italic font-normal' : 'text-slate-300 font-medium'
+                            }`}
+                            title={productName}
+                          >
+                            {productName}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -6880,51 +6890,34 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       />
                     </div>
 
-                    {/* RIGHT SECTION: Scheduled Post Information (PRODUCT + PLATFORM, POST DATE & TIME) + Status Badge + Three-Dot Menu */}
+                    {/* RIGHT SECTION: Scheduled Post Information (PLATFORM, POST DATE & TIME) + Status Badge + Three-Dot Menu */}
                     <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 justify-end w-auto min-w-0">
-                      {/* Scheduled Post Information (PRODUCT, PLATFORM, POST DATE & TIME) */}
-                      <div className="flex flex-col justify-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-[#070c18]/90 border border-slate-800/80 text-left min-w-[210px] max-w-[270px] shadow-sm">
-                        {/* Top: PRODUCT (left) & PLATFORM (right) */}
-                        <div className="flex items-start justify-between gap-3 min-w-0">
-                          <div className="flex flex-col min-w-0 flex-1">
-                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
-                              PRODUCT
-                            </span>
-                            <span className="text-[11px] sm:text-xs font-semibold text-white truncate mt-1 leading-tight" title={productName}>
-                              {productName}
-                            </span>
-                          </div>
-
-                          <div className="flex flex-col shrink-0 text-right min-w-0 max-w-[120px]">
-                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
-                              PLATFORM
-                            </span>
-                            <span 
-                              className="text-[11px] sm:text-xs font-semibold text-cyan-400 truncate mt-1 leading-tight"
-                              title={formattedPlatforms || 'Not selected'}
-                            >
-                              {formattedPlatforms || <span className="text-slate-500 italic font-normal">Not set</span>}
-                            </span>
-                          </div>
+                      {/* Scheduled Post Information (PLATFORM, POST DATE & TIME) */}
+                      <div className="flex items-center justify-between gap-3.5 sm:gap-4 shrink-0 px-3 py-2 rounded-xl bg-[#070c18]/90 border border-slate-800/80 text-left min-w-[210px] max-w-[270px] shadow-sm">
+                        {/* PLATFORM (Left column inside panel) */}
+                        <div className="flex flex-col justify-center min-w-0 flex-1">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
+                            PLATFORM
+                          </span>
+                          <span 
+                            className="text-[12px] sm:text-[12.5px] font-semibold text-cyan-400 truncate mt-1 leading-tight"
+                            title={formattedPlatforms || 'Not selected'}
+                          >
+                            {formattedPlatforms || <span className="text-slate-500 italic font-normal text-xs">Not set</span>}
+                          </span>
                         </div>
 
-                        {/* Subtle Divider */}
-                        <div className="w-full h-[1px] bg-slate-800/80" />
-
-                        {/* Bottom: POST DATE & TIME */}
-                        <div className="flex items-center justify-between gap-2 min-w-0">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none shrink-0">
+                        {/* POST DATE & TIME (Right column inside panel) */}
+                        <div className="flex flex-col justify-center shrink-0 text-right min-w-0">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
                             POST DATE & TIME
                           </span>
-                          <div className="flex items-center gap-1.5 shrink-0 font-mono">
-                            <span className="text-[11px] font-semibold text-purple-300 leading-none">
-                              {scheduledDateFormatted}
-                            </span>
-                            <span className="text-slate-600 leading-none">•</span>
-                            <span className="text-[10px] text-slate-400 leading-none">
-                              {scheduledTimeFormatted}
-                            </span>
-                          </div>
+                          <span className="text-[11px] sm:text-xs font-semibold text-purple-300 font-mono mt-1 leading-tight">
+                            {scheduledDateFormatted}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono mt-0.5 leading-tight">
+                            {scheduledTimeFormatted}
+                          </span>
                         </div>
                       </div>
 
