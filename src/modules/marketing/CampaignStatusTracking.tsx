@@ -3225,6 +3225,12 @@ export const isInfluencerScheduledForDate = (
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
 
+  // 1. Post Date step must be completed
+  if (!isInfluencerPostDateCompleted(record, videoNumber)) {
+    return false;
+  }
+
+  // 2. Normalized Post Date must match target calendar date
   const targetDateYMD = mode === 'yesterday'
     ? getLocalYesterdayYMD()
     : (mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD());
@@ -3357,14 +3363,18 @@ export const validateFilterCounts = (
       const rawDate = getInfluencerResolvedPostDateYMD(r, videoNumber);
       const normDate = normalizePostDate(rawDate);
       if (normDate && targetDates.includes(normDate)) {
-        const isDone = isFullyCompletedPost(r, videoNumber);
+        const pdStepDone = isInfluencerPostDateCompleted(r, videoNumber);
+        const apDone = isFullyCompletedPost(r, videoNumber);
+        const isIncludedInFilter = isInfluencerScheduledForDate(r, videoNumber, normDate === todayYMD ? 'today' : (normDate === tomorrowYMD ? 'tomorrow' : 'yesterday'));
         const code = r.dispatch?.influencer_code || r.influencer?.code || (r as any).code || '—';
         nearRecords.push({
           code,
           rawPostDate: rawDate,
           normalizedPostDate: normDate,
           targetDate: normDate === todayYMD ? `TODAY (${todayYMD})` : (normDate === tomorrowYMD ? `TOMORROW (${tomorrowYMD})` : `YESTERDAY (${yesterdayYMD})`),
-          isFullyCompleted: isDone
+          postDateStepCompleted: pdStepDone,
+          afterPostCompleted: apDone,
+          includedInFilter: isIncludedInFilter
         });
       }
     });
