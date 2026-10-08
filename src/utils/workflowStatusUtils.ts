@@ -22,6 +22,7 @@ export type WorkflowStateKey =
   | 're_draft'
   | 're_draft_submitted'
   | 'post_date'
+  | 'before_post'
   | 'payment'
   | 'after_post'
   | 'completed';
@@ -39,6 +40,7 @@ export interface WorkflowStepHelpers {
   isReDraftRequired?: (r: any, v: number) => boolean;
   isReDraftSubmitted?: (r: any, v: number) => boolean;
   isPostDateCompleted?: (r: any, v: number) => boolean;
+  isBeforePostCompleted?: (r: any, v: number) => boolean;
   isPaymentCompleted?: (r: any, v: number) => boolean;
   isAfterPostCompleted?: (r: any, v: number) => boolean;
   getDeliveryStatus?: (r: any) => string;
@@ -265,6 +267,10 @@ export function getCurrentWorkflowState(
     ? helpers.isPostDateCompleted(record, videoNumber)
     : false;
 
+  const isBeforePostCompleted = helpers?.isBeforePostCompleted
+    ? helpers.isBeforePostCompleted(record, videoNumber)
+    : false;
+
   const isPaymentCompleted = helpers?.isPaymentCompleted
     ? helpers.isPaymentCompleted(record, videoNumber)
     : false;
@@ -283,6 +289,7 @@ export function getCurrentWorkflowState(
     isTimelineCompleted || 
     isDraftCompleted || 
     isPostDateCompleted || 
+    isBeforePostCompleted ||
     isPaymentCompleted ||
     isAfterPostCompleted
   );
@@ -296,7 +303,7 @@ export function getCurrentWorkflowState(
   }
 
   // ALL VIDEOS (1 TO 6) UNIFIED WORKFLOW:
-  // 1. Delivered -> 2. Share Script -> 3. Call Explain -> 4. Draft -> Re-Draft -> Re-Draft Submitted -> Draft Approved -> 5. Payment -> 6. Post Date -> 7. After Post
+  // 1. Delivered -> 2. Share Script -> 3. Call Explain -> 4. Draft -> Re-Draft -> Re-Draft Submitted -> Draft Approved -> 5. Payment -> 6. Post Date -> 7. Before Post -> 8. After Post
   if (!isScriptCompleted) {
     return 'delivered';
   }
@@ -330,6 +337,9 @@ export function getCurrentWorkflowState(
   if (!isPostDateCompleted) {
     return 'post_date';
   }
+  if (!isBeforePostCompleted) {
+    return 'before_post';
+  }
   if (!isAfterPostCompleted) {
     return 'after_post';
   }
@@ -357,6 +367,7 @@ export function getStepCompletion(
   if (stepId === 're_draft') return helpers?.isReDraftSubmitted ? helpers.isReDraftSubmitted(record, videoNumber) || (helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false) : false;
   if (stepId === 're_draft_submitted') return helpers?.isDraftCompleted ? helpers.isDraftCompleted(record, videoNumber) : false;
   if (stepId === 'post_date') return helpers?.isPostDateCompleted ? helpers.isPostDateCompleted(record, videoNumber) : false;
+  if (stepId === 'before_post') return helpers?.isBeforePostCompleted ? helpers.isBeforePostCompleted(record, videoNumber) : false;
   if (stepId === 'payment') return helpers?.isPaymentCompleted ? helpers.isPaymentCompleted(record, videoNumber) : false;
   if (stepId === 'after_post') return helpers?.isAfterPostCompleted ? helpers.isAfterPostCompleted(record, videoNumber) : false;
   return false;

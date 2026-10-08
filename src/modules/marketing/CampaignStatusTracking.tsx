@@ -11,7 +11,7 @@ import {
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Activity, Truck, Share2, Globe, GitBranch,
   Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward,
   FilePlus, CheckCircle2, Save, Sparkles, Radio, Image as ImageIcon, Upload, AlertCircle,
-  CalendarCheck, CalendarClock
+  CalendarCheck, CalendarClock, ClipboardCheck
 } from 'lucide-react';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
@@ -132,7 +132,7 @@ export interface VideoStepConfig {
 }
 
 // UNIFIED WORKFLOW STEPS FOR ALL VIDEOS 1 TO 6:
-// Delivered -> Share Script -> Call & Explain -> Draft -> Payment -> Post Date -> After Post (7 steps)
+// Delivered -> Share Script -> Call & Explain -> Draft -> Payment -> Post Date -> Before Post -> After Post (8 steps)
 export const WORKFLOW_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
@@ -140,6 +140,7 @@ export const WORKFLOW_STEP_CONFIGS: VideoStepConfig[] = [
   { id: 'draft', label: 'Draft', shortLabel: 'Draft', icon: Video },
   { id: 'payment', label: 'Payment', shortLabel: 'Payment', icon: IndianRupee },
   { id: 'post_date', label: 'Post Date', shortLabel: 'Post Date', icon: Calendar },
+  { id: 'before_post', label: 'Before Post', shortLabel: 'Before Post', icon: ClipboardCheck },
   { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
 ];
 
@@ -1661,6 +1662,44 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
             history: Array.isArray(postData.history) ? postData.history : []
           }
         };
+      } else if (cfg.id === 'before_post') {
+        const bpData = st.data || {};
+        const pdStepData = steps['post_date']?.data || storedVideo?.steps?.['post_date']?.data || {};
+        const scheduleEntryForVideo = (record.postDates || []).find((pd: any) => Number(pd.video_number) === Number(videoNum));
+        
+        const trackingLink = bpData.tracking_link || pdStepData.final_tracking_link || pdStepData.tracking_link || pdStepData.final_post_link || (videoNum === 1 ? record.final_product_link : '') || '';
+        const description = bpData.description || pdStepData.final_caption || pdStepData.caption || pdStepData.final_description || (videoNum === 1 ? record.final_caption : '') || '';
+        const thumbnailUrl = bpData.thumbnail_url || pdStepData.thumbnail_url || scheduleEntryForVideo?.thumbnail_url || '';
+        const thumbnailPath = bpData.thumbnail_path || pdStepData.thumbnail_path || scheduleEntryForVideo?.thumbnail_path || '';
+        const thumbnailFileName = bpData.thumbnail_file_name || pdStepData.thumbnail_file_name || '';
+        const videoUrl = bpData.video_url || bpData.final_video_url || '';
+        const videoFileName = bpData.video_file_name || (videoUrl ? videoUrl.split('/').pop()?.split('?')[0] : '') || '';
+
+        const hasLink = Boolean(trackingLink && !isFakeUrl(trackingLink));
+        const hasDesc = Boolean(description && description.trim().length > 0);
+        const hasVideo = Boolean(videoUrl && videoUrl.trim().length > 0);
+        const isReady = hasLink && hasDesc && hasVideo;
+        const isCompleted = Boolean(st.completed || isReady);
+
+        steps[cfg.id] = {
+          ...st,
+          completed: isCompleted,
+          status: isCompleted ? 'COMPLETED' : ((hasLink || hasDesc || hasVideo || thumbnailUrl) ? 'IN_PROGRESS' : 'NOT_STARTED'),
+          data: {
+            ...bpData,
+            tracking_link: trackingLink,
+            description,
+            thumbnail_url: thumbnailUrl,
+            thumbnail_path: thumbnailPath,
+            thumbnail_file_name: thumbnailFileName,
+            video_url: videoUrl,
+            video_file_name: videoFileName,
+            tracking_link_status: hasLink ? 'completed' : 'pending',
+            description_status: hasDesc ? 'completed' : 'pending',
+            thumbnail_status: thumbnailUrl ? 'completed' : 'not_uploaded',
+            video_status: hasVideo ? 'completed' : 'pending'
+          }
+        };
       } else if (cfg.id === 'after_post') {
         const afterPostData = st.data || {};
         const pData = afterPostData.platforms_data;
@@ -1958,6 +1997,32 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
           thumbnail_file_name: '',
           history: []
         };
+      } else if (cfg.id === 'before_post') {
+        const pdStepData = steps['post_date']?.data || {};
+        const scheduleEntryForVideo = (record.postDates || []).find((pd: any) => Number(pd.video_number) === Number(videoNum));
+        const trackingLink = pdStepData.final_tracking_link || pdStepData.tracking_link || pdStepData.final_post_link || (videoNum === 1 ? record.final_product_link : '') || '';
+        const description = pdStepData.final_caption || pdStepData.caption || pdStepData.final_description || (videoNum === 1 ? record.final_caption : '') || '';
+        const thumbnailUrl = pdStepData.thumbnail_url || scheduleEntryForVideo?.thumbnail_url || '';
+        const thumbnailPath = pdStepData.thumbnail_path || scheduleEntryForVideo?.thumbnail_path || '';
+        const thumbnailFileName = pdStepData.thumbnail_file_name || '';
+
+        const hasLink = Boolean(trackingLink && !isFakeUrl(trackingLink));
+        const hasDesc = Boolean(description && description.trim().length > 0);
+
+        completed = false;
+        data = {
+          tracking_link: trackingLink,
+          description,
+          thumbnail_url: thumbnailUrl,
+          thumbnail_path: thumbnailPath,
+          thumbnail_file_name: thumbnailFileName,
+          video_url: '',
+          video_file_name: '',
+          tracking_link_status: hasLink ? 'completed' : 'pending',
+          description_status: hasDesc ? 'completed' : 'pending',
+          thumbnail_status: thumbnailUrl ? 'completed' : 'not_uploaded',
+          video_status: 'pending'
+        };
       } else if (cfg.id === 'after_post') {
         if (videoNum === 2 && metadata.video2_final_post_link && !isFakeUrl(metadata.video2_final_post_link)) {
           completed = !!metadata.video2_confirmed;
@@ -2107,6 +2172,8 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     activeStepId = 'payment';
   } else if (!isStepDone('post_date')) {
     activeStepId = 'post_date';
+  } else if (!isStepDone('before_post')) {
+    activeStepId = 'before_post';
   } else if (!isStepDone('after_post')) {
     activeStepId = 'after_post';
   } else {
@@ -2537,6 +2604,39 @@ export const isInfluencerPostDateCompleted = (record: StatusTrackingRecord, vide
 };
 
 /**
+ * Checks if Before Post step is completed.
+ * Required checklist items:
+ * - Tracking link exists
+ * - Description exists
+ * - Video is uploaded
+ * Thumbnail is explicitly OPTIONAL and does NOT block completion.
+ */
+export const isInfluencerBeforePostCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (!record) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const vData = getVideoWorkflow(record, videoNumber);
+  const bpStep = vData.steps['before_post'];
+  if (bpStep?.completed === true || bpStep?.status === 'COMPLETED') {
+    return true;
+  }
+
+  const bpData = bpStep?.data || {};
+  const pdStep = vData.steps['post_date'];
+  const trackingLink = bpData.tracking_link || pdStep?.data?.final_tracking_link || pdStep?.data?.tracking_link || pdStep?.data?.final_post_link || (videoNumber === 1 ? record.final_product_link : '');
+  const description = bpData.description || pdStep?.data?.final_caption || pdStep?.data?.caption || pdStep?.data?.final_description || (videoNumber === 1 ? record.final_caption : '');
+  const videoUrl = bpData.video_url || bpData.final_video_url;
+
+  const hasLink = Boolean(trackingLink && !isFakeUrl(trackingLink));
+  const hasDesc = Boolean(description && description.trim().length > 0);
+  const hasVideo = Boolean(videoUrl && videoUrl.trim().length > 0);
+
+  return hasLink && hasDesc && hasVideo;
+};
+
+/**
  * Checks if After Post step has actually been completed/confirmed.
  * Completed when live post details are recorded and marked live/completed.
  */
@@ -2839,6 +2939,7 @@ export const isInfluencerVideoNotStarted = (record: StatusTrackingRecord, videoN
   if (isInfluencerDraftCompleted(record, videoNumber) || getInfluencerDraftStatus(record, videoNumber) !== 'not_started') return false;
   if (isInfluencerPaymentCompleted(record, videoNumber)) return false;
   if (isInfluencerPostDateCompleted(record, videoNumber)) return false;
+  if (isInfluencerBeforePostCompleted(record, videoNumber)) return false;
   if (isInfluencerAfterPostCompleted(record, videoNumber)) return false;
   return true;
 };
@@ -3158,6 +3259,8 @@ export const isStepFilterMatch = (
       return isInfluencerPaymentCompleted(record, videoNumber);
     case 'post_date':
       return isInfluencerPostDateCompleted(record, videoNumber);
+    case 'before_post':
+      return isInfluencerBeforePostCompleted(record, videoNumber);
     case 'yesterday':
     case 'yesterday_post':
       return isInfluencerScheduledForDate(record, videoNumber, 'yesterday');
@@ -3216,7 +3319,7 @@ export const validateFilterCounts = (
 /**
  * ONE CENTRALIZED WORKFLOW-STATE CALCULATION
  * Returns the exact current active workflow step for an influencer in a given video number:
- * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'draft_pending' | 'draft' | 're_draft' | 're_draft_submitted' | 'post_date' | 'payment' | 'after_post' | 'completed'
+ * One of: 're_dispatch' | 'not_started' | 'delivered' | 'share_script' | 'call_explain' | 'call_skipped' | 'pay_advance' | 'draft_pending' | 'draft' | 're_draft' | 're_draft_submitted' | 'post_date' | 'before_post' | 'payment' | 'after_post' | 'completed'
  */
 export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, videoNumber: number): string => {
   return getCurrentWorkflowState(record, videoNumber, {
@@ -3231,6 +3334,7 @@ export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, 
     isReDraftRequired: isInfluencerReDraftRequired,
     isReDraftSubmitted: isInfluencerReDraftSubmitted,
     isPostDateCompleted: isInfluencerPostDateCompleted,
+    isBeforePostCompleted: isInfluencerBeforePostCompleted,
     isPaymentCompleted: isInfluencerPaymentCompleted,
     isAfterPostCompleted: isInfluencerAfterPostCompleted,
     getDeliveryStatus: getInfluencerDeliveryStatus,
@@ -3288,6 +3392,7 @@ export const getStepVisualState = (
     stepId === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
     stepId === 'payment' ? isInfluencerPaymentCompleted(record, videoNumber) :
     stepId === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
+    stepId === 'before_post' ? isInfluencerBeforePostCompleted(record, videoNumber) :
     stepId === 'after_post' ? isInfluencerAfterPostCompleted(record, videoNumber) :
     false
   );
@@ -3386,6 +3491,23 @@ export const getStepVisualState = (
 
   if (stepId === 'post_date') {
     if (vData.activeStepId === 'post_date' || stepObj?.status === 'IN_PROGRESS') {
+      return 'in_progress';
+    }
+    return 'not_started';
+  }
+
+  if (stepId === 'before_post') {
+    if (vData.activeStepId === 'before_post' || stepObj?.status === 'IN_PROGRESS') {
+      return 'in_progress';
+    }
+    const pdStep = vData.steps['post_date'];
+    const hasAnyAsset = Boolean(
+      stepData.tracking_link || pdStep?.data?.final_tracking_link || pdStep?.data?.tracking_link || (videoNumber === 1 && record.final_product_link) ||
+      stepData.description || pdStep?.data?.final_caption || pdStep?.data?.caption || (videoNumber === 1 && record.final_caption) ||
+      stepData.thumbnail_url || pdStep?.data?.thumbnail_url ||
+      stepData.video_url || stepData.final_video_url
+    );
+    if (hasAnyAsset) {
       return 'in_progress';
     }
     return 'not_started';
@@ -3512,6 +3634,7 @@ export const getInfluencerLatestReversibleStep = (
       cfg.id === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
       cfg.id === 'payment' ? isInfluencerPaymentCompleted(record, videoNumber) :
       cfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
+      cfg.id === 'before_post' ? isInfluencerBeforePostCompleted(record, videoNumber) :
       cfg.id === 'after_post' ? isInfluencerAfterPostCompleted(record, videoNumber) :
       false
     );
@@ -3546,6 +3669,7 @@ export const getInfluencerLatestReversibleStep = (
           dCfg.id === 'draft' ? isInfluencerDraftCompleted(record, videoNumber) :
           dCfg.id === 'payment' ? isInfluencerPaymentCompleted(record, videoNumber) :
           dCfg.id === 'post_date' ? isInfluencerPostDateCompleted(record, videoNumber) :
+          dCfg.id === 'before_post' ? isInfluencerBeforePostCompleted(record, videoNumber) :
           dCfg.id === 'after_post' ? isInfluencerAfterPostCompleted(record, videoNumber) :
           false
         );
@@ -3581,6 +3705,7 @@ export const getInfluencerLatestReversibleStep = (
           c.id === 'pay_advance' ? isInfluencerPayAdvanceCompleted(record, 1) :
           c.id === 'draft' ? isInfluencerDraftCompleted(record, 1) :
           c.id === 'post_date' ? isInfluencerPostDateCompleted(record, 1) :
+          c.id === 'before_post' ? isInfluencerBeforePostCompleted(record, 1) :
           c.id === 'after_post' ? isInfluencerAfterPostCompleted(record, 1) :
           false
         );
@@ -6358,36 +6483,41 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             </div>
           </div>
 
-          {/* 2. RESPONSIVE WORKFLOW STEP SUMMARY COUNT BOXES (NO HORIZONTAL SCROLL) */}
+          {/* 2. RESPONSIVE FIXED 2-ROW WORKFLOW STEP SUMMARY GRID (EXACTLY 11 + 11 = 22 SLOTS, NO HORIZONTAL SCROLL) */}
           <div className="flex flex-col gap-2.5 shrink-0">
-            {/* Top: Responsive Wrapping Workflow Step Summary Boxes without horizontal scrollbar */}
+            {/* Fixed 2-Row Filter Grid: 11 Columns */}
             <div className="w-full">
-              <div className="flex flex-wrap items-stretch gap-1.5 sm:gap-2 w-full">
-                {/* 1. All Box */}
+              <div 
+                className="w-full grid gap-1.5 sm:gap-2"
+                style={{
+                  gridTemplateColumns: 'repeat(11, minmax(0, 1fr))'
+                }}
+              >
+                {/* 1. All Box (Slot 1 of Row 1) */}
                 <button
                   type="button"
                   onClick={() => setSelectedSummaryStep(null)}
-                  className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm flex-1 min-w-[76px] sm:min-w-[84px] max-w-[110px] ${
+                  className={`group relative flex flex-col justify-between p-1.5 sm:p-2 xl:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 w-full ${
                     selectedSummaryStep === null
                       ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                       : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                   }`}
                   title="View All Influencers"
                 >
-                  <div className="flex items-center justify-between gap-1 mb-1 w-full">
-                    <span className={`text-[10.5px] sm:text-[11px] font-semibold whitespace-nowrap ${
+                  <div className="flex items-center justify-between gap-1 mb-1 w-full min-w-0">
+                    <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold truncate ${
                       selectedSummaryStep === null ? 'text-purple-200' : 'text-slate-300 group-hover:text-white'
                     }`}>
                       All
                     </span>
                     <Users 
-                      size={13} 
+                      size={12} 
                       className={`shrink-0 transition-colors ${
                         selectedSummaryStep === null ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-300'
                       }`} 
                     />
                   </div>
-                  <div className="flex items-baseline justify-between w-full">
+                  <div className="flex items-baseline justify-between w-full min-w-0">
                     <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
                       {workflowStepCounts.all}
                     </span>
@@ -6397,7 +6527,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   </div>
                 </button>
 
-                {/* Workflow Step Boxes */}
+                {/* Slots 2 to 17: Active Workflow Step Boxes */}
                 {getVideoSummaryBoxConfigs(selectedVideoNumber).filter(step => step.id !== 'all').map(step => {
                   const isSelected = selectedSummaryStep === step.id;
                   const count = workflowStepCounts[step.id] || 0;
@@ -6428,15 +6558,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         }
                         setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
                       }}
-                      className={`group relative flex flex-col justify-between p-2 sm:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm flex-1 min-w-[105px] sm:min-w-[115px] xl:min-w-[120px] cursor-pointer ${
+                      className={`group relative flex flex-col justify-between p-1.5 sm:p-2 xl:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 w-full cursor-pointer ${
                         isSelected
                           ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                           : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                       }`}
                       title={`${step.id === 'yesterday' || step.id === 'today' || step.id === 'tomorrow' ? 'Click to view scheduled posts popup' : 'Filter by ' + step.label} (${count})`}
                     >
-                      <div className="flex items-center justify-between gap-1 mb-1 w-full">
-                        <span className={`text-[10.5px] sm:text-[11px] font-semibold whitespace-nowrap ${
+                      <div className="flex items-center justify-between gap-1 mb-1 w-full min-w-0">
+                        <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold truncate ${
                           isSelected 
                             ? 'text-purple-200' 
                             : 'text-slate-300 group-hover:text-white'
@@ -6444,7 +6574,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           {step.shortLabel || step.label}
                         </span>
                         <StepIcon 
-                          size={13} 
+                          size={12} 
                           className={`shrink-0 transition-colors ${
                             isSelected 
                               ? 'text-purple-400' 
@@ -6452,7 +6582,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           }`} 
                         />
                       </div>
-                      <div className="flex items-baseline justify-between w-full">
+                      <div className="flex items-baseline justify-between w-full min-w-0">
                         <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
                           {count}
                         </span>
@@ -6463,6 +6593,15 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     </button>
                   );
                 })}
+
+                {/* Slots 18 to 22: 5 Empty Placeholder Slots in Row 2 (Reserved for future filters) */}
+                {[1, 2, 3, 4, 5].map((slotIdx) => (
+                  <div
+                    key={`filter-empty-placeholder-${slotIdx}`}
+                    className="h-[68px] sm:h-[72px] rounded-xl border border-slate-800/40 bg-[#070c1a]/30 min-w-0 w-full select-none pointer-events-none"
+                    aria-hidden="true"
+                  />
+                ))}
               </div>
             </div>
 
@@ -6741,31 +6880,51 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       />
                     </div>
 
-                    {/* RIGHT SECTION: Scheduled Post Information + Status Badge + Three-Dot Menu */}
+                    {/* RIGHT SECTION: Scheduled Post Information (PRODUCT + PLATFORM, POST DATE & TIME) + Status Badge + Three-Dot Menu */}
                     <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 justify-end w-auto min-w-0">
-                      {/* Scheduled Post Information (PRODUCT, POST DATE & TIME) */}
-                      <div className="flex flex-row items-center gap-3 sm:gap-3.5 shrink-0 px-3 py-1.5 rounded-xl bg-[#070c18]/90 border border-slate-800/80 text-left min-w-0">
-                        <div className="flex flex-col min-w-0 max-w-[100px] sm:max-w-[120px]">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
-                            PRODUCT
-                          </span>
-                          <span className="text-[11px] sm:text-xs font-semibold text-white truncate mt-1 leading-tight" title={productName}>
-                            {productName}
-                          </span>
+                      {/* Scheduled Post Information (PRODUCT, PLATFORM, POST DATE & TIME) */}
+                      <div className="flex flex-col justify-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-[#070c18]/90 border border-slate-800/80 text-left min-w-[210px] max-w-[270px] shadow-sm">
+                        {/* Top: PRODUCT (left) & PLATFORM (right) */}
+                        <div className="flex items-start justify-between gap-3 min-w-0">
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
+                              PRODUCT
+                            </span>
+                            <span className="text-[11px] sm:text-xs font-semibold text-white truncate mt-1 leading-tight" title={productName}>
+                              {productName}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col shrink-0 text-right min-w-0 max-w-[120px]">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
+                              PLATFORM
+                            </span>
+                            <span 
+                              className="text-[11px] sm:text-xs font-semibold text-cyan-400 truncate mt-1 leading-tight"
+                              title={formattedPlatforms || 'Not selected'}
+                            >
+                              {formattedPlatforms || <span className="text-slate-500 italic font-normal">Not set</span>}
+                            </span>
+                          </div>
                         </div>
 
-                        <div className="w-[1px] h-7 bg-slate-800 shrink-0" />
+                        {/* Subtle Divider */}
+                        <div className="w-full h-[1px] bg-slate-800/80" />
 
-                        <div className="flex flex-col shrink-0">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none">
+                        {/* Bottom: POST DATE & TIME */}
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider leading-none shrink-0">
                             POST DATE & TIME
                           </span>
-                          <span className="text-[11px] sm:text-xs font-semibold text-purple-300 font-mono mt-1 leading-tight">
-                            {scheduledDateFormatted}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono leading-tight mt-0.5">
-                            {scheduledTimeFormatted}
-                          </span>
+                          <div className="flex items-center gap-1.5 shrink-0 font-mono">
+                            <span className="text-[11px] font-semibold text-purple-300 leading-none">
+                              {scheduledDateFormatted}
+                            </span>
+                            <span className="text-slate-600 leading-none">•</span>
+                            <span className="text-[10px] text-slate-400 leading-none">
+                              {scheduledTimeFormatted}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -8024,6 +8183,22 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               record={record} 
               existingData={activeStepState.data}
               onSave={(formData: any, completed?: boolean) => onSaveStep('post_date', formData, completed !== undefined ? completed : true)}
+              onAdvanceStep={() => {
+                setSelectedVideoStepId('before_post');
+                onStepChange?.('before_post');
+              }}
+            />
+          )}
+
+          {activeStepConfig?.id === 'before_post' && (
+            <BeforePostForm 
+              key={`v-${videoNumber}-before-post-${record.id}`}
+              videoNumber={videoNumber}
+              record={record} 
+              campaign={campaign}
+              existingData={activeStepState.data}
+              postDateData={videoData.steps?.post_date?.data}
+              onSave={(formData: any, completed?: boolean) => onSaveStep('before_post', formData, completed !== undefined ? completed : isInfluencerBeforePostCompleted(record, videoNumber))}
               onAdvanceStep={() => {
                 setSelectedVideoStepId('after_post');
                 onStepChange?.('after_post');
@@ -14911,6 +15086,851 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// =========================================================================
+// --- STEP: Before Post (Pre-publication Checklist for Video 1 to 6) ---
+// =========================================================================
+interface BeforePostFormProps {
+  videoNumber: number;
+  record: StatusTrackingRecord;
+  campaign?: Campaign;
+  existingData?: any;
+  postDateData?: any;
+  onSave: (data: any, completed?: boolean) => Promise<any> | void;
+  onAdvanceStep?: () => void;
+}
+
+const BeforePostForm: React.FC<BeforePostFormProps> = ({
+  videoNumber,
+  record,
+  campaign,
+  existingData = {},
+  postDateData,
+  onSave,
+  onAdvanceStep
+}) => {
+  // Resolve initial data from existingData or postDateData / record
+  const initialTrackingLink = (
+    existingData.tracking_link ||
+    postDateData?.final_tracking_link ||
+    postDateData?.tracking_link ||
+    postDateData?.final_post_link ||
+    postDateData?.finalL ||
+    (videoNumber === 1 ? record.final_product_link : '') ||
+    ''
+  );
+
+  const initialDescription = (
+    existingData.description ||
+    postDateData?.final_caption ||
+    postDateData?.caption ||
+    postDateData?.final_description ||
+    postDateData?.finalD ||
+    (videoNumber === 1 ? record.final_caption : '') ||
+    ''
+  );
+
+  const scheduleEntry = (record.postDates || []).find((p: any) => Number(p.video_number) === Number(videoNumber));
+
+  const initialThumbnailUrl = (
+    existingData.thumbnail_url ||
+    postDateData?.thumbnail_url ||
+    scheduleEntry?.thumbnail_url ||
+    ''
+  );
+  const initialThumbnailPath = existingData.thumbnail_path || postDateData?.thumbnail_path || scheduleEntry?.thumbnail_path || '';
+  const initialThumbnailName = existingData.thumbnail_file_name || postDateData?.thumbnail_file_name || '';
+
+  const initialVideoUrl = existingData.video_url || existingData.final_video_url || '';
+  const initialVideoFileName = existingData.video_file_name || (initialVideoUrl ? initialVideoUrl.split('/').pop()?.split('?')[0] : '') || '';
+  const initialVideoPath = existingData.video_path || '';
+
+  // State
+  const [trackingLink, setTrackingLink] = useState<string>(initialTrackingLink);
+  const [description, setDescription] = useState<string>(initialDescription);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string>(initialThumbnailUrl);
+  const [thumbnailPath, setThumbnailPath] = useState<string>(initialThumbnailPath);
+  const [thumbnailFileName, setThumbnailFileName] = useState<string>(initialThumbnailName);
+  const [videoUrl, setVideoUrl] = useState<string>(initialVideoUrl);
+  const [videoFileName, setVideoFileName] = useState<string>(initialVideoFileName);
+  const [videoPath, setVideoPath] = useState<string>(initialVideoPath);
+
+  // Edit / Modal States
+  const [isEditingLink, setIsEditingLink] = useState<boolean>(false);
+  const [tempLink, setTempLink] = useState<string>(initialTrackingLink);
+
+  const [isEditingDesc, setIsEditingDesc] = useState<boolean>(false);
+  const [tempDesc, setTempDesc] = useState<string>(initialDescription);
+
+  const [isPreviewingThumbnail, setIsPreviewingThumbnail] = useState<boolean>(false);
+  const [isPreviewingVideo, setIsPreviewingVideo] = useState<boolean>(false);
+
+  const [isUploadingVideo, setIsUploadingVideo] = useState<boolean>(false);
+  const [isUploadingThumbnail, setIsUploadingThumbnail] = useState<boolean>(false);
+  const [linkCopied, setLinkCopied] = useState<boolean>(false);
+  const [descCopied, setDescCopied] = useState<boolean>(false);
+
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state if props change
+  useEffect(() => {
+    const tLink = existingData.tracking_link || postDateData?.final_tracking_link || postDateData?.tracking_link || postDateData?.final_post_link || (videoNumber === 1 ? record.final_product_link : '') || '';
+    setTrackingLink(tLink);
+    setTempLink(tLink);
+
+    const desc = existingData.description || postDateData?.final_caption || postDateData?.caption || postDateData?.final_description || (videoNumber === 1 ? record.final_caption : '') || '';
+    setDescription(desc);
+    setTempDesc(desc);
+
+    const sched = (record.postDates || []).find((p: any) => Number(p.video_number) === Number(videoNumber));
+    const tUrl = existingData.thumbnail_url || postDateData?.thumbnail_url || sched?.thumbnail_url || '';
+    setThumbnailUrl(tUrl);
+    setThumbnailPath(existingData.thumbnail_path || postDateData?.thumbnail_path || sched?.thumbnail_path || '');
+    setThumbnailFileName(existingData.thumbnail_file_name || postDateData?.thumbnail_file_name || '');
+
+    const vUrl = existingData.video_url || existingData.final_video_url || '';
+    setVideoUrl(vUrl);
+    setVideoFileName(existingData.video_file_name || (vUrl ? vUrl.split('/').pop()?.split('?')[0] : '') || '');
+    setVideoPath(existingData.video_path || '');
+  }, [existingData, postDateData, record, videoNumber]);
+
+  // Validation Checks
+  const hasValidLink = Boolean(trackingLink && !isFakeUrl(trackingLink));
+  const hasValidDesc = Boolean(description && description.trim().length > 0);
+  const hasValidVideo = Boolean(videoUrl && videoUrl.trim().length > 0);
+  const hasThumbnail = Boolean(thumbnailUrl && thumbnailUrl.trim().length > 0);
+
+  // Completion Condition: Link + Description + Video are REQUIRED. Thumbnail is OPTIONAL!
+  const isAllRequiredReady = hasValidLink && hasValidDesc && hasValidVideo;
+
+  // Persist helper
+  const persistChanges = async (updates: Partial<{
+    tracking_link: string;
+    description: string;
+    thumbnail_url: string;
+    thumbnail_path: string;
+    thumbnail_file_name: string;
+    video_url: string;
+    video_file_name: string;
+    video_path: string;
+  }>) => {
+    const nextLink = updates.tracking_link !== undefined ? updates.tracking_link : trackingLink;
+    const nextDesc = updates.description !== undefined ? updates.description : description;
+    const nextVideoUrl = updates.video_url !== undefined ? updates.video_url : videoUrl;
+    const nextThumbUrl = updates.thumbnail_url !== undefined ? updates.thumbnail_url : thumbnailUrl;
+
+    const completed = Boolean(
+      nextLink && !isFakeUrl(nextLink) &&
+      nextDesc && nextDesc.trim().length > 0 &&
+      nextVideoUrl && nextVideoUrl.trim().length > 0
+    );
+
+    const payload = {
+      ...existingData,
+      tracking_link: nextLink,
+      description: nextDesc,
+      thumbnail_url: nextThumbUrl,
+      thumbnail_path: updates.thumbnail_path !== undefined ? updates.thumbnail_path : thumbnailPath,
+      thumbnail_file_name: updates.thumbnail_file_name !== undefined ? updates.thumbnail_file_name : thumbnailFileName,
+      video_url: nextVideoUrl,
+      video_file_name: updates.video_file_name !== undefined ? updates.video_file_name : videoFileName,
+      video_path: updates.video_path !== undefined ? updates.video_path : videoPath,
+      tracking_link_status: nextLink && !isFakeUrl(nextLink) ? 'completed' : 'pending',
+      description_status: nextDesc && nextDesc.trim().length > 0 ? 'completed' : 'pending',
+      thumbnail_status: nextThumbUrl ? 'completed' : 'not_uploaded',
+      video_status: nextVideoUrl && nextVideoUrl.trim().length > 0 ? 'completed' : 'pending',
+      completed,
+      status: completed ? 'COMPLETED' : 'IN_PROGRESS',
+      updated_at: new Date().toISOString()
+    };
+
+    await onSave(payload, completed);
+  };
+
+  // 1. Copy Tracking Link
+  const handleCopyLink = () => {
+    if (!trackingLink) return;
+    navigator.clipboard?.writeText(trackingLink);
+    setLinkCopied(true);
+    toast.success('Tracking link copied to clipboard!');
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  // Save edited Link
+  const handleSaveLink = async () => {
+    const trimmed = tempLink.trim();
+    setTrackingLink(trimmed);
+    setIsEditingLink(false);
+    await persistChanges({ tracking_link: trimmed });
+    toast.success('Tracking link updated.');
+  };
+
+  // 2. Copy Description
+  const handleCopyDesc = () => {
+    if (!description) return;
+    navigator.clipboard?.writeText(description);
+    setDescCopied(true);
+    toast.success('Description copied to clipboard!');
+    setTimeout(() => setDescCopied(false), 2000);
+  };
+
+  // Save edited Description
+  const handleSaveDesc = async () => {
+    const trimmed = tempDesc.trim();
+    setDescription(trimmed);
+    setIsEditingDesc(false);
+    await persistChanges({ description: trimmed });
+    toast.success('Description updated.');
+  };
+
+  // 3. Thumbnail Upload (Optional)
+  const handleThumbnailUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const validExts = ['jpg', 'jpeg', 'png', 'webp'];
+    if (!validExts.includes(ext) && !file.type.startsWith('image/')) {
+      toast.error('Invalid image format. Please upload JPG, PNG, or WEBP.');
+      if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error('File size exceeds 15MB limit.');
+      if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
+      return;
+    }
+
+    setIsUploadingThumbnail(true);
+    const toastId = toast.loading(`Uploading thumbnail: ${file.name}...`);
+    try {
+      const campId = record.campaign_id || 'camp';
+      const infId = record.influencer_id || 'inf';
+      const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const storagePath = `campaigns/${campId}/influencers/${infId}/video_${videoNumber}/thumbnail/thumb_${uniqueKey}.${ext}`;
+
+      const { error: uploadErr } = await supabaseAdmin.storage
+        .from('influencer-profiles')
+        .upload(storagePath, file, { cacheControl: '3600', upsert: true });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicData } = supabaseAdmin.storage
+        .from('influencer-profiles')
+        .getPublicUrl(storagePath);
+
+      const pubUrl = publicData.publicUrl;
+      setThumbnailUrl(pubUrl);
+      setThumbnailPath(storagePath);
+      setThumbnailFileName(file.name);
+
+      await persistChanges({
+        thumbnail_url: pubUrl,
+        thumbnail_path: storagePath,
+        thumbnail_file_name: file.name
+      });
+
+      toast.success('Thumbnail uploaded successfully!', { id: toastId });
+    } catch (err: any) {
+      console.error('Error uploading thumbnail:', err);
+      toast.error('Failed to upload thumbnail: ' + (err?.message || 'Storage error'), { id: toastId });
+    } finally {
+      setIsUploadingThumbnail(false);
+      if (thumbnailInputRef.current) thumbnailInputRef.current.value = '';
+    }
+  };
+
+  // 4. Video Upload (Required)
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const validExts = ['mp4', 'mov', 'webm', 'm4v'];
+    if (!validExts.includes(ext) && !file.type.startsWith('video/')) {
+      toast.error('Invalid video format. Please upload MP4, MOV, or WEBM.');
+      if (videoInputRef.current) videoInputRef.current.value = '';
+      return;
+    }
+
+    if (file.size > 250 * 1024 * 1024) {
+      toast.error('File size exceeds 250MB limit.');
+      if (videoInputRef.current) videoInputRef.current.value = '';
+      return;
+    }
+
+    setIsUploadingVideo(true);
+    const toastId = toast.loading(`Uploading video: ${file.name}...`);
+    try {
+      const campId = record.campaign_id || 'camp';
+      const infId = record.influencer_id || 'inf';
+      const uniqueKey = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const storagePath = `campaigns/${campId}/influencers/${infId}/video_${videoNumber}/before_post/video_${uniqueKey}.${ext}`;
+
+      const { error: uploadErr } = await supabaseAdmin.storage
+        .from('influencer-profiles')
+        .upload(storagePath, file, {
+          contentType: file.type || (ext === 'mov' ? 'video/quicktime' : 'video/mp4'),
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data: publicData } = supabaseAdmin.storage
+        .from('influencer-profiles')
+        .getPublicUrl(storagePath);
+
+      const pubUrl = publicData.publicUrl;
+      setVideoUrl(pubUrl);
+      setVideoFileName(file.name);
+      setVideoPath(storagePath);
+
+      await persistChanges({
+        video_url: pubUrl,
+        video_file_name: file.name,
+        video_path: storagePath
+      });
+
+      toast.success('Video uploaded successfully!', { id: toastId });
+    } catch (err: any) {
+      console.error('Error uploading video:', err);
+      toast.error('Failed to upload video: ' + (err?.message || 'Storage error'), { id: toastId });
+    } finally {
+      setIsUploadingVideo(false);
+      if (videoInputRef.current) videoInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="space-y-4 max-w-4xl mx-auto">
+      {/* Hidden File Inputs */}
+      <input
+        type="file"
+        ref={thumbnailInputRef}
+        onChange={handleThumbnailUpload}
+        accept="image/jpeg,image/png,image/webp,image/jpg"
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={videoInputRef}
+        onChange={handleVideoUpload}
+        accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.webm,.m4v"
+        className="hidden"
+      />
+
+      {/* Header Banner */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#0b1329] border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base sm:text-lg font-black text-white tracking-wide uppercase">
+              BEFORE POST
+            </h3>
+            <span className="text-xs font-bold text-slate-400">
+              (Video {videoNumber})
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            Prepare and verify all final-post assets before publishing.
+          </p>
+        </div>
+
+        <div>
+          {isAllRequiredReady ? (
+            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-950/90 text-emerald-400 border border-emerald-600/60 flex items-center gap-1.5 shadow-sm">
+              <Check size={14} strokeWidth={2.5} />
+              <span>Before Post Ready</span>
+            </span>
+          ) : (
+            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-950/80 text-amber-300 border border-amber-600/60 flex items-center gap-1.5 shadow-sm">
+              <AlertCircle size={14} />
+              <span>Pending Required Assets</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Pre-publication Checklist Card */}
+      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-800/80 shadow-lg">
+
+        {/* 1. INFLUENCER TRACKING LINK (Required) */}
+        <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#0e1733]/50 transition-colors">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+              hasValidLink 
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-500/20' 
+                : 'bg-amber-500/15 text-amber-400 border border-amber-500/40'
+            }`}>
+              {hasValidLink ? <Check size={16} strokeWidth={2.5} /> : <AlertCircle size={16} />}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                  Influencer Tracking Link
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.2 rounded text-rose-400 bg-rose-950/40 border border-rose-800/40">
+                  Required
+                </span>
+              </div>
+
+              {hasValidLink ? (
+                <div className="mt-1.5">
+                  <a 
+                    href={trackingLink} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-xs font-mono text-cyan-400 hover:text-cyan-300 underline underline-offset-2 break-all block"
+                    title={trackingLink}
+                  >
+                    {trackingLink}
+                  </a>
+                </div>
+              ) : (
+                <p className="text-xs text-amber-400/90 mt-1 italic">
+                  Tracking link not generated yet.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center pl-11 sm:pl-0">
+            {hasValidLink && (
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className="px-3 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Copy tracking link"
+              >
+                {linkCopied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                <span>{linkCopied ? 'Copied' : 'Copy'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setTempLink(trackingLink);
+                setIsEditingLink(true);
+              }}
+              className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Edit3 size={13} />
+              <span>{hasValidLink ? 'Edit' : 'Add Link'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 2. DESCRIPTION (Required) */}
+        <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-3 hover:bg-[#0e1733]/50 transition-colors">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+              hasValidDesc 
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-500/20' 
+                : 'bg-amber-500/15 text-amber-400 border border-amber-500/40'
+            }`}>
+              {hasValidDesc ? <Check size={16} strokeWidth={2.5} /> : <AlertCircle size={16} />}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                  Description
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.2 rounded text-rose-400 bg-rose-950/40 border border-rose-800/40">
+                  Required
+                </span>
+              </div>
+
+              {hasValidDesc ? (
+                <div className="mt-1.5 p-2.5 rounded-lg bg-[#070c18] border border-slate-800/90 text-xs text-slate-300 max-h-24 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                  {description}
+                </div>
+              ) : (
+                <p className="text-xs text-amber-400/90 mt-1 italic">
+                  Description not available yet.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center pl-11 sm:pl-0">
+            {hasValidDesc && (
+              <button
+                type="button"
+                onClick={handleCopyDesc}
+                className="px-3 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Copy complete description"
+              >
+                {descCopied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                <span>{descCopied ? 'Copied' : 'Copy'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setTempDesc(description);
+                setIsEditingDesc(true);
+              }}
+              className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Edit3 size={13} />
+              <span>{hasValidDesc ? 'Edit' : 'Add Description'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3. THUMBNAIL (Optional) */}
+        <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#0e1733]/50 transition-colors">
+          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 ${
+              hasThumbnail 
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-500/20' 
+                : 'bg-slate-800/60 text-slate-400 border border-slate-700'
+            }`}>
+              {hasThumbnail ? <Check size={16} strokeWidth={2.5} /> : <ImageIcon size={15} />}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                  Thumbnail
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.2 rounded text-slate-400 bg-slate-800 border border-slate-700">
+                  Optional
+                </span>
+              </div>
+
+              {hasThumbnail ? (
+                <div className="flex items-center gap-3 mt-1.5">
+                  <div 
+                    onClick={() => setIsPreviewingThumbnail(true)}
+                    className="w-12 h-12 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shrink-0 cursor-pointer hover:border-blue-400 transition-colors shadow-sm"
+                    title="Click to view full thumbnail"
+                  >
+                    <img src={thumbnailUrl} alt="Thumbnail preview" className="w-full h-full object-cover" />
+                  </div>
+                  <span className="text-xs text-slate-400 truncate max-w-xs">
+                    {thumbnailFileName || 'thumbnail_image.jpg'}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 mt-1">
+                  Optional • Does not block Before Post completion.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center pl-11 sm:pl-0">
+            {hasThumbnail ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewingThumbnail(true)}
+                  className="px-3 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Eye size={13} />
+                  <span>View</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => thumbnailInputRef.current?.click()}
+                  disabled={isUploadingThumbnail}
+                  className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isUploadingThumbnail ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  <span>{isUploadingThumbnail ? 'Uploading...' : 'Replace'}</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => thumbnailInputRef.current?.click()}
+                disabled={isUploadingThumbnail}
+                className="px-3.5 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isUploadingThumbnail ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span>{isUploadingThumbnail ? 'Uploading...' : 'Upload Thumbnail'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 4. VIDEO (Required) */}
+        <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#0e1733]/50 transition-colors">
+          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 ${
+              hasValidVideo 
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-500/20' 
+                : 'bg-amber-500/15 text-amber-400 border border-amber-500/40'
+            }`}>
+              {hasValidVideo ? <Check size={16} strokeWidth={2.5} /> : <AlertCircle size={16} />}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                  Video
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.2 rounded text-rose-400 bg-rose-950/40 border border-rose-800/40">
+                  Required
+                </span>
+              </div>
+
+              {hasValidVideo ? (
+                <div className="flex items-center gap-2 mt-1.5">
+                  <Video size={15} className="text-purple-400 shrink-0" />
+                  <span className="text-xs font-mono text-purple-200 truncate max-w-sm">
+                    {videoFileName || 'video_asset.mp4'}
+                  </span>
+                  <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-2 py-0.5 rounded-full shrink-0">
+                    Ready for Post
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-amber-400/90 mt-1 italic">
+                  Video not uploaded yet.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center pl-11 sm:pl-0">
+            {hasValidVideo ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsPreviewingVideo(true)}
+                  className="px-3 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-purple-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Play size={13} />
+                  <span>Preview</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => videoInputRef.current?.click()}
+                  disabled={isUploadingVideo}
+                  className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isUploadingVideo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  <span>{isUploadingVideo ? 'Uploading...' : 'Replace'}</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                disabled={isUploadingVideo}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-md disabled:opacity-50"
+              >
+                {isUploadingVideo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span>{isUploadingVideo ? 'Uploading...' : 'Upload Video'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer Navigation Action */}
+      <div className="flex items-center justify-between pt-2">
+        <p className="text-[11px] text-slate-400">
+          Required to complete: <strong className="text-slate-300">Tracking Link</strong>, <strong className="text-slate-300">Description</strong>, and <strong className="text-slate-300">Video</strong>. Thumbnail is optional.
+        </p>
+
+        {onAdvanceStep && (
+          <button
+            type="button"
+            onClick={onAdvanceStep}
+            className="px-4 py-2.5 bg-purple-600/30 hover:bg-purple-600/40 border border-purple-500/60 text-purple-200 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+          >
+            <span>Next: After Post</span>
+            <ArrowLeft size={14} className="rotate-180" />
+          </button>
+        )}
+      </div>
+
+      {/* MODAL: Edit Tracking Link */}
+      {isEditingLink && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-[#0b1329] border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Edit3 size={15} className="text-blue-400" />
+                <span>Edit Influencer Tracking Link</span>
+              </h4>
+              <button 
+                type="button" 
+                onClick={() => setIsEditingLink(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Tracking URL
+              </label>
+              <input
+                type="url"
+                value={tempLink}
+                onChange={(e) => setTempLink(e.target.value)}
+                placeholder="https://cleanmagichomecare.com/product/..."
+                className="w-full bg-[#070c18] border border-slate-800 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none"
+              />
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                This link will be updated as the final product tracking link for this video.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsEditingLink(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveLink}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              >
+                <Check size={14} />
+                <span>Save Link</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Edit Description */}
+      {isEditingDesc && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-[#0b1329] border border-slate-700 rounded-2xl w-full max-w-xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Edit3 size={15} className="text-blue-400" />
+                <span>Edit Description</span>
+              </h4>
+              <button 
+                type="button" 
+                onClick={() => setIsEditingDesc(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Full Description & Caption
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  Line breaks preserved
+                </span>
+              </div>
+              <textarea
+                value={tempDesc}
+                onChange={(e) => setTempDesc(e.target.value)}
+                placeholder="Enter complete caption and description..."
+                rows={8}
+                className="w-full bg-[#070c18] border border-slate-800 focus:border-blue-500 rounded-xl p-3.5 text-xs text-white leading-relaxed focus:outline-none resize-y"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsEditingDesc(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDesc}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              >
+                <Check size={14} />
+                <span>Save Description</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: View Thumbnail */}
+      {isPreviewingThumbnail && thumbnailUrl && (
+        <div 
+          onClick={() => setIsPreviewingThumbnail(false)}
+          className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl"
+          >
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-[#070c18]">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <ImageIcon size={15} className="text-blue-400" />
+                <span>Thumbnail Preview</span>
+              </h4>
+              <button 
+                type="button" 
+                onClick={() => setIsPreviewingThumbnail(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center bg-black/40 max-h-[70vh] overflow-hidden">
+              <img src={thumbnailUrl} alt="Thumbnail preview" className="max-w-full max-h-[65vh] object-contain rounded-lg" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Preview Video */}
+      {isPreviewingVideo && videoUrl && (
+        <div 
+          onClick={() => setIsPreviewingVideo(false)}
+          className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#0b1329] border border-slate-700 rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl"
+          >
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-[#070c18]">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Video size={15} className="text-purple-400" />
+                <span>Video Preview ({videoFileName || 'video.mp4'})</span>
+              </h4>
+              <button 
+                type="button" 
+                onClick={() => setIsPreviewingVideo(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-center bg-black max-h-[70vh]">
+              <video 
+                src={videoUrl} 
+                controls 
+                autoPlay 
+                className="max-w-full max-h-[60vh] rounded-lg shadow-lg"
+              />
+            </div>
           </div>
         </div>
       )}
