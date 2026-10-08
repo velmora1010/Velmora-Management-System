@@ -119,7 +119,7 @@ export const normalizeWorkflowStepLabel = (val: string): string => {
     case 'today': return 'Today Post';
     case 'tomorrow': return 'Tomorrow Post';
     case 'payment': return 'Payment';
-    case 'after_post': return 'After Post';
+    case 'after_post': return 'Completed';
     default: return val;
   }
 };
@@ -178,7 +178,7 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'yesterday', label: 'Yesterday Post', shortLabel: 'Yesterday Post', icon: History },
   { id: 'today', label: 'Today Post', shortLabel: 'Today Post', icon: CalendarCheck },
   { id: 'tomorrow', label: 'Tomorrow Post', shortLabel: 'Tomorrow Post', icon: CalendarClock },
-  { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: CheckSquare },
+  { id: 'after_post', label: 'Completed', shortLabel: 'Completed', icon: CheckSquare },
 ];
 
 export const VIDEO_1_SUMMARY_BOX_CONFIGS = WORKFLOW_SUMMARY_BOX_CONFIGS;
@@ -3224,6 +3224,35 @@ export const isInfluencerScheduledForDate = (
 };
 
 /**
+ * Checks if an influencer's post for a target date is FULLY COMPLETED.
+ * Condition:
+ * 1. Post Date = target calendar date (yesterday / today / tomorrow)
+ * 2. After Post step = COMPLETED (entire workflow through final step completed)
+ */
+export const isInfluencerCompletedPostForDate = (
+  record: StatusTrackingRecord,
+  videoNumber: number,
+  mode: 'yesterday' | 'today' | 'tomorrow'
+): boolean => {
+  if (!record) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  // 1. Final workflow step After Post must be completed
+  if (!isInfluencerAfterPostCompleted(record, videoNumber)) {
+    return false;
+  }
+
+  // 2. Scheduled Post Date must match the target calendar date
+  const targetDateYMD = mode === 'yesterday'
+    ? getLocalYesterdayYMD()
+    : (mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD());
+  const parsedPostDate = getInfluencerResolvedPostDateYMD(record, videoNumber);
+  return Boolean(parsedPostDate && parsedPostDate === targetDateYMD);
+};
+
+/**
  * Reusable single predicate matching step ID for both counts and filtered list.
  * Guarantees that summary filter count exactly equals the number of matching rows when clicked!
  */
@@ -3263,14 +3292,15 @@ export const isStepFilterMatch = (
       return isInfluencerBeforePostCompleted(record, videoNumber);
     case 'yesterday':
     case 'yesterday_post':
-      return isInfluencerScheduledForDate(record, videoNumber, 'yesterday');
+      return isInfluencerCompletedPostForDate(record, videoNumber, 'yesterday');
     case 'today':
     case 'today_post':
-      return isInfluencerScheduledForDate(record, videoNumber, 'today');
+      return isInfluencerCompletedPostForDate(record, videoNumber, 'today');
     case 'tomorrow':
     case 'tomorrow_post':
-      return isInfluencerScheduledForDate(record, videoNumber, 'tomorrow');
+      return isInfluencerCompletedPostForDate(record, videoNumber, 'tomorrow');
     case 'after_post':
+    case 'completed':
       return isInfluencerAfterPostCompleted(record, videoNumber);
     case 're_dispatch':
       return isInfluencerInReDispatch(record) || isInfluencerReDispatchActive(record) || getInfluencerReDispatchCycles(record).length > 0;
@@ -3282,6 +3312,7 @@ export const isStepFilterMatch = (
 /**
  * Authoritative debug & runtime validation function for filter counts.
  * Calculates exact step counts directly from source status records.
+ * Uses the exact same isStepFilterMatch predicate as the active filter list!
  */
 export const validateFilterCounts = (
   records: StatusTrackingRecord[],
@@ -3298,18 +3329,6 @@ export const validateFilterCounts = (
 
   for (const cfg of summaryConfigs) {
     if (cfg.id === 'all') continue;
-    if (cfg.id === 'yesterday' || cfg.id === 'yesterday_post') {
-      counts[cfg.id] = getScheduledPostsForDate(records, videoNumber, 'yesterday').length;
-      continue;
-    }
-    if (cfg.id === 'today' || cfg.id === 'today_post') {
-      counts[cfg.id] = getScheduledPostsForDate(records, videoNumber, 'today').length;
-      continue;
-    }
-    if (cfg.id === 'tomorrow' || cfg.id === 'tomorrow_post') {
-      counts[cfg.id] = getScheduledPostsForDate(records, videoNumber, 'tomorrow').length;
-      continue;
-    }
     counts[cfg.id] = assignedRecords.filter(r => isStepFilterMatch(cfg.id, r, videoNumber)).length;
   }
 
@@ -4499,16 +4518,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     });
   };
 
-  // Scheduled Posts (Yesterday / Today / Tomorrow) Modal State
-  const [scheduledPostsModalMode, setScheduledPostsModalMode] = useState<'yesterday' | 'today' | 'tomorrow' | null>(null);
-  const [modalVideoNumber, setModalVideoNumber] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (scheduledPostsModalMode && modalVideoNumber === null) {
-      setModalVideoNumber(selectedVideoNumber);
-    }
-  }, [scheduledPostsModalMode, selectedVideoNumber, modalVideoNumber]);
-
   // LEVEL 2 VIEW STATE: null = Main List View; object = Video Detail View
   // Initialized from URL query params (stInfluencer, stVideo, stStep)
   const [selectedVideo, setSelectedVideo] = useState<{ recordId: string; videoNumber: number; stepId?: string | null } | null>(() => {
@@ -4928,12 +4937,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const workflowStepCounts = useMemo(() => {
     return validateFilterCounts(baseFilteredRecords, selectedVideoNumber);
   }, [baseFilteredRecords, selectedVideoNumber]);
-
-  // Scheduled Posts (Today / Tomorrow) list for modal popup
-  const modalScheduledPosts = useMemo(() => {
-    if (!scheduledPostsModalMode) return [];
-    return getScheduledPostsForDate(baseFilteredRecords, modalVideoNumber, scheduledPostsModalMode);
-  }, [baseFilteredRecords, modalVideoNumber, scheduledPostsModalMode]);
 
   // Bulk Sync New Scripts across all active influencers safely without overwriting manual customizations
   const [isSyncingScripts, setIsSyncingScripts] = useState<boolean>(false);
@@ -6538,24 +6541,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       key={step.id}
                       type="button"
                       onClick={() => {
-                        if (step.id === 'yesterday' || step.id === 'yesterday_post') {
-                          setModalVideoNumber(selectedVideoNumber);
-                          setScheduledPostsModalMode('yesterday');
-                          setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
-                          return;
-                        }
-                        if (step.id === 'today' || step.id === 'today_post') {
-                          setModalVideoNumber(selectedVideoNumber);
-                          setScheduledPostsModalMode('today');
-                          setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
-                          return;
-                        }
-                        if (step.id === 'tomorrow' || step.id === 'tomorrow_post') {
-                          setModalVideoNumber(selectedVideoNumber);
-                          setScheduledPostsModalMode('tomorrow');
-                          setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
-                          return;
-                        }
                         setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
                       }}
                       className={`group relative flex flex-col justify-between p-1.5 sm:p-2 xl:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 w-full cursor-pointer ${
@@ -6563,7 +6548,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                           : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                       }`}
-                      title={`${step.id === 'yesterday' || step.id === 'today' || step.id === 'tomorrow' ? 'Click to view scheduled posts popup' : 'Filter by ' + step.label} (${count})`}
+                      title={`Filter by ${step.label} (${count})`}
                     >
                       <div className="flex items-center justify-between gap-1 mb-1 w-full min-w-0">
                         <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold truncate ${
@@ -6739,9 +6724,11 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               <div className="flex flex-col justify-center items-center h-64 text-slate-500 italic bg-[#0b1329]/50 rounded-2xl border border-slate-800/60 p-8">
                 <div className="text-4xl mb-3 opacity-60">🎯</div>
                 <h3 className="text-slate-300 text-base font-semibold mb-1">
-                  {activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep
-                    ? 'No influencers match the selected filters.'
-                    : 'No matching status tracking records'}
+                  {selectedSummaryStep === 'today' || selectedSummaryStep === 'yesterday' || selectedSummaryStep === 'tomorrow'
+                    ? 'No completed posts for this date.'
+                    : (activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep
+                      ? 'No influencers match the selected filters.'
+                      : 'No matching status tracking records')}
                 </h3>
                 <p className="text-xs text-slate-400 mb-3">
                   {activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep
@@ -7377,245 +7364,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             setViewAllModalRecord(null);
           }}
         />
-      )}
-
-      {/* ========================================================
-          MODAL: SCHEDULED POSTS POPUP (TODAY / TOMORROW)
-      ======================================================== */}
-      {scheduledPostsModalMode && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-5 animate-fade-in">
-          <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[88vh] overflow-hidden">
-            {/* Modal Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-5 border-b border-slate-800 bg-[#070c18] gap-3">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                  scheduledPostsModalMode === 'yesterday'
-                    ? 'bg-amber-500/15 border border-amber-500/40 text-amber-400'
-                    : scheduledPostsModalMode === 'today'
-                    ? 'bg-purple-500/15 border border-purple-500/40 text-purple-400'
-                    : 'bg-blue-500/15 border border-blue-500/40 text-blue-400'
-                }`}>
-                  {scheduledPostsModalMode === 'yesterday' ? (
-                    <History size={20} />
-                  ) : scheduledPostsModalMode === 'today' ? (
-                    <CalendarCheck size={20} />
-                  ) : (
-                    <CalendarClock size={20} />
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2.5">
-                    <h3 className="text-white font-bold text-base sm:text-lg tracking-tight">
-                      {scheduledPostsModalMode === 'yesterday'
-                        ? "Yesterday's Posts"
-                        : scheduledPostsModalMode === 'today'
-                        ? "Today's Posts"
-                        : "Tomorrow's Posts"}
-                    </h3>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-purple-950/80 border border-purple-800/60 text-purple-300 font-mono">
-                      {formatDisplayDateLocal(
-                        scheduledPostsModalMode === 'yesterday'
-                          ? getLocalYesterdayYMD()
-                          : scheduledPostsModalMode === 'today'
-                          ? getLocalTodayYMD()
-                          : getLocalTomorrowYMD()
-                      )}
-                    </span>
-                  </div>
-                  <p className="text-slate-400 text-xs mt-0.5">
-                    {scheduledPostsModalMode === 'yesterday'
-                      ? 'Influencers with posts scheduled to go live yesterday'
-                      : scheduledPostsModalMode === 'today'
-                      ? 'Influencers with posts scheduled to go live today'
-                      : 'Influencers with posts scheduled to go live tomorrow'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-center">
-                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700/80">
-                  {modalScheduledPosts.length} {modalScheduledPosts.length === 1 ? 'Post' : 'Posts'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setScheduledPostsModalMode(null)}
-                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-                  title="Close popup"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            </div>
-
-            {/* Video Selector Filter Tabs inside Modal */}
-            <div className="px-4 sm:px-5 py-2.5 bg-[#091024] border-b border-slate-800 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1 shrink-0">
-                Video:
-              </span>
-              <button
-                type="button"
-                onClick={() => setModalVideoNumber(null)}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
-                  modalVideoNumber === null
-                    ? 'bg-purple-600 text-white shadow-md shadow-purple-950'
-                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60'
-                }`}
-              >
-                All Videos
-              </button>
-              {[1, 2, 3, 4, 5, 6].map(num => (
-                <button
-                  key={num}
-                  type="button"
-                  onClick={() => setModalVideoNumber(num)}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
-                    modalVideoNumber === num
-                      ? 'bg-purple-600 text-white shadow-md shadow-purple-950'
-                      : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60'
-                  }`}
-                >
-                  Video {num}
-                </button>
-              ))}
-            </div>
-
-            {/* Modal Body / Table */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5">
-              {modalScheduledPosts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center text-slate-400">
-                  <div className="w-14 h-14 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-center text-slate-500 mb-3">
-                    {scheduledPostsModalMode === 'yesterday' ? (
-                      <History size={28} />
-                    ) : scheduledPostsModalMode === 'today' ? (
-                      <CalendarCheck size={28} />
-                    ) : (
-                      <CalendarClock size={28} />
-                    )}
-                  </div>
-                  <h4 className="text-white font-bold text-sm sm:text-base">
-                    {scheduledPostsModalMode === 'yesterday'
-                      ? 'No posts scheduled for yesterday'
-                      : scheduledPostsModalMode === 'today'
-                      ? 'No posts scheduled for today'
-                      : 'No posts scheduled for tomorrow'}
-                  </h4>
-                  <p className="text-xs text-slate-500 max-w-sm mt-1">
-                    {modalVideoNumber !== null 
-                      ? `No Video ${modalVideoNumber} posts scheduled for ${
-                          scheduledPostsModalMode === 'yesterday'
-                            ? 'yesterday'
-                            : scheduledPostsModalMode === 'today'
-                            ? 'today'
-                            : 'tomorrow'
-                        }. Try selecting "All Videos" or schedule new posts in the Post Date step.`
-                      : `No posts scheduled across any videos for ${
-                          scheduledPostsModalMode === 'yesterday'
-                            ? 'yesterday'
-                            : scheduledPostsModalMode === 'today'
-                            ? 'today'
-                            : 'tomorrow'
-                        }.`}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-slate-800 shadow-sm">
-                  <table className="w-full text-left text-xs text-slate-300">
-                    <thead className="bg-[#070c18] text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                      <tr>
-                        <th className="py-3 px-3.5">Creator Code</th>
-                        <th className="py-3 px-3.5">Influencer</th>
-                        <th className="py-3 px-3.5">Video</th>
-                        <th className="py-3 px-3.5">Product</th>
-                        <th className="py-3 px-3.5">Platform</th>
-                        <th className="py-3 px-3.5">Post Date</th>
-                        <th className="py-3 px-3.5">Post Time</th>
-                        <th className="py-3 px-3.5 text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/70 bg-[#0b1329]">
-                      {modalScheduledPosts.map((item, idx) => (
-                        <tr key={`${item.record.id}-v${item.videoNumber}-${item.platform}-${idx}`} className="hover:bg-slate-800/30 transition-colors">
-                          <td className="py-3 px-3.5 font-mono font-bold text-purple-300 whitespace-nowrap">
-                            {item.creatorCode}
-                          </td>
-                          <td className="py-3 px-3.5">
-                            <div className="font-semibold text-white whitespace-nowrap">
-                              {item.influencerName}
-                            </div>
-                            {item.record.influencer?.instagram_handle && (
-                              <div className="text-[11px] text-slate-400">
-                                @{item.record.influencer.instagram_handle}
-                              </div>
-                            )}
-                          </td>
-                          <td className="py-3 px-3.5 whitespace-nowrap">
-                            <span className="px-2 py-0.5 rounded bg-blue-950/80 border border-blue-800/60 text-blue-300 text-[11px] font-bold">
-                              Video {item.videoNumber}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3.5 whitespace-nowrap text-slate-200">
-                            {item.productName}
-                          </td>
-                          <td className="py-3 px-3.5 whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
-                              item.platform.toLowerCase() === 'instagram'
-                                ? 'bg-pink-950/70 border-pink-800/60 text-pink-300'
-                                : item.platform.toLowerCase() === 'youtube'
-                                ? 'bg-red-950/70 border-red-800/60 text-red-300'
-                                : 'bg-blue-950/70 border-blue-800/60 text-blue-300'
-                            }`}>
-                              {item.platform}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3.5 font-mono whitespace-nowrap text-white">
-                            {formatDisplayDateLocal(item.postDate)}
-                          </td>
-                          <td className="py-3 px-3.5 font-mono whitespace-nowrap">
-                            {item.postTime ? (
-                              <span className="text-cyan-300 font-medium">
-                                {formatDisplayTime12h(item.postTime)}
-                              </span>
-                            ) : (
-                              <span className="text-slate-500 italic">
-                                Time not set
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleOpenVideo(item.record, item.videoNumber, 'post_date');
-                                setScheduledPostsModalMode(null);
-                              }}
-                              className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] transition-colors shadow-sm cursor-pointer"
-                            >
-                              Open Post Date
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-3.5 sm:p-4 border-t border-slate-800 bg-[#070c18] flex items-center justify-between text-xs">
-              <span className="text-slate-400">
-                Showing {modalScheduledPosts.length} scheduled {modalScheduledPosts.length === 1 ? 'post' : 'posts'}
-              </span>
-              <button
-                type="button"
-                onClick={() => setScheduledPostsModalMode(null)}
-                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold transition-colors cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* ========================================================
