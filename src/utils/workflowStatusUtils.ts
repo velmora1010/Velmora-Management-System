@@ -8,7 +8,33 @@ export interface WorkflowStatusInfo {
   dotClass: string;
 }
 
+export interface WorkflowStepDefinition {
+  key: string;
+  label: string;
+  shortLabel?: string;
+}
+
+export const INFLUENCER_WORKFLOW_STEPS: WorkflowStepDefinition[] = [
+  { key: 'offer_agreement', label: 'Offer Agreement', shortLabel: 'Offer Agr.' },
+  { key: 'after_dispatch', label: 'After Dispatch', shortLabel: 'After Disp.' },
+  { key: 'delivered', label: 'Delivered', shortLabel: 'Delivered' },
+  { key: 'share_script', label: 'Share Script', shortLabel: 'Share Script' },
+  { key: 'call_explain', label: 'Call Explain', shortLabel: 'Call Explain' },
+  { key: 'draft', label: 'Draft', shortLabel: 'Draft' },
+  { key: 'payment', label: 'Payment', shortLabel: 'Payment' },
+  { key: 'post_date', label: 'Post Date', shortLabel: 'Post Date' },
+  { key: 'before_post', label: 'Before Post', shortLabel: 'Before Post' },
+  { key: 'after_post', label: 'After Post', shortLabel: 'After Post' },
+];
+
+export const getWorkflowStepLabel = (stepKey: string): string => {
+  const match = INFLUENCER_WORKFLOW_STEPS.find(s => s.key === stepKey);
+  return match?.label || stepKey;
+};
+
 export type WorkflowStateKey = 
+  | 'offer_agreement'
+  | 'after_dispatch'
   | 're_dispatch'
   | 'not_started'
   | 'delivered'
@@ -28,6 +54,8 @@ export type WorkflowStateKey =
   | 'completed';
 
 export interface WorkflowStepHelpers {
+  isOfferAgreementCompleted?: (r: any, v: number) => boolean;
+  isAfterDispatchCompleted?: (r: any, v: number) => boolean;
   isShareScriptCompleted?: (r: any, v: number) => boolean;
   isShareScriptInProgress?: (r: any, v: number) => boolean;
   isCallCompleted?: (r: any, v: number) => boolean;
@@ -237,6 +265,14 @@ export function getCurrentWorkflowState(
   }
 
   // 2. Evaluate step completions
+  const isOfferAgreementCompleted = helpers?.isOfferAgreementCompleted
+    ? helpers.isOfferAgreementCompleted(record, videoNumber)
+    : false;
+
+  const isAfterDispatchCompleted = helpers?.isAfterDispatchCompleted
+    ? helpers.isAfterDispatchCompleted(record, videoNumber)
+    : false;
+
   const isDelivered = isInfluencerDeliveryConfirmed(record);
 
   const isScriptCompleted = helpers?.isShareScriptCompleted
@@ -281,6 +317,8 @@ export function getCurrentWorkflowState(
 
   // True NOT STARTED: NO workflow step has been completed for this influencer/video
   const hasAnyStepCompleted = Boolean(
+    isOfferAgreementCompleted ||
+    isAfterDispatchCompleted ||
     isDelivered || 
     isScriptCompleted || 
     isCallCompleted || 
@@ -356,6 +394,8 @@ export function getStepCompletion(
   helpers?: WorkflowStepHelpers
 ): boolean {
   if (isInfluencerInReDispatch(record)) return false;
+  if (stepId === 'offer_agreement') return helpers?.isOfferAgreementCompleted ? helpers.isOfferAgreementCompleted(record, videoNumber) : false;
+  if (stepId === 'after_dispatch') return helpers?.isAfterDispatchCompleted ? helpers.isAfterDispatchCompleted(record, videoNumber) : false;
   if (stepId === 'delivered') return isInfluencerDeliveryConfirmed(record);
   if (stepId === 'share_script') return helpers?.isShareScriptCompleted ? helpers.isShareScriptCompleted(record, videoNumber) : false;
   if (stepId === 'call_explain') return helpers?.isCallCompleted ? helpers.isCallCompleted(record, videoNumber) : false;

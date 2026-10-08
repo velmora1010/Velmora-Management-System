@@ -257,7 +257,18 @@ export interface CampaignDescription {
 export interface InfluencerConversation {
   id: string;
   campaign_id: string;
-  conversation: string;
+  step_key: string;
+  conversation_name?: string;
+  title?: string; // backwards compatibility alias for conversation_name
+  regional_language?: string;
+  english_text: string;
+  regional_text: string;
+  regional_transliteration: string;
+  // legacy backward compatibility aliases:
+  conversation_text?: string;
+  conversation?: string;
+  display_order?: number;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 }

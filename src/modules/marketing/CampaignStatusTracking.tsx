@@ -11,8 +11,17 @@ import {
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Activity, Truck, Share2, Globe, GitBranch,
   Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward,
   FilePlus, CheckCircle2, Save, Sparkles, Radio, Image as ImageIcon, Upload, AlertCircle,
-  CalendarCheck, CalendarClock, ClipboardCheck
+  CalendarCheck, CalendarClock, ClipboardCheck, FileCheck, Send, Download
 } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
+import { buildAgreementText } from './OfferAgreementSection';
+import { 
+  afterDispatchService, 
+  buildAfterDispatchMessage, 
+  resolveDispatchedProducts, 
+  resolveInfluencerShipment, 
+  resolvePaymentDetails 
+} from '../../services/afterDispatchService';
 import { logActivity } from '../../services/activityService';
 import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
@@ -39,8 +48,10 @@ import {
   getScriptVideoUrl, 
   type CampaignScript 
 } from '../../services/campaignScriptService';
+import { downloadMediaFile } from '../../utils/fileDownloadUtils';
 import { fetchInfluencerTrackingLinks } from '../../services/influencerTrackingLinkService';
 import { fetchCampaignDescriptions } from '../../services/campaignDescriptionService';
+import { InfluencerConversationSelector } from '../../components/marketing/InfluencerConversationSelector';
 import { 
   StatusTrackingFilterDrawer, 
   type StatusTrackingFilterState, 
@@ -82,6 +93,8 @@ export type WorkflowStepKey = 'delivery' | 'video1' | 'video2' | 'video3' | 'vid
 export const normalizeWorkflowStepId = (val: string): string => {
   if (!val) return '';
   const s = val.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s.includes('offeragreement') || s.includes('offeragr') || s === 'offer_agreement') return 'offer_agreement';
+  if (s.includes('afterdispatch') || s.includes('afterdisp') || s === 'after_dispatch') return 'after_dispatch';
   if (s.includes('redraftsubmitted') || s === 're_draft_submitted') return 're_draft_submitted';
   if (s.includes('redraft') || s === 're_draft') return 're_draft';
   if (s.includes('draftpending') || s === 'draft_pending') return 'draft_pending';
@@ -106,6 +119,8 @@ export const normalizeWorkflowStepId = (val: string): string => {
 export const normalizeWorkflowStepLabel = (val: string): string => {
   const id = normalizeWorkflowStepId(val);
   switch (id) {
+    case 'offer_agreement': return 'Offer Agreement';
+    case 'after_dispatch': return 'After Dispatch';
     case 're_draft_submitted': return 'Re-Draft Submitted';
     case 're_draft': return 'Re-Draft';
     case 'draft_pending': return 'Draft Pending';
@@ -132,8 +147,10 @@ export interface VideoStepConfig {
 }
 
 // UNIFIED WORKFLOW STEPS FOR ALL VIDEOS 1 TO 6:
-// Delivered -> Share Script -> Call & Explain -> Draft -> Payment -> Post Date -> Before Post -> After Post (8 steps)
+// Offer Agreement -> After Dispatch -> Delivered -> Share Script -> Call & Explain -> Draft -> Payment -> Post Date -> Before Post -> After Post (10 steps)
 export const WORKFLOW_STEP_CONFIGS: VideoStepConfig[] = [
+  { id: 'offer_agreement', label: 'Offer Agreement', shortLabel: 'Offer Agr.', icon: FileCheck },
+  { id: 'after_dispatch', label: 'After Dispatch', shortLabel: 'After Disp.', icon: Send },
   { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
   { id: 'call_explain', label: 'Call & Explain', shortLabel: 'Call Explain', icon: Phone },
@@ -163,6 +180,8 @@ export interface WorkflowSummaryBoxConfig {
 }
 
 export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
+  { id: 'offer_agreement', label: 'Offer Agreement', shortLabel: 'Offer Agr.', icon: FileCheck },
+  { id: 'after_dispatch', label: 'After Dispatch', shortLabel: 'After Disp.', icon: Send },
   { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
   { id: 'not_started', label: 'Not Started', shortLabel: 'Not Started', icon: Clock },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
@@ -1477,6 +1496,38 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   const steps: Record<string, { completed: boolean; skipped?: boolean; status?: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' | 'SKIPPED'; data: any; updated_at?: string }> = {};
 
   configs.forEach(cfg => {
+    // Dedicated Step: Offer Agreement
+    if (cfg.id === 'offer_agreement') {
+      const st = storedVideo?.steps?.['offer_agreement'];
+      const isOfferDone = Boolean(st?.completed === true || st?.status === 'COMPLETED' || st?.data?.sent_confirmed === true);
+      steps[cfg.id] = {
+        completed: isOfferDone,
+        skipped: false,
+        status: isOfferDone ? 'COMPLETED' : 'NOT_STARTED',
+        data: {
+          sent_confirmed: isOfferDone,
+          ...(st?.data || {})
+        }
+      };
+      return;
+    }
+
+    // Dedicated Step: After Dispatch
+    if (cfg.id === 'after_dispatch') {
+      const st = storedVideo?.steps?.['after_dispatch'];
+      const isDispDone = Boolean(st?.completed === true || st?.status === 'COMPLETED' || st?.data?.sent_confirmed === true);
+      steps[cfg.id] = {
+        completed: isDispDone,
+        skipped: false,
+        status: isDispDone ? 'COMPLETED' : 'NOT_STARTED',
+        data: {
+          sent_confirmed: isDispDone,
+          ...(st?.data || {})
+        }
+      };
+      return;
+    }
+
     // Dedicated Step: Delivered (Video 1 only)
     if (cfg.id === 'delivered') {
       const isDeliv = isInfluencerDeliveryConfirmed(record);
@@ -2138,8 +2189,6 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   const completedCount = effectiveConfigs.filter(c => steps[c.id]?.completed).length;
   const totalSteps = effectiveConfigs.length;
 
-  const isStarted = depth > 0 ? isDelivered : isInfluencerVideoStarted(record, videoNum);
-
   let status: 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED' = 'NOT_STARTED';
   if (!isAssigned) {
     status = 'NOT_STARTED';
@@ -2156,6 +2205,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
   let activeStepId = '';
   if (!isAssigned) {
     activeStepId = '';
+  } else if (!isStepDone('offer_agreement')) {
+    activeStepId = 'offer_agreement';
+  } else if (!isStepDone('after_dispatch')) {
+    activeStepId = 'after_dispatch';
   } else if (!isDelivered) {
     activeStepId = 'delivered';
   } else if (!isStepDone('share_script')) {
@@ -2214,6 +2267,9 @@ export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum:
   if (isInfluencerDeliveryConfirmed(record)) {
     return true;
   }
+  if (isInfluencerOfferAgreementCompleted(record, videoNum) || isInfluencerAfterDispatchCompleted(record, videoNum)) {
+    return true;
+  }
 
   // 1. Explicit Video N script
   const vScript = (record.videoScripts || []).find((vs: any) => Number(vs.video_number) === videoNum);
@@ -2257,6 +2313,40 @@ export const isInfluencerVideoStarted = (record: StatusTrackingRecord, videoNum:
 
   return false;
 };
+
+/**
+ * Checks if Offer Agreement step has been completed for an influencer in the given video number.
+ * Requires explicit user confirmation via checkbox.
+ */
+export const isInfluencerOfferAgreementCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const metadata: any = getRecordNotesMetadata(record);
+  const storedVideo = metadata.videos?.[String(videoNumber)] || metadata.videos?.[videoNumber];
+  const step = storedVideo?.steps?.['offer_agreement'];
+  return Boolean(step?.completed === true || step?.status === 'COMPLETED' || step?.data?.sent_confirmed === true);
+};
+
+export const isOfferAgreementCompleted = isInfluencerOfferAgreementCompleted;
+
+/**
+ * Checks if After Dispatch step has been completed for an influencer in the given video number.
+ * Requires explicit user confirmation via checkbox.
+ */
+export const isInfluencerAfterDispatchCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  const metadata: any = getRecordNotesMetadata(record);
+  const storedVideo = metadata.videos?.[String(videoNumber)] || metadata.videos?.[videoNumber];
+  const step = storedVideo?.steps?.['after_dispatch'];
+  return Boolean(step?.completed === true || step?.status === 'COMPLETED' || step?.data?.sent_confirmed === true);
+};
+
+export const isAfterDispatchCompleted = isInfluencerAfterDispatchCompleted;
 
 /**
  * Checks if Share Script is actually completed/confirmed for an influencer in the given video number.
@@ -2930,6 +3020,8 @@ export const isInfluencerVideoNotStarted = (record: StatusTrackingRecord, videoN
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
 
+  if (isInfluencerOfferAgreementCompleted(record, videoNumber)) return false;
+  if (isInfluencerAfterDispatchCompleted(record, videoNumber)) return false;
   if (isInfluencerDeliveryConfirmed(record)) return false;
   if (isInfluencerInReDispatch(record)) return false;
   if (isInfluencerReDispatchActive(record)) return false;
@@ -3276,6 +3368,10 @@ export const isStepFilterMatch = (
   videoNumber: number
 ): boolean => {
   switch (stepId) {
+    case 'offer_agreement':
+      return isInfluencerOfferAgreementCompleted(record, videoNumber);
+    case 'after_dispatch':
+      return isInfluencerAfterDispatchCompleted(record, videoNumber);
     case 'delivered':
       return isInfluencerDeliveryConfirmed(record);
     case 'not_started':
@@ -3408,6 +3504,8 @@ export const validateFilterCounts = (
  */
 export const getInfluencerCurrentWorkflowState = (record: StatusTrackingRecord, videoNumber: number): string => {
   return getCurrentWorkflowState(record, videoNumber, {
+    isOfferAgreementCompleted: isInfluencerOfferAgreementCompleted,
+    isAfterDispatchCompleted: isInfluencerAfterDispatchCompleted,
     isShareScriptCompleted: isInfluencerShareScriptCompleted,
     isShareScriptInProgress: isInfluencerShareScriptInProgress,
     isCallCompleted: isInfluencerCallCompleted,
@@ -3449,6 +3547,14 @@ export const getStepVisualState = (
 ): StepVisualState => {
   if (!record) return 'not_started';
 
+  // 0. Pre-delivery workflow steps
+  if (stepId === 'offer_agreement') {
+    return isInfluencerOfferAgreementCompleted(record, videoNumber) ? 'completed' : 'not_started';
+  }
+  if (stepId === 'after_dispatch') {
+    return isInfluencerAfterDispatchCompleted(record, videoNumber) ? 'completed' : 'not_started';
+  }
+
   // 1. Delivery step check (Applies to ALL videos 1 to 6)
   if (stepId === 'delivered') {
     if (isInfluencerInReDispatch(record)) {
@@ -3470,6 +3576,8 @@ export const getStepVisualState = (
 
   // 3. Check completion first (COMPLETED HAS HIGHEST PRIORITY - GREEN)
   const isDone = (
+    stepId === 'offer_agreement' ? isInfluencerOfferAgreementCompleted(record, videoNumber) :
+    stepId === 'after_dispatch' ? isInfluencerAfterDispatchCompleted(record, videoNumber) :
     stepId === 'share_script' ? isInfluencerShareScriptCompleted(record, videoNumber) :
     stepId === 'call_explain' ? isInfluencerCallCompleted(record, videoNumber) :
     stepId === 'call_skipped' ? isInfluencerCallSkipped(record, videoNumber) :
@@ -3713,6 +3821,8 @@ export const getInfluencerLatestReversibleStep = (
   for (let idx = subStepConfigs.length - 1; idx >= 0; idx--) {
     const cfg = subStepConfigs[idx];
     const isCompleted = (
+      cfg.id === 'offer_agreement' ? isInfluencerOfferAgreementCompleted(record, videoNumber) :
+      cfg.id === 'after_dispatch' ? isInfluencerAfterDispatchCompleted(record, videoNumber) :
       cfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, videoNumber) :
       cfg.id === 'call_explain' ? isInfluencerCallCompleted(record, videoNumber) :
       cfg.id === 'pay_advance' ? isInfluencerPaymentCompleted(record, videoNumber) :
@@ -3733,14 +3843,8 @@ export const getInfluencerLatestReversibleStep = (
         const isPrevSkipped = prevCfg.id === 'call_explain' && isInfluencerCallSkipped(record, videoNumber);
         previousStateLabel = `${prevCfg.label} (${isPrevSkipped ? 'Skipped' : 'Completed'})`;
       } else {
-        // First sub-step (share_script) returns to Delivery Confirmation / Re-Dispatch
-        if (cycles.length > 0) {
-          const lastCycle = cycles[cycles.length - 1];
-          const num = lastCycle.cycle_number || cycles.length;
-          previousStateLabel = `Delivered #${num} (Confirmed)`;
-        } else {
-          previousStateLabel = 'Delivered (Confirmed)';
-        }
+        // First sub-step returns to Not Started
+        previousStateLabel = 'Not Started';
       }
 
       // Check if any downstream sub-steps exist (in case of out-of-order data)
@@ -3748,6 +3852,8 @@ export const getInfluencerLatestReversibleStep = (
       for (let dIdx = idx + 1; dIdx < subStepConfigs.length; dIdx++) {
         const dCfg = subStepConfigs[dIdx];
         const dDone = (
+          dCfg.id === 'offer_agreement' ? isInfluencerOfferAgreementCompleted(record, videoNumber) :
+          dCfg.id === 'after_dispatch' ? isInfluencerAfterDispatchCompleted(record, videoNumber) :
           dCfg.id === 'share_script' ? isInfluencerShareScriptCompleted(record, videoNumber) :
           dCfg.id === 'call_explain' ? (isInfluencerCallCompleted(record, videoNumber) || isInfluencerCallSkipped(record, videoNumber)) :
           dCfg.id === 'pay_advance' ? isInfluencerPaymentCompleted(record, videoNumber) :
@@ -3892,14 +3998,125 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
   const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
   const [isOverflowing, setIsOverflowing] = useState<boolean>(false);
 
-  // Filter video sub-steps
-  const visibleSubSteps = useMemo(() => {
-    return currentVideoData.configs.filter(
-      cfg => !(selectedVideoNumber === 1 && hasRedispatch && cfg.id === 'delivered')
-    );
-  }, [currentVideoData.configs, selectedVideoNumber, hasRedispatch]);
+  // Unified timeline items in strictly correct workflow order
+  const timelineItems = useMemo(() => {
+    type TimelineItem =
+      | {
+          kind: 'prereq';
+          id: string;
+          label: string;
+          visualState: StepVisualState;
+          visualStyles: any;
+          isCompleted: boolean;
+          isPending: boolean;
+          title: string;
+          pStep: PrerequisiteStep;
+        }
+      | {
+          kind: 'substep';
+          id: string;
+          cfg: WorkflowStepConfig;
+          label: string;
+          visualState: StepVisualState;
+          visualStyles: any;
+          isCompleted: boolean;
+          isSkipped: boolean;
+          isPending: boolean;
+          isReDraftReq: boolean;
+          title: string;
+        };
 
-  const totalStepsCount = (selectedVideoNumber === 1 && hasRedispatch ? prerequisiteSteps.length : 0) + visibleSubSteps.length;
+    const items: TimelineItem[] = [];
+
+    const addSubStep = (cfg: WorkflowStepConfig) => {
+      const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
+      const visualStyles = getStepVisualStyles(visualState);
+      const isCompleted = visualState === 'completed';
+      const isSkipped = visualState === 'skipped';
+      const isReDraftReq = cfg.id === 'draft' && currentVideoData.isReDraftRequired;
+      const title = cfg.id === 'delivered'
+        ? `Delivery Confirmation: ${isDelivered ? 'Completed' : 'Not Confirmed'}`
+        : `${cfg.label} (${
+            visualState === 'completed'
+              ? 'Completed'
+              : visualState === 'review_required'
+              ? 'Draft Completed – Review Required'
+              : visualState === 'skipped'
+              ? 'Skipped'
+              : isReDraftReq
+              ? 'Re-Draft Required'
+              : visualState === 'pending'
+              ? 'Pending Action'
+              : visualState === 'in_progress'
+              ? 'In Progress'
+              : 'Not Started'
+          })`;
+
+      const label = cfg.id === 'draft' && (visualState === 'pending' || visualState === 'review_required')
+        ? 'Draft Pending Approval'
+        : cfg.id === 'draft' && visualState === 'rejected'
+        ? 'Draft'
+        : cfg.id === 're_draft'
+        ? 'Re-Draft'
+        : cfg.id === 're_draft_submitted'
+        ? 'Re-Draft Submitted'
+        : cfg.id === 'call_explain' && (isSkipped || visualState === 'skipped')
+        ? 'Call Skipped'
+        : (cfg.shortLabel || cfg.label);
+
+      items.push({
+        kind: 'substep',
+        id: cfg.id,
+        cfg,
+        label,
+        visualState,
+        visualStyles,
+        isCompleted,
+        isSkipped,
+        isPending: visualState === 'pending' || visualState === 'review_required',
+        isReDraftReq,
+        title,
+      });
+    };
+
+    const addPrereq = (pStep: PrerequisiteStep) => {
+      const pVisualState = pStep.isCompleted ? 'completed' : pStep.isPending ? 'pending' : 'not_started';
+      const pVisualStyles = getStepVisualStyles(pVisualState);
+      items.push({
+        kind: 'prereq',
+        id: pStep.id,
+        label: pStep.label,
+        visualState: pVisualState,
+        visualStyles: pVisualStyles,
+        isCompleted: pStep.isCompleted,
+        isPending: pStep.isPending,
+        title: pStep.title,
+        pStep,
+      });
+    };
+
+    if (selectedVideoNumber === 1 && hasRedispatch) {
+      // 1. Steps before delivery (Offer Agreement, After Dispatch)
+      currentVideoData.configs
+        .filter(cfg => cfg.id === 'offer_agreement' || cfg.id === 'after_dispatch')
+        .forEach(addSubStep);
+
+      // 2. Prerequisite steps (Re-dispatch cycles & replacement delivery)
+      prerequisiteSteps.forEach(addPrereq);
+
+      // 3. Steps after delivery (Share Script, Call Explain, Draft, Payment, Post Date, Before Post, After Post)
+      currentVideoData.configs
+        .filter(cfg => cfg.id !== 'offer_agreement' && cfg.id !== 'after_dispatch' && cfg.id !== 'delivered')
+        .forEach(addSubStep);
+    } else {
+      // Standard video flow: all configs in order
+      currentVideoData.configs.forEach(addSubStep);
+    }
+
+    return items;
+  }, [record, selectedVideoNumber, hasRedispatch, prerequisiteSteps, currentVideoData, isDelivered, isPendingReDispatch]);
+
+  const totalStepsCount = timelineItems.length;
 
   const updateScrollBounds = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -3925,21 +4142,18 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
 
   // Identify active step ID for auto-scroll
   const activeStepKey = useMemo(() => {
-    if (selectedVideoNumber === 1 && hasRedispatch) {
-      for (const p of prerequisiteSteps) {
-        if (!p.isCompleted) return p.id;
+    for (const item of timelineItems) {
+      if (item.visualState === 'in_progress' || item.visualState === 'pending' || item.visualState === 'review_required') {
+        return item.id;
       }
     }
-    for (const cfg of visibleSubSteps) {
-      const state = getStepVisualState(record, selectedVideoNumber, cfg.id);
-      if (state === 'in_progress' || state === 'pending') return cfg.id;
+    for (const item of timelineItems) {
+      if (item.visualState === 'not_started') {
+        return item.id;
+      }
     }
-    for (const cfg of visibleSubSteps) {
-      const state = getStepVisualState(record, selectedVideoNumber, cfg.id);
-      if (state === 'not_started') return cfg.id;
-    }
-    return visibleSubSteps[visibleSubSteps.length - 1]?.id || '';
-  }, [record, selectedVideoNumber, hasRedispatch, prerequisiteSteps, visibleSubSteps]);
+    return timelineItems[timelineItems.length - 1]?.id || '';
+  }, [timelineItems]);
 
   const lastScrolledStepRef = useRef<string>('');
 
@@ -4008,84 +4222,18 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
         <div className="flex items-center min-w-max">
-          {/* 1. PREREQUISITES: For Video 1 with Re-Dispatch cycles */}
-          {selectedVideoNumber === 1 && hasRedispatch && prerequisiteSteps.map((pStep, pIdx) => {
-            const pVisualState = pStep.isCompleted ? 'completed' : pStep.isPending ? 'pending' : 'not_started';
-            const pVisualStyles = getStepVisualStyles(pVisualState);
-            const isActiveStep = pStep.id === activeStepKey;
+          {timelineItems.map((item, idx, arr) => {
+            const isActiveStep = item.id === activeStepKey;
 
             return (
-              <React.Fragment key={pStep.id}>
-                <div
-                  ref={isActiveStep ? activeStepRef : null}
-                  className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
-                  onClick={() => onOpenDeliveryModal(pStep)}
-                  title={pStep.title}
-                >
-                  <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${pVisualStyles.circle}`}>
-                    {pStep.isCompleted ? (
-                      <Check size={14} strokeWidth={2.5} className="text-white" />
-                    ) : pStep.isPending ? (
-                      <AlertTriangle size={13} className="text-amber-400" />
-                    ) : pStep.type === 'redispatch' ? (
-                      <RotateCcw size={13} className={`${pVisualStyles.iconClass} transition-colors`} />
-                    ) : (
-                      <Package size={13} className={`${pVisualStyles.iconClass} transition-colors`} />
-                    )}
-                  </div>
-                  <div className="flex flex-col items-center text-center min-w-0 mt-1">
-                    <span className={`text-[9px] sm:text-[9.5px] xl:text-[10px] text-center leading-tight transition-colors whitespace-nowrap block ${pVisualStyles.label}`}>
-                      {pStep.label}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Connecting Line after this prerequisite step */}
-                {(() => {
-                  let isPrereqLineActive = false;
-                  if (pIdx < prerequisiteSteps.length - 1) {
-                    const nextPrereq = prerequisiteSteps[pIdx + 1];
-                    isPrereqLineActive = pStep.isCompleted && nextPrereq.isCompleted;
-                  } else {
-                    const firstSubStepConfig = visibleSubSteps[0];
-                    if (firstSubStepConfig) {
-                      const firstSubVisualState = getStepVisualState(record, selectedVideoNumber, firstSubStepConfig.id);
-                      isPrereqLineActive = pStep.isCompleted && (firstSubVisualState === 'completed' || firstSubVisualState === 'skipped');
-                    }
-                  }
-
-                  return (
-                    <div className="w-4 sm:w-6 xl:w-8 h-[2px] mx-0.5 sm:mx-1 -mt-4 transition-colors duration-300 shrink-0">
-                      <div className={`h-full w-full rounded-full transition-all duration-300 ${
-                        isPrereqLineActive ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-slate-700/60'
-                      }`} />
-                    </div>
-                  );
-                })()}
-              </React.Fragment>
-            );
-          })}
-
-          {/* 2. SUB-STEPS FOR THE SELECTED VIDEO */}
-          {visibleSubSteps.map((cfg, idx, arr) => {
-            const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
-            const visualStyles = getStepVisualStyles(visualState);
-
-            const isCompleted = visualState === 'completed';
-            const isSkipped = visualState === 'skipped';
-            const isReDraftReq = cfg.id === 'draft' && currentVideoData.isReDraftRequired;
-            const StepIcon = cfg.icon;
-
-            const isCurrentStepDone = isCompleted || isSkipped || visualState === 'review_required';
-            const isActiveStep = cfg.id === activeStepKey;
-
-            return (
-              <React.Fragment key={`${selectedVideoNumber}-${cfg.id}`}>
+              <React.Fragment key={`${selectedVideoNumber}-${item.id}`}>
                 <div
                   ref={isActiveStep ? activeStepRef : null}
                   className="flex flex-col items-center cursor-pointer group relative select-none shrink-0 min-w-0"
                   onClick={() => {
-                    if (cfg.id === 'delivered') {
+                    if (item.kind === 'prereq') {
+                      onOpenDeliveryModal(item.pStep);
+                    } else if (item.cfg.id === 'delivered') {
                       onOpenDeliveryModal({
                         id: 'delivery-initial',
                         type: 'initial_delivery',
@@ -4095,96 +4243,78 @@ export const RowWorkflowTimeline: React.FC<RowWorkflowTimelineProps> = ({
                         modalMode: isPendingReDispatch ? 'review_issue' : 'confirm_delivery',
                         title: 'Delivery Confirmation'
                       });
-                      return;
+                    } else {
+                      onOpenVideoModal(item.cfg.id);
                     }
-                    onOpenVideoModal(cfg.id);
                   }}
-                  title={
-                    cfg.id === 'delivered'
-                      ? `Delivery Confirmation: ${isDelivered ? 'Completed' : 'Not Confirmed'}`
-                      : `${cfg.label} (${
-                          visualState === 'completed'
-                            ? 'Completed'
-                            : visualState === 'review_required'
-                            ? 'Draft Completed – Review Required'
-                            : visualState === 'skipped'
-                            ? 'Skipped'
-                            : isReDraftReq
-                            ? 'Re-Draft Required'
-                            : visualState === 'pending'
-                            ? 'Pending Action'
-                            : visualState === 'in_progress'
-                            ? 'In Progress'
-                            : 'Not Started'
-                        })`
-                  }
+                  title={item.title}
                 >
                   <div className={`w-7.5 h-7.5 sm:w-8 sm:h-8 xl:w-8.5 xl:h-8.5 rounded-full flex items-center justify-center transition-all duration-200 z-10 shrink-0 ${
-                    cfg.id === 're_draft' && visualState === 'rejected'
+                    item.kind === 'substep' && item.cfg.id === 're_draft' && item.visualState === 'rejected'
                       ? 'bg-rose-500/20 text-rose-400 border border-rose-500/80 shadow-[0_0_12px_rgba(244,63,94,0.5)] animate-pulse'
-                      : cfg.id === 're_draft_submitted' && visualState === 'completed'
+                      : item.kind === 'substep' && item.cfg.id === 're_draft_submitted' && item.visualState === 'completed'
                       ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/80 shadow-[0_0_12px_rgba(16,185,129,0.5)] animate-pulse'
-                      : visualStyles.circle
+                      : item.visualStyles.circle
                   }`}>
-                    {visualState === 'review_required' || (cfg.id === 'draft' && visualState === 'pending') ? (
-                      <StepIcon size={13} className="text-amber-400" />
-                    ) : isCompleted ? (
+                    {item.kind === 'prereq' ? (
+                      item.isCompleted ? (
+                        <Check size={14} strokeWidth={2.5} className="text-white" />
+                      ) : item.isPending ? (
+                        <AlertTriangle size={13} className="text-amber-400" />
+                      ) : item.pStep.type === 'redispatch' ? (
+                        <RotateCcw size={13} className={`${item.visualStyles.iconClass} transition-colors`} />
+                      ) : (
+                        <Package size={13} className={`${item.visualStyles.iconClass} transition-colors` } />
+                      )
+                    ) : item.visualState === 'review_required' || (item.cfg.id === 'draft' && item.visualState === 'pending') ? (
+                      <item.cfg.icon size={13} className="text-amber-400" />
+                    ) : item.isCompleted ? (
                       <Check size={14} strokeWidth={2.5} className="text-white" />
-                    ) : isSkipped ? (
+                    ) : item.isSkipped ? (
                       <FastForward size={13} className="text-amber-400" />
-                    ) : visualState === 'rejected' ? (
-                      cfg.id === 're_draft' ? (
+                    ) : item.visualState === 'rejected' ? (
+                      item.cfg.id === 're_draft' ? (
                         <RotateCcw size={13} className="text-rose-400" />
                       ) : (
                         <X size={14} strokeWidth={2.5} className="text-rose-400" />
                       )
                     ) : (
-                      <StepIcon size={13} className={`${visualStyles.iconClass} transition-colors`} />
+                      <item.cfg.icon size={13} className={`${item.visualStyles.iconClass} transition-colors`} />
                     )}
                   </div>
                   <div className="flex flex-col items-center text-center min-w-0 mt-1">
                     <span className={`text-[9.5px] sm:text-[10px] xl:text-[10.5px] text-center leading-tight transition-colors whitespace-nowrap block ${
-                      cfg.id === 're_draft' && visualState === 'rejected'
+                      item.kind === 'substep' && item.cfg.id === 're_draft' && item.visualState === 'rejected'
                         ? 'text-rose-400 font-bold'
-                        : cfg.id === 're_draft_submitted'
+                        : item.kind === 'substep' && item.cfg.id === 're_draft_submitted'
                         ? 'text-emerald-400 font-bold'
-                        : cfg.id === 'draft' && visualState === 'rejected'
+                        : item.kind === 'substep' && item.cfg.id === 'draft' && item.visualState === 'rejected'
                         ? 'text-rose-400 font-semibold'
-                        : visualStyles.label
+                        : item.visualStyles.label
                     }`}>
-                      {cfg.id === 'draft' && (visualState === 'pending' || visualState === 'review_required')
-                        ? 'Draft Pending Approval'
-                        : cfg.id === 'draft' && visualState === 'rejected'
-                        ? 'Draft'
-                        : cfg.id === 're_draft'
-                        ? 'Re-Draft'
-                        : cfg.id === 're_draft_submitted'
-                        ? 'Re-Draft Submitted'
-                        : cfg.id === 'call_explain' && (isSkipped || visualState === 'skipped')
-                        ? 'Call Skipped'
-                        : (cfg.shortLabel || cfg.label)}
+                      {item.label}
                     </span>
                   </div>
                 </div>
 
-                {/* Connecting Line between Sub-Steps */}
+                {/* Connecting Line between Steps */}
                 {idx !== arr.length - 1 && (() => {
-                  const nextCfg = arr[idx + 1];
-                  const nextVisualState = getStepVisualState(record, selectedVideoNumber, nextCfg.id);
-                  const isNextStepDone = nextVisualState === 'completed' || nextVisualState === 'skipped';
-                  const isNextPending = nextVisualState === 'review_required' || nextVisualState === 'pending';
-                  const isNextInProgress = nextVisualState === 'in_progress';
+                  const nextItem = arr[idx + 1];
+                  const isCurrentDone = item.isCompleted || (item.kind === 'substep' && item.isSkipped);
+                  const isNextDone = nextItem.isCompleted || (nextItem.kind === 'substep' && nextItem.isSkipped);
+                  const isNextPending = nextItem.isPending;
+                  const isNextInProgress = nextItem.visualState === 'in_progress';
 
                   let lineColor = 'bg-slate-700/60';
-                  if (cfg.id === 'draft' && visualState === 'rejected' && nextCfg.id === 're_draft') {
+                  if (item.id === 'draft' && item.visualState === 'rejected' && nextItem.id === 're_draft') {
                     lineColor = 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]';
-                  } else if (cfg.id === 're_draft' && nextCfg.id === 're_draft_submitted') {
+                  } else if (item.id === 're_draft' && nextItem.id === 're_draft_submitted') {
                     lineColor = 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]';
-                  } else if (isCurrentStepDone && isNextStepDone) {
+                  } else if (isCurrentDone && isNextDone) {
                     lineColor = 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]';
-                  } else if (isCurrentStepDone && isNextPending) {
+                  } else if (isCurrentDone && isNextPending) {
                     lineColor = 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]';
-                  } else if ((isCurrentStepDone && isNextInProgress) || visualState === 'in_progress') {
+                  } else if ((isCurrentDone && isNextInProgress) || item.visualState === 'in_progress') {
                     lineColor = 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]';
                   }
 
@@ -4237,14 +4367,6 @@ export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps>
   const isDelivered = isInfluencerDeliveryConfirmed(record);
   const isPendingReDispatch = isInfluencerInReDispatch(record);
 
-  const visibleSubSteps = currentVideoData.configs.filter(
-    cfg => !(selectedVideoNumber === 1 && hasRedispatch && cfg.id === 'delivered')
-  );
-
-  const influencerCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || `ID ${record.influencer_id}`;
-  const influencerName = record.influencer?.name || (record as any).name || record.dispatch?.influencer_name || 'Creator';
-  const username = record.influencer?.instagram_username ? `@${record.influencer.instagram_username}` : '';
-
   const allOrderedSteps: Array<{
     id: string;
     stepNumber: number;
@@ -4263,29 +4385,7 @@ export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps>
 
   let stepCounter = 1;
 
-  if (selectedVideoNumber === 1 && hasRedispatch) {
-    prerequisiteSteps.forEach(p => {
-      const pVisualState = p.isCompleted ? 'completed' : p.isPending ? 'pending' : 'not_started';
-      const pVisualStyles = getStepVisualStyles(pVisualState);
-      const StepIcon = p.type === 'redispatch' ? RotateCcw : Package;
-      allOrderedSteps.push({
-        id: p.id,
-        stepNumber: stepCounter++,
-        label: p.label,
-        type: 'prerequisite',
-        visualState: pVisualState,
-        visualStyles: pVisualStyles,
-        isCompleted: p.isCompleted,
-        isSkipped: false,
-        isPending: p.isPending,
-        title: p.title,
-        pStep: p,
-        icon: StepIcon
-      });
-    });
-  }
-
-  visibleSubSteps.forEach(cfg => {
+  const pushSubStep = (cfg: WorkflowStepConfig) => {
     const visualState = getStepVisualState(record, selectedVideoNumber, cfg.id);
     const visualStyles = getStepVisualStyles(visualState);
     const isDraftPending = cfg.id === 'draft' && (visualState === 'pending' || visualState === 'review_required');
@@ -4304,7 +4404,44 @@ export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps>
       cfgId: cfg.id,
       icon: cfg.icon
     });
-  });
+  };
+
+  const pushPrereq = (p: PrerequisiteStep) => {
+    const pVisualState = p.isCompleted ? 'completed' : p.isPending ? 'pending' : 'not_started';
+    const pVisualStyles = getStepVisualStyles(pVisualState);
+    const StepIcon = p.type === 'redispatch' ? RotateCcw : Package;
+    allOrderedSteps.push({
+      id: p.id,
+      stepNumber: stepCounter++,
+      label: p.label,
+      type: 'prerequisite',
+      visualState: pVisualState,
+      visualStyles: pVisualStyles,
+      isCompleted: p.isCompleted,
+      isSkipped: false,
+      isPending: p.isPending,
+      title: p.title,
+      pStep: p,
+      icon: StepIcon
+    });
+  };
+
+  if (selectedVideoNumber === 1 && hasRedispatch) {
+    // 1. Steps before delivery (Offer Agreement, After Dispatch)
+    currentVideoData.configs
+      .filter(cfg => cfg.id === 'offer_agreement' || cfg.id === 'after_dispatch')
+      .forEach(pushSubStep);
+
+    // 2. Prerequisite steps (Re-dispatch cycles)
+    prerequisiteSteps.forEach(pushPrereq);
+
+    // 3. Steps after delivery
+    currentVideoData.configs
+      .filter(cfg => cfg.id !== 'offer_agreement' && cfg.id !== 'after_dispatch' && cfg.id !== 'delivered')
+      .forEach(pushSubStep);
+  } else {
+    currentVideoData.configs.forEach(pushSubStep);
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
@@ -6662,8 +6799,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   );
                 })}
 
-                {/* Slots 18 to 22: 5 Empty Placeholder Slots in Row 2 (Reserved for future filters) */}
-                {[1, 2, 3, 4, 5].map((slotIdx) => (
+                {/* Slots 20 to 22: 3 Empty Placeholder Slots in Row 2 (19 active filter boxes + 3 placeholders = 22 total slots across 11 columns) */}
+                {[1, 2, 3].map((slotIdx) => (
                   <div
                     key={`filter-empty-placeholder-${slotIdx}`}
                     className="h-[68px] sm:h-[72px] rounded-xl border border-slate-800/40 bg-[#070c1a]/30 min-w-0 w-full select-none pointer-events-none"
@@ -7162,12 +7299,18 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 </button>
               </div>
 
-              <div className="p-6 max-h-[calc(85vh-120px)] overflow-y-auto">
+              <div className="p-6 max-h-[calc(85vh-120px)] overflow-y-auto space-y-5">
                 <DeliveredForm 
                   record={targetRecord} 
                   initialMode={activeModal.mode}
                   cycleNumber={activeModal.cycleNumber}
                   onSave={(data: any) => handleDeliverySave(targetRecord.id, data)} 
+                />
+                <InfluencerConversationSelector 
+                  campaignId={targetRecord.campaign_id || campaign.id}
+                  stepKey="delivered"
+                  stepLabel="Delivered"
+                  targetLanguages={campaign.target_languages}
                 />
               </div>
             </div>
@@ -7894,7 +8037,36 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
         })()}
 
         {/* Step Component Form - Exclusively renders the active step */}
-        <div>
+        <div className="space-y-6">
+          <div>
+            {activeStepConfig?.id === 'offer_agreement' && (
+            <OfferAgreementForm
+              key={`v-${videoNumber}-offer-agreement-${record.id}`}
+              record={record}
+              videoNumber={videoNumber}
+              campaign={campaign}
+              existingData={activeStepState.data}
+              onSave={async (formData: any, completed: boolean) => {
+                await onSaveStep('offer_agreement', formData, completed);
+              }}
+              onAdvanceStep={handleAdvanceToNextStep}
+            />
+          )}
+
+          {activeStepConfig?.id === 'after_dispatch' && (
+            <AfterDispatchForm
+              key={`v-${videoNumber}-after-dispatch-${record.id}`}
+              record={record}
+              videoNumber={videoNumber}
+              campaign={campaign}
+              existingData={activeStepState.data}
+              onSave={async (formData: any, completed: boolean) => {
+                await onSaveStep('after_dispatch', formData, completed);
+              }}
+              onAdvanceStep={handleAdvanceToNextStep}
+            />
+          )}
+
           {activeStepConfig?.id === 'delivered' && (
             <DeliveredForm
               record={record}
@@ -8028,6 +8200,20 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
               onSave={(formData: any, completed?: boolean) => onSaveStep('after_post', formData, completed !== undefined ? completed : true)}
             />
           )}
+          </div>
+
+          {/* Influencer Conversation Section (At the bottom of step page) */}
+          <InfluencerConversationSelector
+            campaignId={campaign?.id || record.campaign_id}
+            stepKey={(() => {
+              const sid = activeStepConfig?.id || selectedVideoStepId || 'delivered';
+              if (sid === 're_draft' || sid === 're_draft_submitted') return 'draft';
+              if (sid === 'timeline') return 'post_date';
+              return sid;
+            })()}
+            stepLabel={activeStepConfig?.label || 'Workflow Step'}
+            targetLanguages={campaign?.target_languages}
+          />
         </div>
       </div>
 
@@ -8038,6 +8224,501 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 // =========================================================================
 // SUB-FORM COMPONENTS (Maintained & Enhanced for all Steps)
 // =========================================================================
+
+// --- STEP 1: Offer Agreement ---
+interface OfferAgreementFormProps {
+  record: StatusTrackingRecord;
+  videoNumber: number;
+  campaign?: Campaign;
+  existingData?: any;
+  onSave: (data: any, completed: boolean) => Promise<void> | void;
+  onAdvanceStep?: () => void;
+}
+
+const OfferAgreementForm: React.FC<OfferAgreementFormProps> = ({
+  record,
+  videoNumber,
+  campaign,
+  existingData = {},
+  onSave,
+  onAdvanceStep
+}) => {
+  const [copied, setCopied] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Initialize sent confirmation from existing step data
+  const [isSentConfirmed, setIsSentConfirmed] = useState<boolean>(() => {
+    return Boolean(existingData?.sent_confirmed === true || existingData?.completed === true);
+  });
+
+  // Track agreement text
+  const [agreementText, setAgreementText] = useState<string>(() => {
+    if (existingData?.agreement_text && typeof existingData.agreement_text === 'string' && existingData.agreement_text.trim()) {
+      return existingData.agreement_text;
+    }
+    if (typeof window !== 'undefined' && campaign?.id) {
+      try {
+        const raw = localStorage.getItem(`velmora_offer_agreements_${campaign.id}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const infId = String(record.influencer_id || record.id);
+          if (parsed[infId]?.agreement_text) {
+            return parsed[infId].agreement_text;
+          }
+        }
+      } catch (e) {}
+    }
+    if (record.influencer) {
+      try {
+        return buildAgreementText(record.influencer, campaign?.campaign_name || '');
+      } catch (e) {}
+    }
+    return '';
+  });
+
+  const [isLoadingText, setIsLoadingText] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsSentConfirmed(Boolean(existingData?.sent_confirmed === true || existingData?.completed === true));
+  }, [existingData?.sent_confirmed, existingData?.completed]);
+
+  // Load authoritative agreement text from database if not present
+  useEffect(() => {
+    let isMounted = true;
+    const loadDbAgreement = async () => {
+      if (!campaign?.id || !record.influencer_id) return;
+      try {
+        setIsLoadingText(true);
+        const { data, error } = await supabase
+          .from('offer_agreements')
+          .select('agreement_text')
+          .eq('campaign_id', campaign.id)
+          .eq('influencer_id', record.influencer_id)
+          .maybeSingle();
+
+        if (isMounted) {
+          if (!error && data?.agreement_text) {
+            setAgreementText(data.agreement_text);
+          } else if (!agreementText && record.influencer) {
+            const fresh = buildAgreementText(record.influencer, campaign?.campaign_name || '');
+            setAgreementText(fresh);
+          }
+        }
+      } catch (err) {
+        if (isMounted && !agreementText && record.influencer) {
+          const fresh = buildAgreementText(record.influencer, campaign?.campaign_name || '');
+          setAgreementText(fresh);
+        }
+      } finally {
+        if (isMounted) setIsLoadingText(false);
+      }
+    };
+
+    loadDbAgreement();
+    return () => { isMounted = false; };
+  }, [campaign?.id, record.influencer_id, record.influencer, campaign?.campaign_name]);
+
+  const handleCopy = async () => {
+    if (!agreementText) {
+      toast.error('No agreement text available to copy.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(agreementText);
+      setCopied(true);
+      toast.success('Copied!');
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      toast.error('Failed to copy to clipboard.');
+    }
+  };
+
+  const handleToggleSent = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const nextVal = e.target.checked;
+    setIsSentConfirmed(nextVal);
+    setIsSaving(true);
+    try {
+      await onSave({
+        ...existingData,
+        agreement_text: agreementText,
+        sent_confirmed: nextVal,
+        sent_confirmed_at: nextVal ? new Date().toISOString() : null
+      }, nextVal);
+      if (nextVal) {
+        toast.success('Offer Agreement marked as sent!');
+      } else {
+        toast.success('Offer Agreement marked as pending.');
+      }
+    } catch (err) {
+      console.error('Failed saving offer agreement step:', err);
+      toast.error('Failed to update status.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const influencerName = record.dispatch?.influencer_name || record.influencer?.name || 'Influencer';
+  const influencerCode = record.dispatch?.influencer_code || record.influencer_id;
+
+  return (
+    <div className="space-y-4">
+      {/* 1. Card Header with Title and Copy Text button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#070c18] border border-slate-800 p-4 rounded-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 flex items-center justify-center shrink-0">
+            <FileCheck size={18} />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-white leading-tight">
+              Offer Agreement Text
+            </h4>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Review and copy the collaboration agreement for {influencerName} ({influencerCode})
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCopy}
+          disabled={!agreementText}
+          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer shrink-0 ${
+            copied
+              ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50'
+              : 'bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 hover:border-purple-500/60 active:scale-95'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+          title="Copy agreement text to clipboard"
+        >
+          {copied ? <Check size={14} strokeWidth={2.5} /> : <Copy size={14} />}
+          <span>{copied ? 'Copied!' : 'Copy Text'}</span>
+        </button>
+      </div>
+
+      {/* 2. Agreement Text Area / Card */}
+      <div className="relative bg-[#050914] border border-slate-800/90 rounded-xl p-4 sm:p-5 shadow-inner">
+        {isLoadingText ? (
+          <div className="flex items-center justify-center py-12 text-slate-400 gap-2 text-xs">
+            <Loader2 size={16} className="animate-spin" />
+            <span>Loading agreement text...</span>
+          </div>
+        ) : agreementText ? (
+          <div className="max-h-[380px] overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
+            <pre className="text-xs sm:text-[13px] text-slate-200 font-sans leading-relaxed whitespace-pre-wrap select-text break-words">
+              {agreementText}
+            </pre>
+          </div>
+        ) : (
+          <div className="py-8 text-center text-slate-500 text-xs italic">
+            No agreement text available for this influencer.
+          </div>
+        )}
+      </div>
+
+      {/* 3. Sent Confirmation Checkbox Card */}
+      <div className={`p-4 rounded-xl border transition-all ${
+        isSentConfirmed
+          ? 'bg-emerald-950/20 border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
+          : 'bg-[#070c18] border-slate-800 hover:border-slate-700'
+      }`}>
+        <label className="flex items-start sm:items-center gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={isSentConfirmed}
+            onChange={handleToggleSent}
+            disabled={isSaving}
+            className="w-4 h-4 rounded mt-0.5 sm:mt-0 text-emerald-500 bg-slate-900 border-slate-700 focus:ring-emerald-500 cursor-pointer accent-emerald-500 shrink-0"
+          />
+          <div className="flex-1 min-w-0">
+            <span className={`text-xs sm:text-sm font-bold block ${
+              isSentConfirmed ? 'text-emerald-300' : 'text-white'
+            }`}>
+              Have you sent the Offer Agreement to the influencer?
+            </span>
+            <span className="text-[11px] text-slate-400 mt-0.5 block leading-relaxed">
+              Check this box once the agreement text has been sent to the creator. This marks the step as Completed.
+            </span>
+          </div>
+          {isSentConfirmed && (
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1 shrink-0">
+              <Check size={11} strokeWidth={2.5} />
+              <span>Sent & Completed</span>
+            </span>
+          )}
+        </label>
+      </div>
+
+      {/* 4. Action Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+        <span className="text-[11px] text-slate-500">
+          Step 1 of 10 • Offer Agreement
+        </span>
+        {onAdvanceStep && (
+          <button
+            type="button"
+            onClick={onAdvanceStep}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 hover:border-blue-500/60 transition-all cursor-pointer shadow-sm active:scale-95"
+          >
+            <span>Next: After Dispatch</span>
+            <ChevronRight size={14} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- STEP 2: After Dispatch Message ---
+interface AfterDispatchFormProps {
+  record: StatusTrackingRecord;
+  videoNumber: number;
+  campaign?: Campaign;
+  existingData?: any;
+  onSave: (data: any, completed: boolean) => Promise<void> | void;
+  onAdvanceStep?: () => void;
+}
+
+const AfterDispatchForm: React.FC<AfterDispatchFormProps> = ({
+  record,
+  videoNumber,
+  campaign,
+  existingData = {},
+  onSave,
+  onAdvanceStep
+}) => {
+  const [copied, setCopied] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Initialize sent confirmation from existing step data
+  const [isSentConfirmed, setIsSentConfirmed] = useState<boolean>(() => {
+    return Boolean(existingData?.sent_confirmed === true || existingData?.completed === true);
+  });
+
+  // Track dispatch message
+  const [dispatchMessage, setDispatchMessage] = useState<string>(() => {
+    if (existingData?.message_text && typeof existingData.message_text === 'string' && existingData.message_text.trim()) {
+      return existingData.message_text;
+    }
+    if (existingData?.dispatch_message && typeof existingData.dispatch_message === 'string' && existingData.dispatch_message.trim()) {
+      return existingData.dispatch_message;
+    }
+    if (typeof window !== 'undefined' && campaign?.id) {
+      try {
+        const raw = localStorage.getItem(`velmora_after_dispatch_messages_${campaign.id}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const infId = String(record.influencer_id || record.id);
+          if (parsed[infId]?.message_text) {
+            return parsed[infId].message_text;
+          }
+        }
+      } catch (e) {}
+    }
+    if (record.influencer) {
+      try {
+        const inf = record.influencer;
+        const dispatchedProds = resolveDispatchedProducts(inf, [record.dispatch]);
+        const shipmentInfo = resolveInfluencerShipment(inf, [], [record.dispatch]);
+        const paymentDetails = resolvePaymentDetails(inf, dispatchedProds);
+        return buildAfterDispatchMessage(inf, dispatchedProds, shipmentInfo, paymentDetails);
+      } catch (e) {}
+    }
+    return '';
+  });
+
+  const [isLoadingMessage, setIsLoadingMessage] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsSentConfirmed(Boolean(existingData?.sent_confirmed === true || existingData?.completed === true));
+  }, [existingData?.sent_confirmed, existingData?.completed]);
+
+  // Load authoritative message from afterDispatchService / Supabase
+  useEffect(() => {
+    let isMounted = true;
+    const loadDbMessage = async () => {
+      if (!campaign?.id || !record.influencer_id) return;
+      try {
+        setIsLoadingMessage(true);
+        const msgs = await afterDispatchService.getMessages(campaign.id);
+        const infId = String(record.influencer_id || record.id);
+        if (isMounted) {
+          if (msgs[infId]?.message_text) {
+            setDispatchMessage(msgs[infId].message_text);
+          } else if (!dispatchMessage && record.influencer) {
+            const inf = record.influencer;
+            const dispatchedProds = resolveDispatchedProducts(inf, [record.dispatch]);
+            const shipmentInfo = resolveInfluencerShipment(inf, [], [record.dispatch]);
+            const paymentDetails = resolvePaymentDetails(inf, dispatchedProds);
+            const generated = buildAfterDispatchMessage(inf, dispatchedProds, shipmentInfo, paymentDetails);
+            setDispatchMessage(generated);
+          }
+        }
+      } catch (err) {
+        if (isMounted && !dispatchMessage && record.influencer) {
+          const inf = record.influencer;
+          const dispatchedProds = resolveDispatchedProducts(inf, [record.dispatch]);
+          const shipmentInfo = resolveInfluencerShipment(inf, [], [record.dispatch]);
+          const paymentDetails = resolvePaymentDetails(inf, dispatchedProds);
+          const generated = buildAfterDispatchMessage(inf, dispatchedProds, shipmentInfo, paymentDetails);
+          setDispatchMessage(generated);
+        }
+      } finally {
+        if (isMounted) setIsLoadingMessage(false);
+      }
+    };
+
+    loadDbMessage();
+    return () => { isMounted = false; };
+  }, [campaign?.id, record.influencer_id, record.influencer, record.dispatch]);
+
+  const handleCopy = async () => {
+    if (!dispatchMessage) {
+      toast.error('No dispatch message available to copy.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(dispatchMessage);
+      setCopied(true);
+      toast.success('Copied!');
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      toast.error('Failed to copy to clipboard.');
+    }
+  };
+
+  const handleToggleSent = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const nextVal = e.target.checked;
+    setIsSentConfirmed(nextVal);
+    setIsSaving(true);
+    try {
+      await onSave({
+        ...existingData,
+        message_text: dispatchMessage,
+        dispatch_message: dispatchMessage,
+        sent_confirmed: nextVal,
+        sent_confirmed_at: nextVal ? new Date().toISOString() : null
+      }, nextVal);
+      if (nextVal) {
+        toast.success('After Dispatch message marked as sent!');
+      } else {
+        toast.success('After Dispatch message marked as pending.');
+      }
+    } catch (err) {
+      console.error('Failed saving after dispatch step:', err);
+      toast.error('Failed to update status.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const influencerName = record.dispatch?.influencer_name || record.influencer?.name || 'Influencer';
+  const influencerCode = record.dispatch?.influencer_code || record.influencer_id;
+
+  return (
+    <div className="space-y-4">
+      {/* 1. Card Header with Title and Copy Text button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#070c18] border border-slate-800 p-4 rounded-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/40 text-blue-300 flex items-center justify-center shrink-0">
+            <Send size={18} />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-white leading-tight">
+              After Dispatch Message
+            </h4>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Review and copy the dispatch tracking message for {influencerName} ({influencerCode})
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCopy}
+          disabled={!dispatchMessage}
+          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer shrink-0 ${
+            copied
+              ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/50'
+              : 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 hover:border-blue-500/60 active:scale-95'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+          title="Copy dispatch message to clipboard"
+        >
+          {copied ? <Check size={14} strokeWidth={2.5} /> : <Copy size={14} />}
+          <span>{copied ? 'Copied!' : 'Copy Text'}</span>
+        </button>
+      </div>
+
+      {/* 2. Message Text Area / Card */}
+      <div className="relative bg-[#050914] border border-slate-800/90 rounded-xl p-4 sm:p-5 shadow-inner">
+        {isLoadingMessage ? (
+          <div className="flex items-center justify-center py-12 text-slate-400 gap-2 text-xs">
+            <Loader2 size={16} className="animate-spin" />
+            <span>Loading dispatch message...</span>
+          </div>
+        ) : dispatchMessage ? (
+          <div className="max-h-[380px] overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
+            <pre className="text-xs sm:text-[13px] text-slate-200 font-sans leading-relaxed whitespace-pre-wrap select-text break-words">
+              {dispatchMessage}
+            </pre>
+          </div>
+        ) : (
+          <div className="py-8 text-center text-slate-500 text-xs italic">
+            No dispatch message available for this influencer.
+          </div>
+        )}
+      </div>
+
+      {/* 3. Sent Confirmation Checkbox Card */}
+      <div className={`p-4 rounded-xl border transition-all ${
+        isSentConfirmed
+          ? 'bg-emerald-950/20 border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
+          : 'bg-[#070c18] border-slate-800 hover:border-slate-700'
+      }`}>
+        <label className="flex items-start sm:items-center gap-3 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={isSentConfirmed}
+            onChange={handleToggleSent}
+            disabled={isSaving}
+            className="w-4 h-4 rounded mt-0.5 sm:mt-0 text-emerald-500 bg-slate-900 border-slate-700 focus:ring-emerald-500 cursor-pointer accent-emerald-500 shrink-0"
+          />
+          <div className="flex-1 min-w-0">
+            <span className={`text-xs sm:text-sm font-bold block ${
+              isSentConfirmed ? 'text-emerald-300' : 'text-white'
+            }`}>
+              Have you sent the After Dispatch message to the influencer?
+            </span>
+            <span className="text-[11px] text-slate-400 mt-0.5 block leading-relaxed">
+              Check this box once the dispatch message has been sent to the creator. This marks the step as Completed.
+            </span>
+          </div>
+          {isSentConfirmed && (
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1 shrink-0">
+              <Check size={11} strokeWidth={2.5} />
+              <span>Sent & Completed</span>
+            </span>
+          )}
+        </label>
+      </div>
+
+      {/* 4. Action Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+        <span className="text-[11px] text-slate-500">
+          Step 2 of 10 • After Dispatch
+        </span>
+        {onAdvanceStep && (
+          <button
+            type="button"
+            onClick={onAdvanceStep}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 hover:border-blue-500/60 transition-all cursor-pointer shadow-sm active:scale-95"
+          >
+            <span>Next: Delivered</span>
+            <ChevronRight size={14} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // --- STEP: Delivery Confirmation (Option A: No Issue vs Option B: Re-Dispatch Required + Shipment History) ---
 const DeliveredForm: React.FC<{
@@ -9081,6 +9762,21 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Copy and download states
+  const [isScriptCopied, setIsScriptCopied] = useState(false);
+  const [isKeyPointsCopied, setIsKeyPointsCopied] = useState(false);
+  const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
+  const [isDownloadingVideo, setIsDownloadingVideo] = useState(false);
+  const scriptCopyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const keyPointsCopyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (scriptCopyTimeoutRef.current) clearTimeout(scriptCopyTimeoutRef.current);
+      if (keyPointsCopyTimeoutRef.current) clearTimeout(keyPointsCopyTimeoutRef.current);
+    };
+  }, []);
+
   // Script version tracking metadata
   const [sourceScriptMeta, setSourceScriptMeta] = useState<{
     id: string | null;
@@ -9400,6 +10096,106 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
     }
   };
 
+  const handleCopyScript = async () => {
+    if (!script || !script.trim()) {
+      toast.error('No script text to copy');
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(script);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = script;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (!successful) throw new Error('Copy command failed');
+      }
+      setIsScriptCopied(true);
+      toast.success('Script copied to clipboard');
+      if (scriptCopyTimeoutRef.current) clearTimeout(scriptCopyTimeoutRef.current);
+      scriptCopyTimeoutRef.current = setTimeout(() => {
+        setIsScriptCopied(false);
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy script:', err);
+      toast.error('Failed to copy script to clipboard');
+    }
+  };
+
+  const handleCopyKeyPoints = async () => {
+    if (!hooks || !hooks.trim()) {
+      toast.error('No key points text to copy');
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(hooks);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = hooks;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (!successful) throw new Error('Copy command failed');
+      }
+      setIsKeyPointsCopied(true);
+      toast.success('Key points copied to clipboard');
+      if (keyPointsCopyTimeoutRef.current) clearTimeout(keyPointsCopyTimeoutRef.current);
+      keyPointsCopyTimeoutRef.current = setTimeout(() => {
+        setIsKeyPointsCopied(false);
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy key points:', err);
+      toast.error('Failed to copy key points to clipboard');
+    }
+  };
+
+  const handleDownloadAudio = async () => {
+    if (!voiceRecord?.url) {
+      toast.error('No audio file available to download');
+      return;
+    }
+    setIsDownloadingAudio(true);
+    try {
+      const filename = voiceRecord.file_name || `${effectiveProductName || 'Reference'}_audio.mp3`;
+      await downloadMediaFile(voiceRecord.url, filename);
+      toast.success('Audio download started');
+    } catch (err) {
+      console.error('Error downloading audio:', err);
+      toast.error('Failed to download audio file');
+    } finally {
+      setIsDownloadingAudio(false);
+    }
+  };
+
+  const handleDownloadVideo = async () => {
+    if (!referenceVideo?.url) {
+      toast.error('No video file available to download');
+      return;
+    }
+    setIsDownloadingVideo(true);
+    try {
+      const filename = referenceVideo.file_name || `${effectiveProductName || 'Reference'}_video.mp4`;
+      await downloadMediaFile(referenceVideo.url, filename);
+      toast.success('Video download started');
+    } catch (err) {
+      console.error('Error downloading video:', err);
+      toast.error('Failed to download video file');
+    } finally {
+      setIsDownloadingVideo(false);
+    }
+  };
+
   return (
     <div className="bg-[#070c18] border border-slate-800 rounded-xl p-5 sm:p-6 space-y-6 animate-fade-in">
       
@@ -9574,9 +10370,33 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
               MODEL SCRIPT
             </label>
-            <span className="text-[10px] text-slate-500 font-mono">
-              {script.length}/2000
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCopyScript}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isScriptCopied
+                    ? 'bg-emerald-950/80 border-emerald-600/80 text-emerald-300 shadow-sm'
+                    : 'bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700/80'
+                }`}
+                title="Copy Complete Model Script"
+              >
+                {isScriptCopied ? (
+                  <>
+                    <Check size={12} className="text-emerald-400" />
+                    <span>Copied ✓</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={12} />
+                    <span>Copy Script</span>
+                  </>
+                )}
+              </button>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {script.length}/2000
+              </span>
+            </div>
           </div>
           <div className="relative">
             <textarea 
@@ -9595,9 +10415,33 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
               KEY POINTS
             </label>
-            <span className="text-[10px] text-slate-500 font-mono">
-              {hooks.length}/1000
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCopyKeyPoints}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isKeyPointsCopied
+                    ? 'bg-emerald-950/80 border-emerald-600/80 text-emerald-300 shadow-sm'
+                    : 'bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700/80'
+                }`}
+                title="Copy Complete Key Points"
+              >
+                {isKeyPointsCopied ? (
+                  <>
+                    <Check size={12} className="text-emerald-400" />
+                    <span>Copied ✓</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={12} />
+                    <span>Copy Key Points</span>
+                  </>
+                )}
+              </button>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {hooks.length}/1000
+              </span>
+            </div>
           </div>
           <div className="relative">
             <textarea 
@@ -9652,6 +10496,20 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
                   >
                     <ExternalLink size={13} />
                   </a>
+                  <button 
+                    type="button" 
+                    onClick={handleDownloadAudio} 
+                    disabled={isDownloadingAudio}
+                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-semibold transition-colors border border-slate-700/80 flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
+                    title="Download reference audio"
+                  >
+                    {isDownloadingAudio ? (
+                      <Loader2 size={11} className="animate-spin text-purple-400" />
+                    ) : (
+                      <Download size={11} />
+                    )}
+                    <span>{isDownloadingAudio ? 'Downloading...' : 'Download'}</span>
+                  </button>
                   <label className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-semibold cursor-pointer transition-colors border border-slate-700/80 flex items-center gap-1 shrink-0">
                     <UploadCloud size={11} />
                     <span>Replace</span>
@@ -9780,6 +10638,20 @@ const ShareScriptForm: React.FC<ShareScriptFormProps> = ({
                   >
                     <ExternalLink size={13} />
                   </a>
+                  <button 
+                    type="button" 
+                    onClick={handleDownloadVideo} 
+                    disabled={isDownloadingVideo}
+                    className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-semibold transition-colors border border-slate-700/80 flex items-center gap-1 shrink-0 cursor-pointer disabled:opacity-50"
+                    title="Download reference video"
+                  >
+                    {isDownloadingVideo ? (
+                      <Loader2 size={11} className="animate-spin text-purple-400" />
+                    ) : (
+                      <Download size={11} />
+                    )}
+                    <span>{isDownloadingVideo ? 'Downloading...' : 'Download Video'}</span>
+                  </button>
                   <button 
                     type="button" 
                     onClick={handleRemoveReferenceVideo} 

@@ -1,20 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   MessageSquare, 
   ArrowLeft, 
   Plus, 
-  Loader2, 
-  Search, 
-  RefreshCw,
-  AlertCircle 
+  Loader2
 } from 'lucide-react';
 import type { Campaign, InfluencerConversation } from '../../types';
 import { 
   fetchInfluencerConversations, 
   deleteInfluencerConversation 
 } from '../../services/influencerConversationService';
+import { INFLUENCER_WORKFLOW_STEPS } from '../../utils/workflowStatusUtils';
 import { CampaignConversationModal } from './CampaignConversationModal';
-import { CampaignConversationCard } from './CampaignConversationCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import toast from 'react-hot-toast';
 
@@ -29,17 +26,18 @@ export const CampaignConversationSection: React.FC<CampaignConversationSectionPr
 }) => {
   const [conversations, setConversations] = useState<InfluencerConversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
 
-  // Modal states
+  // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [activeStepKey, setActiveStepKey] = useState<string>('offer_agreement');
+  const [activeStepLabel, setActiveStepLabel] = useState<string>('Offer Agreement');
   const [conversationToEdit, setConversationToEdit] = useState<InfluencerConversation | null>(null);
 
-  // Delete modal state
+  // Delete state
   const [conversationToDelete, setConversationToDelete] = useState<InfluencerConversation | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Fetch conversations
+  // Load conversations
   const loadConversations = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -47,7 +45,7 @@ export const CampaignConversationSection: React.FC<CampaignConversationSectionPr
       setConversations(data);
     } catch (err: any) {
       console.error('Error loading conversations:', err);
-      toast.error('Failed to load conversations.');
+      toast.error('Failed to load conversations');
     } finally {
       setIsLoading(false);
     }
@@ -57,32 +55,28 @@ export const CampaignConversationSection: React.FC<CampaignConversationSectionPr
     loadConversations();
   }, [loadConversations]);
 
-  // Open Create Modal
-  const handleOpenCreate = () => {
+  // Open Add modal for a specific step
+  const handleOpenAdd = (stepKey: string, stepLabel: string) => {
+    setActiveStepKey(stepKey);
+    setActiveStepLabel(stepLabel);
     setConversationToEdit(null);
     setIsModalOpen(true);
   };
 
-  // Open Edit Modal
-  const handleOpenEdit = (conv: InfluencerConversation) => {
-    setConversationToEdit(conv);
-    setIsModalOpen(true);
-  };
-
-  // Success handler for create / edit
+  // Handle successful create / update
   const handleModalSuccess = (saved: InfluencerConversation) => {
     setConversations(prev => {
       const idx = prev.findIndex(c => c.id === saved.id);
       if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = saved;
-        return copy;
+        const next = [...prev];
+        next[idx] = saved;
+        return next;
       }
       return [saved, ...prev];
     });
   };
 
-  // Delete action
+  // Handle Delete
   const handleConfirmDelete = async () => {
     if (!conversationToDelete) return;
     setIsDeleting(true);
@@ -99,16 +93,25 @@ export const CampaignConversationSection: React.FC<CampaignConversationSectionPr
     }
   };
 
-  // Filter conversations by search if user types
-  const filteredConversations = conversations.filter(c => {
-    if (!searchQuery.trim()) return true;
-    return (c.conversation || '').toLowerCase().includes(searchQuery.toLowerCase().trim());
-  });
+  // Group conversations by workflow step for the modal
+  const groupedConversations = useMemo(() => {
+    const map = new Map<string, InfluencerConversation[]>();
+    INFLUENCER_WORKFLOW_STEPS.forEach(s => map.set(s.key, []));
+
+    conversations.forEach(c => {
+      const key = (c.step_key || 'delivered').toLowerCase();
+      const list = map.get(key) || [];
+      list.push(c);
+      map.set(key, list);
+    });
+
+    return map;
+  }, [conversations]);
 
   return (
-    <div className="w-full space-y-5 animate-fade-in text-slate-200">
-      {/* Top Header Bar */}
-      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+    <div className="w-full space-y-6 animate-fade-in text-slate-200">
+      {/* 1. Clean Top Header Bar */}
+      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
@@ -124,114 +127,64 @@ export const CampaignConversationSection: React.FC<CampaignConversationSectionPr
               Influencer Conversation
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              {campaign.campaign_name}
+              {campaign.campaign_name} • Step-specific reusable message library
             </p>
           </div>
         </div>
-
-        {/* Right Action: Create Conversation */}
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={loadConversations}
-            disabled={isLoading}
-            className="p-2 bg-[#070c18] border border-slate-700/80 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
-            title="Refresh conversations"
-          >
-            <RefreshCw size={15} className={isLoading ? 'animate-spin' : ''} />
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenCreate}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-purple-950/40 cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>Create Conversation</span>
-          </button>
-        </div>
       </div>
 
-      {/* Search Bar (if conversations exist) */}
-      {conversations.length > 0 && (
-        <div className="flex items-center justify-between gap-4 bg-[#0b1329] border border-slate-800 p-3 rounded-2xl shadow-sm">
-          <div className="relative flex-1 max-w-md">
-            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search conversation text..."
-              className="w-full bg-[#070c18] border border-slate-700/80 rounded-xl pl-9 pr-4 py-2 text-xs sm:text-sm text-slate-200 placeholder:text-slate-500 outline-none focus:border-purple-500 transition-colors"
-            />
-          </div>
-          <div className="text-xs font-semibold text-slate-400 px-2 whitespace-nowrap">
-            {filteredConversations.length} {filteredConversations.length === 1 ? 'conversation' : 'conversations'}
-          </div>
-        </div>
-      )}
-
-      {/* Main Content Area */}
+      {/* 2. Loading State */}
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-24 bg-[#0b1329] border border-slate-800 rounded-2xl">
           <Loader2 size={32} className="animate-spin text-purple-400 mb-3" />
-          <p className="text-xs text-slate-400">Loading influencer conversations...</p>
-        </div>
-      ) : conversations.length === 0 ? (
-        /* Empty State */
-        <div className="flex flex-col items-center justify-center py-20 px-4 bg-[#0b1329] border border-dashed border-slate-800 rounded-2xl text-center">
-          <div className="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center mb-4 shadow-sm">
-            <MessageSquare size={28} />
-          </div>
-          <h3 className="text-base sm:text-lg font-bold text-white mb-1">
-            No conversations yet
-          </h3>
-          <p className="text-xs text-slate-400 max-w-sm mb-6 leading-relaxed">
-            Start by saving your first influencer conversation. Paste notes, emails, WhatsApp or chat messages here.
-          </p>
-          <button
-            type="button"
-            onClick={handleOpenCreate}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs sm:text-sm font-bold transition-all shadow-md shadow-purple-950/40 cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>Create Conversation</span>
-          </button>
-        </div>
-      ) : filteredConversations.length === 0 ? (
-        /* No Search Matches */
-        <div className="flex flex-col items-center justify-center py-16 bg-[#0b1329] border border-slate-800 rounded-2xl text-center">
-          <AlertCircle size={28} className="text-slate-500 mb-2" />
-          <p className="text-sm font-semibold text-slate-300">No conversations match your search</p>
-          <p className="text-xs text-slate-500 mt-1">Try adjusting your search terms</p>
+          <p className="text-xs text-slate-400">Loading workflow step conversations...</p>
         </div>
       ) : (
-        /* Cards Grid (Newest First) */
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredConversations.map((conv) => (
-            <CampaignConversationCard
-              key={conv.id}
-              conversation={conv}
-              onEdit={handleOpenEdit}
-              onDelete={(c) => setConversationToDelete(c)}
-            />
+        /* 3. Compact 4-Card Grid for All 10 Workflow Steps */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+          {INFLUENCER_WORKFLOW_STEPS.map((step) => (
+            <div 
+              key={step.key}
+              className="bg-[#0b1329] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4 sm:p-5 flex flex-col justify-between min-h-[115px] sm:min-h-[125px] shadow-sm transition-all w-full"
+            >
+              <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                {step.label}
+              </h3>
+
+              <div className="pt-3 flex items-center justify-start">
+                <button
+                  type="button"
+                  onClick={() => handleOpenAdd(step.key, step.label)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-950/40 cursor-pointer"
+                >
+                  <Plus size={14} />
+                  <span>Add Conversation</span>
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       )}
 
-      {/* Create / Edit Modal */}
+      {/* Add / Edit Conversation Modal with Step-locked 3 Languages & Saved List */}
       <CampaignConversationModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         campaignId={campaign.id}
+        stepKey={activeStepKey}
+        stepLabel={activeStepLabel}
+        targetLanguages={campaign.target_languages}
         conversationToEdit={conversationToEdit}
+        stepConversations={groupedConversations.get(activeStepKey) || []}
         onSuccess={handleModalSuccess}
+        onDeleteConversation={(c) => setConversationToDelete(c)}
       />
 
       {/* Delete Confirmation Modal */}
       <ConfirmModal
         isOpen={Boolean(conversationToDelete)}
         title="Delete Conversation"
-        message="Are you sure you want to delete this influencer conversation? This action cannot be undone."
+        message="Are you sure you want to delete this conversation? This action cannot be undone."
         confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
         onConfirm={handleConfirmDelete}
         onCancel={() => setConversationToDelete(null)}
