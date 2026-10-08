@@ -14,6 +14,10 @@ const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug
  * Parses any incoming date representation (string, Date, ISO, Excel serial, DD-MMM-YYYY, MMM DD, etc.)
  * into a canonical YYYY-MM-DD string using calendar values (no UTC timezone shifts).
  */
+export const normalizePostDate = (val: any, defaultYear = 2026): string => {
+  return parseToYMD(val, defaultYear);
+};
+
 export const parseToYMD = (val: any, defaultYear = 2026): string => {
   if (val === undefined || val === null) return '';
   if (val instanceof Date) {

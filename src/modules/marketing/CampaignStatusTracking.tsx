@@ -19,7 +19,7 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes, isDeliveryStepCompleted } from '../../services/influencerStatusHandoffService';
 import { getOriginalOrderId } from '../../utils/orderIdUtils';
-import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
+import { parseToYMD, normalizePostDate, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 import toast from 'react-hot-toast';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { getInfluencerResolvedVideoProducts, isVideoLabel } from './AddCampaignInfluencer';
@@ -3049,8 +3049,11 @@ export const isInfluencerDraftApprovedForPosting = (
   return isInfluencerDraftApproved(record, videoNumber);
 };
 
+export { normalizePostDate };
+
 /**
  * Resolves the scheduled post date (YYYY-MM-DD) for a specific influencer video.
+ * Uses canonical normalizePostDate to guarantee calendar-safe YYYY-MM-DD without UTC timezone drift.
  */
 export const getInfluencerResolvedPostDateYMD = (
   record: StatusTrackingRecord,
@@ -3064,18 +3067,22 @@ export const getInfluencerResolvedPostDateYMD = (
   const postStepData = vWorkflow.steps['post_date']?.data || {};
 
   let rawPostDate = postStepData.scheduled_post_date || postStepData.post_date || scheduleEntry?.post_date || (videoNumber === 1 ? ((record as any).scheduled_post_date || record.post_date) : '') || '';
-  if (!rawPostDate && Array.isArray((record.dispatch as any)?.languages)) {
-    const matchViews = (record.dispatch as any).languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
-    if (matchViews) {
-      try {
-        const vJson = JSON.parse(matchViews.substring('views_data:'.length));
-        const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
-        if (found?.post_date) rawPostDate = found.post_date;
-      } catch (e) {}
+  if (!rawPostDate) {
+    const langs = (record.influencer as any)?.languages || (record.dispatch as any)?.languages;
+    if (Array.isArray(langs)) {
+      const matchViews = langs.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+      if (matchViews) {
+        try {
+          const vJson = JSON.parse(matchViews.substring('views_data:'.length));
+          const found = (vJson?.post_dates || []).find((pd: any) => Number(pd.video_number) === Number(videoNumber));
+          if (found?.post_date) rawPostDate = found.post_date;
+        } catch (e) {}
+      }
     }
   }
 
-  return parseToYMD(rawPostDate, 2026);
+  const normalized = normalizePostDate(rawPostDate, 2026);
+  return normalized || null;
 };
 
 /**
@@ -3224,10 +3231,22 @@ export const isInfluencerScheduledForDate = (
 };
 
 /**
+ * Single source of truth predicate for a fully completed influencer post.
+ * A post is considered FULLY COMPLETED if and only if the final workflow step
+ * "After Post" has been completed for the specified video number.
+ */
+export const isFullyCompletedPost = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): boolean => {
+  return isInfluencerAfterPostCompleted(record, videoNumber);
+};
+
+/**
  * Checks if an influencer's post for a target date is FULLY COMPLETED.
  * Condition:
- * 1. Post Date = target calendar date (yesterday / today / tomorrow)
- * 2. After Post step = COMPLETED (entire workflow through final step completed)
+ * 1. Post Date = target calendar date (yesterday / today / tomorrow) normalized without UTC shifts
+ * 2. After Post step = COMPLETED (entire workflow through final step completed, verified via isFullyCompletedPost)
  */
 export const isInfluencerCompletedPostForDate = (
   record: StatusTrackingRecord,
@@ -3239,17 +3258,18 @@ export const isInfluencerCompletedPostForDate = (
   const assigned = getInfluencerAssignedVideos(record);
   if (!assigned.includes(videoNumber)) return false;
 
-  // 1. Final workflow step After Post must be completed
-  if (!isInfluencerAfterPostCompleted(record, videoNumber)) {
+  // 1. Single source of truth: Final workflow step After Post must be completed
+  if (!isFullyCompletedPost(record, videoNumber)) {
     return false;
   }
 
-  // 2. Scheduled Post Date must match the target calendar date
+  // 2. Scheduled Post Date must match the target calendar date (strictly normalized, no UTC drift)
   const targetDateYMD = mode === 'yesterday'
     ? getLocalYesterdayYMD()
     : (mode === 'today' ? getLocalTodayYMD() : getLocalTomorrowYMD());
   const parsedPostDate = getInfluencerResolvedPostDateYMD(record, videoNumber);
-  return Boolean(parsedPostDate && parsedPostDate === targetDateYMD);
+  const normalizedPostDate = normalizePostDate(parsedPostDate);
+  return Boolean(normalizedPostDate && normalizedPostDate === targetDateYMD);
 };
 
 /**
@@ -3301,7 +3321,7 @@ export const isStepFilterMatch = (
       return isInfluencerCompletedPostForDate(record, videoNumber, 'tomorrow');
     case 'after_post':
     case 'completed':
-      return isInfluencerAfterPostCompleted(record, videoNumber);
+      return isFullyCompletedPost(record, videoNumber);
     case 're_dispatch':
       return isInfluencerInReDispatch(record) || isInfluencerReDispatchActive(record) || getInfluencerReDispatchCycles(record).length > 0;
     default:
@@ -3330,6 +3350,44 @@ export const validateFilterCounts = (
   for (const cfg of summaryConfigs) {
     if (cfg.id === 'all') continue;
     counts[cfg.id] = assignedRecords.filter(r => isStepFilterMatch(cfg.id, r, videoNumber)).length;
+  }
+
+  // Debug audit logging for date filters per user specification
+  if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+    const todayYMD = getLocalTodayYMD();
+    const tomorrowYMD = getLocalTomorrowYMD();
+    const yesterdayYMD = getLocalYesterdayYMD();
+    const targetDates = [yesterdayYMD, todayYMD, tomorrowYMD];
+
+    const nearRecords: any[] = [];
+    assignedRecords.forEach(r => {
+      const rawDate = getInfluencerResolvedPostDateYMD(r, videoNumber);
+      const normDate = normalizePostDate(rawDate);
+      if (normDate && targetDates.includes(normDate)) {
+        const isDone = isFullyCompletedPost(r, videoNumber);
+        const code = r.dispatch?.influencer_code || r.influencer?.code || (r as any).code || '—';
+        nearRecords.push({
+          code,
+          rawPostDate: rawDate,
+          normalizedPostDate: normDate,
+          targetDate: normDate === todayYMD ? `TODAY (${todayYMD})` : (normDate === tomorrowYMD ? `TOMORROW (${tomorrowYMD})` : `YESTERDAY (${yesterdayYMD})`),
+          isFullyCompleted: isDone
+        });
+      }
+    });
+
+    if (nearRecords.length > 0) {
+      console.debug(`[Status Tracking Date Audit - Video ${videoNumber}]`, {
+        dates: { yesterday: yesterdayYMD, today: todayYMD, tomorrow: tomorrowYMD },
+        counts: {
+          yesterday: counts['yesterday'],
+          today: counts['today'],
+          tomorrow: counts['tomorrow'],
+          completed: counts['after_post']
+        },
+        records: nearRecords
+      });
+    }
   }
 
   return counts;

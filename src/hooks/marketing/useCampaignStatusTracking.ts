@@ -5,12 +5,12 @@ import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import { logActivity } from '../../services/activityService';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import { naturalCompareCodes } from '../../services/influencerStatusHandoffService';
-import { parseToYMD, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
+import { parseToYMD, normalizePostDate, calculateDraftDate, calculatePostDateFromDraft } from '../../utils/influencerDateUtils';
 import type { InfluencerVideoPayment } from '../../services/influencerVideoPaymentService';
 import { fetchCampaignVideoScripts, type CampaignVideoScriptRecord } from '../../services/campaignVideoScriptService';
 import { fetchAllInChunks } from './useCampaignInfluencers';
 
-export { naturalCompareCodes, parseToYMD, calculateDraftDate, calculatePostDateFromDraft };
+export { naturalCompareCodes, parseToYMD, normalizePostDate, calculateDraftDate, calculatePostDateFromDraft };
 
 export interface StatusTrackingRecord {
   id: string;
@@ -198,10 +198,11 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           activeInfluencerIds,
           200
         ),
-        supabaseAdmin
-          .from(SUPABASE_TABLES.influencerPostDates)
-          .select('*')
-          .eq('campaign_id', campQuery),
+        fetchAllInChunks(
+          chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk),
+          activeInfluencerIds,
+          200
+        ),
         supabaseAdmin
           .from(SUPABASE_TABLES.influencerVideoPayment)
           .select('*')
@@ -220,7 +221,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
 
       const trackingData = trackingRes.data || [];
       const dispatchData = dispatchRes.data || [];
-      const postDatesData = postDatesRes.data || [];
+      const postDatesData = Array.isArray(postDatesRes) ? postDatesRes : ((postDatesRes as any)?.data || []);
       const videoPaymentsData = videoPaymentsRes.data || [];
       const redispatchData = redispatchRes.data || [];
 
