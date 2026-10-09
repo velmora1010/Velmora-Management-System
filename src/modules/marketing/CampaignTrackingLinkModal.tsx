@@ -21,6 +21,8 @@ import {
   TRACKING_PLATFORMS, 
   TRACKING_VIDEOS, 
   buildInfluencerTrackingUrl, 
+  buildAmazonRedirectTrackingUrl,
+  isValidAmazonUrl,
   extractBaseProductUrl, 
   extractCodeNumber,
   batchGenerateInfluencerTrackingLinks,
@@ -54,8 +56,10 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   const isEditMode = Boolean(linkToEdit);
 
   // Form Fields
+  const [destinationType, setDestinationType] = useState<'shopify' | 'amazon'>('shopify');
   const [selectedProduct, setSelectedProduct] = useState<string>('Kitchen Cleaner');
   const [productUrl, setProductUrl] = useState<string>('');
+  const [amazonUrl, setAmazonUrl] = useState<string>('');
   const [selectedPlatformId, setSelectedPlatformId] = useState<string>('instagram');
   const [selectedVideoId, setSelectedVideoId] = useState<string>('Video 1');
 
@@ -107,9 +111,18 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       setIsGenerating(false);
 
       if (linkToEdit) {
+        const dest = linkToEdit.destination_type || (isValidAmazonUrl(linkToEdit.base_product_url || '') ? 'amazon' : 'shopify');
+        setDestinationType(dest);
         setSelectedProduct(linkToEdit.product || 'Kitchen Cleaner');
         setEditTrackingUrl(linkToEdit.tracking_url || '');
         setEditNotes(linkToEdit.notes || '');
+        if (dest === 'amazon') {
+          setAmazonUrl(linkToEdit.original_destination_url || linkToEdit.base_product_url || '');
+          setProductUrl('');
+        } else {
+          setProductUrl(linkToEdit.base_product_url || '');
+          setAmazonUrl('');
+        }
         const matchedPlat = TRACKING_PLATFORMS.find(
           p => p.name.toLowerCase() === (linkToEdit.platform || '').toLowerCase() ||
                p.utmSource.toLowerCase() === (linkToEdit.utm_source || '').toLowerCase()
@@ -118,6 +131,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         setSelectedVideoId(linkToEdit.video_number || 'Video 1');
       } else {
         // Defaults for batch generation
+        setDestinationType('shopify');
         const initialProd = (defaultProduct && defaultProduct !== 'All')
           ? defaultProduct
           : (SCRIPT_PRODUCTS.includes('Kitchen Cleaner' as any)
@@ -125,6 +139,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
             : SCRIPT_PRODUCTS[0] || 'Kitchen Cleaner');
         setSelectedProduct(initialProd);
         setProductUrl(extractBaseProductUrl(initialProd));
+        setAmazonUrl('');
         setSelectedPlatformId('instagram');
         setSelectedVideoId('Video 1');
         setEditTrackingUrl('');
@@ -160,6 +175,11 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
 
   // Live Sample Preview URL
   const samplePreviewUrl = useMemo(() => {
+    if (destinationType === 'amazon') {
+      if (!amazonUrl.trim()) return '';
+      const sampleId = sampleInfluencer ? `link_${sampleInfluencer.id}` : 'sample_id';
+      return buildAmazonRedirectTrackingUrl(sampleId);
+    }
     if (!productUrl.trim()) return '';
     const code = sampleInfluencer?.code || (sampleInfluencer as any)?.influencer_code || 'HIS1';
     return buildInfluencerTrackingUrl(
@@ -168,7 +188,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       currentVideo.utmContent,
       code
     );
-  }, [productUrl, currentPlatform, currentVideo, sampleInfluencer]);
+  }, [destinationType, amazonUrl, productUrl, currentPlatform, currentVideo, sampleInfluencer]);
 
   if (!isOpen) return null;
 
@@ -178,16 +198,27 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       setValidationError('Please select a product.');
       return false;
     }
-    if (!productUrl.trim()) {
-      setValidationError('Please enter a valid product link.');
-      return false;
-    }
-    try {
-      const test = productUrl.startsWith('http') ? productUrl : `https://${productUrl}`;
-      new URL(test);
-    } catch {
-      setValidationError('Please enter a valid URL (e.g. https://www.justmixx.com/products/kitchen-cleaner).');
-      return false;
+    if (destinationType === 'amazon') {
+      if (!amazonUrl.trim()) {
+        setValidationError('Please enter the original Amazon product URL.');
+        return false;
+      }
+      if (!isValidAmazonUrl(amazonUrl)) {
+        setValidationError('Please enter a valid Amazon product URL (e.g. https://www.amazon.in/dp/B0... or https://www.amazon.com/...).');
+        return false;
+      }
+    } else {
+      if (!productUrl.trim()) {
+        setValidationError('Please enter a valid product link.');
+        return false;
+      }
+      try {
+        const test = productUrl.startsWith('http') ? productUrl : `https://${productUrl}`;
+        new URL(test);
+      } catch {
+        setValidationError('Please enter a valid URL (e.g. https://www.justmixx.com/products/kitchen-cleaner).');
+        return false;
+      }
     }
     if (sortedEligibleInfluencers.length === 0) {
       setValidationError('No eligible (non-eliminated) influencers found in this campaign.');
@@ -207,6 +238,11 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       return;
     }
 
+    if (destinationType === 'amazon' && amazonUrl.trim() && !isValidAmazonUrl(amazonUrl)) {
+      setValidationError('Please enter a valid Amazon product URL.');
+      return;
+    }
+
     setIsGenerating(true);
     const toastId = toast.loading('Updating tracking link...');
 
@@ -216,6 +252,9 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         influencer_name: linkToEdit.influencer_name,
         influencer_code: linkToEdit.influencer_code,
         product: selectedProduct,
+        destination_type: destinationType,
+        original_destination_url: destinationType === 'amazon' ? amazonUrl.trim() : undefined,
+        base_product_url: destinationType === 'amazon' ? amazonUrl.trim() : productUrl.trim(),
         platform: currentPlatform.name,
         platform_category: currentPlatform.category,
         video_number: currentVideo.name,
@@ -248,7 +287,9 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       const result = await batchGenerateInfluencerTrackingLinks({
         campaign_id: campaign.id,
         product: selectedProduct,
-        base_product_url: productUrl,
+        base_product_url: destinationType === 'amazon' ? amazonUrl.trim() : productUrl.trim(),
+        destination_type: destinationType,
+        original_amazon_url: destinationType === 'amazon' ? amazonUrl.trim() : undefined,
         platform: currentPlatform.name,
         platform_category: currentPlatform.category,
         utm_source: currentPlatform.utmSource,
@@ -431,6 +472,47 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         ) : (
           /* Batch Generation Form */
           <div className="space-y-4">
+            {/* 0. DESTINATION TYPE: SHOPIFY VS AMAZON */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                Destination Type <span className="text-purple-400">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDestinationType('shopify');
+                    setValidationError(null);
+                  }}
+                  disabled={isGenerating}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer border ${
+                    destinationType === 'shopify'
+                      ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                      : 'bg-[#070c18] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                >
+                  <Globe size={15} className={destinationType === 'shopify' ? 'text-purple-400' : 'text-slate-500'} />
+                  <span>Shopify (Website)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDestinationType('amazon');
+                    setValidationError(null);
+                  }}
+                  disabled={isGenerating}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer border ${
+                    destinationType === 'amazon'
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-200 shadow-sm ring-1 ring-amber-500/50'
+                      : 'bg-[#070c18] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                >
+                  <ShoppingBag size={15} className={destinationType === 'amazon' ? 'text-amber-400' : 'text-slate-500'} />
+                  <span>Amazon (Marketplace)</span>
+                </button>
+              </div>
+            </div>
+
             {/* 1. PRODUCT * */}
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
@@ -453,34 +535,61 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
               </select>
             </div>
 
-            {/* 2. PRODUCT LINK * */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                  Product Link <span className="text-purple-400">*</span>
-                </label>
-                <span className="text-[11px] text-slate-400">
-                  UTMs will be auto-replaced
-                </span>
-              </div>
-              <input
-                type="text"
-                value={productUrl}
-                onChange={(e) => {
-                  setProductUrl(e.target.value);
-                  setValidationError(null);
-                }}
-                disabled={isGenerating}
-                placeholder="https://www.justmixx.com/products/kitchen-cleaner"
-                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors disabled:opacity-50"
-              />
-              {cleanBaseUrl && (
-                <div className="mt-1.5 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-400 truncate flex items-center gap-1.5">
-                  <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Base URL:</span>
-                  <span className="text-slate-300 font-mono truncate">{cleanBaseUrl}</span>
+            {/* 2. PRODUCT LINK * (Conditional based on Destination Type) */}
+            {destinationType === 'shopify' ? (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Shopify Product Link <span className="text-purple-400">*</span>
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    UTMs will be auto-replaced
+                  </span>
                 </div>
-              )}
-            </div>
+                <input
+                  type="text"
+                  value={productUrl}
+                  onChange={(e) => {
+                    setProductUrl(e.target.value);
+                    setValidationError(null);
+                  }}
+                  disabled={isGenerating}
+                  placeholder="https://www.justmixx.com/products/kitchen-cleaner"
+                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors disabled:opacity-50"
+                />
+                {cleanBaseUrl && (
+                  <div className="mt-1.5 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-400 truncate flex items-center gap-1.5">
+                    <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Base URL:</span>
+                    <span className="text-slate-300 font-mono truncate">{cleanBaseUrl}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider">
+                    Original Amazon Product URL <span className="text-amber-400">*</span>
+                  </label>
+                  <span className="text-[11px] text-amber-400 font-medium">
+                    Click Tracking Enabled
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={amazonUrl}
+                  onChange={(e) => {
+                    setAmazonUrl(e.target.value);
+                    setValidationError(null);
+                  }}
+                  disabled={isGenerating}
+                  placeholder="https://www.amazon.in/dp/B0... or https://www.amazon.com/..."
+                  className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors disabled:opacity-50"
+                />
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  A unique redirect tracking link (<code className="text-amber-300">/r/:id</code>) will be generated for each influencer. Visitor clicks are atomically tracked before redirecting to Amazon.
+                </p>
+              </div>
+            )}
 
             {/* 3. PLATFORM * */}
             <div>
@@ -648,11 +757,21 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                     <span className="font-medium">
                       Sample Link Preview ({sampleInfluencer?.code || '#HIS1'}):
                     </span>
-                    <span className="text-purple-400 text-[10px] font-mono">
-                      utm_campaign={(sampleInfluencer?.code || 'his1').replace(/^#+/, '').toLowerCase()}
-                    </span>
+                    {destinationType === 'amazon' ? (
+                      <span className="text-amber-400 text-[10px] font-medium flex items-center gap-1">
+                        302 Redirect &bull; Redis Click Tracking
+                      </span>
+                    ) : (
+                      <span className="text-purple-400 text-[10px] font-mono">
+                        utm_campaign={(sampleInfluencer?.code || 'his1').replace(/^#+/, '').toLowerCase()}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-[11px] font-mono text-purple-300/90 break-all select-all leading-relaxed bg-purple-950/20 p-2 rounded-lg border border-purple-500/20">
+                  <p className={`text-[11px] font-mono break-all select-all leading-relaxed p-2 rounded-lg border ${
+                    destinationType === 'amazon'
+                      ? 'text-amber-300/90 bg-amber-950/20 border-amber-500/20'
+                      : 'text-purple-300/90 bg-purple-950/20 border-purple-500/20'
+                  }`}>
                     {samplePreviewUrl}
                   </p>
                 </div>

@@ -12,19 +12,26 @@ import {
   Calendar,
   Globe,
   ShoppingBag,
-  Video
+  Video,
+  MousePointerClick
 } from 'lucide-react';
 import type { InfluencerTrackingLink } from '../../types';
 import { TRACKING_PLATFORMS } from '../../services/influencerTrackingLinkService';
 
 interface CampaignTrackingLinkCardProps {
   link: InfluencerTrackingLink;
+  clicks?: number;
+  isClicksConfigured?: boolean;
+  isLoadingClicks?: boolean;
   onEdit: (link: InfluencerTrackingLink) => void;
   onDelete: (link: InfluencerTrackingLink) => void;
 }
 
 export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> = ({
   link,
+  clicks = 0,
+  isClicksConfigured = true,
+  isLoadingClicks = false,
   onEdit,
   onDelete
 }) => {
@@ -168,8 +175,16 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
           )}
         </div>
 
-        {/* Platform & Video Badges */}
+        {/* Platform, Video & Clicks Badges */}
         <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
+          {/* Destination Type Badge (if Amazon) */}
+          {link.destination_type === 'amazon' && (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold">
+              <ShoppingBag size={11} className="text-amber-400" />
+              <span>Amazon</span>
+            </div>
+          )}
+
           {/* Platform Badge */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-800 font-semibold text-slate-300">
             <div
@@ -187,15 +202,39 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
             <Video size={12} className="text-purple-400" />
             <span>{videoName}</span>
           </div>
+
+          {/* Clicks Badge */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono font-bold text-[11px] ${
+              !isClicksConfigured
+                ? 'bg-slate-900/80 border-slate-800 text-slate-500'
+                : clicks > 0
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                  : 'bg-slate-900/90 border-slate-800 text-slate-400'
+            }`}
+            title={!isClicksConfigured ? 'Redis click tracking not configured' : `${clicks} clicks recorded`}
+          >
+            <MousePointerClick
+              size={12}
+              className={!isClicksConfigured ? 'text-slate-500' : clicks > 0 ? 'text-amber-400' : 'text-slate-500'}
+            />
+            <span>{isLoadingClicks ? '...' : !isClicksConfigured ? 'Clicks: N/A' : `${clicks} clicks`}</span>
+          </div>
         </div>
 
         {/* Tracking URL Box */}
         <div className="bg-[#070c18] border border-slate-800/80 rounded-xl p-3 my-2 space-y-1">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
             <span>Tracking Link</span>
-            <span className="text-purple-400/80 lowercase font-mono text-[10px]">
-              utm_campaign={link.creator_code || (link.influencer_code || '').replace(/^#+/, '').toLowerCase()}
-            </span>
+            {link.destination_type === 'amazon' ? (
+              <span className="text-amber-400 font-mono text-[10px]">
+                302 Redirect Tracking
+              </span>
+            ) : (
+              <span className="text-purple-400/80 lowercase font-mono text-[10px]">
+                utm_campaign={link.creator_code || (link.influencer_code || '').replace(/^#+/, '').toLowerCase()}
+              </span>
+            )}
           </div>
           <p
             className="text-xs text-purple-300 font-mono break-all select-all leading-relaxed bg-purple-950/20 p-2 rounded-lg border border-purple-500/20"

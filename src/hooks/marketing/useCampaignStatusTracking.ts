@@ -209,7 +209,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           .eq('campaign_id', campQuery),
         fetchCampaignVideoScripts(cleanCampaignId, activeInfluencerIds),
         fetchAllInChunks(
-          chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPlatform).select('influencer_id, username, platform').in('influencer_id', chunk),
+          chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPlatform).select('influencer_id, username, platform, performance_code, video_views, followers_count').in('influencer_id', chunk),
           activeInfluencerIds,
           200
         ),
@@ -384,7 +384,9 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           ...info,
           auto_dm: info.auto_dm,
           pricing: pricingMap[info.id] || {},
-          products: productsByInfluencer[String(info.id)] || []
+          products: productsByInfluencer[String(info.id)] || [],
+          platforms: rawPlatforms,
+          creator_category: info.creator_category || info.creatorCategory || info.category,
         };
 
         const vPayments = (videoPaymentsData || []).filter(

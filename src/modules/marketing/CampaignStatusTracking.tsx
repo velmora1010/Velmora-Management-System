@@ -11,7 +11,7 @@ import {
   Mic, Volume2, ExternalLink, SlidersHorizontal, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Activity, Truck, Share2, Globe, GitBranch,
   Calendar, CreditCard, PhoneCall, PhoneOff, Users, CheckSquare, FastForward,
   FilePlus, CheckCircle2, Save, Sparkles, Radio, Image as ImageIcon, Upload, AlertCircle,
-  CalendarCheck, CalendarClock, ClipboardCheck, FileCheck, Send, Download
+  CalendarCheck, CalendarClock, ClipboardCheck, FileCheck, Send, Download, Tag
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { buildAgreementText } from './OfferAgreementSection';
@@ -52,6 +52,11 @@ import { downloadMediaFile } from '../../utils/fileDownloadUtils';
 import { fetchInfluencerTrackingLinks } from '../../services/influencerTrackingLinkService';
 import { fetchCampaignDescriptions } from '../../services/campaignDescriptionService';
 import { InfluencerConversationSelector } from '../../components/marketing/InfluencerConversationSelector';
+import { 
+  StatusTrackingDateRangeModal, 
+  type DateRange, 
+  formatSelectedRangeText 
+} from '../../components/marketing/StatusTrackingDateRangeModal';
 import { 
   StatusTrackingFilterDrawer, 
   type StatusTrackingFilterState, 
@@ -197,7 +202,8 @@ export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
   { id: 'yesterday', label: 'Yesterday Post', shortLabel: 'Yesterday Post', icon: History },
   { id: 'today', label: 'Today Post', shortLabel: 'Today Post', icon: CalendarCheck },
   { id: 'tomorrow', label: 'Tomorrow Post', shortLabel: 'Tomorrow Post', icon: CalendarClock },
-  { id: 'after_post', label: 'Completed', shortLabel: 'Completed', icon: CheckSquare },
+  { id: 'after_post', label: 'After Post', shortLabel: 'After Post', icon: Share2 },
+  { id: 'completed', label: 'Completed', shortLabel: 'Completed', icon: CheckSquare },
 ];
 
 export const VIDEO_1_SUMMARY_BOX_CONFIGS = WORKFLOW_SUMMARY_BOX_CONFIGS;
@@ -707,37 +713,104 @@ export const isRecordAutoDmEnabled = (record: StatusTrackingRecord): boolean => 
   return getRecordAutoDmCategory(record) === 'yes';
 };
 
+export const CREATOR_CATEGORY_CODES = [
+  'C1L1',
+  'C1L2',
+  'C2L1',
+  'C2L2',
+  'C3L1',
+  'C3L2',
+  'C4L1',
+  'C4L2'
+] as const;
+
+export type CreatorCategoryCode = (typeof CREATOR_CATEGORY_CODES)[number];
+
+export const normalizeCategoryCode = (code: string | undefined | null): string => {
+  if (!code || typeof code !== 'string') return '';
+  const clean = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if ((CREATOR_CATEGORY_CODES as readonly string[]).includes(clean)) {
+    return clean;
+  }
+  if (clean === 'BELOW10K' || clean === 'BELOW10000') {
+    return 'C4L2';
+  }
+  return clean;
+};
+
+export const areCategoriesEqual = (a: string | undefined | null, b: string | undefined | null): boolean => {
+  if (!a || !b) return false;
+  const cleanA = normalizeCategoryCode(a);
+  const cleanB = normalizeCategoryCode(b);
+  if (cleanA && cleanB) return cleanA === cleanB;
+  return cleanA === cleanB;
+};
+
 export const getInfluencerCategories = (record: StatusTrackingRecord): string[] => {
   const categories: string[] = [];
   const inf = record.influencer || {};
+  const dispatch = record.dispatch || ({} as any);
   
   if (inf.creatorCategory && typeof inf.creatorCategory === 'string') {
     categories.push(inf.creatorCategory);
   }
+  if (inf.creator_category && typeof inf.creator_category === 'string') {
+    categories.push(inf.creator_category);
+  }
   if (inf.category && typeof inf.category === 'string') {
     categories.push(inf.category);
   }
-  if ((record.dispatch as any)?.category && typeof (record.dispatch as any).category === 'string') {
-    categories.push((record.dispatch as any).category);
+  if (dispatch.category && typeof dispatch.category === 'string') {
+    categories.push(dispatch.category);
+  }
+  if (dispatch.creator_category && typeof dispatch.creator_category === 'string') {
+    categories.push(dispatch.creator_category);
+  }
+  if (dispatch.creatorCategory && typeof dispatch.creatorCategory === 'string') {
+    categories.push(dispatch.creatorCategory);
   }
 
   if (Array.isArray(inf.platforms)) {
     inf.platforms.forEach((p: any) => {
-      if (p.performance_code && typeof p.performance_code === 'string') categories.push(p.performance_code);
-      if (p.creator_category && typeof p.creator_category === 'string') categories.push(p.creator_category);
-      if (p.category && typeof p.category === 'string') categories.push(p.category);
+      if (typeof p === 'object' && p !== null) {
+        if (p.performance_code && typeof p.performance_code === 'string') categories.push(p.performance_code);
+        if (p.creator_category && typeof p.creator_category === 'string') categories.push(p.creator_category);
+        if (p.category && typeof p.category === 'string') categories.push(p.category);
+      }
     });
   }
 
-  if (Array.isArray(inf.languages)) {
-    const vd = inf.languages.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
+  const langs = Array.isArray(inf.languages)
+    ? inf.languages
+    : (Array.isArray(dispatch.languages) ? dispatch.languages : []);
+
+  if (Array.isArray(langs)) {
+    const vd = langs.find((l: string) => typeof l === 'string' && l.startsWith('views_data:'));
     if (vd) {
       try {
-        const parsed = JSON.parse(vd.replace('views_data:', ''));
-        if (parsed.platform_views && typeof parsed.platform_views === 'object') {
+        const parsed = JSON.parse(vd.substring('views_data:'.length));
+        if (parsed?.creator_category && typeof parsed.creator_category === 'string') {
+          categories.push(parsed.creator_category);
+        }
+        if (parsed?.performance_code && typeof parsed.performance_code === 'string') {
+          categories.push(parsed.performance_code);
+        }
+        if (parsed?.category && typeof parsed.category === 'string') {
+          categories.push(parsed.category);
+        }
+        if (parsed?.platform_views && typeof parsed.platform_views === 'object') {
           Object.values(parsed.platform_views).forEach((pv: any) => {
             if (pv?.creator_category && typeof pv.creator_category === 'string') {
               categories.push(pv.creator_category);
+            }
+            if (pv?.performance_code && typeof pv.performance_code === 'string') {
+              categories.push(pv.performance_code);
+            }
+            if (pv?.view_code && typeof pv.view_code === 'string') {
+              categories.push(pv.view_code);
+            }
+            if (pv?.category && typeof pv.category === 'string') {
+              categories.push(pv.category);
             }
           });
         }
@@ -749,7 +822,8 @@ export const getInfluencerCategories = (record: StatusTrackingRecord): string[] 
   if (inf.facebook_view_code) categories.push(inf.facebook_view_code);
   if (inf.youtube_view_code) categories.push(inf.youtube_view_code);
 
-  return getUniqueFilterOptions(categories);
+  const normalized = categories.map(c => normalizeCategoryCode(c)).filter(Boolean);
+  return getUniqueFilterOptions(normalized);
 };
 
 /**
@@ -1499,7 +1573,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     // Dedicated Step: Offer Agreement
     if (cfg.id === 'offer_agreement') {
       const st = storedVideo?.steps?.['offer_agreement'];
-      const isOfferDone = Boolean(st?.completed === true || st?.status === 'COMPLETED' || st?.data?.sent_confirmed === true);
+      const isDeliv = isInfluencerDeliveryConfirmed(record);
+      const isExplicitFalse = st?.data?.sent_confirmed === false;
+      const isOfferDone = isExplicitFalse ? false : Boolean(st?.completed === true || st?.status === 'COMPLETED' || st?.data?.sent_confirmed === true || isDeliv);
       steps[cfg.id] = {
         completed: isOfferDone,
         skipped: false,
@@ -1515,7 +1591,9 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
     // Dedicated Step: After Dispatch
     if (cfg.id === 'after_dispatch') {
       const st = storedVideo?.steps?.['after_dispatch'];
-      const isDispDone = Boolean(st?.completed === true || st?.status === 'COMPLETED' || st?.data?.sent_confirmed === true);
+      const isDeliv = isInfluencerDeliveryConfirmed(record);
+      const isExplicitFalse = st?.data?.sent_confirmed === false;
+      const isDispDone = isExplicitFalse ? false : Boolean(st?.completed === true || st?.status === 'COMPLETED' || st?.data?.sent_confirmed === true || isDeliv);
       steps[cfg.id] = {
         completed: isDispDone,
         skipped: false,
@@ -1700,6 +1778,11 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         const effThumbnailPath = postData.thumbnail_path || scheduleEntry?.thumbnail_path || '';
         const effThumbnailName = postData.thumbnail_file_name || '';
         const isPostDone = Boolean(st.completed === true || st.status === 'COMPLETED' || postData.post_date_confirmed === true);
+        const effPlatforms = Array.isArray(postData.selected_platforms) && postData.selected_platforms.length > 0
+          ? postData.selected_platforms
+          : (Array.isArray(scheduleEntry?.selected_platforms) && scheduleEntry.selected_platforms.length > 0 ? scheduleEntry.selected_platforms : undefined);
+        const effPlatform = postData.platform || scheduleEntry?.platform || undefined;
+        const effPlatformDeliverables = postData.platform_deliverables || scheduleEntry?.platform_deliverables || undefined;
         steps[cfg.id] = {
           ...st,
           completed: isPostDone,
@@ -1710,7 +1793,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
             thumbnail_url: effThumbnailUrl,
             thumbnail_path: effThumbnailPath,
             thumbnail_file_name: effThumbnailName,
-            history: Array.isArray(postData.history) ? postData.history : []
+            history: Array.isArray(postData.history) ? postData.history : [],
+            ...(effPlatforms ? { selected_platforms: effPlatforms } : {}),
+            ...(effPlatform ? { platform: effPlatform } : {}),
+            ...(effPlatformDeliverables ? { platform_deliverables: effPlatformDeliverables } : {})
           }
         };
       } else if (cfg.id === 'before_post') {
@@ -1730,7 +1816,7 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         const hasDesc = Boolean(description && description.trim().length > 0);
         const hasVideo = Boolean(videoUrl && videoUrl.trim().length > 0);
         const isReady = hasLink && hasDesc && hasVideo;
-        const isCompleted = Boolean(st.completed || isReady);
+        const isCompleted = isReady;
 
         steps[cfg.id] = {
           ...st,
@@ -1766,7 +1852,10 @@ export const getVideoWorkflow = (record: StatusTrackingRecord, videoNum: number,
         const link = afterPostData.link || (videoNum === 1 ? record.final_post_link : '') || '';
         const postedAt = afterPostData.postedAt || (videoNum === 1 ? record.final_post_actual_datetime : '') || '';
         const platform = afterPostData.platform || 'Instagram';
-        const isLiveDone = isMultiPlatformDone && Boolean(st.completed || afterPostData.confirmed_live || afterPostData.confirmed || (videoNum === 1 && record.final_post_completed));
+        const hasLiveLink = Array.isArray(sPlatforms) && sPlatforms.length > 0 
+          ? isMultiPlatformDone 
+          : Boolean(link && !isFakeUrl(link));
+        const isLiveDone = hasLiveLink && Boolean(st.completed || afterPostData.confirmed_live || afterPostData.confirmed || (videoNum === 1 && record.final_post_completed));
         steps[cfg.id] = {
           ...st,
           completed: isLiveDone,
@@ -2326,14 +2415,17 @@ export const isInfluencerOfferAgreementCompleted = (record: StatusTrackingRecord
   const metadata: any = getRecordNotesMetadata(record);
   const storedVideo = metadata.videos?.[String(videoNumber)] || metadata.videos?.[videoNumber];
   const step = storedVideo?.steps?.['offer_agreement'];
-  return Boolean(step?.completed === true || step?.status === 'COMPLETED' || step?.data?.sent_confirmed === true);
+  if (step?.data?.sent_confirmed === false) return false;
+  if (step?.completed === true || step?.status === 'COMPLETED' || step?.data?.sent_confirmed === true) return true;
+  // Automatically treated as completed if the influencer's product is already Delivered
+  return isInfluencerDeliveryConfirmed(record);
 };
 
 export const isOfferAgreementCompleted = isInfluencerOfferAgreementCompleted;
 
 /**
  * Checks if After Dispatch step has been completed for an influencer in the given video number.
- * Requires explicit user confirmation via checkbox.
+ * Requires explicit user confirmation via checkbox, or auto-completed if product is already Delivered.
  */
 export const isInfluencerAfterDispatchCompleted = (record: StatusTrackingRecord, videoNumber: number): boolean => {
   if (isInfluencerInReDispatch(record)) return false;
@@ -2343,7 +2435,10 @@ export const isInfluencerAfterDispatchCompleted = (record: StatusTrackingRecord,
   const metadata: any = getRecordNotesMetadata(record);
   const storedVideo = metadata.videos?.[String(videoNumber)] || metadata.videos?.[videoNumber];
   const step = storedVideo?.steps?.['after_dispatch'];
-  return Boolean(step?.completed === true || step?.status === 'COMPLETED' || step?.data?.sent_confirmed === true);
+  if (step?.data?.sent_confirmed === false) return false;
+  if (step?.completed === true || step?.status === 'COMPLETED' || step?.data?.sent_confirmed === true) return true;
+  // Automatically treated as completed if the influencer's product is already Delivered
+  return isInfluencerDeliveryConfirmed(record);
 };
 
 export const isAfterDispatchCompleted = isInfluencerAfterDispatchCompleted;
@@ -2709,10 +2804,6 @@ export const isInfluencerBeforePostCompleted = (record: StatusTrackingRecord, vi
 
   const vData = getVideoWorkflow(record, videoNumber);
   const bpStep = vData.steps['before_post'];
-  if (bpStep?.completed === true || bpStep?.status === 'COMPLETED') {
-    return true;
-  }
-
   const bpData = bpStep?.data || {};
   const pdStep = vData.steps['post_date'];
   const trackingLink = bpData.tracking_link || pdStep?.data?.final_tracking_link || pdStep?.data?.tracking_link || pdStep?.data?.final_post_link || (videoNumber === 1 ? record.final_product_link : '');
@@ -2752,15 +2843,11 @@ export const isInfluencerAfterPostCompleted = (record: StatusTrackingRecord, vid
     return allPlatformsValid && Boolean(apStep.completed || apStep.data?.confirmed_live || apStep.data?.confirmed);
   }
 
-  const hasLink = Boolean(apStep?.data?.link && !isFakeUrl(apStep.data.link));
-  const hasDate = Boolean(apStep?.data?.posted_date || apStep?.data?.postedAt);
-  return Boolean(
-    apStep?.completed || 
-    apStep?.data?.confirmed_live || 
-    apStep?.data?.confirmed || 
-    (hasLink && hasDate) ||
-    (videoNumber === 1 && (record.final_post_completed || (record.final_post_link && !isFakeUrl(record.final_post_link) && record.final_post_actual_datetime)))
-  );
+  const hasLink = Boolean((apStep?.data?.link && !isFakeUrl(apStep.data.link)) || (videoNumber === 1 && record.final_post_link && !isFakeUrl(record.final_post_link)));
+  const hasDate = Boolean(apStep?.data?.posted_date || apStep?.data?.postedAt || (videoNumber === 1 && record.final_post_actual_datetime));
+  const isConfirmed = Boolean(apStep?.completed || apStep?.data?.confirmed_live || apStep?.data?.confirmed || (videoNumber === 1 && record.final_post_completed));
+
+  return hasLink && (hasDate || isConfirmed);
 };
 
 /**
@@ -3220,6 +3307,15 @@ export const getFormattedPlatformsShort = (platforms: string[]): string => {
   return shortNames.join(' • ');
 };
 
+export const normalizePlatformName = (name: string): string => {
+  if (!name) return '';
+  const lower = String(name).trim().toLowerCase();
+  if (lower === 'instagram' || lower === 'insta' || lower === 'ig') return 'Instagram';
+  if (lower === 'youtube' || lower === 'yt' || lower === 'ytube') return 'YouTube';
+  if (lower === 'facebook' || lower === 'fb') return 'Facebook';
+  return name.trim();
+};
+
 export const getInfluencerSelectedPlatforms = (
   record: StatusTrackingRecord,
   videoNumber: number
@@ -3234,14 +3330,18 @@ export const getInfluencerSelectedPlatforms = (
   let platforms: string[] = [];
   if (Array.isArray(postStepData.selected_platforms) && postStepData.selected_platforms.length > 0) {
     platforms = postStepData.selected_platforms;
+  } else if (postStepData.platform_deliverables && Object.keys(postStepData.platform_deliverables).length > 0) {
+    platforms = Object.keys(postStepData.platform_deliverables);
   } else if (Array.isArray(scheduleEntry?.selected_platforms) && scheduleEntry.selected_platforms.length > 0) {
     platforms = scheduleEntry.selected_platforms;
+  } else if (scheduleEntry?.platform_deliverables && Object.keys(scheduleEntry.platform_deliverables).length > 0) {
+    platforms = Object.keys(scheduleEntry.platform_deliverables);
   } else if (postStepData.platform) {
     platforms = postStepData.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
   } else if (scheduleEntry?.platform) {
     platforms = scheduleEntry.platform.split(/[+,]/).map((s: string) => s.trim()).filter(Boolean);
   }
-  return platforms;
+  return platforms.map(normalizePlatformName).filter(Boolean);
 };
 
 export const getScheduledPostsForDate = (
@@ -3289,7 +3389,7 @@ export const getScheduledPostsForDate = (
         : (record.dispatch?.product_name || (vNum === 1 ? record.ref_concept : '') || '—');
 
       const platforms = getInfluencerSelectedPlatforms(record, vNum);
-      const platformDisplay = platforms.length > 0 ? platforms.join(' + ') : 'Instagram';
+      const platformDisplay = platforms.length > 0 ? platforms.join(' + ') : 'Not selected';
 
       results.push({
         record,
@@ -3332,15 +3432,81 @@ export const isInfluencerScheduledForDate = (
 };
 
 /**
+ * Single source of truth predicate for a fully completed influencer workflow.
+ * An influencer must ONLY be considered completed if ALL required workflow steps
+ * are completed:
+ * 1. Offer Agreement
+ * 2. After Dispatch
+ * 3. Delivered
+ * 4. Share Script
+ * 5. Call Explain (or skipped if call skip is supported)
+ * 6. Draft Approved
+ * 7. Payment (if payment step is required/applicable)
+ * 8. Post Date
+ * 9. Before Post (tracking link, description, and required video upload)
+ * 10. After Post (live post link recorded and confirmed)
+ */
+export const isInfluencerWorkflowFullyCompleted = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): boolean => {
+  if (!record) return false;
+  if (isInfluencerInReDispatch(record)) return false;
+  const assigned = getInfluencerAssignedVideos(record);
+  if (!assigned.includes(videoNumber)) return false;
+
+  // 1. Offer Agreement
+  if (!isInfluencerOfferAgreementCompleted(record, videoNumber)) return false;
+
+  // 2. After Dispatch
+  if (!isInfluencerAfterDispatchCompleted(record, videoNumber)) return false;
+
+  // 3. Delivered
+  if (!isInfluencerDeliveryConfirmed(record)) return false;
+
+  // 4. Share Script
+  if (!isInfluencerShareScriptCompleted(record, videoNumber)) return false;
+
+  // 5. Call Explain (or skipped if call skip is supported)
+  if (!isInfluencerCallCompleted(record, videoNumber) && !isInfluencerCallSkipped(record, videoNumber)) return false;
+
+  // 6. Draft Approved
+  if (!isInfluencerDraftApproved(record, videoNumber)) return false;
+
+  // 7. Payment (if payment step is required/applicable)
+  const vPrice = getInfluencerVideoPrice(record.influencer, videoNumber);
+  const totalPrice = getInfluencerCampaignTotalPrice(record.influencer, record.pricing);
+  const isPaymentApplicable = Boolean(
+    (vPrice !== null && vPrice > 0) ||
+    (totalPrice !== null && totalPrice > 0) ||
+    (Array.isArray(record.videoPayments) && record.videoPayments.some((vp: any) => Number(vp.video_number) === Number(videoNumber) && Number(vp.agreed_amount || vp.paid_amount || 0) > 0))
+  );
+  if (isPaymentApplicable && !isInfluencerPaymentCompleted(record, videoNumber)) {
+    return false;
+  }
+
+  // 8. Post Date
+  if (!isInfluencerPostDateCompleted(record, videoNumber)) return false;
+
+  // 9. Before Post (must verify tracking link, description, and required video upload)
+  if (!isInfluencerBeforePostCompleted(record, videoNumber)) return false;
+
+  // 10. After Post (live post link must be recorded and confirmed)
+  if (!isInfluencerAfterPostCompleted(record, videoNumber)) return false;
+
+  return true;
+};
+
+/**
  * Single source of truth predicate for a fully completed influencer post.
- * A post is considered FULLY COMPLETED if and only if the final workflow step
- * "After Post" has been completed for the specified video number.
+ * A post is considered FULLY COMPLETED if and only if EVERY required workflow step
+ * has been completed for the specified video number.
  */
 export const isFullyCompletedPost = (
   record: StatusTrackingRecord,
   videoNumber: number
 ): boolean => {
-  return isInfluencerAfterPostCompleted(record, videoNumber);
+  return isInfluencerWorkflowFullyCompleted(record, videoNumber);
 };
 
 /**
@@ -3410,8 +3576,9 @@ export const isStepFilterMatch = (
     case 'tomorrow_post':
       return isInfluencerScheduledForDate(record, videoNumber, 'tomorrow');
     case 'after_post':
+      return isInfluencerAfterPostCompleted(record, videoNumber);
     case 'completed':
-      return isFullyCompletedPost(record, videoNumber);
+      return isInfluencerWorkflowFullyCompleted(record, videoNumber);
     case 're_dispatch':
       return isInfluencerInReDispatch(record) || isInfluencerReDispatchActive(record) || getInfluencerReDispatchCycles(record).length > 0;
     default:
@@ -4632,6 +4799,14 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const listScrollContainerRef = useRef<HTMLDivElement>(null);
   const savedScrollTopRef = useRef<number>(0);
   const lastOpenedRecordIdRef = useRef<string | null>(null);
+  const lastAnchorRef = useRef<{
+    recordId: string;
+    dispatchId?: string;
+    influencerId?: string;
+    influencerCode?: string;
+    scrollTop: number;
+  } | null>(null);
+  const isRestoringScrollRef = useRef<boolean>(false);
 
   // Clear All & Single Delete Confirmation States
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
@@ -4649,6 +4824,13 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   // Top Workflow Summary Step filter: null = All, or one of 'share_script' | 'call_explain' | 'pay_advance' | 'timeline' | 'draft' | 'post_date' | 'payment'
   const [selectedSummaryStep, setSelectedSummaryStep] = useState<string | null>(null);
 
+  // Top Creator Category Card filter: null = All, or one of 'C1L1' | 'C1L2' | 'C2L1' | 'C2L2' | 'C3L1' | 'C3L2' | 'C4L1' | 'C4L2'
+  const [selectedCreatorCategory, setSelectedCreatorCategory] = useState<string | null>(null);
+
+  // Date Range Calendar Filter State
+  const [selectedDateRange, setSelectedDateRange] = useState<DateRange | null>(null);
+  const [isDateRangeModalOpen, setIsDateRangeModalOpen] = useState(false);
+
   // Active filter count calculation (total individual criteria selected)
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -4661,8 +4843,10 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     count += activeFilters.deliveryStatuses.length;
     if (activeFilters.autoDmStatus && activeFilters.autoDmStatus !== 'all') count += 1;
     if (selectedSummaryStep) count += 1;
+    if (selectedCreatorCategory) count += 1;
+    if (selectedDateRange) count += 1;
     return count;
-  }, [activeFilters, selectedSummaryStep]);
+  }, [activeFilters, selectedSummaryStep, selectedCreatorCategory, selectedDateRange]);
 
   // Modals & Menu State
   const [activeModal, setActiveModal] = useState<{
@@ -4778,16 +4962,28 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
 
   // Navigation handlers for detail view and list view
   const handleOpenVideo = useCallback((record: StatusTrackingRecord, videoNumber: number, stepId?: string) => {
-    if (listScrollContainerRef.current) {
-      const currentScroll = listScrollContainerRef.current.scrollTop;
-      savedScrollTopRef.current = currentScroll;
-      sessionStorage.setItem(`st_scroll_${campaign.id}`, String(currentScroll));
-    }
-    const recId = record.id;
+    const currentScroll = listScrollContainerRef.current ? listScrollContainerRef.current.scrollTop : 0;
+    savedScrollTopRef.current = currentScroll;
+    sessionStorage.setItem(`st_scroll_${campaign.id}`, String(currentScroll));
+
+    const recId = String(record.id);
+    const dispId = record.dispatch_id ? String(record.dispatch_id) : '';
+    const infId = record.influencer_id ? String(record.influencer_id) : '';
+    const infCode = (record.dispatch?.influencer_code || (record as any).code || '').trim();
+
+    const anchor = {
+      recordId: recId,
+      dispatchId: dispId,
+      influencerId: infId,
+      influencerCode: infCode,
+      scrollTop: currentScroll
+    };
+    lastAnchorRef.current = anchor;
+    sessionStorage.setItem(`st_last_anchor_${campaign.id}`, JSON.stringify(anchor));
     lastOpenedRecordIdRef.current = recId;
     sessionStorage.setItem(`st_last_record_${campaign.id}`, recId);
 
-    const influencerIdentifier = record.dispatch?.influencer_code || record.id;
+    const influencerIdentifier = infCode || recId;
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.set('stInfluencer', influencerIdentifier);
@@ -4799,11 +4995,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       }
       return next;
     });
+    setSelectedWorkflowStep(`video${videoNumber}` as WorkflowStepKey);
     setSelectedVideoStepId(stepId || null);
-    setSelectedVideo({ recordId: record.id, videoNumber, stepId: stepId || null });
+    setSelectedVideo({ 
+      recordId: recId, 
+      videoNumber, 
+      stepId: stepId || null,
+      influencerId: infId,
+      influencerCode: infCode
+    } as any);
   }, [campaign.id, setSearchParams]);
 
   const handleBackFromDetail = useCallback(() => {
+    isRestoringScrollRef.current = true;
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.delete('stInfluencer');
@@ -4826,37 +5030,77 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
       }
       return next;
     }, { replace: true });
+    setSelectedWorkflowStep(`video${videoNumber}` as WorkflowStepKey);
     setSelectedVideoStepId(stepId || null);
     setSelectedVideo(prev => prev ? { ...prev, videoNumber, stepId: stepId || null } : { recordId, videoNumber, stepId: stepId || null });
   }, [setSearchParams]);
 
   const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (isRestoringScrollRef.current) return;
     const top = e.currentTarget.scrollTop;
     savedScrollTopRef.current = top;
     sessionStorage.setItem(`st_scroll_${campaign.id}`, String(top));
+    if (lastAnchorRef.current) {
+      lastAnchorRef.current.scrollTop = top;
+    }
   }, [campaign.id]);
 
-  // Scroll restoration: when returning to list view, smoothly restore exact scroll position
+  // Scroll restoration: when returning to list view, smoothly restore exact scroll position and focus on the same influencer
   useEffect(() => {
     if (!selectedVideo && !isLoading && listScrollContainerRef.current) {
-      const savedPos = savedScrollTopRef.current || Number(sessionStorage.getItem(`st_scroll_${campaign.id}`) || '0');
-      if (savedPos > 0) {
-        listScrollContainerRef.current.scrollTop = savedPos;
-        const raf = requestAnimationFrame(() => {
-          if (listScrollContainerRef.current) {
-            listScrollContainerRef.current.scrollTop = savedPos;
+      isRestoringScrollRef.current = true;
+      let anchor = lastAnchorRef.current;
+      if (!anchor) {
+        try {
+          const stored = sessionStorage.getItem(`st_last_anchor_${campaign.id}`);
+          if (stored) anchor = JSON.parse(stored);
+        } catch (e) {}
+      }
+
+      const savedPos = anchor?.scrollTop ?? (savedScrollTopRef.current || Number(sessionStorage.getItem(`st_scroll_${campaign.id}`) || '0'));
+
+      const timer = setTimeout(() => {
+        let el: HTMLElement | null = null;
+        if (anchor) {
+          if (anchor.recordId) {
+            el = document.getElementById(`st-card-${anchor.recordId}`);
           }
-        });
-        return () => cancelAnimationFrame(raf);
-      } else {
-        const lastRecordId = lastOpenedRecordIdRef.current || sessionStorage.getItem(`st_last_record_${campaign.id}`);
-        if (lastRecordId) {
-          const el = document.getElementById(`st-card-${lastRecordId}`);
-          if (el) {
-            el.scrollIntoView({ block: 'nearest' });
+          if (!el && anchor.dispatchId) {
+            el = document.querySelector(`[data-dispatch-id="${anchor.dispatchId}"]`);
+          }
+          if (!el && anchor.influencerCode) {
+            const clean = anchor.influencerCode.replace(/^#+/, '').toLowerCase();
+            el = document.querySelector(`[data-influencer-code="${anchor.influencerCode}" i]`) ||
+                 document.querySelector(`[data-clean-code="${clean}" i]`);
+          }
+          if (!el && anchor.influencerId) {
+            el = document.querySelector(`[data-influencer-id="${anchor.influencerId}"]`);
           }
         }
-      }
+
+        if (!el) {
+          const lastRecordId = lastOpenedRecordIdRef.current || sessionStorage.getItem(`st_last_record_${campaign.id}`);
+          if (lastRecordId) {
+            el = document.getElementById(`st-card-${lastRecordId}`);
+          }
+        }
+
+        if (el && listScrollContainerRef.current) {
+          el.scrollIntoView({ block: 'center', behavior: 'instant' });
+          el.classList.add('ring-2', 'ring-purple-500/80', 'transition-all');
+          setTimeout(() => {
+            el?.classList.remove('ring-2', 'ring-purple-500/80');
+          }, 1200);
+        } else if (savedPos > 0 && listScrollContainerRef.current) {
+          listScrollContainerRef.current.scrollTop = savedPos;
+        }
+
+        setTimeout(() => {
+          isRestoringScrollRef.current = false;
+        }, 150);
+      }, 50);
+
+      return () => clearTimeout(timer);
     }
   }, [selectedVideo, isLoading, campaign.id]);
 
@@ -5059,12 +5303,19 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matchesPrice) return false;
       }
 
-      // 4. Category filter (OR within section)
+      // 4. Category filter (OR within section, from Advanced Filter Drawer)
       if (activeFilters.categories.length > 0) {
         const recordCategories = getInfluencerCategories(record);
         const matchesCategory = activeFilters.categories.some(filterCat =>
-          recordCategories.some(recCat => areFilterValuesEqual(recCat, filterCat))
+          recordCategories.some(recCat => areFilterValuesEqual(recCat, filterCat) || areCategoriesEqual(recCat, filterCat))
         );
+        if (!matchesCategory) return false;
+      }
+
+      // 4b. Creator Category Card filter (C1L1, C1L2, C2L1, C2L2, C3L1, C3L2, C4L1, C4L2)
+      if (selectedCreatorCategory) {
+        const recordCategories = getInfluencerCategories(record);
+        const matchesCategory = recordCategories.some(recCat => areCategoriesEqual(recCat, selectedCreatorCategory));
         if (!matchesCategory) return false;
       }
 
@@ -5126,9 +5377,18 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
         if (!matches) return false;
       }
 
+      // 10. Date Range filter (Post Date within selected start and end dates inclusive)
+      if (selectedDateRange) {
+        const postDateYMD = getInfluencerResolvedPostDateYMD(record, selectedVideoNumber);
+        if (!postDateYMD) return false;
+        if (postDateYMD < selectedDateRange.start || postDateYMD > selectedDateRange.end) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber]);
+  }, [activeTrackingRecords, activeFilters, searchQuery, selectedWorkflowStep, selectedVideoNumber, selectedCreatorCategory, selectedDateRange]);
 
   // 2. Final filtered records: incorporates top horizontal summary step box selection
   const filteredRecords = useMemo(() => {
@@ -5140,6 +5400,31 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
   const workflowStepCounts = useMemo(() => {
     return validateFilterCounts(baseFilteredRecords, selectedVideoNumber);
   }, [baseFilteredRecords, selectedVideoNumber]);
+
+  // Dynamic category card counts across active tracking records for all 8 creator categories
+  const categoryCardCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      C1L1: 0,
+      C1L2: 0,
+      C2L1: 0,
+      C2L2: 0,
+      C3L1: 0,
+      C3L2: 0,
+      C4L1: 0,
+      C4L2: 0,
+    };
+
+    activeTrackingRecords.forEach(record => {
+      const cats = getInfluencerCategories(record);
+      CREATOR_CATEGORY_CODES.forEach(code => {
+        if (cats.some(c => areCategoriesEqual(c, code))) {
+          counts[code] = (counts[code] || 0) + 1;
+        }
+      });
+    });
+
+    return counts;
+  }, [activeTrackingRecords]);
 
   // Bulk Sync New Scripts across all active influencers safely without overwriting manual customizations
   const [isSyncingScripts, setIsSyncingScripts] = useState<boolean>(false);
@@ -5592,6 +5877,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     setActiveFilters(initialStatusTrackingFilterState);
     setSearchQuery('');
     setSelectedSummaryStep(null);
+    setSelectedCreatorCategory(null);
+    setSelectedDateRange(null);
   };
 
   // Clear All Status Tracking Records for Current Campaign
@@ -6543,23 +6830,23 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     if (!selectedVideo) return null;
     const targetId = String(selectedVideo.recordId).trim().toLowerCase();
     const cleanTargetId = targetId.replace(/^#+/, '');
+    const infId = (selectedVideo as any).influencerId ? String((selectedVideo as any).influencerId).toLowerCase() : null;
+    const infCode = (selectedVideo as any).influencerCode ? String((selectedVideo as any).influencerCode).trim().toLowerCase() : null;
 
-    return (
-      activeTrackingRecords.find(r => {
+    const findMatch = (records: StatusTrackingRecord[]) => {
+      return records.find(r => {
         const rId = String(r.id).toLowerCase();
-        const code = (r.dispatch?.influencer_code || '').trim().toLowerCase();
+        const code = (r.dispatch?.influencer_code || (r as any).code || '').trim().toLowerCase();
         const cleanCode = code.replace(/^#+/, '');
-        const infId = String(r.influencer_id || '').toLowerCase();
-        return rId === targetId || code === targetId || cleanCode === cleanTargetId || infId === targetId;
-      }) ||
-      trackingRecords.find(r => {
-        const rId = String(r.id).toLowerCase();
-        const code = (r.dispatch?.influencer_code || '').trim().toLowerCase();
-        const cleanCode = code.replace(/^#+/, '');
-        const infId = String(r.influencer_id || '').toLowerCase();
-        return rId === targetId || code === targetId || cleanCode === cleanTargetId || infId === targetId;
-      }) || null
-    );
+        const rInfId = String(r.influencer_id || '').toLowerCase();
+        
+        if (infId && rInfId === infId) return true;
+        if (infCode && (code === infCode || cleanCode === infCode.replace(/^#+/, ''))) return true;
+        return rId === targetId || code === targetId || cleanCode === cleanTargetId || rInfId === targetId;
+      });
+    };
+
+    return findMatch(activeTrackingRecords) || findMatch(trackingRecords) || null;
   }, [selectedVideo, activeTrackingRecords, trackingRecords]);
 
   return (
@@ -6799,8 +7086,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   );
                 })}
 
-                {/* Slots 20 to 22: 3 Empty Placeholder Slots in Row 2 (19 active filter boxes + 3 placeholders = 22 total slots across 11 columns) */}
-                {[1, 2, 3].map((slotIdx) => (
+                {/* Slots 21 to 22: 2 Empty Placeholder Slots in Row 2 (20 active filter boxes + 2 placeholders = 22 total slots across 11 columns) */}
+                {[1, 2].map((slotIdx) => (
                   <div
                     key={`filter-empty-placeholder-${slotIdx}`}
                     className="h-[68px] sm:h-[72px] rounded-xl border border-slate-800/40 bg-[#070c1a]/30 min-w-0 w-full select-none pointer-events-none"
@@ -6810,23 +7097,127 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
               </div>
             </div>
 
+            {/* Creator Category Filter Cards Section (8 Cards: C1L1, C1L2, C2L1, C2L2, C3L1, C3L2, C4L1, C4L2) */}
+            <div className="w-full">
+              <div className="flex items-center justify-between gap-2 mb-1.5 px-0.5">
+                <div className="flex items-center gap-1.5">
+                  <Tag size={12} className="text-purple-400" />
+                  <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Creator Categories
+                  </span>
+                </div>
+                {selectedCreatorCategory && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCreatorCategory(null)}
+                    className="text-[10.5px] text-purple-400 hover:text-purple-300 font-medium cursor-pointer transition-colors"
+                  >
+                    Clear Category ({selectedCreatorCategory})
+                  </button>
+                )}
+              </div>
+
+              <div className="w-full grid grid-cols-4 sm:grid-cols-8 gap-1.5 sm:gap-2">
+                {CREATOR_CATEGORY_CODES.map((code) => {
+                  const isSelected = selectedCreatorCategory === code;
+                  const count = categoryCardCounts[code] || 0;
+                  return (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCreatorCategory(prev => prev === code ? null : code);
+                      }}
+                      className={`group relative flex flex-col justify-between p-1.5 sm:p-2 xl:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 w-full cursor-pointer ${
+                        isSelected
+                          ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
+                          : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
+                      }`}
+                      title={`Filter by Creator Category ${code} (${count} influencer${count === 1 ? '' : 's'})`}
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1 w-full min-w-0">
+                        <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold truncate ${
+                          isSelected 
+                            ? 'text-purple-200' 
+                            : 'text-slate-300 group-hover:text-white'
+                        }`}>
+                          {code}
+                        </span>
+                        <Tag 
+                          size={12} 
+                          className={`shrink-0 transition-colors ${
+                            isSelected 
+                              ? 'text-purple-400' 
+                              : 'text-slate-500 group-hover:text-slate-300'
+                          }`} 
+                        />
+                      </div>
+                      <div className="flex items-baseline justify-between w-full min-w-0">
+                        <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
+                          {count}
+                        </span>
+                        {isSelected && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Bottom Toolbar: Filter Status + Search Bar + Advanced Filters */}
             <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 shrink-0 pt-0.5">
               <div className="flex items-center gap-2 text-xs">
-                {selectedSummaryStep ? (
+                {(selectedSummaryStep || selectedCreatorCategory || selectedDateRange || (activeFilters.autoDmStatus && activeFilters.autoDmStatus !== 'all')) ? (
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-slate-400">Filtered by:</span>
-                    <span className="px-2.5 py-1 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 font-semibold flex items-center gap-1.5 text-xs">
-                      <span>{getVideoSummaryBoxConfigs(selectedVideoNumber).find(b => b.id === selectedSummaryStep)?.label}</span>
-                      <button 
-                        type="button" 
-                        onClick={() => setSelectedSummaryStep(null)}
-                        className="hover:text-white text-purple-400 cursor-pointer ml-0.5"
-                        title="Clear filter"
-                      >
-                        <X size={12} />
-                      </button>
-                    </span>
+                    {selectedSummaryStep && (
+                      <span className="px-2.5 py-1 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 font-semibold flex items-center gap-1.5 text-xs">
+                        <span>{getVideoSummaryBoxConfigs(selectedVideoNumber).find(b => b.id === selectedSummaryStep)?.label}</span>
+                        <button 
+                          type="button" 
+                          onClick={() => setSelectedSummaryStep(null)}
+                          className="hover:text-white text-purple-400 cursor-pointer ml-0.5"
+                          title="Clear step filter"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    )}
+                    {selectedCreatorCategory && (
+                      <span className="px-2.5 py-1 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300 font-semibold flex items-center gap-1.5 text-xs">
+                        <span>Category: {selectedCreatorCategory}</span>
+                        <button 
+                          type="button" 
+                          onClick={() => setSelectedCreatorCategory(null)}
+                          className="hover:text-white text-purple-400 cursor-pointer ml-0.5"
+                          title="Clear category filter"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    )}
+                    {selectedDateRange && (
+                      <span className="px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 font-semibold flex items-center gap-1.5 text-xs">
+                        <Calendar size={12} className="text-cyan-400" />
+                        <span>Post Date: {formatSelectedRangeText(selectedDateRange)}</span>
+                        <button 
+                          type="button" 
+                          onClick={() => setSelectedDateRange(null)}
+                          className="hover:text-white text-cyan-400 cursor-pointer ml-0.5"
+                          title="Clear date range filter"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    )}
+                    {activeFilters.autoDmStatus && activeFilters.autoDmStatus !== 'all' && (
+                      <span className="bg-purple-950/60 text-purple-300 border border-purple-800/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 font-medium text-[11px]">
+                        Auto DM: {activeFilters.autoDmStatus === 'yes' ? 'Yes' : activeFilters.autoDmStatus === 'no' ? 'No' : 'Blank'}
+                        <button onClick={removeFilterAutoDm} className="hover:text-white text-slate-400 cursor-pointer ml-0.5">&times;</button>
+                      </span>
+                    )}
                     <span className="text-slate-500 text-xs">({filteredRecords.length} matching)</span>
                   </div>
                 ) : (
@@ -6897,6 +7288,27 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     className="w-full h-[38px] bg-[#0b1329] border border-slate-800/80 rounded-xl pl-9 pr-4 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
                   />
                 </div>
+
+                {/* Date Range Calendar Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsDateRangeModalOpen(true)}
+                  className={`h-[38px] px-3 bg-[#0b1329] border ${
+                    selectedDateRange 
+                      ? 'border-cyan-500 text-cyan-300 font-semibold bg-cyan-500/15 shadow-[0_0_12px_rgba(6,182,212,0.25)]' 
+                      : 'border-slate-800/80 text-slate-300 hover:text-white hover:border-slate-700'
+                  } rounded-xl flex items-center gap-2 transition-all relative cursor-pointer shadow-sm shrink-0`}
+                  title={selectedDateRange ? `Active date range: ${formatSelectedRangeText(selectedDateRange)}` : 'Filter by Post Date Range'}
+                >
+                  <Calendar size={15} className={selectedDateRange ? 'text-cyan-400' : 'text-slate-400'} />
+                  <span className="text-xs font-semibold hidden md:inline">
+                    {selectedDateRange ? formatSelectedRangeText(selectedDateRange) : 'Date Range'}
+                  </span>
+                  {selectedDateRange && (
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
+                  )}
+                </button>
+
                 {/* Advanced Filter drawer button */}
                 <button
                   type="button"
@@ -6915,7 +7327,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     </span>
                   )}
                 </button>
-                {(activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep) && (
+                {(activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep || selectedCreatorCategory || selectedDateRange) && (
                   <button 
                     type="button" 
                     onClick={handleClearAllFilters}
@@ -6946,16 +7358,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 <h3 className="text-slate-300 text-base font-semibold mb-1">
                   {selectedSummaryStep === 'today' || selectedSummaryStep === 'yesterday' || selectedSummaryStep === 'tomorrow'
                     ? 'No scheduled posts for this date.'
-                    : (activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep
+                    : (activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep || selectedCreatorCategory
                       ? 'No influencers match the selected filters.'
                       : 'No matching status tracking records')}
                 </h3>
                 <p className="text-xs text-slate-400 mb-3">
-                  {activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep
+                  {activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep || selectedCreatorCategory
                     ? 'Try adjusting or clearing your filters to view influencers.'
                     : 'Dispatch an influencer with Delivered shipment status to begin status tracking.'}
                 </p>
-                {(activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep) && (
+                {(activeFilterCount > 0 || searchQuery.trim() || selectedSummaryStep || selectedCreatorCategory) && (
                   <button
                     type="button"
                     onClick={handleClearAllFilters}
@@ -7014,7 +7426,12 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 return (
                   <div 
                     key={record.id}
-                    id={`st-card-${record.dispatch_id || record.id}`}
+                    id={`st-card-${record.id}`}
+                    data-record-id={record.id}
+                    data-dispatch-id={record.dispatch_id || ''}
+                    data-influencer-id={record.influencer_id || ''}
+                    data-influencer-code={influencerCode}
+                    data-clean-code={influencerCode.replace(/^#+/, '').toLowerCase()}
                     className="bg-[#0b1329] hover:bg-[#0e1733] border border-slate-800/90 hover:border-slate-700/80 rounded-xl px-3.5 py-3 sm:px-4 sm:py-3.5 min-h-[86px] sm:min-h-[88px] transition-all duration-200 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-3 w-full min-w-0"
                   >
                     {/* LEFT SECTION: Compact Code Badge, Profile Avatar, Name + Price + Product */}
@@ -7615,6 +8032,16 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           },
           autoDmCounts,
           totalCount: baseFilteredRecords.length
+        }}
+      />
+
+      {/* Date Range Calendar Filter Modal */}
+      <StatusTrackingDateRangeModal
+        isOpen={isDateRangeModalOpen}
+        onClose={() => setIsDateRangeModalOpen(false)}
+        selectedRange={selectedDateRange}
+        onApplyRange={(range) => {
+          setSelectedDateRange(range);
         }}
       />
 
@@ -8246,9 +8673,17 @@ const OfferAgreementForm: React.FC<OfferAgreementFormProps> = ({
   const [copied, setCopied] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
-  // Initialize sent confirmation from existing step data
+  const isDeliv = isInfluencerDeliveryConfirmed(record);
+
+  // Initialize sent confirmation from existing step data or delivery confirmation
   const [isSentConfirmed, setIsSentConfirmed] = useState<boolean>(() => {
-    return Boolean(existingData?.sent_confirmed === true || existingData?.completed === true);
+    if (existingData?.sent_confirmed !== undefined) {
+      return Boolean(existingData.sent_confirmed);
+    }
+    if (existingData?.completed !== undefined) {
+      return Boolean(existingData.completed);
+    }
+    return isDeliv;
   });
 
   // Track agreement text
@@ -8279,8 +8714,15 @@ const OfferAgreementForm: React.FC<OfferAgreementFormProps> = ({
   const [isLoadingText, setIsLoadingText] = useState<boolean>(false);
 
   useEffect(() => {
-    setIsSentConfirmed(Boolean(existingData?.sent_confirmed === true || existingData?.completed === true));
-  }, [existingData?.sent_confirmed, existingData?.completed]);
+    const deliv = isInfluencerDeliveryConfirmed(record);
+    if (existingData?.sent_confirmed !== undefined) {
+      setIsSentConfirmed(Boolean(existingData.sent_confirmed));
+    } else if (existingData?.completed !== undefined) {
+      setIsSentConfirmed(Boolean(existingData.completed));
+    } else {
+      setIsSentConfirmed(deliv);
+    }
+  }, [existingData?.sent_confirmed, existingData?.completed, record]);
 
   // Load authoritative agreement text from database if not present
   useEffect(() => {
@@ -8488,9 +8930,17 @@ const AfterDispatchForm: React.FC<AfterDispatchFormProps> = ({
   const [copied, setCopied] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
-  // Initialize sent confirmation from existing step data
+  const isDeliv = isInfluencerDeliveryConfirmed(record);
+
+  // Initialize sent confirmation from existing step data or delivery confirmation
   const [isSentConfirmed, setIsSentConfirmed] = useState<boolean>(() => {
-    return Boolean(existingData?.sent_confirmed === true || existingData?.completed === true);
+    if (existingData?.sent_confirmed !== undefined) {
+      return Boolean(existingData.sent_confirmed);
+    }
+    if (existingData?.completed !== undefined) {
+      return Boolean(existingData.completed);
+    }
+    return isDeliv;
   });
 
   // Track dispatch message
@@ -8528,8 +8978,15 @@ const AfterDispatchForm: React.FC<AfterDispatchFormProps> = ({
   const [isLoadingMessage, setIsLoadingMessage] = useState<boolean>(false);
 
   useEffect(() => {
-    setIsSentConfirmed(Boolean(existingData?.sent_confirmed === true || existingData?.completed === true));
-  }, [existingData?.sent_confirmed, existingData?.completed]);
+    const deliv = isInfluencerDeliveryConfirmed(record);
+    if (existingData?.sent_confirmed !== undefined) {
+      setIsSentConfirmed(Boolean(existingData.sent_confirmed));
+    } else if (existingData?.completed !== undefined) {
+      setIsSentConfirmed(Boolean(existingData.completed));
+    } else {
+      setIsSentConfirmed(deliv);
+    }
+  }, [existingData?.sent_confirmed, existingData?.completed, record]);
 
   // Load authoritative message from afterDispatchService / Supabase
   useEffect(() => {
@@ -14563,27 +15020,43 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
 
   // Multi-Platform selection (Single source of truth for Post Date, Deliverables, and After Post)
   const availablePlatforms = ['Instagram', 'YouTube', 'Facebook'];
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(() => {
-    if (Array.isArray(existingData.selected_platforms) && existingData.selected_platforms.length > 0) {
-      return existingData.selected_platforms;
+
+  // Resolve previously saved platform selections for this specific influencer and video
+  const initialSavedPlatforms = useMemo(() => {
+    if (Array.isArray(existingData?.selected_platforms) && existingData.selected_platforms.length > 0) {
+      return existingData.selected_platforms.map(normalizePlatformName).filter(Boolean);
     }
-    if (existingData.platform) {
-      const parts = existingData.platform.split(' + ').map((s: string) => s.trim()).filter(Boolean);
+    if (existingData?.platform && typeof existingData.platform === 'string') {
+      const parts = existingData.platform.split(/[+,]/).map((s: string) => normalizePlatformName(s.trim())).filter(Boolean);
       if (parts.length > 0) return parts;
     }
-    const draftStepKey = videoNumber === 1 ? 'draft_video' : `draft_v${videoNumber}`;
-    const draftData = record.status_data?.[draftStepKey] || record.status_data?.draft || {};
-    const draftLatestAttempt = Array.isArray(draftData.attempts) && draftData.attempts.length > 0 
-      ? draftData.attempts[draftData.attempts.length - 1] 
-      : null;
-    if (Array.isArray(draftLatestAttempt?.selected_platforms) && draftLatestAttempt.selected_platforms.length > 0) {
-      return draftLatestAttempt.selected_platforms;
+    if (Array.isArray(scheduleEntry?.selected_platforms) && scheduleEntry.selected_platforms.length > 0) {
+      return scheduleEntry.selected_platforms.map(normalizePlatformName).filter(Boolean);
     }
-    if (Array.isArray(draftData?.selected_platforms) && draftData.selected_platforms.length > 0) {
-      return draftData.selected_platforms;
+    if (scheduleEntry?.platform && typeof scheduleEntry.platform === 'string') {
+      const parts = scheduleEntry.platform.split(/[+,]/).map((s: string) => normalizePlatformName(s.trim())).filter(Boolean);
+      if (parts.length > 0) return parts;
     }
-    return ['Instagram'];
-  });
+    if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
+      return Object.keys(existingData.platform_deliverables).map(normalizePlatformName).filter(Boolean);
+    }
+    const recordPlatforms = getInfluencerSelectedPlatforms(record, videoNumber);
+    if (recordPlatforms && recordPlatforms.length > 0) {
+      return recordPlatforms.map(normalizePlatformName).filter(Boolean);
+    }
+    return [];
+  }, [
+    existingData?.selected_platforms, 
+    existingData?.platform, 
+    existingData?.platform_deliverables, 
+    scheduleEntry?.selected_platforms, 
+    scheduleEntry?.platform, 
+    record, 
+    videoNumber
+  ]);
+
+  // Load saved platforms if they exist; start with empty array if new/unconfigured
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(initialSavedPlatforms);
 
   // Resolve assigned product for this video
   const resolvedProductInfo = useMemo(() => {
@@ -14608,6 +15081,9 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
       return existingData.platform_deliverables;
     }
+    if (scheduleEntry?.platform_deliverables && Object.keys(scheduleEntry.platform_deliverables).length > 0) {
+      return scheduleEntry.platform_deliverables;
+    }
     const draftStepKey = videoNumber === 1 ? 'draft_video' : `draft_v${videoNumber}`;
     const draftData = record.status_data?.[draftStepKey] || record.status_data?.draft || {};
     const draftLatestAttempt = Array.isArray(draftData.attempts) && draftData.attempts.length > 0 
@@ -14622,9 +15098,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     const legacyLink = existingData?.final_post_link || existingData?.finalL || draftLatestAttempt?.final_product_link || draftData?.finalL || '';
     const legacyDesc = existingData?.final_description || existingData?.finalD || draftLatestAttempt?.final_description || draftData?.finalD || '';
     if (legacyLink || legacyDesc) {
+      const primaryPlat = (initialSavedPlatforms && initialSavedPlatforms[0]) || 'Instagram';
       return {
-        'Instagram': {
-          platform: 'Instagram',
+        [primaryPlat]: {
+          platform: primaryPlat,
           final_post_link: legacyLink,
           final_description: legacyDesc,
           status: legacyLink ? 'generated' : 'not_generated'
@@ -14640,6 +15117,22 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
   // History list
   const historyList: PostDateHistoryEntry[] = Array.isArray(existingData.history) ? existingData.history : [];
 
+  const [lastGeneratedPlatforms, setLastGeneratedPlatforms] = useState<string[]>(initialSavedPlatforms);
+
+  // Video or Influencer tab switcher synchronization
+  const activeVideoKey = `${record.id || (record as any).influencer_id}_v${videoNumber}`;
+  const prevVideoKeyRef = useRef(activeVideoKey);
+  useEffect(() => {
+    if (prevVideoKeyRef.current !== activeVideoKey) {
+      prevVideoKeyRef.current = activeVideoKey;
+      setSelectedPlatforms(initialSavedPlatforms);
+      setLastGeneratedPlatforms(initialSavedPlatforms);
+    } else if (selectedPlatforms.length === 0 && initialSavedPlatforms.length > 0) {
+      setSelectedPlatforms(initialSavedPlatforms);
+      setLastGeneratedPlatforms(initialSavedPlatforms);
+    }
+  }, [activeVideoKey, initialSavedPlatforms, selectedPlatforms.length]);
+
   // Synchronize state if props change or video tab switches
   useEffect(() => {
     const eff = existingData.scheduled_post_date || existingData.post_date || scheduleEntry?.post_date || '';
@@ -14648,15 +15141,11 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     if (!eff || !isStepConfirmed) {
       setIsEditingDate(true);
     }
-    if (Array.isArray(existingData.selected_platforms) && existingData.selected_platforms.length > 0) {
-      setSelectedPlatforms(existingData.selected_platforms);
-    } else if (existingData.platform) {
-      const parts = existingData.platform.split(' + ').map((s: string) => s.trim()).filter(Boolean);
-      if (parts.length > 0) setSelectedPlatforms(parts);
-    }
 
     if (existingData?.platform_deliverables && Object.keys(existingData.platform_deliverables).length > 0) {
       setPlatformDeliverables(existingData.platform_deliverables);
+    } else if (scheduleEntry?.platform_deliverables && Object.keys(scheduleEntry.platform_deliverables).length > 0) {
+      setPlatformDeliverables(scheduleEntry.platform_deliverables);
     }
 
     // Video-specific thumbnail synchronization
@@ -14679,10 +15168,136 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     scheduleEntry?.post_date, 
     scheduleEntry?.thumbnail_url, 
     scheduleEntry?.thumbnail_path, 
-    isStepConfirmed, 
-    existingData.platform, 
-    existingData.selected_platforms
+    scheduleEntry?.platform_deliverables,
+    isStepConfirmed
   ]);
+
+  // Auto-restore / safe repair of deliverables from authentic sources when saved platforms exist
+  const isResolvingMissingDeliverablesRef = useRef(false);
+  useEffect(() => {
+    if (selectedPlatforms.length === 0) return;
+    if (isResolvingMissingDeliverablesRef.current) return;
+
+    // Check if any selected platform is missing deliverable info
+    const needsResolution = selectedPlatforms.some(plat => {
+      const d = platformDeliverables[plat];
+      return !d || (!d.final_post_link && !d.final_description);
+    });
+
+    if (!needsResolution) return;
+
+    let isMounted = true;
+    const restoreMissing = async () => {
+      isResolvingMissingDeliverablesRef.current = true;
+      try {
+        const campaignId = record.campaign_id;
+        if (!campaignId) return;
+        const [allTrackingLinks, allDescriptions] = await Promise.all([
+          fetchInfluencerTrackingLinks(campaignId),
+          fetchCampaignDescriptions(campaignId)
+        ]);
+
+        if (!isMounted) return;
+
+        const prodName = assignedProductName.trim();
+        const normProd = prodName.toLowerCase();
+
+        const currentInfCode = (record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || '').trim().toLowerCase();
+        const rawCodeClean = currentInfCode.replace(/^#+/, '');
+        const currentInfId = String(record.influencer_id || '').trim();
+
+        let hasNewData = false;
+        const updated = { ...platformDeliverables };
+
+        for (const plat of selectedPlatforms) {
+          const normPlat = plat.trim().toLowerCase();
+          const existing = updated[plat];
+          if (existing && existing.final_post_link && existing.final_description) {
+            continue;
+          }
+
+          const matchedLink = allTrackingLinks.find(link => {
+            const linkInfId = String(link.influencer_id || '').trim();
+            const linkInfCode = (link.influencer_code || '').trim().toLowerCase().replace(/^#+/, '');
+            const linkCreatorCode = (link.creator_code || '').trim().toLowerCase().replace(/^#+/, '');
+            const matchInf = (linkInfId && currentInfId && linkInfId === currentInfId) ||
+              (rawCodeClean && (linkInfCode === rawCodeClean || linkCreatorCode === rawCodeClean));
+            if (!matchInf) return false;
+
+            const linkVidNum = (link.video_number || '').trim().toLowerCase();
+            const linkUtmContent = (link.utm_content || '').trim().toLowerCase();
+            const matchVideo =
+              linkVidNum === `video ${videoNumber}`.toLowerCase() ||
+              linkVidNum === String(videoNumber) ||
+              linkUtmContent === `v${videoNumber}`.toLowerCase() ||
+              (videoNumber === 1 && (!link.video_number || link.video_number === 'Video 1'));
+            if (!matchVideo) return false;
+
+            const linkPlat = (link.platform || '').trim().toLowerCase();
+            const linkUtmSource = (link.utm_source || '').trim().toLowerCase();
+            const matchPlat = linkPlat === normPlat || linkUtmSource === normPlat;
+            if (!matchPlat) return false;
+
+            if (normProd && link.product) {
+              const lp = link.product.trim().toLowerCase();
+              if (!lp.startsWith('video ')) {
+                const matchProd = lp === normProd || normalizeScriptMatch(lp) === normalizeScriptMatch(normProd);
+                if (!matchProd) return false;
+              }
+            }
+
+            return true;
+          });
+
+          const matchedDesc = allDescriptions.find(d => {
+            const dp = (d.product || '').trim().toLowerCase();
+            const dVid = (d as any).video || (d as any).video_number;
+            if (dVid) {
+              const normDVid = String(dVid).toLowerCase();
+              const matchesVid = normDVid === `video ${videoNumber}`.toLowerCase() || normDVid === String(videoNumber) || normDVid === `v${videoNumber}`;
+              if (!matchesVid) return false;
+            }
+            return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
+          }) || allDescriptions.find(d => {
+            const dp = (d.product || '').trim().toLowerCase();
+            return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
+          });
+
+          const finalLink = existing?.final_post_link || matchedLink?.tracking_url || '';
+          const finalDesc = existing?.final_description || matchedDesc?.description || '';
+
+          if (finalLink || finalDesc) {
+            hasNewData = true;
+            let status: PlatformDeliverableInfo['status'] = 'generated';
+            if (!finalLink && !finalDesc) status = 'missing';
+            else if (!finalLink) status = 'link_missing';
+            else if (!finalDesc) status = 'desc_missing';
+
+            updated[plat] = {
+              platform: plat,
+              final_post_link: finalLink,
+              final_description: finalDesc,
+              status,
+              generated_at: existing?.generated_at || new Date().toISOString(),
+              tracking_link_id: existing?.tracking_link_id || matchedLink?.id,
+              description_id: existing?.description_id || matchedDesc?.id
+            };
+          }
+        }
+
+        if (hasNewData && isMounted) {
+          setPlatformDeliverables(updated);
+        }
+      } catch (e) {
+        console.error('Error auto-restoring deliverables:', e);
+      } finally {
+        isResolvingMissingDeliverablesRef.current = false;
+      }
+    };
+
+    restoreMissing();
+    return () => { isMounted = false; };
+  }, [selectedPlatforms, videoNumber, record, assignedProductName]);
 
   const handleTogglePlatform = (platform: string) => {
     setSelectedPlatforms(prev => {
@@ -14712,12 +15327,24 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     });
   };
 
+  const hasAnyExistingDeliverables = useMemo(() => {
+    return Object.values(platformDeliverables).some(
+      (d: any) => Boolean(d && (d.status === 'generated' || d.final_post_link || d.final_description))
+    );
+  }, [platformDeliverables]);
+
   const hasGeneratedDeliverables = useMemo(() => {
     return selectedPlatforms.some(plat => {
       const d = platformDeliverables[plat];
-      return Boolean(d && (d.status === 'generated' || d.final_post_link || d.final_description));
+      return Boolean(d && (d.status === 'generated' || d.final_post_link || d.final_description || d.status === 'link_missing' || d.status === 'desc_missing' || d.status === 'missing'));
     });
   }, [selectedPlatforms, platformDeliverables]);
+
+  const isPlatformSelectionChanged = useMemo(() => {
+    if (lastGeneratedPlatforms.length === 0 || selectedPlatforms.length === 0) return false;
+    if (selectedPlatforms.length !== lastGeneratedPlatforms.length) return true;
+    return selectedPlatforms.some(p => !lastGeneratedPlatforms.includes(p));
+  }, [selectedPlatforms, lastGeneratedPlatforms]);
 
   const handleGenerateLinkAndDescription = async () => {
     if (!isDraftApproved) {
@@ -14834,6 +15461,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       }
 
       setPlatformDeliverables(updatedDeliverables);
+      setLastGeneratedPlatforms([...selectedPlatforms]);
 
       // Persist immediately to Supabase
       if (onSave) {
@@ -15165,42 +15793,56 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         </div>
 
         {/* GENERATE FINAL LINK & DESCRIPTION */}
-        {selectedPlatforms.length > 0 && (
-          <div className="space-y-3 bg-[#070c18] p-4 rounded-xl border border-slate-800/90">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h6 className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
-                  Generate Final Link & Description
-                </h6>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Automatically fetch matching product tracking URLs and captions for Video {videoNumber} across selected platforms.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleGenerateLinkAndDescription}
-                disabled={isGeneratingDeliverables || selectedPlatforms.length === 0}
-                className="self-start sm:self-center flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:from-purple-700 active:to-indigo-700 text-white transition-all shadow-md shadow-purple-900/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
-              >
-                {isGeneratingDeliverables ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin text-white" />
-                    <span>Generating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={16} className="text-amber-300" />
-                    <span>{hasGeneratedDeliverables ? 'Regenerate Link and Description' : 'Generate Link and Description'}</span>
-                  </>
-                )}
-              </button>
+        <div className="space-y-3 bg-[#070c18] p-4 rounded-xl border border-slate-800/90">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h6 className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
+                Generate Final Link & Description
+              </h6>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Automatically fetch matching product tracking URLs and captions for Video {videoNumber} across selected platforms.
+              </p>
             </div>
-          </div>
-        )}
 
-        {/* Platform Deliverable Sections (Shown ONLY after generation) */}
-        {hasGeneratedDeliverables && (
+            <button
+              type="button"
+              onClick={handleGenerateLinkAndDescription}
+              disabled={isGeneratingDeliverables || selectedPlatforms.length === 0}
+              className="self-start sm:self-center flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:from-purple-700 active:to-indigo-700 text-white transition-all shadow-md shadow-purple-900/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+              title={selectedPlatforms.length === 0 ? 'Select at least one platform to enable generation' : undefined}
+            >
+              {isGeneratingDeliverables ? (
+                <>
+                  <Loader2 size={16} className="animate-spin text-white" />
+                  <span>Generating...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={16} className="text-amber-300" />
+                  <span>{hasAnyExistingDeliverables ? 'Regenerate Link and Description' : 'Generate Link and Description'}</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Prompt when no platforms selected */}
+          {selectedPlatforms.length === 0 && (
+            <p className="text-[11px] text-slate-500 italic pt-1 border-t border-slate-800/60">
+              Please select at least one platform above to enable generation.
+            </p>
+          )}
+
+          {/* Notice when platform selection changed after generation */}
+          {isPlatformSelectionChanged && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium">
+              <AlertTriangle size={14} className="shrink-0 text-amber-400" />
+              <span>Platform selection changed. Click <strong>Regenerate Link and Description</strong> to update links and captions for selected platforms.</span>
+            </div>
+          )}
+        </div>
+
+        {/* Platform Deliverable Sections (Shown ONLY when platforms are selected and have generated deliverables) */}
+        {selectedPlatforms.length > 0 && hasGeneratedDeliverables && (
           <div className="space-y-4 pt-1">
             {selectedPlatforms.map((platId) => {
               const deliverable = platformDeliverables[platId] || {
@@ -15857,6 +16499,8 @@ const BeforePostForm: React.FC<BeforePostFormProps> = ({
 
   const [isUploadingVideo, setIsUploadingVideo] = useState<boolean>(false);
   const [isUploadingThumbnail, setIsUploadingThumbnail] = useState<boolean>(false);
+  const [isDownloadingThumbnail, setIsDownloadingThumbnail] = useState<boolean>(false);
+  const [isDownloadingVideo, setIsDownloadingVideo] = useState<boolean>(false);
   const [linkCopied, setLinkCopied] = useState<boolean>(false);
   const [descCopied, setDescCopied] = useState<boolean>(false);
 
@@ -16094,6 +16738,72 @@ const BeforePostForm: React.FC<BeforePostFormProps> = ({
     }
   };
 
+  // Download Thumbnail
+  const handleDownloadThumbnail = async () => {
+    if (!thumbnailUrl) return;
+    setIsDownloadingThumbnail(true);
+    const toastId = toast.loading('Preparing thumbnail download...');
+    try {
+      const influencerCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).influencer_code || (record as any).code || 'influencer';
+      const cleanInfCode = (influencerCode || 'influencer').replace(/[^a-zA-Z0-9_-]/g, '');
+      const thumbExt = thumbnailFileName?.split('.').pop() || thumbnailUrl?.split('.').pop()?.split('?')[0] || 'png';
+      const filename = `${cleanInfCode}_video${videoNumber}_thumbnail.${thumbExt}`;
+      await downloadMediaFile(thumbnailUrl, filename);
+      toast.success('Thumbnail downloaded successfully!', { id: toastId });
+    } catch (err: any) {
+      console.error('Error downloading thumbnail:', err);
+      toast.error('Failed to download thumbnail: ' + (err?.message || 'Download error'), { id: toastId });
+    } finally {
+      setIsDownloadingThumbnail(false);
+    }
+  };
+
+  // Remove Thumbnail
+  const handleRemoveThumbnail = async () => {
+    setThumbnailUrl('');
+    setThumbnailPath('');
+    setThumbnailFileName('');
+    await persistChanges({
+      thumbnail_url: '',
+      thumbnail_path: '',
+      thumbnail_file_name: ''
+    });
+    toast.success('Thumbnail removed.');
+  };
+
+  // Download Video
+  const handleDownloadVideo = async () => {
+    if (!videoUrl) return;
+    setIsDownloadingVideo(true);
+    const toastId = toast.loading('Preparing video download...');
+    try {
+      const influencerCode = record.dispatch?.influencer_code || record.influencer?.code || (record as any).influencer_code || (record as any).code || 'influencer';
+      const cleanInfCode = (influencerCode || 'influencer').replace(/[^a-zA-Z0-9_-]/g, '');
+      const vidExt = videoFileName?.split('.').pop() || videoUrl?.split('.').pop()?.split('?')[0] || 'mp4';
+      const filename = `${cleanInfCode}_video${videoNumber}_video.${vidExt}`;
+      await downloadMediaFile(videoUrl, filename);
+      toast.success('Video downloaded successfully!', { id: toastId });
+    } catch (err: any) {
+      console.error('Error downloading video:', err);
+      toast.error('Failed to download video: ' + (err?.message || 'Download error'), { id: toastId });
+    } finally {
+      setIsDownloadingVideo(false);
+    }
+  };
+
+  // Remove Video
+  const handleRemoveVideo = async () => {
+    setVideoUrl('');
+    setVideoPath('');
+    setVideoFileName('');
+    await persistChanges({
+      video_url: '',
+      video_path: '',
+      video_file_name: ''
+    });
+    toast.success('Video removed.');
+  };
+
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       {/* Hidden File Inputs */}
@@ -16314,25 +17024,45 @@ const BeforePostForm: React.FC<BeforePostFormProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center pl-11 sm:pl-0">
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center pl-11 sm:pl-0 flex-wrap">
             {hasThumbnail ? (
               <>
                 <button
                   type="button"
                   onClick={() => setIsPreviewingThumbnail(true)}
                   className="px-3 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="View full thumbnail"
                 >
                   <Eye size={13} />
                   <span>View</span>
                 </button>
                 <button
                   type="button"
+                  onClick={handleDownloadThumbnail}
+                  disabled={isDownloadingThumbnail}
+                  className="px-3 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-emerald-300 hover:text-emerald-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Download thumbnail image"
+                >
+                  {isDownloadingThumbnail ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  <span>{isDownloadingThumbnail ? 'Downloading...' : 'Download'}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => thumbnailInputRef.current?.click()}
                   disabled={isUploadingThumbnail}
                   className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Replace thumbnail"
                 >
                   {isUploadingThumbnail ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                   <span>{isUploadingThumbnail ? 'Uploading...' : 'Replace'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemoveThumbnail}
+                  className="px-2.5 py-1.5 bg-[#070c18] hover:bg-rose-950/40 border border-slate-700 hover:border-rose-800/60 text-slate-400 hover:text-rose-300 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Remove thumbnail"
+                >
+                  <Trash2 size={13} />
                 </button>
               </>
             ) : (
@@ -16388,25 +17118,45 @@ const BeforePostForm: React.FC<BeforePostFormProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center pl-11 sm:pl-0">
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center pl-11 sm:pl-0 flex-wrap">
             {hasValidVideo ? (
               <>
                 <button
                   type="button"
                   onClick={() => setIsPreviewingVideo(true)}
                   className="px-3 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-purple-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Preview video"
                 >
                   <Play size={13} />
                   <span>Preview</span>
                 </button>
                 <button
                   type="button"
+                  onClick={handleDownloadVideo}
+                  disabled={isDownloadingVideo}
+                  className="px-3 py-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700 text-emerald-300 hover:text-emerald-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Download video file"
+                >
+                  {isDownloadingVideo ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  <span>{isDownloadingVideo ? 'Downloading...' : 'Download'}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => videoInputRef.current?.click()}
                   disabled={isUploadingVideo}
                   className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Replace video"
                 >
                   {isUploadingVideo ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                   <span>{isUploadingVideo ? 'Uploading...' : 'Replace'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemoveVideo}
+                  className="px-2.5 py-1.5 bg-[#070c18] hover:bg-rose-950/40 border border-slate-700 hover:border-rose-800/60 text-slate-400 hover:text-rose-300 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                  title="Remove video"
+                >
+                  <Trash2 size={13} />
                 </button>
               </>
             ) : (

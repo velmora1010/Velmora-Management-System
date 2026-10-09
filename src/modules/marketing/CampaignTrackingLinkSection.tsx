@@ -24,13 +24,15 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
-  ChevronsUpDown
+  ChevronsUpDown,
+  MousePointerClick
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
 import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
 import { 
   fetchInfluencerTrackingLinks, 
   deleteInfluencerTrackingLink,
+  fetchTrackingLinkClicks,
   TRACKING_PLATFORMS, 
   TRACKING_VIDEOS, 
   compareTrackingLinksByCodeAsc 
@@ -135,6 +137,11 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // Click tracking state
+  const [clicksMap, setClicksMap] = useState<Record<string, number>>({});
+  const [isClicksConfigured, setIsClicksConfigured] = useState<boolean>(true);
+  const [isLoadingClicks, setIsLoadingClicks] = useState<boolean>(false);
+
   // Filters: Product, Platform, Video
   const [selectedProduct, setSelectedProduct] = useState<string>('All');
   const [selectedPlatform, setSelectedPlatform] = useState<string>('All');
@@ -175,13 +182,29 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     return set;
   }, [influencers]);
 
-  // Load tracking links
+  // Load tracking links & fetch server-side click counts
   const loadLinks = useCallback(async () => {
     setIsLoading(true);
     setFetchError(null);
     try {
       const data = await fetchInfluencerTrackingLinks(campaign.id);
       setLinks(data);
+
+      const linkIds = data.map(l => String(l.id));
+      if (linkIds.length > 0) {
+        setIsLoadingClicks(true);
+        try {
+          const res = await fetchTrackingLinkClicks(linkIds);
+          setIsClicksConfigured(res.configured);
+          setClicksMap(res.clicks || {});
+        } catch (e) {
+          console.warn('Failed to fetch clicks:', e);
+        } finally {
+          setIsLoadingClicks(false);
+        }
+      } else {
+        setClicksMap({});
+      }
     } catch (err: any) {
       console.error('Error loading influencer tracking links:', err);
       const msg = err?.message || 'Failed to load tracking links.';
@@ -224,6 +247,14 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       });
       return copy.sort(compareTrackingLinksByCodeAsc);
     });
+
+    const savedIds = savedLinks.map(l => String(l.id));
+    if (savedIds.length > 0) {
+      fetchTrackingLinkClicks(savedIds).then(res => {
+        setIsClicksConfigured(res.configured);
+        setClicksMap(prev => ({ ...prev, ...(res.clicks || {}) }));
+      });
+    }
   };
 
   // Delete handler
@@ -847,8 +878,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                 {isPlatformExpanded && (
                                   <div className="border-t border-slate-800/80 bg-[#070c18]">
                                     {viewMode === 'table' ? (
-                                      /* 5-Column Clean Table: Influencer, Creator Code, Video, Tracking Link, Actions */
-                                      /* (Product and Platform are NOT repeated to avoid clutter!) */
+                                      /* 6-Column Clean Table: Influencer, Creator Code, Video, Tracking Link, Clicks, Actions */
                                       <div className="overflow-x-auto">
                                         <table className="w-full text-left text-xs text-slate-300">
                                           <thead className="bg-[#050914] border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
@@ -857,6 +887,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                               <th scope="col" className="px-4 py-3 min-w-[110px]">Creator Code</th>
                                               <th scope="col" className="px-4 py-3 min-w-[90px]">Video</th>
                                               <th scope="col" className="px-4 py-3 min-w-[280px]">Tracking Link</th>
+                                              <th scope="col" className="px-4 py-3 text-center min-w-[100px]">Clicks</th>
                                               <th scope="col" className="px-4 py-3 text-right min-w-[140px]">Actions</th>
                                             </tr>
                                           </thead>
@@ -909,7 +940,35 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </div>
                                                   </td>
 
-                                                  {/* 5. Actions (Copy, Open, Edit, Delete) */}
+                                                  {/* 5. Clicks (Atomic server-side counter) */}
+                                                  <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                                                    {isLoadingClicks ? (
+                                                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-mono">
+                                                        <Loader2 size={11} className="animate-spin text-purple-400" />
+                                                        <span>...</span>
+                                                      </span>
+                                                    ) : !isClicksConfigured ? (
+                                                      <span
+                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-800/80 text-slate-400 border border-slate-700/60"
+                                                        title="Redis click tracking not configured"
+                                                      >
+                                                        N/A
+                                                      </span>
+                                                    ) : (
+                                                      <span
+                                                        className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold border ${
+                                                          (clicksMap[link.id] || 0) > 0
+                                                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                                                            : 'bg-slate-900 border-slate-800 text-slate-400'
+                                                        }`}
+                                                        title={`${clicksMap[link.id] || 0} recorded clicks`}
+                                                      >
+                                                        {(clicksMap[link.id] || 0).toLocaleString()}
+                                                      </span>
+                                                    )}
+                                                  </td>
+
+                                                  {/* 6. Actions (Copy, Open, Edit, Delete) */}
                                                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                                                     <div className="flex items-center justify-end gap-1.5">
                                                       <button
@@ -971,6 +1030,9 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                           <CampaignTrackingLinkCard
                                             key={link.id}
                                             link={link}
+                                            clicks={clicksMap[link.id] ?? 0}
+                                            isClicksConfigured={isClicksConfigured}
+                                            isLoadingClicks={isLoadingClicks}
                                             onEdit={handleOpenEdit}
                                             onDelete={(l) => setLinkToDelete(l)}
                                           />

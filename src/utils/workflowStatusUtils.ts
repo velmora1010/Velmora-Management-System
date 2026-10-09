@@ -337,6 +337,12 @@ export function getCurrentWorkflowState(
   }
 
   if (!isDelivered) {
+    if (isAfterDispatchCompleted) {
+      return 'after_dispatch';
+    }
+    if (isOfferAgreementCompleted) {
+      return 'offer_agreement';
+    }
     return 'not_started';
   }
 

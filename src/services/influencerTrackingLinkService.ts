@@ -170,6 +170,83 @@ export function buildInfluencerTrackingUrl(
   }
 }
 
+export const ALLOWED_AMAZON_DOMAINS = [
+  'amazon.in',
+  'amazon.com',
+  'amazon.co.uk',
+  'amazon.de',
+  'amazon.fr',
+  'amazon.es',
+  'amazon.it',
+  'amazon.ca',
+  'amazon.com.au',
+  'amazon.co.jp',
+  'amzn.to',
+  'amzn.in',
+  'amzn.eu'
+];
+
+/**
+ * Validates whether a URL is a legitimate Amazon marketplace URL
+ */
+export function isValidAmazonUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const clean = urlStr.trim();
+    const test = clean.startsWith('http://') || clean.startsWith('https://') ? clean : `https://${clean}`;
+    const parsed = new URL(test);
+    const host = parsed.hostname.toLowerCase();
+    return ALLOWED_AMAZON_DOMAINS.some(domain => host === domain || host.endsWith('.' + domain));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Builds the unique redirect tracking URL for Amazon destination
+ * Formats: ${origin}/r/${linkId} (with fallback to window.location.origin)
+ */
+export function buildAmazonRedirectTrackingUrl(linkId: string, origin?: string): string {
+  const base = origin || (typeof window !== 'undefined' ? window.location.origin : '');
+  const cleanId = encodeURIComponent(String(linkId || '').trim());
+  return base ? `${base}/r/${cleanId}` : `/r/${cleanId}`;
+}
+
+export interface FetchClicksResult {
+  configured: boolean;
+  clicks: Record<string, number>;
+  error?: string;
+}
+
+/**
+ * Fetches server-side persistent click counts from /api/clicks
+ */
+export async function fetchTrackingLinkClicks(linkIds: string[]): Promise<FetchClicksResult> {
+  if (!Array.isArray(linkIds) || linkIds.length === 0) {
+    return { configured: true, clicks: {} };
+  }
+  try {
+    const cleanIds = linkIds.map(id => String(id).trim()).filter(Boolean);
+    const res = await fetch(`/api/clicks?ids=${encodeURIComponent(cleanIds.join(','))}`);
+    if (!res.ok) {
+      throw new Error(`Click count API returned HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return {
+      configured: data.configured !== false,
+      clicks: data.clicks || {},
+      error: data.error
+    };
+  } catch (err: any) {
+    console.warn('Failed to fetch tracking clicks from API:', err);
+    return {
+      configured: false,
+      clicks: {},
+      error: err?.message || 'Failed to fetch clicks'
+    };
+  }
+}
+
 // ==========================================
 // 4. RECORD NORMALIZATION & LOCAL CACHING
 // ==========================================
@@ -231,9 +308,20 @@ export function normalizeTrackingLink(raw: any): InfluencerTrackingLink {
 
   const base_product_url = raw.base_product_url || extra.base_product_url || urlBase || '';
 
+  // Determine destination type (Shopify or Amazon)
+  const isAmazon = 
+    raw.destination_type === 'amazon' || 
+    extra.destination_type === 'amazon' ||
+    isValidAmazonUrl(base_product_url) ||
+    (raw.tracking_url && (raw.tracking_url.includes('/r/') || raw.tracking_url.includes('/api/r')));
+  const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
+  const original_destination_url = raw.original_destination_url || extra.original_amazon_url || extra.original_destination_url || (isAmazon ? base_product_url : undefined);
+
   const cleanNotes = extra.userNotes !== undefined
     ? extra.userNotes
     : (typeof raw.notes === 'string' && !raw.notes.startsWith('{') ? raw.notes : '');
+
+  const clicks = typeof raw.clicks === 'number' ? raw.clicks : (typeof extra.clicks === 'number' ? extra.clicks : undefined);
 
   return {
     id: String(raw.id || `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`),
@@ -251,6 +339,9 @@ export function normalizeTrackingLink(raw: any): InfluencerTrackingLink {
     utm_content,
     base_product_url,
     tracking_url: raw.tracking_url || '',
+    destination_type,
+    original_destination_url,
+    clicks,
     notes: cleanNotes,
     created_at: raw.created_at || new Date().toISOString(),
     updated_at: raw.updated_at || new Date().toISOString()
@@ -320,6 +411,8 @@ export interface BatchGenerateParams {
   campaign_id: string | number;
   product: string;
   base_product_url: string;
+  destination_type?: 'shopify' | 'amazon';
+  original_amazon_url?: string;
   platform: string; // 'Instagram', 'YouTube', etc.
   platform_category: PlatformCategory;
   utm_source: string; // 'instagram', 'youtube', etc.
@@ -375,6 +468,9 @@ export async function batchGenerateInfluencerTrackingLinks(
   const existingLinks = await fetchInfluencerTrackingLinks(cleanCampaignId);
   const now = new Date().toISOString();
   const cleanBaseUrl = extractBaseProductUrl(params.base_product_url);
+  const isAmazon = params.destination_type === 'amazon' || isValidAmazonUrl(params.base_product_url);
+  const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
+  const original_destination_url = isAmazon ? (params.original_amazon_url || params.base_product_url).trim() : undefined;
 
   // Prepare link records for each eligible influencer in ascending order
   const recordsToUpsert: InfluencerTrackingLink[] = sortedInfluencers.map((inf) => {
@@ -382,14 +478,6 @@ export async function batchGenerateInfluencerTrackingLinks(
     const rawCode = inf.code || (inf as any).influencer_code || `HIS${inf.id}`;
     const cleanCode = String(rawCode).replace(/^#+/, '').trim().toLowerCase();
     const displayCode = `#${cleanCode.toUpperCase()}`;
-
-    // Build unique tracking URL
-    const trackingUrl = buildInfluencerTrackingUrl(
-      params.base_product_url,
-      params.utm_source,
-      params.utm_content,
-      cleanCode
-    );
 
     // Deduplication check: Match (campaign_id, influencer_id, product, platform, video_number)
     const existing = existingLinks.find(
@@ -401,37 +489,41 @@ export async function batchGenerateInfluencerTrackingLinks(
         (l.video_number || '').trim().toLowerCase() === params.video_number.trim().toLowerCase()
     );
 
-    if (existing) {
-      // Update existing record
-      return {
-        ...existing,
-        influencer_name: inf.influencer_name || inf.name || existing.influencer_name || '',
-        influencer_code: displayCode,
-        creator_code: cleanCode,
-        product: params.product.trim(),
-        platform: params.platform,
-        platform_category: params.platform_category,
-        video_number: params.video_number,
-        utm_source: params.utm_source.toLowerCase(),
-        utm_medium: 'influencer',
-        utm_content: params.utm_content.toLowerCase(),
-        base_product_url: cleanBaseUrl,
-        tracking_url: trackingUrl,
-        updated_at: now
-      };
-    }
-
-    // Create fresh record
-    const newId =
+    const recordId = existing?.id || (
       typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
-        : `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        : `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+    );
+
+    // Build unique tracking URL
+    const trackingUrl = isAmazon
+      ? buildAmazonRedirectTrackingUrl(recordId)
+      : buildInfluencerTrackingUrl(
+          params.base_product_url,
+          params.utm_source,
+          params.utm_content,
+          cleanCode
+        );
+
+    const notesPayload = JSON.stringify({
+      destination_type,
+      original_amazon_url: original_destination_url,
+      platform: params.platform,
+      platform_category: params.platform_category,
+      video_number: params.video_number,
+      utm_source: params.utm_source,
+      utm_medium: 'influencer',
+      utm_content: params.utm_content,
+      creator_code: cleanCode,
+      base_product_url: isAmazon ? (original_destination_url || cleanBaseUrl) : cleanBaseUrl,
+      userNotes: existing?.notes || ''
+    });
 
     return {
-      id: newId,
+      id: recordId,
       campaign_id: cleanCampaignId,
       influencer_id: String(inf.id).trim(),
-      influencer_name: inf.influencer_name || inf.name || '',
+      influencer_name: inf.influencer_name || inf.name || existing?.influencer_name || '',
       influencer_code: displayCode,
       creator_code: cleanCode,
       product: params.product.trim(),
@@ -441,10 +533,13 @@ export async function batchGenerateInfluencerTrackingLinks(
       utm_source: params.utm_source.toLowerCase(),
       utm_medium: 'influencer',
       utm_content: params.utm_content.toLowerCase(),
-      base_product_url: cleanBaseUrl,
+      base_product_url: isAmazon ? (original_destination_url || cleanBaseUrl) : cleanBaseUrl,
       tracking_url: trackingUrl,
-      notes: '',
-      created_at: now,
+      destination_type,
+      original_destination_url,
+      clicks: existing?.clicks || 0,
+      notes: notesPayload,
+      created_at: existing?.created_at || now,
       updated_at: now
     };
   });
@@ -477,17 +572,21 @@ export async function batchGenerateInfluencerTrackingLinks(
             influencer_code: c.influencer_code,
             product: c.product,
             tracking_url: c.tracking_url,
-            notes: JSON.stringify({
-              platform: c.platform,
-              platform_category: c.platform_category,
-              video_number: c.video_number,
-              utm_source: c.utm_source,
-              utm_medium: c.utm_medium,
-              utm_content: c.utm_content,
-              creator_code: c.creator_code,
-              base_product_url: c.base_product_url,
-              userNotes: c.notes || ''
-            }),
+            notes: typeof c.notes === 'string' && c.notes.startsWith('{')
+              ? c.notes
+              : JSON.stringify({
+                  platform: c.platform,
+                  platform_category: c.platform_category,
+                  video_number: c.video_number,
+                  utm_source: c.utm_source,
+                  utm_medium: c.utm_medium,
+                  utm_content: c.utm_content,
+                  creator_code: c.creator_code,
+                  base_product_url: c.base_product_url,
+                  destination_type: c.destination_type,
+                  original_destination_url: c.original_destination_url,
+                  userNotes: c.notes || ''
+                }),
             created_at: c.created_at,
             updated_at: c.updated_at
           }));
@@ -551,6 +650,8 @@ export interface CreateTrackingLinkParams {
   influencer_name?: string;
   influencer_code?: string;
   product: string;
+  destination_type?: 'shopify' | 'amazon';
+  original_destination_url?: string;
   platform?: string;
   platform_category?: PlatformCategory;
   video_number?: string;
@@ -574,6 +675,24 @@ export async function createInfluencerTrackingLink(
   const cleanCode = rawCode.replace(/^#+/, '').trim().toLowerCase();
   const displayCode = cleanCode ? `#${cleanCode.toUpperCase()}` : '';
 
+  const isAmazon = params.destination_type === 'amazon' || isValidAmazonUrl(params.base_product_url || '');
+  const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
+  const original_destination_url = params.original_destination_url || (isAmazon ? params.base_product_url : undefined);
+
+  const notesPayload = JSON.stringify({
+    destination_type,
+    original_amazon_url: original_destination_url,
+    platform: params.platform || 'Instagram',
+    platform_category: params.platform_category || 'WEBSITE',
+    video_number: params.video_number || 'Video 1',
+    utm_source: (params.utm_source || 'instagram').toLowerCase(),
+    utm_medium: 'influencer',
+    utm_content: (params.utm_content || 'v1').toLowerCase(),
+    creator_code: cleanCode,
+    base_product_url: params.base_product_url || '',
+    userNotes: params.notes?.trim() || ''
+  });
+
   const newRecord: InfluencerTrackingLink = {
     id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
     campaign_id: cleanCampaignId,
@@ -588,9 +707,12 @@ export async function createInfluencerTrackingLink(
     utm_source: (params.utm_source || 'instagram').toLowerCase(),
     utm_medium: 'influencer',
     utm_content: (params.utm_content || 'v1').toLowerCase(),
-    base_product_url: params.base_product_url || '',
+    base_product_url: isAmazon ? (original_destination_url || params.base_product_url || '') : (params.base_product_url || ''),
     tracking_url: params.tracking_url.trim(),
-    notes: params.notes?.trim() || '',
+    destination_type,
+    original_destination_url,
+    clicks: 0,
+    notes: notesPayload,
     created_at: now,
     updated_at: now
   };
@@ -612,17 +734,7 @@ export async function createInfluencerTrackingLink(
           influencer_code: newRecord.influencer_code,
           product: newRecord.product,
           tracking_url: newRecord.tracking_url,
-          notes: JSON.stringify({
-            platform: newRecord.platform,
-            platform_category: newRecord.platform_category,
-            video_number: newRecord.video_number,
-            utm_source: newRecord.utm_source,
-            utm_medium: newRecord.utm_medium,
-            utm_content: newRecord.utm_content,
-            creator_code: newRecord.creator_code,
-            base_product_url: newRecord.base_product_url,
-            userNotes: newRecord.notes
-          }),
+          notes: notesPayload,
           created_at: newRecord.created_at,
           updated_at: newRecord.updated_at
         };
@@ -649,6 +761,8 @@ export interface UpdateTrackingLinkParams {
   influencer_name?: string;
   influencer_code?: string;
   product: string;
+  destination_type?: 'shopify' | 'amazon';
+  original_destination_url?: string;
   platform?: string;
   platform_category?: PlatformCategory;
   video_number?: string;
@@ -674,13 +788,31 @@ export async function updateInfluencerTrackingLink(
   const cleanCode = rawCode.replace(/^#+/, '').trim().toLowerCase();
   const displayCode = cleanCode ? `#${cleanCode.toUpperCase()}` : '';
 
+  const isAmazon = params.destination_type === 'amazon' || isValidAmazonUrl(params.base_product_url || '');
+  const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
+  const original_destination_url = params.original_destination_url || (isAmazon ? params.base_product_url : undefined);
+
+  const notesPayload = JSON.stringify({
+    destination_type,
+    original_amazon_url: original_destination_url,
+    platform: params.platform,
+    platform_category: params.platform_category,
+    video_number: params.video_number,
+    utm_source: params.utm_source,
+    utm_medium: params.utm_medium,
+    utm_content: params.utm_content,
+    creator_code: cleanCode,
+    base_product_url: params.base_product_url,
+    userNotes: params.notes?.trim() || ''
+  });
+
   const updates = {
     influencer_id: String(params.influencer_id).trim(),
     influencer_name: params.influencer_name?.trim() || '',
     influencer_code: displayCode,
     product: params.product.trim(),
     tracking_url: params.tracking_url.trim(),
-    notes: params.notes?.trim() || '',
+    notes: notesPayload,
     updated_at: now
   };
 
@@ -696,7 +828,7 @@ export async function updateInfluencerTrackingLink(
       console.warn('Supabase update tracking link failed, updating locally:', error.message);
     }
 
-    const saved = data ? normalizeTrackingLink(data) : { ...updates, id, campaign_id: cleanCampaignId } as InfluencerTrackingLink;
+    const saved = data ? normalizeTrackingLink(data) : { ...updates, id, campaign_id: cleanCampaignId, destination_type, original_destination_url } as InfluencerTrackingLink;
     const local = getLocalTrackingLinks(cleanCampaignId);
     const updatedList = local.map(l => l.id === id ? { ...l, ...saved } : l);
     saveLocalTrackingLinks(cleanCampaignId, updatedList);
@@ -706,7 +838,7 @@ export async function updateInfluencerTrackingLink(
     const local = getLocalTrackingLinks(cleanCampaignId);
     const found = local.find(l => l.id === id);
     if (!found) throw new Error('Tracking link not found');
-    const updated = { ...found, ...updates };
+    const updated = { ...found, ...updates, destination_type, original_destination_url };
     saveLocalTrackingLinks(cleanCampaignId, local.map(l => l.id === id ? updated : l));
     return updated;
   }
