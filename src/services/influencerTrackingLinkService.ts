@@ -202,7 +202,7 @@ export function isValidAmazonUrl(urlStr: string): boolean {
   }
 }
 
-export const BRANDED_TRACKING_DOMAIN = 'https://go.justmixx.com';
+export const BRANDED_TRACKING_DOMAIN = 'https://velmora-management-system.vercel.app/r';
 
 /**
  * Builds the canonical short code/slug from creator code and video number.
@@ -226,7 +226,7 @@ export function buildTrackingSlug(
 }
 
 /**
- * Builds the branded tracking URL: https://go.justmixx.com/${slug}
+ * Builds the reliable Vercel-hosted tracking URL: https://velmora-management-system.vercel.app/r/${slug}
  */
 export function buildBrandedTrackingUrl(slug: string): string {
   const cleanSlug = encodeURIComponent(String(slug || '').trim().replace(/^\/+|\/+$/g, ''));

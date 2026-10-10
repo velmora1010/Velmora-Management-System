@@ -866,23 +866,23 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       </div>
 
       {/* Notice Banners */}
-      <div className="bg-purple-950/20 border border-purple-500/30 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-purple-200">
+      <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-emerald-200">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-400 flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shrink-0">
             <Globe size={16} />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-bold text-white">Custom Branded Domain:</span>
-              <span className="font-mono text-amber-300 font-semibold bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-500/30">
-                go.justmixx.com
+              <span className="font-bold text-white">Active Tracking Endpoint:</span>
+              <span className="font-mono text-emerald-300 font-semibold bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/30">
+                velmora-management-system.vercel.app/r
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                Awaiting DNS CNAME
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                Live & Verified
               </span>
             </div>
             <p className="text-slate-400 text-[11px] mt-0.5 truncate">
-              Amazon links display as clean branded short codes (e.g. <span className="font-mono text-purple-300">go.justmixx.com/his2-v1</span>). Legacy UUID links remain supported.
+              Amazon tracking links resolve directly via the production Vercel endpoint (e.g. <span className="font-mono text-emerald-300">velmora-management-system.vercel.app/r/his4-v1</span>) without third-party DNS dependency.
             </p>
           </div>
         </div>
