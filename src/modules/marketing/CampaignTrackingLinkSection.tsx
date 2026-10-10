@@ -169,9 +169,13 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
-  // Clear selection whenever the selected product changes to prevent accidental cross-product actions
+  // Dedicated Marketplace View state within a selected product
+  const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
+
+  // Clear selection and selected marketplace whenever the selected product changes
   useEffect(() => {
     setSelectedLinkIds(new Set());
+    setSelectedMarketplace(null);
   }, [selectedProduct]);
 
   // Accordion expansion state:
@@ -372,6 +376,11 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         (l.video_number && l.video_number.toLowerCase() === selectedVideo.toLowerCase()) ||
         (l.utm_content && l.utm_content.toLowerCase() === selectedVideo.toLowerCase());
 
+      // Dedicated Selected Marketplace Filter (Drill-down level)
+      const matchMarketplace = !selectedMarketplace ||
+        (l.platform && l.platform.toLowerCase() === selectedMarketplace.toLowerCase()) ||
+        (l.utm_source && l.utm_source.toLowerCase() === selectedMarketplace.toLowerCase());
+
       // Search Query
       const q = searchQuery.trim().toLowerCase();
       const matchSearch = !q || 
@@ -382,11 +391,11 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         (l.product && l.product.toLowerCase().includes(q)) ||
         (l.platform && l.platform.toLowerCase().includes(q));
 
-      return matchProduct && matchPlatform && matchVideo && matchSearch;
+      return matchProduct && matchPlatform && matchVideo && matchMarketplace && matchSearch;
     });
 
     return filtered.sort(compareTrackingLinksByCodeAsc);
-  }, [links, eliminatedInfluencerIds, selectedProduct, selectedPlatform, selectedVideo, searchQuery]);
+  }, [links, eliminatedInfluencerIds, selectedProduct, selectedPlatform, selectedVideo, selectedMarketplace, searchQuery]);
 
   // Hierarchical Grouping: PRODUCT -> PLATFORM CATEGORY (WEBSITE / MARKETPLACE) -> PLATFORM -> LINKS
   const productGroups: ProductGroup[] = useMemo(() => {
@@ -576,6 +585,77 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       return a.name.localeCompare(b.name);
     });
   }, [links, eliminatedInfluencerIds]);
+
+  // Marketplaces and platforms summaries specifically for the currently selected product
+  const selectedProductMarketplaces = useMemo(() => {
+    if (selectedProduct === 'All') return [];
+
+    // Filter links for this product
+    const prodLinks = links.filter(
+      l => !eliminatedInfluencerIds.has(String(l.influencer_id)) &&
+           (l.product || '').toLowerCase() === selectedProduct.toLowerCase()
+    );
+
+    // Group by platform name
+    const platMap = new Map<string, {
+      name: string;
+      category: 'MARKETPLACE' | 'WEBSITE' | string;
+      count: number;
+      brandColor: string;
+      description: string;
+    }>();
+
+    // Default channels to display for easy link creation/viewing
+    const defaultChannels = [
+      { name: 'Amazon', category: 'MARKETPLACE', brandColor: '#FF9900', description: 'Amazon short links redirecting to product ASINs' },
+      { name: 'Flipkart', category: 'MARKETPLACE', brandColor: '#2874F0', description: 'Flipkart marketplace influencer tracking' },
+      { name: 'Meesho', category: 'MARKETPLACE', brandColor: '#F43397', description: 'Meesho reseller & influencer campaign links' },
+      { name: 'Instagram', category: 'WEBSITE', brandColor: '#E1306C', description: 'Instagram bio and story UTM campaign links' },
+      { name: 'YouTube', category: 'WEBSITE', brandColor: '#FF0000', description: 'YouTube video description and pinned comment links' }
+    ];
+
+    defaultChannels.forEach(c => {
+      platMap.set(c.name.toLowerCase(), {
+        name: c.name,
+        category: c.category,
+        count: 0,
+        brandColor: c.brandColor,
+        description: c.description
+      });
+    });
+
+    // Populate actual counts
+    prodLinks.forEach(l => {
+      const pName = (l.platform || l.utm_source || 'Amazon').trim();
+      const matched = TRACKING_PLATFORMS.find(
+        p => p.name.toLowerCase() === pName.toLowerCase() ||
+             p.utmSource.toLowerCase() === pName.toLowerCase() ||
+             p.id.toLowerCase() === pName.toLowerCase()
+      );
+      const canonical = matched?.name || pName;
+      const key = canonical.toLowerCase();
+
+      if (!platMap.has(key)) {
+        platMap.set(key, {
+          name: canonical,
+          category: l.platform_category || matched?.category || 'MARKETPLACE',
+          count: 0,
+          brandColor: matched?.brandColor || '#A855F7',
+          description: `${canonical} campaign tracking links`
+        });
+      }
+
+      platMap.get(key)!.count += 1;
+    });
+
+    // Return list sorted: Marketplaces with links first, then marketplaces, then websites
+    return Array.from(platMap.values()).sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      if (a.category === 'MARKETPLACE' && b.category !== 'MARKETPLACE') return -1;
+      if (b.category === 'MARKETPLACE' && a.category !== 'MARKETPLACE') return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [links, eliminatedInfluencerIds, selectedProduct]);
 
   // Toggle handlers for collapsible sections
   const toggleProduct = (prodName: string) => {
@@ -1055,134 +1135,241 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         /* =========================================================================
            2. DEDICATED SELECTED PRODUCT VIEW / SEARCH RESULTS VIEW
            ========================================================================= */
-        <div className="space-y-6">
-          {/* Breadcrumb / Back to Products Bar & Bulk Selection Toolbar */}
-          <div className="space-y-3">
-            {selectedProduct !== 'All' && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0b1329] border border-slate-800 p-3.5 sm:p-4 rounded-2xl">
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProduct('All')}
-                    className="flex items-center gap-2 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-purple-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm"
-                  >
-                    <ArrowLeft size={15} />
-                    <span>Back to Products</span>
-                  </button>
-                  <div className="h-5 w-[1px] bg-slate-800 hidden sm:block" />
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400 font-medium">Viewing Product:</span>
-                    <span className="text-sm font-bold text-white uppercase tracking-wide px-2.5 py-0.5 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300">
-                      {selectedProduct}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 self-end sm:self-auto text-xs text-slate-400">
-                  <span className="font-semibold text-slate-300">
-                    {filteredLinks.length} {filteredLinks.length === 1 ? 'Tracking Link' : 'Tracking Links'}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* BULK DELETE TOOLBAR (Shown whenever at least 1 link is selected) */}
-            {selectedFilteredCount > 0 && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-purple-950/40 via-[#111a38] to-[#0d142d] border border-purple-500/40 p-3 sm:p-4 rounded-2xl shadow-lg shadow-purple-950/20 animate-fade-in">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-300 flex items-center justify-center font-bold text-xs">
-                    {selectedFilteredCount}
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-white tracking-wide">
-                      {selectedFilteredCount} {selectedFilteredCount === 1 ? 'tracking link selected' : 'tracking links selected'}
-                    </span>
-                    <p className="text-[11px] text-slate-400">
-                      {selectedProduct !== 'All' ? `From ${selectedProduct}` : 'Across filtered results'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={handleToggleSelectAll}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                  >
-                    {isAllFilteredSelected ? 'Deselect All' : `Select All (${filteredLinks.length})`}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedLinkIds(new Set())}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                  >
-                    Clear Selection
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsBulkDeleteModalOpen(true)}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white transition-all shadow-md shadow-rose-950/30 cursor-pointer"
-                  >
-                    <Trash2 size={13} />
-                    <span>Delete Selected ({selectedFilteredCount})</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {productGroups.map((productGroup, prodIndex) => {
-            // Collapsible state: if dedicated single product view, always expand by default
-            const isProductExpanded = (selectedProduct !== 'All') || isSearching
-              ? (expandedProducts[productGroup.product] !== false)
-              : (expandedProducts[productGroup.product] !== undefined
-                  ? expandedProducts[productGroup.product]
-                  : prodIndex === 0);
-
-            return (
-              <div 
-                key={productGroup.product}
-                className="bg-[#0b1329] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl overflow-hidden shadow-sm transition-all duration-200"
-              >
-                {/* 1. PRODUCT HEADER BAR (Collapsible) */}
+        <div className="space-y-5">
+          {/* Top Breadcrumb & Product Scope Header */}
+          {selectedProduct !== 'All' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0b1329] border border-slate-800 p-3.5 sm:p-4 rounded-2xl shadow-sm">
+              <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => toggleProduct(productGroup.product)}
-                  className="w-full flex items-center justify-between p-4 sm:p-5 bg-gradient-to-r from-[#0e1733] to-[#0b1329] hover:from-[#121d42] hover:to-[#0e1935] transition-all cursor-pointer text-left border-b border-slate-800/80"
+                  onClick={() => {
+                    if (selectedMarketplace) {
+                      setSelectedMarketplace(null);
+                    } else {
+                      setSelectedProduct('All');
+                    }
+                  }}
+                  className="flex items-center gap-2 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-purple-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm"
                 >
-                  <div className="flex items-center gap-3.5 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-purple-600/15 border border-purple-500/30 text-purple-300 flex items-center justify-center text-xl shrink-0 shadow-sm">
-                      🧴
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2.5 flex-wrap">
-                        <h4 className="text-base sm:text-lg font-bold text-white tracking-wide uppercase truncate">
-                          {productGroup.product}
-                        </h4>
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
-                          {productGroup.totalLinks} {productGroup.totalLinks === 1 ? 'Link' : 'Links'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-0.5">Product Tracking Links</p>
-                    </div>
-                  </div>
+                  <ArrowLeft size={15} />
+                  <span>{selectedMarketplace ? 'Back to Marketplaces' : 'Back to Products'}</span>
+                </button>
+                <div className="h-5 w-[1px] bg-slate-800 hidden sm:block" />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-slate-400 font-medium">Product:</span>
+                  <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wide px-2.5 py-0.5 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300">
+                    {selectedProduct}
+                  </span>
+                  {selectedMarketplace && (
+                    <>
+                      <ChevronRight size={14} className="text-slate-600" />
+                      <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wide px-2.5 py-0.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-amber-300">
+                        {selectedMarketplace}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
 
-                  <div className="flex items-center gap-2.5 text-slate-400 shrink-0 ml-3">
-                    <span className="text-xs font-medium hidden md:inline text-slate-500">
-                      {isProductExpanded ? 'Click to collapse' : 'Click to expand'}
-                    </span>
-                    <div className="w-8 h-8 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-center text-slate-300">
-                      {isProductExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3 self-end sm:self-auto text-xs text-slate-400">
+                <span className="font-semibold text-slate-300">
+                  {filteredLinks.length} {filteredLinks.length === 1 ? 'Tracking Link' : 'Tracking Links'}
+                </span>
+                {selectedMarketplace && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMarketplace(null)}
+                    className="text-[11px] font-semibold text-purple-400 hover:text-purple-300 underline cursor-pointer"
+                  >
+                    View All Channels
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* BULK DELETE TOOLBAR (Shown whenever at least 1 link is selected) */}
+          {selectedFilteredCount > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-purple-950/40 via-[#111a38] to-[#0d142d] border border-purple-500/40 p-3 sm:p-4 rounded-2xl shadow-lg shadow-purple-950/20 animate-fade-in">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-300 flex items-center justify-center font-bold text-xs">
+                  {selectedFilteredCount}
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-white tracking-wide">
+                    {selectedFilteredCount} {selectedFilteredCount === 1 ? 'tracking link selected' : 'tracking links selected'}
+                  </span>
+                  <p className="text-[11px] text-slate-400">
+                    {selectedMarketplace
+                      ? `${selectedProduct} • ${selectedMarketplace}`
+                      : selectedProduct !== 'All'
+                        ? `From ${selectedProduct}`
+                        : 'Across filtered results'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleToggleSelectAll}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  {isAllFilteredSelected ? 'Deselect All' : `Select All (${filteredLinks.length})`}
                 </button>
 
-                {/* 2. PRODUCT BODY: PLATFORM CATEGORIES (Shown when product is expanded) */}
-                {isProductExpanded && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedLinkIds(new Set())}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  Clear Selection
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsBulkDeleteModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white transition-all shadow-md shadow-rose-950/30 cursor-pointer"
+                >
+                  <Trash2 size={13} />
+                  <span>Delete Selected ({selectedFilteredCount})</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* LEVEL 2: MARKETPLACE CARDS GRID (When product is selected and no single marketplace is drilled down, unless searching) */}
+          {selectedProduct !== 'All' && !selectedMarketplace && !isSearching && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                    <ShoppingBag size={15} className="text-amber-400" />
+                    <span>Select Marketplace / Channel</span>
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Choose a marketplace card below to view, manage, and bulk delete its tracking links
+                  </p>
+                </div>
+                <span className="text-xs font-semibold text-slate-400 bg-[#070c18] border border-slate-800 px-3 py-1 rounded-xl">
+                  {selectedProductMarketplaces.length} Channels Available
+                </span>
+              </div>
+
+              {/* 3 cards/row desktop (lg:grid-cols-3), 2 tablet (sm:grid-cols-2), 1 mobile (grid-cols-1) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {selectedProductMarketplaces.map((mkt) => {
+                  const hasLinks = mkt.count > 0;
+                  const isAmazon = mkt.name.toLowerCase() === 'amazon';
+
+                  return (
+                    <div
+                      key={mkt.name}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedMarketplace(mkt.name)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedMarketplace(mkt.name);
+                        }
+                      }}
+                      className="group relative flex flex-col justify-between bg-[#0b1329] hover:bg-[#0f1938] border border-slate-800/90 hover:border-purple-500/50 rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-purple-950/20 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    >
+                      <div className="space-y-3.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2.5">
+                            <PlatformBrandIcon platform={mkt.name} color={mkt.brandColor} />
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-400">
+                              {mkt.category}
+                            </span>
+                          </div>
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                              hasLinks
+                                ? isAmazon
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 group-hover:bg-amber-500/30'
+                                  : 'bg-purple-500/20 text-purple-300 border-purple-500/30 group-hover:bg-purple-500/30'
+                                : 'bg-slate-800/60 text-slate-500 border-slate-700/40'
+                            }`}
+                          >
+                            {mkt.count} {mkt.count === 1 ? 'Link' : 'Links'}
+                          </span>
+                        </div>
+
+                        <div>
+                          <h5 className="text-base font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors">
+                            {mkt.name}
+                          </h5>
+                          <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                            {mkt.description}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 pt-3.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 group-hover:text-purple-300 transition-colors">
+                        <span className="font-semibold text-xs">
+                          {hasLinks ? 'View Links' : 'Generate Links'}
+                        </span>
+                        <div className="flex items-center gap-1 font-bold text-xs text-purple-400 group-hover:text-purple-300">
+                          <span>Open</span>
+                          <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* LEVEL 3: TRACKING LINKS TABLE / LIST (When marketplace is chosen, or during search/multi-product mode) */}
+          {((selectedProduct !== 'All' && selectedMarketplace) || (selectedProduct === 'All') || isSearching) && (
+            <div className="space-y-5 animate-fade-in">
+              {productGroups.map((productGroup) => (
+                <div 
+                  key={productGroup.product}
+                  className="bg-[#0b1329] border border-slate-800/90 rounded-2xl overflow-hidden shadow-sm transition-all duration-200"
+                >
+                  {/* Clean Product Header */}
+                  <div className="p-4 sm:p-5 bg-gradient-to-r from-[#0e1733] to-[#0b1329] border-b border-slate-800/80 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-purple-600/15 border border-purple-500/30 text-purple-300 flex items-center justify-center text-xl shrink-0 shadow-sm">
+                        🧴
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <h4 className="text-base sm:text-lg font-bold text-white tracking-wide uppercase truncate">
+                            {productGroup.product}
+                          </h4>
+                          {selectedMarketplace && (
+                            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                              {selectedMarketplace}
+                            </span>
+                          )}
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+                            {productGroup.totalLinks} {productGroup.totalLinks === 1 ? 'Link' : 'Links'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">Influencer Tracking Table</p>
+                      </div>
+                    </div>
+
+                    {selectedMarketplace && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMarketplace(null)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <ArrowLeft size={13} />
+                        <span>All Marketplaces</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Product Body: Categories & Platform Tables */}
                   <div className="p-4 sm:p-5 space-y-6 bg-[#080d1c]/40">
-                    {productGroup.categories.map((catGroup, catIdx) => (
+                    {productGroup.categories.map((catGroup) => (
                       <div key={catGroup.category} className="space-y-3">
                         {/* Category Label with Divider */}
                         <div className="flex items-center gap-2.5 pb-1">
@@ -1200,16 +1387,11 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                           </span>
                         </div>
 
-                        {/* Platform Cards */}
-                        <div className="space-y-3">
-                          {catGroup.platforms.map((platformGroup, platIdx) => {
+                        {/* Platform Groups */}
+                        <div className="space-y-4">
+                          {catGroup.platforms.map((platformGroup) => {
                             const platformKey = `${productGroup.product}::${platformGroup.platformName}`;
-                            // Platform collapsible state:
-                            const isPlatformExpanded = isSearching
-                              ? true
-                              : (expandedPlatforms[platformKey] !== undefined
-                                  ? expandedPlatforms[platformKey]
-                                  : (catIdx === 0 && platIdx === 0));
+                            const isPlatformExpanded = expandedPlatforms[platformKey] !== false;
 
                             const allInPlatformSelected = platformGroup.links.length > 0 && 
                               platformGroup.links.every(l => selectedLinkIds.has(l.id));
@@ -1220,7 +1402,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                 key={platformGroup.platformName}
                                 className="border border-slate-800 rounded-xl overflow-hidden bg-[#070c18] shadow-sm transition-all"
                               >
-                                {/* Platform Header Bar (Collapsible) */}
+                                {/* Platform Header Bar */}
                                 <div className="w-full flex items-center justify-between px-4 py-3 bg-[#0a1124] hover:bg-[#0f1730] transition-colors border-b border-slate-800/60">
                                   <div className="flex items-center gap-3 min-w-0">
                                     {/* Platform Select All Checkbox */}
@@ -1265,7 +1447,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                   </div>
                                 </div>
 
-                                {/* Platform Content (Table or Grid) when platform is expanded */}
+                                {/* Platform Content (Table or Grid) */}
                                 {isPlatformExpanded && (
                                   <div className="border-t border-slate-800/80 bg-[#070c18]">
                                     {viewMode === 'table' ? (
@@ -1506,10 +1688,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
