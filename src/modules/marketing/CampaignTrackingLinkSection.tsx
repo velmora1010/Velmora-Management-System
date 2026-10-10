@@ -32,6 +32,7 @@ import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
 import { 
   fetchInfluencerTrackingLinks, 
   deleteInfluencerTrackingLink,
+  bulkDeleteInfluencerTrackingLinks,
   fetchTrackingLinkClicks,
   TRACKING_PLATFORMS, 
   TRACKING_VIDEOS, 
@@ -163,6 +164,16 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   // Copy tracking state for feedback
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Bulk Selection & Deletion state
+  const [selectedLinkIds, setSelectedLinkIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  // Clear selection whenever the selected product changes to prevent accidental cross-product actions
+  useEffect(() => {
+    setSelectedLinkIds(new Set());
+  }, [selectedProduct]);
+
   // Accordion expansion state:
   // expandedProducts: { [productName: string]: boolean }
   // expandedPlatforms: { [`${productName}::${platformName}`]: boolean }
@@ -261,17 +272,47 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     }
   };
 
-  // Delete handler
+  // Single Delete handler
   const handleDeleteConfirm = async () => {
     if (!linkToDelete) return;
     try {
       await deleteInfluencerTrackingLink(linkToDelete.id, campaign.id);
       toast.success('Tracking link deleted successfully');
       setLinks(prev => prev.filter(l => l.id !== linkToDelete.id));
+      setSelectedLinkIds(prev => {
+        const next = new Set(prev);
+        next.delete(linkToDelete.id);
+        return next;
+      });
       setLinkToDelete(null);
     } catch (err: any) {
       console.error('Error deleting tracking link:', err);
       toast.error(err?.message || 'Failed to delete tracking link');
+    }
+  };
+
+  // Bulk Delete handler
+  const handleBulkDeleteConfirm = async () => {
+    const idsToDelete = Array.from(selectedLinkIds);
+    if (idsToDelete.length === 0 || isBulkDeleting) return;
+
+    setIsBulkDeleting(true);
+    try {
+      const result = await bulkDeleteInfluencerTrackingLinks(idsToDelete, campaign.id);
+      if (result.success) {
+        toast.success(`Successfully deleted ${idsToDelete.length} tracking link${idsToDelete.length === 1 ? '' : 's'}`);
+        const idSet = new Set(idsToDelete);
+        setLinks(prev => prev.filter(l => !idSet.has(l.id)));
+        setSelectedLinkIds(new Set());
+        setIsBulkDeleteModalOpen(false);
+      } else {
+        toast.error(result.error || 'Failed to delete selected tracking links');
+      }
+    } catch (err: any) {
+      console.error('Error during bulk deletion:', err);
+      toast.error(err?.message || 'Failed to delete selected tracking links');
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -581,6 +622,65 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     setExpandedProducts(newProducts);
     setExpandedPlatforms(newPlatforms);
   };
+
+  // Toggle single row selection
+  const handleToggleSelectLink = (linkId: string) => {
+    setSelectedLinkIds(prev => {
+      const next = new Set(prev);
+      if (next.has(linkId)) {
+        next.delete(linkId);
+      } else {
+        next.add(linkId);
+      }
+      return next;
+    });
+  };
+
+  // Toggle select all filtered links
+  const handleToggleSelectAll = () => {
+    const allFilteredIds = filteredLinks.map(l => l.id);
+    const areAllSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedLinkIds.has(id));
+
+    if (areAllSelected) {
+      // Deselect all filtered links
+      setSelectedLinkIds(prev => {
+        const next = new Set(prev);
+        allFilteredIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      // Select all filtered links
+      setSelectedLinkIds(prev => {
+        const next = new Set(prev);
+        allFilteredIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  // Toggle select all links within a specific platform group
+  const handleToggleSelectPlatformGroup = (groupLinks: InfluencerTrackingLink[]) => {
+    const groupIds = groupLinks.map(l => l.id);
+    const areAllInGroupSelected = groupIds.length > 0 && groupIds.every(id => selectedLinkIds.has(id));
+
+    setSelectedLinkIds(prev => {
+      const next = new Set(prev);
+      if (areAllInGroupSelected) {
+        groupIds.forEach(id => next.delete(id));
+      } else {
+        groupIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  // Selection statistics for filtered links
+  const selectedFilteredCount = useMemo(() => {
+    return filteredLinks.filter(l => selectedLinkIds.has(l.id)).length;
+  }, [filteredLinks, selectedLinkIds]);
+
+  const isAllFilteredSelected = filteredLinks.length > 0 && selectedFilteredCount === filteredLinks.length;
+  const isPartiallyFilteredSelected = selectedFilteredCount > 0 && !isAllFilteredSelected;
 
   const isSearching = searchQuery.trim().length > 0;
 
@@ -956,34 +1056,82 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
            2. DEDICATED SELECTED PRODUCT VIEW / SEARCH RESULTS VIEW
            ========================================================================= */
         <div className="space-y-6">
-          {/* Breadcrumb / Back to Products Bar when drilled into a single product */}
-          {selectedProduct !== 'All' && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0b1329] border border-slate-800 p-3.5 sm:p-4 rounded-2xl">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedProduct('All')}
-                  className="flex items-center gap-2 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-purple-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm"
-                >
-                  <ArrowLeft size={15} />
-                  <span>Back to Products</span>
-                </button>
-                <div className="h-5 w-[1px] bg-slate-800 hidden sm:block" />
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400 font-medium">Viewing Product:</span>
-                  <span className="text-sm font-bold text-white uppercase tracking-wide px-2.5 py-0.5 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300">
-                    {selectedProduct}
+          {/* Breadcrumb / Back to Products Bar & Bulk Selection Toolbar */}
+          <div className="space-y-3">
+            {selectedProduct !== 'All' && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0b1329] border border-slate-800 p-3.5 sm:p-4 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProduct('All')}
+                    className="flex items-center gap-2 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-purple-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm"
+                  >
+                    <ArrowLeft size={15} />
+                    <span>Back to Products</span>
+                  </button>
+                  <div className="h-5 w-[1px] bg-slate-800 hidden sm:block" />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 font-medium">Viewing Product:</span>
+                    <span className="text-sm font-bold text-white uppercase tracking-wide px-2.5 py-0.5 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300">
+                      {selectedProduct}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-auto text-xs text-slate-400">
+                  <span className="font-semibold text-slate-300">
+                    {filteredLinks.length} {filteredLinks.length === 1 ? 'Tracking Link' : 'Tracking Links'}
                   </span>
                 </div>
               </div>
+            )}
 
-              <div className="flex items-center gap-2 self-end sm:self-auto text-xs text-slate-400">
-                <span className="font-semibold text-slate-300">
-                  {filteredLinks.length} {filteredLinks.length === 1 ? 'Tracking Link' : 'Tracking Links'}
-                </span>
+            {/* BULK DELETE TOOLBAR (Shown whenever at least 1 link is selected) */}
+            {selectedFilteredCount > 0 && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-purple-950/40 via-[#111a38] to-[#0d142d] border border-purple-500/40 p-3 sm:p-4 rounded-2xl shadow-lg shadow-purple-950/20 animate-fade-in">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-300 flex items-center justify-center font-bold text-xs">
+                    {selectedFilteredCount}
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-white tracking-wide">
+                      {selectedFilteredCount} {selectedFilteredCount === 1 ? 'tracking link selected' : 'tracking links selected'}
+                    </span>
+                    <p className="text-[11px] text-slate-400">
+                      {selectedProduct !== 'All' ? `From ${selectedProduct}` : 'Across filtered results'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleToggleSelectAll}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  >
+                    {isAllFilteredSelected ? 'Deselect All' : `Select All (${filteredLinks.length})`}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLinkIds(new Set())}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    Clear Selection
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkDeleteModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white transition-all shadow-md shadow-rose-950/30 cursor-pointer"
+                  >
+                    <Trash2 size={13} />
+                    <span>Delete Selected ({selectedFilteredCount})</span>
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {productGroups.map((productGroup, prodIndex) => {
             // Collapsible state: if dedicated single product view, always expand by default
@@ -1057,12 +1205,15 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                           {catGroup.platforms.map((platformGroup, platIdx) => {
                             const platformKey = `${productGroup.product}::${platformGroup.platformName}`;
                             // Platform collapsible state:
-                            // By default, first platform in first category is expanded, or auto-expand if searching
                             const isPlatformExpanded = isSearching
                               ? true
                               : (expandedPlatforms[platformKey] !== undefined
                                   ? expandedPlatforms[platformKey]
                                   : (catIdx === 0 && platIdx === 0));
+
+                            const allInPlatformSelected = platformGroup.links.length > 0 && 
+                              platformGroup.links.every(l => selectedLinkIds.has(l.id));
+                            const someInPlatformSelected = platformGroup.links.some(l => selectedLinkIds.has(l.id));
 
                             return (
                               <div
@@ -1070,41 +1221,71 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                 className="border border-slate-800 rounded-xl overflow-hidden bg-[#070c18] shadow-sm transition-all"
                               >
                                 {/* Platform Header Bar (Collapsible) */}
-                                <button
-                                  type="button"
-                                  onClick={() => togglePlatform(productGroup.product, platformGroup.platformName)}
-                                  className="w-full flex items-center justify-between px-4 py-3 bg-[#0a1124] hover:bg-[#0f1730] transition-colors cursor-pointer text-left"
-                                >
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    <PlatformBrandIcon
-                                      platform={platformGroup.platformName}
-                                      color={platformGroup.brandColor}
+                                <div className="w-full flex items-center justify-between px-4 py-3 bg-[#0a1124] hover:bg-[#0f1730] transition-colors border-b border-slate-800/60">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    {/* Platform Select All Checkbox */}
+                                    <input
+                                      type="checkbox"
+                                      checked={allInPlatformSelected}
+                                      ref={(el) => {
+                                        if (el) el.indeterminate = !allInPlatformSelected && someInPlatformSelected;
+                                      }}
+                                      onChange={() => handleToggleSelectPlatformGroup(platformGroup.links)}
+                                      className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                                      title={allInPlatformSelected ? `Deselect all ${platformGroup.platformName} links` : `Select all ${platformGroup.platformName} links`}
                                     />
-                                    <span className="text-sm font-bold text-white tracking-wide truncate">
-                                      {platformGroup.platformName.toUpperCase()}
-                                    </span>
-                                    <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-800/90 text-slate-300 border border-slate-700/60 shrink-0">
-                                      {platformGroup.links.length}{' '}
-                                      {platformGroup.links.length === 1 ? 'Link' : 'Links'}
-                                    </span>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => togglePlatform(productGroup.product, platformGroup.platformName)}
+                                      className="flex items-center gap-2.5 min-w-0 text-left cursor-pointer"
+                                    >
+                                      <PlatformBrandIcon
+                                        platform={platformGroup.platformName}
+                                        color={platformGroup.brandColor}
+                                      />
+                                      <span className="text-sm font-bold text-white tracking-wide truncate">
+                                        {platformGroup.platformName.toUpperCase()}
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-800/90 text-slate-300 border border-slate-700/60 shrink-0">
+                                        {platformGroup.links.length}{' '}
+                                        {platformGroup.links.length === 1 ? 'Link' : 'Links'}
+                                      </span>
+                                    </button>
                                   </div>
 
                                   <div className="flex items-center gap-2 text-slate-400 shrink-0 ml-2">
-                                    <div className="w-6 h-6 rounded-md bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white">
+                                    <button
+                                      type="button"
+                                      onClick={() => togglePlatform(productGroup.product, platformGroup.platformName)}
+                                      className="w-6 h-6 rounded-md bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white cursor-pointer"
+                                    >
                                       {isPlatformExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                                    </div>
+                                    </button>
                                   </div>
-                                </button>
+                                </div>
 
                                 {/* Platform Content (Table or Grid) when platform is expanded */}
                                 {isPlatformExpanded && (
                                   <div className="border-t border-slate-800/80 bg-[#070c18]">
                                     {viewMode === 'table' ? (
-                                      /* 6-Column Clean Table: Influencer, Creator Code, Video, Tracking Link, Clicks, Actions */
+                                      /* 7-Column Clean Table: Checkbox, Influencer, Creator Code, Video, Tracking Link, Clicks, Actions */
                                       <div className="overflow-x-auto">
                                         <table className="w-full text-left text-xs text-slate-300">
                                           <thead className="bg-[#050914] border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                                             <tr>
+                                              <th scope="col" className="w-10 px-3 py-3 text-center">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isAllFilteredSelected}
+                                                  ref={(el) => {
+                                                    if (el) el.indeterminate = isPartiallyFilteredSelected;
+                                                  }}
+                                                  onChange={handleToggleSelectAll}
+                                                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                                                  title={isAllFilteredSelected ? 'Deselect all rows' : 'Select all matching rows'}
+                                                />
+                                              </th>
                                               <th scope="col" className="px-4 py-3 min-w-[170px]">Influencer</th>
                                               <th scope="col" className="px-4 py-3 min-w-[110px]">Creator Code</th>
                                               <th scope="col" className="px-4 py-3 min-w-[90px]">Video</th>
@@ -1116,13 +1297,27 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                           <tbody className="divide-y divide-slate-800/60">
                                             {platformGroup.links.map((link) => {
                                               const isCopied = copiedId === link.id;
+                                              const isSelected = selectedLinkIds.has(link.id);
                                               const videoText = link.video_number || 'Video 1';
 
                                               return (
                                                 <tr
                                                   key={link.id}
-                                                  className="hover:bg-slate-900/50 transition-colors group"
+                                                  className={`transition-colors group ${
+                                                    isSelected ? 'bg-purple-950/25 hover:bg-purple-950/35' : 'hover:bg-slate-900/50'
+                                                  }`}
                                                 >
+                                                  {/* 0. Row Selection Checkbox */}
+                                                  <td className="w-10 px-3 py-2.5 text-center">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={isSelected}
+                                                      onChange={() => handleToggleSelectLink(link.id)}
+                                                      className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                                                      title={`Select ${link.influencer_name || link.creator_code || 'link'}`}
+                                                    />
+                                                  </td>
+
                                                   {/* 1. Influencer */}
                                                   <td className="px-4 py-2.5 font-semibold text-white whitespace-nowrap">
                                                     <div className="flex items-center gap-2">
@@ -1318,7 +1513,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Single Delete Confirmation Modal */}
       {linkToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
@@ -1349,6 +1544,70 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                 className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 cursor-pointer"
               >
                 Delete Link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {isBulkDeleteModalOpen && selectedFilteredCount > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-white leading-tight">
+                  Delete {selectedFilteredCount} selected tracking {selectedFilteredCount === 1 ? 'link' : 'links'}?
+                </h4>
+                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                  This action permanently removes the <strong className="text-rose-300">{selectedFilteredCount}</strong> selected tracking-link record{selectedFilteredCount === 1 ? '' : 's'} from <strong className="text-purple-300">{selectedProduct !== 'All' ? selectedProduct : 'the current view'}</strong> and cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-[11px] text-slate-400 space-y-1">
+              <div className="flex justify-between text-slate-300 font-medium">
+                <span>Selected Records:</span>
+                <span className="text-purple-300 font-mono font-bold">{selectedFilteredCount}</span>
+              </div>
+              <div className="flex justify-between text-slate-300 font-medium">
+                <span>Product Scope:</span>
+                <span className="text-slate-300 uppercase">{selectedProduct}</span>
+              </div>
+              <p className="text-[10px] text-slate-500 pt-1 border-t border-slate-800/80">
+                Untouched products and unselected links will remain completely intact.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={handleBulkDeleteConfirm}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 active:bg-rose-800 transition-all cursor-pointer shadow-md shadow-rose-950/40 disabled:opacity-50"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={13} />
+                    <span>Delete {selectedFilteredCount} Links</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

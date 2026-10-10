@@ -1111,3 +1111,47 @@ export async function deleteInfluencerTrackingLink(
     saveLocalTrackingLinks(cleanCampaignId, updated);
   }
 }
+
+/**
+ * Bulk delete multiple tracking links by ID for a specific campaign
+ */
+export async function bulkDeleteInfluencerTrackingLinks(
+  ids: string[],
+  campaignId: string | number
+): Promise<{ success: boolean; deletedCount: number; error?: string }> {
+  if (!ids || ids.length === 0) {
+    return { success: true, deletedCount: 0 };
+  }
+
+  const cleanCampaignId = String(campaignId).trim();
+  const client = supabaseAdmin || supabase;
+  const idSet = new Set(ids);
+
+  try {
+    // Delete in batches of 100 to avoid query length limits
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE);
+      const { error } = await client
+        .from(SUPABASE_TABLES.influencerTrackingLinks)
+        .delete()
+        .in('id', batch)
+        .eq('campaign_id', cleanCampaignId);
+
+      if (error) {
+        console.warn('Supabase batch delete error:', error.message);
+        throw new Error(error.message);
+      }
+    }
+
+    return { success: true, deletedCount: ids.length };
+  } catch (err: any) {
+    console.error('Error in bulkDeleteInfluencerTrackingLinks:', err);
+    return { success: false, deletedCount: 0, error: err?.message || 'Failed to delete selected tracking links' };
+  } finally {
+    const local = getLocalTrackingLinks(cleanCampaignId);
+    const updated = local.filter(l => !idSet.has(l.id));
+    saveLocalTrackingLinks(cleanCampaignId, updated);
+  }
+}
+
