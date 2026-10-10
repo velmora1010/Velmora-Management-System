@@ -90,6 +90,10 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
 const DEFAULT_SUPABASE_URL = 'https://utusdosvijjuxtowzhta.supabase.co';
 const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0dXNkb3N2aWpqdXh0b3d6aHRhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjA4NDE5MiwiZXhwIjoyMDk3NjYwMTkyfQ.U2lv4o8wF1G56B_WoXQADqRTuJEjdYSKXPDQMlJHHA4';
 
+// Default Upstash Redis credentials (fallback for persistent atomic click counter)
+const DEFAULT_UPSTASH_REDIS_URL = 'https://still-griffon-217114.upstash.io';
+const DEFAULT_UPSTASH_REDIS_TOKEN = 'gQAAAAAAA1AaAQIgcDE4N2EzMzUyNWVhNzQ0MjZiOWEyOTk2YTU5M2IxMmFlOA';
+
 export default async function handler(
   req: IncomingMessage & { query?: Record<string, string> },
   res: ServerResponse
@@ -111,8 +115,8 @@ export default async function handler(
     return;
   }
 
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || DEFAULT_UPSTASH_REDIS_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || DEFAULT_UPSTASH_REDIS_TOKEN;
   const isRedisConfigured = Boolean(redisUrl && redisToken);
 
   let destinationUrl = '';
@@ -120,8 +124,13 @@ export default async function handler(
   // 1. Try to read destination URL from Redis cache if available
   if (isRedisConfigured) {
     try {
-      const getRes = await fetch(`${redisUrl}/get/dest:${encodeURIComponent(linkId)}`, {
-        headers: { Authorization: `Bearer ${redisToken}` }
+      const getRes = await fetch(redisUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${redisToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(['GET', `dest:${linkId}`])
       });
       if (getRes.ok) {
         const data = await getRes.json();
@@ -181,13 +190,13 @@ export default async function handler(
 
       // Cache destination in Redis for ultra-fast subsequent redirects
       if (isRedisConfigured && destinationUrl) {
-        fetch(`${redisUrl}/set/dest:${encodeURIComponent(linkId)}`, {
+        fetch(redisUrl, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${redisToken}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify(destinationUrl)
+          body: JSON.stringify(['SET', `dest:${linkId}`, destinationUrl, 'EX', '86400'])
         }).catch(() => {});
       }
     } catch (err) {
@@ -228,9 +237,18 @@ export default async function handler(
   // 6. Increment persistent atomic counter in Redis if genuine visitor
   if (isRedisConfigured && !isBotRequest && !isDuplicateClick) {
     try {
-      await fetch(`${redisUrl}/incr/click:${encodeURIComponent(linkId)}`, {
-        headers: { Authorization: `Bearer ${redisToken}` }
+      const incrRes = await fetch(redisUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${redisToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(['INCR', `click:${linkId}`])
       });
+      if (incrRes.ok) {
+        const data = await incrRes.json();
+        console.log(`[Tracking Redirect] Incremented click for ${linkId}, new count: ${data?.result}`);
+      }
     } catch (err) {
       console.error('[Tracking Redirect] Failed to increment click counter in Redis:', err);
     }

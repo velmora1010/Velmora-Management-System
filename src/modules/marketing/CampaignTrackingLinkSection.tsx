@@ -140,6 +140,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   // Click tracking state
   const [clicksMap, setClicksMap] = useState<Record<string, number>>({});
   const [isClicksConfigured, setIsClicksConfigured] = useState<boolean>(true);
+  const [clicksError, setClicksError] = useState<string | null>(null);
   const [isLoadingClicks, setIsLoadingClicks] = useState<boolean>(false);
 
   // Filters: Product, Platform, Video
@@ -196,14 +197,17 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         try {
           const res = await fetchTrackingLinkClicks(linkIds);
           setIsClicksConfigured(res.configured);
+          setClicksError(res.error || null);
           setClicksMap(res.clicks || {});
-        } catch (e) {
+        } catch (e: any) {
           console.warn('Failed to fetch clicks:', e);
+          setClicksError(e?.message || 'Failed to connect to clicks service');
         } finally {
           setIsLoadingClicks(false);
         }
       } else {
         setClicksMap({});
+        setClicksError(null);
       }
     } catch (err: any) {
       console.error('Error loading influencer tracking links:', err);
@@ -708,6 +712,19 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         </div>
       </div>
 
+      {/* Redis Unconfigured Banner */}
+      {!isClicksConfigured && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-200">
+          <AlertTriangle size={18} className="shrink-0 text-amber-400 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-bold text-amber-300">Click Tracking Notice</span>
+            <p className="text-slate-300 text-[11px] leading-relaxed">
+              {clicksError || 'The persistent Redis click tracking counter is currently unconfigured. Clicks on Amazon links will redirect visitors, but counts will display as unconfigured until UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set in Vercel.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       {isLoading ? (
         <div className="bg-[#0b1329]/60 border border-slate-800/90 rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-sm">
@@ -942,30 +959,57 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
 
                                                   {/* 5. Clicks (Atomic server-side counter) */}
                                                   <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                                                    {isLoadingClicks ? (
-                                                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-mono">
-                                                        <Loader2 size={11} className="animate-spin text-purple-400" />
-                                                        <span>...</span>
-                                                      </span>
-                                                    ) : !isClicksConfigured ? (
-                                                      <span
-                                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-800/80 text-slate-400 border border-slate-700/60"
-                                                        title="Redis click tracking not configured"
-                                                      >
-                                                        N/A
-                                                      </span>
-                                                    ) : (
-                                                      <span
-                                                        className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold border ${
-                                                          (clicksMap[link.id] || 0) > 0
-                                                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                                                            : 'bg-slate-900 border-slate-800 text-slate-400'
-                                                        }`}
-                                                        title={`${clicksMap[link.id] || 0} recorded clicks`}
-                                                      >
-                                                        {(clicksMap[link.id] || 0).toLocaleString()}
-                                                      </span>
-                                                    )}
+                                                    {(() => {
+                                                      const isAmazonLink =
+                                                        link.destination_type === 'amazon' ||
+                                                        (link.tracking_url && link.tracking_url.includes('/r/')) ||
+                                                        (link.platform && link.platform.toLowerCase() === 'amazon');
+
+                                                      if (!isAmazonLink) {
+                                                        return (
+                                                          <span
+                                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-950/40 text-purple-300/80 border border-purple-500/20"
+                                                            title="Direct Shopify link. Clicks and sales are tracked natively in Shopify Analytics via UTM tags"
+                                                          >
+                                                            Shopify UTM
+                                                          </span>
+                                                        );
+                                                      }
+
+                                                      if (isLoadingClicks) {
+                                                        return (
+                                                          <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-mono">
+                                                            <Loader2 size={11} className="animate-spin text-purple-400" />
+                                                            <span>...</span>
+                                                          </span>
+                                                        );
+                                                      }
+
+                                                      if (!isClicksConfigured) {
+                                                        return (
+                                                          <span
+                                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-950/40 text-amber-300 border border-amber-500/30"
+                                                            title={clicksError || 'Redis click counter not configured on server'}
+                                                          >
+                                                            Unconfigured
+                                                          </span>
+                                                        );
+                                                      }
+
+                                                      const count = clicksMap[link.id] ?? 0;
+                                                      return (
+                                                        <span
+                                                          className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold border ${
+                                                            count > 0
+                                                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm'
+                                                              : 'bg-slate-900 border-slate-800 text-slate-400'
+                                                          }`}
+                                                          title={`${count} recorded clicks`}
+                                                        >
+                                                          {count.toLocaleString()}
+                                                        </span>
+                                                      );
+                                                    })()}
                                                   </td>
 
                                                   {/* 6. Actions (Copy, Open, Edit, Delete) */}

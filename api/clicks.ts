@@ -11,6 +11,9 @@ const getBody = (req: IncomingMessage): Promise<string> => {
   });
 };
 
+const DEFAULT_UPSTASH_REDIS_URL = 'https://still-griffon-217114.upstash.io';
+const DEFAULT_UPSTASH_REDIS_TOKEN = 'gQAAAAAAA1AaAQIgcDE4N2EzMzUyNWVhNzQ0MjZiOWEyOTk2YTU5M2IxMmFlOA';
+
 export default async function handler(
   req: IncomingMessage & { query?: Record<string, string> },
   res: ServerResponse
@@ -26,15 +29,15 @@ export default async function handler(
     return;
   }
 
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || DEFAULT_UPSTASH_REDIS_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || DEFAULT_UPSTASH_REDIS_TOKEN;
   const isRedisConfigured = Boolean(redisUrl && redisToken);
 
   if (!isRedisConfigured) {
     res.statusCode = 200;
     res.end(JSON.stringify({
       configured: false,
-      error: 'Redis tracking storage not configured. Please set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.',
+      error: 'Redis tracking storage not configured. Please set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel.',
       clicks: {}
     }));
     return;
@@ -77,17 +80,19 @@ export default async function handler(
 
   try {
     const redisKeys = requestedIds.map(id => `click:${id}`);
-    const redisRes = await fetch(`${redisUrl}/mget`, {
+    
+    // Upstash Redis command array style: ['MGET', key1, key2, ...]
+    const redisRes = await fetch(redisUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${redisToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(redisKeys)
+      body: JSON.stringify(['MGET', ...redisKeys])
     });
 
     if (!redisRes.ok) {
-      throw new Error(`Upstash Redis mget failed with HTTP ${redisRes.status}`);
+      throw new Error(`Upstash Redis MGET failed with HTTP ${redisRes.status}`);
     }
 
     const redisData = await redisRes.json();

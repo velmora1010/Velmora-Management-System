@@ -13,7 +13,8 @@ import {
   Globe,
   ShoppingBag,
   Video,
-  MousePointerClick
+  MousePointerClick,
+  Loader2
 } from 'lucide-react';
 import type { InfluencerTrackingLink } from '../../types';
 import { TRACKING_PLATFORMS } from '../../services/influencerTrackingLinkService';
@@ -204,22 +205,62 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
           </div>
 
           {/* Clicks Badge */}
-          <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono font-bold text-[11px] ${
-              !isClicksConfigured
-                ? 'bg-slate-900/80 border-slate-800 text-slate-500'
-                : clicks > 0
-                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                  : 'bg-slate-900/90 border-slate-800 text-slate-400'
-            }`}
-            title={!isClicksConfigured ? 'Redis click tracking not configured' : `${clicks} clicks recorded`}
-          >
-            <MousePointerClick
-              size={12}
-              className={!isClicksConfigured ? 'text-slate-500' : clicks > 0 ? 'text-amber-400' : 'text-slate-500'}
-            />
-            <span>{isLoadingClicks ? '...' : !isClicksConfigured ? 'Clicks: N/A' : `${clicks} clicks`}</span>
-          </div>
+          {(() => {
+            const isAmazonLink =
+              link.destination_type === 'amazon' ||
+              (link.tracking_url && link.tracking_url.includes('/r/')) ||
+              (link.platform && link.platform.toLowerCase() === 'amazon');
+
+            if (!isAmazonLink) {
+              return (
+                <div
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] bg-purple-950/30 border-purple-500/20 text-purple-300/80"
+                  title="Direct Shopify link. Clicks and sales tracked in Shopify Analytics via UTM tags"
+                >
+                  <Globe size={11} className="text-purple-400" />
+                  <span>Shopify UTM</span>
+                </div>
+              );
+            }
+
+            if (isLoadingClicks) {
+              return (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] bg-slate-900/90 border-slate-800 text-slate-400">
+                  <Loader2 size={11} className="animate-spin text-amber-400" />
+                  <span>...</span>
+                </div>
+              );
+            }
+
+            if (!isClicksConfigured) {
+              return (
+                <div
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] bg-amber-950/30 border-amber-500/30 text-amber-300"
+                  title="Redis click tracking not configured on server"
+                >
+                  <AlertTriangle size={11} className="text-amber-400" />
+                  <span>Clicks: Unconfigured</span>
+                </div>
+              );
+            }
+
+            return (
+              <div
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono font-bold text-[11px] ${
+                  clicks > 0
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    : 'bg-slate-900/90 border-slate-800 text-slate-400'
+                }`}
+                title={`${clicks} recorded Amazon clicks`}
+              >
+                <MousePointerClick
+                  size={12}
+                  className={clicks > 0 ? 'text-amber-400' : 'text-slate-500'}
+                />
+                <span>{clicks.toLocaleString()} {clicks === 1 ? 'click' : 'clicks'}</span>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Tracking URL Box */}
