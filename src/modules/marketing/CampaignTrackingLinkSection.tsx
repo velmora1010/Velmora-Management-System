@@ -875,14 +875,14 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-white">Custom Branded Domain:</span>
               <span className="font-mono text-amber-300 font-semibold bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-500/30">
-                link.justmixx.com
+                go.justmixx.com
               </span>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
                 Awaiting DNS CNAME
               </span>
             </div>
             <p className="text-slate-400 text-[11px] mt-0.5 truncate">
-              Amazon links display as clean branded short codes (e.g. <span className="font-mono text-purple-300">link.justmixx.com/his2-v1</span>). Legacy UUID links remain supported.
+              Amazon links display as clean branded short codes (e.g. <span className="font-mono text-purple-300">go.justmixx.com/his2-v1</span>). Legacy UUID links remain supported.
             </p>
           </div>
         </div>
