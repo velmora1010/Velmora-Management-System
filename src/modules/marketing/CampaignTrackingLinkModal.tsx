@@ -457,7 +457,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                   </label>
                   <div className="flex items-center gap-2">
                     <span className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-amber-300/80 font-mono select-none">
-                      go.justmixx.com/
+                      justmixx.com/
                     </span>
                     <input
                       type="text"
@@ -504,7 +504,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                     type="text"
                     value={editTrackingUrl}
                     onChange={(e) => setEditTrackingUrl(e.target.value)}
-                    placeholder="https://go.justmixx.com/..."
+                    placeholder="https://justmixx.com/..."
                     className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-amber-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
                   />
                 </div>
@@ -673,7 +673,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                   className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors disabled:opacity-50"
                 />
                 <p className="mt-1.5 text-[11px] text-slate-400">
-                  A unique branded short link (<code className="text-amber-300">https://go.justmixx.com/{'{slug}'}</code> e.g. <code className="text-amber-300">his1-v1</code>) will be generated for each influencer. Visitor clicks are atomically tracked in Redis before 302 redirecting to Amazon.
+                  A unique branded short link (<code className="text-amber-300">https://justmixx.com/{'{slug}'}</code> e.g. <code className="text-amber-300">his1-v1</code>) will be generated for each influencer. Visitor clicks are atomically tracked in Redis before 302 redirecting to Amazon.
                 </p>
               </div>
             )}

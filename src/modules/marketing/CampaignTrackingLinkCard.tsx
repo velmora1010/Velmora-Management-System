@@ -212,7 +212,7 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
               link.destination_type === 'amazon' ||
               Boolean(link.custom_slug) ||
               Boolean(link.branded_url) ||
-              (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('go.justmixx.com'))) ||
+              (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('go.justmixx.com') || (link.tracking_url.includes('justmixx.com') && !link.tracking_url.includes('utm_source')))) ||
               (link.platform && link.platform.toLowerCase() === 'amazon');
 
             if (!isAmazonLink) {

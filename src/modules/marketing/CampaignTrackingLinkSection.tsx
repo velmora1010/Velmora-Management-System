@@ -722,14 +722,14 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-white">Custom Branded Domain:</span>
               <span className="font-mono text-amber-300 font-semibold bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-500/30">
-                go.justmixx.com
+                justmixx.com
               </span>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                DNS CNAME Setup Required
+                Tracking Active
               </span>
             </div>
             <p className="text-slate-400 text-[11px] mt-0.5 truncate">
-              Amazon links display as clean short codes (e.g. <span className="font-mono text-purple-300">go.justmixx.com/his1-v1</span>). Legacy UUID links remain supported.
+              Amazon links display as clean root short codes (e.g. <span className="font-mono text-purple-300">justmixx.com/his1-v1</span>). Legacy UUID links remain supported.
             </p>
           </div>
         </div>
@@ -996,7 +996,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                         link.destination_type === 'amazon' ||
                                                         Boolean(link.custom_slug) ||
                                                         Boolean(link.branded_url) ||
-                                                        (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('go.justmixx.com'))) ||
+                                                        (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('go.justmixx.com') || (link.tracking_url.includes('justmixx.com') && !link.tracking_url.includes('utm_source')))) ||
                                                         (link.platform && link.platform.toLowerCase() === 'amazon');
 
                                                       if (!isAmazonLink) {
