@@ -5,6 +5,16 @@
       "has": [
         {
           "type": "host",
+          "value": "link.justmixx.com"
+        }
+      ],
+      "destination": "/api/r?slug=$1"
+    },
+    {
+      "source": "/((?!api/|r/).*)",
+      "has": [
+        {
+          "type": "host",
           "value": "justmixx.com"
         }
       ],

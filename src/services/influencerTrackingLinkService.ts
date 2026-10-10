@@ -202,7 +202,7 @@ export function isValidAmazonUrl(urlStr: string): boolean {
   }
 }
 
-export const BRANDED_TRACKING_DOMAIN = 'https://justmixx.com';
+export const BRANDED_TRACKING_DOMAIN = 'https://link.justmixx.com';
 
 /**
  * Builds the canonical short code/slug from creator code and video number.
