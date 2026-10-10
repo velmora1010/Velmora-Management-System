@@ -52,6 +52,25 @@ export default async function handler(
     try {
       const raw = await getBody(req);
       const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
+
+      // Support persistent slug mapping registration
+      if (parsed.action === 'set_slug' && parsed.slug && parsed.link_id) {
+        const cleanSlug = String(parsed.slug).trim().toLowerCase();
+        const cleanLinkId = String(parsed.link_id).trim();
+        const setRes = await fetch(redisUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${redisToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(['SET', `slug:${cleanSlug}`, cleanLinkId])
+        });
+        const isOk = setRes.ok;
+        res.statusCode = isOk ? 200 : 500;
+        res.end(JSON.stringify({ success: isOk, slug: cleanSlug, link_id: cleanLinkId }));
+        return;
+      }
+
       if (Array.isArray(parsed.ids)) {
         requestedIds = parsed.ids.map((id: any) => String(id).trim()).filter(Boolean);
       }

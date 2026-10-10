@@ -1,6 +1,16 @@
 {
   "rewrites": [
     {
+      "source": "/((?!api/|r/).*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "go.justmixx.com"
+        }
+      ],
+      "destination": "/api/r?slug=$1"
+    },
+    {
       "source": "/r/(.*)",
       "destination": "/api/r?id=$1"
     },

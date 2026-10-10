@@ -27,6 +27,9 @@ import {
   extractCodeNumber,
   batchGenerateInfluencerTrackingLinks,
   updateInfluencerTrackingLink,
+  buildTrackingSlug,
+  buildBrandedTrackingUrl,
+  BRANDED_TRACKING_DOMAIN,
   type TrackingPlatformConfig,
   type TrackingVideoConfig
 } from '../../services/influencerTrackingLinkService';
@@ -60,6 +63,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   const [selectedProduct, setSelectedProduct] = useState<string>('Kitchen Cleaner');
   const [productUrl, setProductUrl] = useState<string>('');
   const [amazonUrl, setAmazonUrl] = useState<string>('');
+  const [customSlug, setCustomSlug] = useState<string>('');
   const [selectedPlatformId, setSelectedPlatformId] = useState<string>('instagram');
   const [selectedVideoId, setSelectedVideoId] = useState<string>('Video 1');
 
@@ -116,9 +120,16 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         setSelectedProduct(linkToEdit.product || 'Kitchen Cleaner');
         setEditTrackingUrl(linkToEdit.tracking_url || '');
         setEditNotes(linkToEdit.notes || '');
+
+        const initialSlug = linkToEdit.custom_slug || (dest === 'amazon' ? buildTrackingSlug(linkToEdit.creator_code || linkToEdit.influencer_code, linkToEdit.video_number, linkToEdit.utm_content) : '');
+        setCustomSlug(initialSlug);
+
         if (dest === 'amazon') {
           setAmazonUrl(linkToEdit.original_destination_url || linkToEdit.base_product_url || '');
           setProductUrl('');
+          if (initialSlug && (!linkToEdit.tracking_url || linkToEdit.tracking_url.includes('/r/'))) {
+            setEditTrackingUrl(buildBrandedTrackingUrl(initialSlug));
+          }
         } else {
           setProductUrl(linkToEdit.base_product_url || '');
           setAmazonUrl('');
@@ -132,6 +143,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       } else {
         // Defaults for batch generation
         setDestinationType('shopify');
+        setCustomSlug('');
         const initialProd = (defaultProduct && defaultProduct !== 'All')
           ? defaultProduct
           : (SCRIPT_PRODUCTS.includes('Kitchen Cleaner' as any)
@@ -177,8 +189,9 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   const samplePreviewUrl = useMemo(() => {
     if (destinationType === 'amazon') {
       if (!amazonUrl.trim()) return '';
-      const sampleId = sampleInfluencer ? `link_${sampleInfluencer.id}` : 'sample_id';
-      return buildAmazonRedirectTrackingUrl(sampleId);
+      const sampleCode = sampleInfluencer?.code || (sampleInfluencer as any)?.influencer_code || 'HIS1';
+      const sampleSlug = buildTrackingSlug(sampleCode, currentVideo.name, currentVideo.utmContent);
+      return buildBrandedTrackingUrl(sampleSlug);
     }
     if (!productUrl.trim()) return '';
     const code = sampleInfluencer?.code || (sampleInfluencer as any)?.influencer_code || 'HIS1';
@@ -238,15 +251,26 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       return;
     }
 
-    if (destinationType === 'amazon' && amazonUrl.trim() && !isValidAmazonUrl(amazonUrl)) {
-      setValidationError('Please enter a valid Amazon product URL.');
-      return;
+    if (destinationType === 'amazon') {
+      if (amazonUrl.trim() && !isValidAmazonUrl(amazonUrl)) {
+        setValidationError('Please enter a valid Amazon product URL.');
+        return;
+      }
+      if (!customSlug.trim()) {
+        setValidationError('Short code / slug is required for Amazon branded links.');
+        return;
+      }
     }
 
     setIsGenerating(true);
     const toastId = toast.loading('Updating tracking link...');
 
     try {
+      const cleanSlug = destinationType === 'amazon' ? customSlug.trim().toLowerCase() : undefined;
+      const finalTrackingUrl = destinationType === 'amazon' && cleanSlug 
+        ? buildBrandedTrackingUrl(cleanSlug) 
+        : editTrackingUrl.trim();
+
       const updated = await updateInfluencerTrackingLink(linkToEdit.id, campaign.id, {
         influencer_id: linkToEdit.influencer_id,
         influencer_name: linkToEdit.influencer_name,
@@ -260,7 +284,8 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         video_number: currentVideo.name,
         utm_source: currentPlatform.utmSource,
         utm_content: currentVideo.utmContent,
-        tracking_url: editTrackingUrl.trim(),
+        tracking_url: finalTrackingUrl,
+        custom_slug: cleanSlug,
         notes: editNotes.trim()
       });
 
@@ -424,18 +449,80 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Tracking URL *
-              </label>
-              <input
-                type="text"
-                value={editTrackingUrl}
-                onChange={(e) => setEditTrackingUrl(e.target.value)}
-                placeholder="https://..."
-                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
-              />
-            </div>
+            {destinationType === 'amazon' ? (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1.5">
+                    Branded Short Code / Slug *
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-amber-300/80 font-mono select-none">
+                      go.justmixx.com/
+                    </span>
+                    <input
+                      type="text"
+                      value={customSlug}
+                      onChange={(e) => {
+                        const val = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+                        setCustomSlug(val);
+                        setEditTrackingUrl(val ? buildBrandedTrackingUrl(val) : '');
+                        setValidationError(null);
+                      }}
+                      placeholder="his1-v1"
+                      className="flex-1 bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors"
+                    />
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Custom short link for this influencer (e.g. <span className="text-amber-300 font-mono">his1-v1</span>, <span className="text-amber-300 font-mono">his1-v2</span>, <span className="text-amber-300 font-mono">his2-v1</span>).
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1.5">
+                    Original Amazon Destination URL *
+                  </label>
+                  <input
+                    type="text"
+                    value={amazonUrl}
+                    onChange={(e) => {
+                      setAmazonUrl(e.target.value);
+                      setValidationError(null);
+                    }}
+                    placeholder="https://www.amazon.in/dp/B0..."
+                    className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Visitors opening the short link are atomically counted and 302 redirected here.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Tracking Link Preview *
+                  </label>
+                  <input
+                    type="text"
+                    value={editTrackingUrl}
+                    onChange={(e) => setEditTrackingUrl(e.target.value)}
+                    placeholder="https://go.justmixx.com/..."
+                    className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-amber-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+                  />
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Tracking URL *
+                </label>
+                <input
+                  type="text"
+                  value={editTrackingUrl}
+                  onChange={(e) => setEditTrackingUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
@@ -586,7 +673,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                   className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors disabled:opacity-50"
                 />
                 <p className="mt-1.5 text-[11px] text-slate-400">
-                  A unique redirect tracking link (<code className="text-amber-300">/r/:id</code>) will be generated for each influencer. Visitor clicks are atomically tracked before redirecting to Amazon.
+                  A unique branded short link (<code className="text-amber-300">https://go.justmixx.com/{'{slug}'}</code> e.g. <code className="text-amber-300">his1-v1</code>) will be generated for each influencer. Visitor clicks are atomically tracked in Redis before 302 redirecting to Amazon.
                 </p>
               </div>
             )}

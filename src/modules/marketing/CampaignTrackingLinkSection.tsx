@@ -713,6 +713,28 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       </div>
 
       {/* Notice Banners */}
+      <div className="bg-purple-950/20 border border-purple-500/30 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-purple-200">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-400 flex items-center justify-center shrink-0">
+            <Globe size={16} />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-white">Custom Branded Domain:</span>
+              <span className="font-mono text-amber-300 font-semibold bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-500/30">
+                go.justmixx.com
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                DNS CNAME Setup Required
+              </span>
+            </div>
+            <p className="text-slate-400 text-[11px] mt-0.5 truncate">
+              Amazon links display as clean short codes (e.g. <span className="font-mono text-purple-300">go.justmixx.com/his1-v1</span>). Legacy UUID links remain supported.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {!isClicksConfigured ? (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-200">
           <AlertTriangle size={18} className="shrink-0 text-amber-400 mt-0.5" />
@@ -972,7 +994,9 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     {(() => {
                                                       const isAmazonLink =
                                                         link.destination_type === 'amazon' ||
-                                                        (link.tracking_url && link.tracking_url.includes('/r/')) ||
+                                                        Boolean(link.custom_slug) ||
+                                                        Boolean(link.branded_url) ||
+                                                        (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('go.justmixx.com'))) ||
                                                         (link.platform && link.platform.toLowerCase() === 'amazon');
 
                                                       if (!isAmazonLink) {

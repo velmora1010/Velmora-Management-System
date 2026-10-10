@@ -291,6 +291,8 @@ export interface InfluencerTrackingLink {
   tracking_url: string;
   destination_type?: 'shopify' | 'amazon';
   original_destination_url?: string;
+  custom_slug?: string;
+  branded_url?: string;
   clicks?: number;
   notes?: string;
   created_at?: string;

@@ -202,11 +202,105 @@ export function isValidAmazonUrl(urlStr: string): boolean {
   }
 }
 
+export const BRANDED_TRACKING_DOMAIN = 'https://go.justmixx.com';
+
+/**
+ * Builds the canonical short code/slug from creator code and video number.
+ * Examples: 'his1-v1', 'his1-v2', 'his2-v1'
+ */
+export function buildTrackingSlug(
+  creatorCode?: string, 
+  videoNumber?: string, 
+  utmContent?: string,
+  suffix?: string
+): string {
+  const cleanCode = (creatorCode || '').replace(/^#+/, '').trim().toLowerCase();
+  const cleanVideo = (utmContent || '').replace(/^v/i, '') || 
+                     (videoNumber || '').replace(/[^0-9]/g, '') || '1';
+  let slug = `${cleanCode || 'inf'}-v${cleanVideo}`;
+  if (suffix) {
+    const cleanSuffix = suffix.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    if (cleanSuffix) slug += `-${cleanSuffix}`;
+  }
+  return slug;
+}
+
+/**
+ * Builds the branded tracking URL: https://go.justmixx.com/${slug}
+ */
+export function buildBrandedTrackingUrl(slug: string): string {
+  const cleanSlug = encodeURIComponent(String(slug || '').trim().replace(/^\/+|\/+$/g, ''));
+  return `${BRANDED_TRACKING_DOMAIN}/${cleanSlug}`;
+}
+
+/**
+ * Generates an abbreviated product suffix if a base slug collides with an existing link
+ */
+export function getDisambiguatedSlug(
+  baseSlug: string,
+  linkId: string,
+  existingLinks: InfluencerTrackingLink[],
+  product?: string
+): string {
+  const cleanBase = baseSlug.trim().toLowerCase();
+  const collision = existingLinks.find(
+    l => String(l.id) !== String(linkId) && 
+         ((l.custom_slug && l.custom_slug.toLowerCase() === cleanBase) ||
+          (l.tracking_url && l.tracking_url.toLowerCase().endsWith(`/${cleanBase}`)))
+  );
+
+  if (!collision) return cleanBase;
+
+  let prodSuffix = '';
+  if (product) {
+    const words = product.trim().split(/\s+/);
+    if (words.length > 1) {
+      prodSuffix = words.map(w => w[0]).join('').toLowerCase();
+    } else {
+      prodSuffix = product.slice(0, 3).toLowerCase();
+    }
+  }
+
+  let candidate = prodSuffix ? `${cleanBase}-${prodSuffix}` : `${cleanBase}-2`;
+  let counter = 2;
+  while (existingLinks.some(l => String(l.id) !== String(linkId) && 
+    ((l.custom_slug && l.custom_slug.toLowerCase() === candidate) ||
+     (l.tracking_url && l.tracking_url.toLowerCase().endsWith(`/${candidate}`))))) {
+    candidate = `${cleanBase}-${prodSuffix ? `${prodSuffix}-` : ''}${counter}`;
+    counter++;
+  }
+
+  return candidate;
+}
+
+/**
+ * Persists a slug to linkId mapping to Redis via /api/clicks
+ */
+export async function persistSlugMapping(slug: string, linkId: string): Promise<boolean> {
+  if (!slug || !linkId) return false;
+  try {
+    const cleanSlug = slug.trim().toLowerCase();
+    const cleanId = String(linkId).trim();
+    const res = await fetch('/api/clicks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_slug', slug: cleanSlug, link_id: cleanId })
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed to persist slug mapping:', err);
+    return false;
+  }
+}
+
 /**
  * Builds the unique redirect tracking URL for Amazon destination
- * Formats: ${origin}/r/${linkId} (with fallback to window.location.origin)
+ * Formats: https://go.justmixx.com/${slug} (with fallback to ${origin}/r/${linkId})
  */
-export function buildAmazonRedirectTrackingUrl(linkId: string, origin?: string): string {
+export function buildAmazonRedirectTrackingUrl(linkId: string, slug?: string, origin?: string): string {
+  if (slug) {
+    return buildBrandedTrackingUrl(slug);
+  }
   const base = origin || (typeof window !== 'undefined' ? window.location.origin : '');
   const cleanId = encodeURIComponent(String(linkId || '').trim());
   return base ? `${base}/r/${cleanId}` : `/r/${cleanId}`;
@@ -399,8 +493,24 @@ export function normalizeTrackingLink(raw: any): InfluencerTrackingLink {
 
   const clicks = typeof raw.clicks === 'number' ? raw.clicks : (typeof extra.clicks === 'number' ? extra.clicks : undefined);
 
+  // Compute branded short code / slug for Amazon links
+  const recordId = String(raw.id || `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
+  const custom_slug = extra.custom_slug || 
+                      raw.custom_slug || 
+                      (isAmazon && creator_code ? buildTrackingSlug(creator_code, video_number, utm_content) : undefined);
+  const branded_url = custom_slug ? buildBrandedTrackingUrl(custom_slug) : undefined;
+
+  let tracking_url = raw.tracking_url || '';
+  if (isAmazon) {
+    if (branded_url) {
+      tracking_url = branded_url;
+    } else if (!tracking_url) {
+      tracking_url = buildAmazonRedirectTrackingUrl(recordId);
+    }
+  }
+
   return {
-    id: String(raw.id || `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`),
+    id: recordId,
     campaign_id: String(raw.campaign_id),
     influencer_id: String(raw.influencer_id),
     influencer_name: raw.influencer_name || '',
@@ -414,9 +524,11 @@ export function normalizeTrackingLink(raw: any): InfluencerTrackingLink {
     utm_medium,
     utm_content,
     base_product_url,
-    tracking_url: raw.tracking_url || '',
+    tracking_url,
     destination_type,
     original_destination_url,
+    custom_slug,
+    branded_url,
     clicks,
     notes: cleanNotes,
     created_at: raw.created_at || new Date().toISOString(),
@@ -469,6 +581,14 @@ export async function fetchInfluencerTrackingLinks(
     if (data && data.length > 0) {
       const normalized = (data as any[]).map(normalizeTrackingLink).sort(compareTrackingLinksByCodeAsc);
       saveLocalTrackingLinks(cleanId, normalized);
+
+      // Asynchronously register any Amazon custom slugs to Redis so redirects resolve instantly
+      normalized.forEach(l => {
+        if (l.destination_type === 'amazon' && l.custom_slug) {
+          persistSlugMapping(l.custom_slug, l.id).catch(() => {});
+        }
+      });
+
       return normalized;
     }
 
@@ -571,9 +691,14 @@ export async function batchGenerateInfluencerTrackingLinks(
         : `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
     );
 
-    // Build unique tracking URL
+    // Derive unique branded slug for Amazon links
+    const baseSlug = isAmazon ? buildTrackingSlug(cleanCode, params.video_number, params.utm_content) : '';
+    const custom_slug = isAmazon ? getDisambiguatedSlug(baseSlug, recordId, existingLinks, params.product) : undefined;
+    const branded_url = custom_slug ? buildBrandedTrackingUrl(custom_slug) : undefined;
+
+    // Build unique tracking URL (prefer branded domain)
     const trackingUrl = isAmazon
-      ? buildAmazonRedirectTrackingUrl(recordId)
+      ? (branded_url || buildAmazonRedirectTrackingUrl(recordId))
       : buildInfluencerTrackingUrl(
           params.base_product_url,
           params.utm_source,
@@ -584,6 +709,7 @@ export async function batchGenerateInfluencerTrackingLinks(
     const notesPayload = JSON.stringify({
       destination_type,
       original_amazon_url: original_destination_url,
+      custom_slug,
       platform: params.platform,
       platform_category: params.platform_category,
       video_number: params.video_number,
@@ -613,6 +739,8 @@ export async function batchGenerateInfluencerTrackingLinks(
       tracking_url: trackingUrl,
       destination_type,
       original_destination_url,
+      custom_slug,
+      branded_url,
       clicks: existing?.clicks || 0,
       notes: notesPayload,
       created_at: existing?.created_at || now,
@@ -706,6 +834,15 @@ export async function batchGenerateInfluencerTrackingLinks(
   const finalLocalLinks = Array.from(mergedMap.values()).sort(compareTrackingLinksByCodeAsc);
   saveLocalTrackingLinks(cleanCampaignId, finalLocalLinks);
 
+  // Asynchronously register any Amazon custom slugs to Redis
+  if (isAmazon) {
+    successfulLinks.forEach(link => {
+      if (link.custom_slug) {
+        persistSlugMapping(link.custom_slug, link.id).catch(() => {});
+      }
+    });
+  }
+
   return {
     total,
     successCount: successfulLinks.length,
@@ -728,6 +865,7 @@ export interface CreateTrackingLinkParams {
   product: string;
   destination_type?: 'shopify' | 'amazon';
   original_destination_url?: string;
+  custom_slug?: string;
   platform?: string;
   platform_category?: PlatformCategory;
   video_number?: string;
@@ -755,9 +893,18 @@ export async function createInfluencerTrackingLink(
   const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
   const original_destination_url = params.original_destination_url || (isAmazon ? params.base_product_url : undefined);
 
+  const custom_slug = isAmazon 
+    ? (params.custom_slug?.trim().toLowerCase() || buildTrackingSlug(cleanCode, params.video_number, params.utm_content))
+    : undefined;
+  const branded_url = custom_slug ? buildBrandedTrackingUrl(custom_slug) : undefined;
+  const finalTrackingUrl = isAmazon 
+    ? (branded_url || params.tracking_url.trim())
+    : params.tracking_url.trim();
+
   const notesPayload = JSON.stringify({
     destination_type,
     original_amazon_url: original_destination_url,
+    custom_slug,
     platform: params.platform || 'Instagram',
     platform_category: params.platform_category || 'WEBSITE',
     video_number: params.video_number || 'Video 1',
@@ -784,14 +931,20 @@ export async function createInfluencerTrackingLink(
     utm_medium: 'influencer',
     utm_content: (params.utm_content || 'v1').toLowerCase(),
     base_product_url: isAmazon ? (original_destination_url || params.base_product_url || '') : (params.base_product_url || ''),
-    tracking_url: params.tracking_url.trim(),
+    tracking_url: finalTrackingUrl,
     destination_type,
     original_destination_url,
+    custom_slug,
+    branded_url,
     clicks: 0,
     notes: notesPayload,
     created_at: now,
     updated_at: now
   };
+
+  if (destination_type === 'amazon' && custom_slug) {
+    persistSlugMapping(custom_slug, newRecord.id).catch(() => {});
+  }
 
   try {
     const { data, error } = await client
@@ -848,6 +1001,7 @@ export interface UpdateTrackingLinkParams {
   creator_code?: string;
   base_product_url?: string;
   tracking_url: string;
+  custom_slug?: string;
   notes?: string;
 }
 
@@ -868,9 +1022,18 @@ export async function updateInfluencerTrackingLink(
   const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
   const original_destination_url = params.original_destination_url || (isAmazon ? params.base_product_url : undefined);
 
+  const custom_slug = isAmazon 
+    ? (params.custom_slug?.trim().toLowerCase() || buildTrackingSlug(cleanCode, params.video_number, params.utm_content))
+    : undefined;
+  const branded_url = custom_slug ? buildBrandedTrackingUrl(custom_slug) : undefined;
+  const finalTrackingUrl = isAmazon 
+    ? (branded_url || params.tracking_url.trim())
+    : params.tracking_url.trim();
+
   const notesPayload = JSON.stringify({
     destination_type,
     original_amazon_url: original_destination_url,
+    custom_slug,
     platform: params.platform,
     platform_category: params.platform_category,
     video_number: params.video_number,
@@ -887,10 +1050,14 @@ export async function updateInfluencerTrackingLink(
     influencer_name: params.influencer_name?.trim() || '',
     influencer_code: displayCode,
     product: params.product.trim(),
-    tracking_url: params.tracking_url.trim(),
+    tracking_url: finalTrackingUrl,
     notes: notesPayload,
     updated_at: now
   };
+
+  if (destination_type === 'amazon' && custom_slug) {
+    persistSlugMapping(custom_slug, id).catch(() => {});
+  }
 
   try {
     const { data, error } = await client

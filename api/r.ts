@@ -98,20 +98,24 @@ export default async function handler(
   req: IncomingMessage & { query?: Record<string, string> },
   res: ServerResponse
 ) {
-  // Parse Link ID from query parameter or request URL path
+  // Parse Link identifier (short slug or UUID) from query parameter or request URL path
   const urlObj = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
-  let rawId = urlObj.searchParams.get('id') || (req.query && req.query.id) || '';
+  let rawIdentifier = urlObj.searchParams.get('slug') || 
+                      urlObj.searchParams.get('id') || 
+                      (req.query && (req.query.slug || req.query.id)) || '';
   
-  if (!rawId && urlObj.pathname.startsWith('/r/')) {
-    rawId = urlObj.pathname.replace(/^\/r\//, '').split('?')[0];
+  if (!rawIdentifier && urlObj.pathname.startsWith('/r/')) {
+    rawIdentifier = urlObj.pathname.replace(/^\/r\//, '').split('?')[0];
+  } else if (!rawIdentifier && urlObj.pathname.length > 1 && !urlObj.pathname.startsWith('/api/')) {
+    rawIdentifier = urlObj.pathname.replace(/^\//, '').split('?')[0];
   }
 
-  const linkId = decodeURIComponent(rawId).trim().replace(/^\/+|\/+$/g, '');
+  const identifier = decodeURIComponent(rawIdentifier).trim().replace(/^\/+|\/+$/g, '').toLowerCase();
 
-  if (!linkId) {
+  if (!identifier) {
     res.statusCode = 400;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end('<h1>400 Bad Request</h1><p>Missing tracking link identifier.</p>');
+    res.end('<h1>400 Bad Request</h1><p>Missing tracking link identifier or short code.</p>');
     return;
   }
 
@@ -119,23 +123,47 @@ export default async function handler(
   const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || DEFAULT_UPSTASH_REDIS_TOKEN;
   const isRedisConfigured = Boolean(redisUrl && redisToken);
 
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+  let canonicalLinkId = isUuid ? identifier : '';
   let destinationUrl = '';
 
-  // 1. Try to read destination URL from Redis cache if available
-  if (isRedisConfigured) {
+  // 1. If identifier is a slug, check Redis persistent slug mapping: slug:<identifier> -> canonicalId
+  if (!canonicalLinkId && isRedisConfigured) {
     try {
-      const getRes = await fetch(redisUrl, {
+      const slugRes = await fetch(redisUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${redisToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(['GET', `dest:${linkId}`])
+        body: JSON.stringify(['GET', `slug:${identifier}`])
       });
-      if (getRes.ok) {
-        const data = await getRes.json();
-        if (data?.result && typeof data.result === 'string') {
-          destinationUrl = data.result;
+      if (slugRes.ok) {
+        const slugData = await slugRes.json();
+        if (slugData?.result && typeof slugData.result === 'string') {
+          canonicalLinkId = slugData.result.trim();
+        }
+      }
+    } catch (err) {
+      console.warn('[Tracking Redirect] Failed to read slug mapping from Redis:', err);
+    }
+  }
+
+  // 2. If canonical ID is known, try to read destination URL from Redis cache
+  if (canonicalLinkId && isRedisConfigured) {
+    try {
+      const destRes = await fetch(redisUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${redisToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(['GET', `dest:${canonicalLinkId}`])
+      });
+      if (destRes.ok) {
+        const destData = await destRes.json();
+        if (destData?.result && typeof destData.result === 'string') {
+          destinationUrl = destData.result;
         }
       }
     } catch (err) {
@@ -143,8 +171,8 @@ export default async function handler(
     }
   }
 
-  // 2. Authoritative source of truth: Query Supabase for the tracking link record
-  if (!destinationUrl) {
+  // 3. Authoritative source of truth: Query Supabase for the tracking link record
+  if (!destinationUrl || !canonicalLinkId) {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
     const supabaseKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || 
                         process.env.SUPABASE_SERVICE_ROLE_KEY || 
@@ -153,69 +181,109 @@ export default async function handler(
                         DEFAULT_SUPABASE_KEY;
 
     try {
-      // Primary lookup: By link ID (primary key)
-      const queryUrl = `${supabaseUrl}/rest/v1/influencer_tracking_links?id=eq.${encodeURIComponent(linkId)}&select=*`;
-      const sbRes = await fetch(queryUrl, {
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`
-        }
-      });
+      let matchedRow: any = null;
 
-      if (sbRes.ok) {
-        const rows = await sbRes.json();
-        const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-        if (row) {
-          destinationUrl = extractAmazonDestinationUrl(row);
+      // Lookup Path A: By exact canonical ID (if UUID known)
+      if (canonicalLinkId) {
+        const queryUrl = `${supabaseUrl}/rest/v1/influencer_tracking_links?id=eq.${encodeURIComponent(canonicalLinkId)}&select=*`;
+        const sbRes = await fetch(queryUrl, {
+          headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }
+        });
+        if (sbRes.ok) {
+          const rows = await sbRes.json();
+          if (Array.isArray(rows) && rows.length > 0) matchedRow = rows[0];
         }
       }
 
-      // Secondary lookup: Fallback by tracking_url match if not found by exact id
-      if (!destinationUrl) {
-        const fallbackUrl = `${supabaseUrl}/rest/v1/influencer_tracking_links?tracking_url=ilike.*${encodeURIComponent(linkId)}*&select=*`;
-        const fbRes = await fetch(fallbackUrl, {
-          headers: {
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`
+      // Lookup Path B: If slug, query by notes JSON containing custom_slug
+      if (!matchedRow && !isUuid) {
+        const slugQueryUrl = `${supabaseUrl}/rest/v1/influencer_tracking_links?notes=ilike.*"custom_slug":"${encodeURIComponent(identifier)}"*&select=*`;
+        const slugRes = await fetch(slugQueryUrl, {
+          headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }
+        });
+        if (slugRes.ok) {
+          const rows = await slugRes.json();
+          if (Array.isArray(rows) && rows.length > 0) {
+            matchedRow = rows.find(r => Boolean(extractAmazonDestinationUrl(r))) || rows[0];
           }
+        }
+      }
+
+      // Lookup Path C: If slug format is code-vNumber (e.g. his1-v1), query creator_code + utm_content
+      if (!matchedRow && !isUuid) {
+        const slugPattern = /^([a-z0-9_]+)-v(\d+)(?:-([a-z0-9_]+))?$/i;
+        const match = identifier.match(slugPattern);
+        if (match) {
+          const codePart = match[1].toLowerCase();
+          const videoNum = match[2];
+          const utmContent = `v${videoNum}`;
+
+          const codeQueryUrl = `${supabaseUrl}/rest/v1/influencer_tracking_links?creator_code=eq.${encodeURIComponent(codePart)}&utm_content=eq.${encodeURIComponent(utmContent)}&select=*`;
+          const codeRes = await fetch(codeQueryUrl, {
+            headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }
+          });
+          if (codeRes.ok) {
+            const rows = await codeRes.json();
+            if (Array.isArray(rows) && rows.length > 0) {
+              matchedRow = rows.find(r => Boolean(extractAmazonDestinationUrl(r))) || rows[0];
+            }
+          }
+        }
+      }
+
+      // Lookup Path D: Fallback match by tracking_url containing the slug/id
+      if (!matchedRow) {
+        const fallbackUrl = `${supabaseUrl}/rest/v1/influencer_tracking_links?tracking_url=ilike.*${encodeURIComponent(identifier)}*&select=*`;
+        const fbRes = await fetch(fallbackUrl, {
+          headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }
         });
         if (fbRes.ok) {
           const fbRows = await fbRes.json();
-          const fbRow = Array.isArray(fbRows) && fbRows.length > 0 ? fbRows[0] : null;
-          if (fbRow) {
-            destinationUrl = extractAmazonDestinationUrl(fbRow);
+          if (Array.isArray(fbRows) && fbRows.length > 0) {
+            matchedRow = fbRows.find(r => Boolean(extractAmazonDestinationUrl(r))) || fbRows[0];
           }
         }
       }
 
-      // Cache destination in Redis for ultra-fast subsequent redirects
-      if (isRedisConfigured && destinationUrl) {
-        fetch(redisUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${redisToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(['SET', `dest:${linkId}`, destinationUrl, 'EX', '86400'])
-        }).catch(() => {});
+      if (matchedRow) {
+        canonicalLinkId = String(matchedRow.id).trim();
+        destinationUrl = extractAmazonDestinationUrl(matchedRow);
+
+        // Cache persistent slug and destination in Redis for ultra-fast subsequent visits
+        if (isRedisConfigured) {
+          if (!isUuid && identifier) {
+            fetch(redisUrl, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${redisToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify(['SET', `slug:${identifier}`, canonicalLinkId])
+            }).catch(() => {});
+          }
+          if (destinationUrl) {
+            fetch(redisUrl, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${redisToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify(['SET', `dest:${canonicalLinkId}`, destinationUrl, 'EX', '86400'])
+            }).catch(() => {});
+          }
+        }
       }
     } catch (err) {
       console.error('[Tracking Redirect] Failed to lookup link in Supabase:', err);
     }
   }
 
-  // 3. If destination URL was not found
-  if (!destinationUrl) {
-    console.warn(`[Tracking Redirect] 404: Tracking link record not found in Supabase for ID: "${linkId}"`);
+  // 4. If destination URL or canonical record was not found
+  if (!destinationUrl || !canonicalLinkId) {
+    console.warn(`[Tracking Redirect] 404: Tracking link record not found in Supabase for identifier: "${identifier}"`);
     res.statusCode = 404;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.end('<h1>404 Not Found</h1><p>The requested tracking link does not exist or has been removed.</p>');
     return;
   }
 
-  // 4. Validate destination URL to prevent open redirect vulnerabilities
+  // 5. Validate destination URL to prevent open redirect vulnerabilities
   if (!isValidAmazonUrl(destinationUrl)) {
-    console.warn(`[Tracking Redirect] 400: Destination "${destinationUrl}" is not a recognized Amazon URL for ID: "${linkId}"`);
+    console.warn(`[Tracking Redirect] 400: Destination "${destinationUrl}" is not a recognized Amazon URL for ID: "${canonicalLinkId}"`);
     res.statusCode = 400;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.end('<h1>400 Invalid Destination</h1><p>The destination URL is not a recognized Amazon store address.</p>');
@@ -227,14 +295,14 @@ export default async function handler(
     ? destinationUrl
     : `https://${destinationUrl}`;
 
-  // 5. Bot filtering & duplicate click deduplication
+  // 6. Bot filtering & duplicate click deduplication (keyed strictly to the canonical tracking link ID)
   const userAgent = req.headers['user-agent'] || '';
   const cookies = parseCookies(req.headers.cookie);
-  const dedupeCookieKey = `trk_c_${linkId}`;
+  const dedupeCookieKey = `trk_c_${canonicalLinkId}`;
   const isDuplicateClick = Boolean(cookies[dedupeCookieKey]);
   const isBotRequest = isBot(userAgent);
 
-  // 6. Increment persistent atomic counter in Redis if genuine visitor
+  // 7. Increment persistent atomic counter in Redis if genuine visitor
   if (isRedisConfigured && !isBotRequest && !isDuplicateClick) {
     try {
       const incrRes = await fetch(redisUrl, {
@@ -243,18 +311,18 @@ export default async function handler(
           Authorization: `Bearer ${redisToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(['INCR', `click:${linkId}`])
+        body: JSON.stringify(['INCR', `click:${canonicalLinkId}`])
       });
       if (incrRes.ok) {
         const data = await incrRes.json();
-        console.log(`[Tracking Redirect] Incremented click for ${linkId}, new count: ${data?.result}`);
+        console.log(`[Tracking Redirect] Incremented click for ${canonicalLinkId} (via ${identifier}), new count: ${data?.result}`);
       }
     } catch (err) {
       console.error('[Tracking Redirect] Failed to increment click counter in Redis:', err);
     }
   }
 
-  // 7. Set short deduplication cookie to protect against double counting from fast page refreshes
+  // 8. Set short deduplication cookie to protect against double counting from fast page refreshes
   res.setHeader('Set-Cookie', `${dedupeCookieKey}=1; Max-Age=5; Path=/; SameSite=Lax`);
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Location', targetRedirect);
