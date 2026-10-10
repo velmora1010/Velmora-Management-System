@@ -25,7 +25,8 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
-  MousePointerClick
+  MousePointerClick,
+  Clock
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
 import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
@@ -169,14 +170,28 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
+  // Pagination state (default: 20 per page)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(20);
+
   // Dedicated Marketplace View state within a selected product
   const [selectedMarketplace, setSelectedMarketplace] = useState<string | null>(null);
 
-  // Clear selection and selected marketplace whenever the selected product changes
+  // Click refresh tracking
+  const [isRefreshingClicks, setIsRefreshingClicks] = useState<boolean>(false);
+  const [lastClicksUpdated, setLastClicksUpdated] = useState<Date | null>(null);
+
+  // Clear selection, selected marketplace, and reset page whenever selected product changes
   useEffect(() => {
     setSelectedLinkIds(new Set());
     setSelectedMarketplace(null);
+    setCurrentPage(1);
   }, [selectedProduct]);
+
+  // Reset pagination to page 1 on filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedMarketplace, selectedPlatform, selectedVideo, searchQuery, pageSize]);
 
   // Accordion expansion state:
   // expandedProducts: { [productName: string]: boolean }
@@ -213,7 +228,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           const res = await fetchTrackingLinkClicks(linkIds);
           setIsClicksConfigured(res.configured);
           setClicksError(res.error || null);
-          setClicksMap(res.clicks || {});
+          setClicksMap(prev => ({ ...prev, ...(res.clicks || {}) }));
+          setLastClicksUpdated(new Date());
         } catch (e: any) {
           console.warn('Failed to fetch clicks:', e);
           setClicksError(e?.message || 'Failed to connect to clicks service');
@@ -237,6 +253,45 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   useEffect(() => {
     loadLinks();
   }, [loadLinks]);
+
+  // Target-aware reliable Click Count Refresh: only queries relevant IDs and safely merges without clobbering
+  const handleRefreshClickCounts = useCallback(async (targetLinks: InfluencerTrackingLink[]) => {
+    if (isRefreshingClicks) return;
+
+    const idsToQuery = targetLinks.map(l => String(l.id)).filter(Boolean);
+    if (idsToQuery.length === 0) {
+      toast('No tracking links to refresh for current view', { icon: 'ℹ️' });
+      return;
+    }
+
+    setIsRefreshingClicks(true);
+    try {
+      const res = await fetchTrackingLinkClicks(idsToQuery);
+      setIsClicksConfigured(res.configured);
+
+      if (res.isError) {
+        const errorText = res.error || 'Failed to refresh click counts';
+        setClicksError(errorText);
+        toast.error(errorText);
+      } else {
+        setClicksError(null);
+        // Merge into previous state so existing counts for other links are preserved
+        setClicksMap(prev => ({
+          ...prev,
+          ...(res.clicks || {})
+        }));
+        setLastClicksUpdated(new Date());
+        toast.success(`Click counts updated (${idsToQuery.length} links checked)`);
+      }
+    } catch (err: any) {
+      console.error('Error refreshing click counts:', err);
+      const msg = err?.message || 'Failed to refresh click counts from Redis';
+      setClicksError(msg);
+      toast.error(msg);
+    } finally {
+      setIsRefreshingClicks(false);
+    }
+  }, [isRefreshingClicks]);
 
   // Open Create Modal
   const handleOpenCreate = (preselectedProduct?: string) => {
@@ -1448,239 +1503,414 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                 </div>
 
                                 {/* Platform Content (Table or Grid) */}
-                                {isPlatformExpanded && (
-                                  <div className="border-t border-slate-800/80 bg-[#070c18]">
-                                    {viewMode === 'table' ? (
-                                      /* 7-Column Clean Table: Checkbox, Influencer, Creator Code, Video, Tracking Link, Clicks, Actions */
-                                      <div className="overflow-x-auto">
-                                        <table className="w-full text-left text-xs text-slate-300">
-                                          <thead className="bg-[#050914] border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                                            <tr>
-                                              <th scope="col" className="w-10 px-3 py-3 text-center">
-                                                <input
-                                                  type="checkbox"
-                                                  checked={isAllFilteredSelected}
-                                                  ref={(el) => {
-                                                    if (el) el.indeterminate = isPartiallyFilteredSelected;
-                                                  }}
-                                                  onChange={handleToggleSelectAll}
-                                                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
-                                                  title={isAllFilteredSelected ? 'Deselect all rows' : 'Select all matching rows'}
-                                                />
-                                              </th>
-                                              <th scope="col" className="px-4 py-3 min-w-[170px]">Influencer</th>
-                                              <th scope="col" className="px-4 py-3 min-w-[110px]">Creator Code</th>
-                                              <th scope="col" className="px-4 py-3 min-w-[90px]">Video</th>
-                                              <th scope="col" className="px-4 py-3 min-w-[280px]">Tracking Link</th>
-                                              <th scope="col" className="px-4 py-3 text-center min-w-[100px]">Clicks</th>
-                                              <th scope="col" className="px-4 py-3 text-right min-w-[140px]">Actions</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-slate-800/60">
-                                            {platformGroup.links.map((link) => {
-                                              const isCopied = copiedId === link.id;
-                                              const isSelected = selectedLinkIds.has(link.id);
-                                              const videoText = link.video_number || 'Video 1';
+                                {isPlatformExpanded && (() => {
+                                  // Pagination logic for this platform group
+                                  const totalPlatformLinks = platformGroup.links.length;
+                                  const totalPages = Math.max(1, Math.ceil(totalPlatformLinks / pageSize));
+                                  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+                                  const startIndex = (safePage - 1) * pageSize;
+                                  const endIndex = Math.min(startIndex + pageSize, totalPlatformLinks);
+                                  const paginatedLinks = platformGroup.links.slice(startIndex, endIndex);
 
-                                              return (
-                                                <tr
-                                                  key={link.id}
-                                                  className={`transition-colors group ${
-                                                    isSelected ? 'bg-purple-950/25 hover:bg-purple-950/35' : 'hover:bg-slate-900/50'
-                                                  }`}
-                                                >
-                                                  {/* 0. Row Selection Checkbox */}
-                                                  <td className="w-10 px-3 py-2.5 text-center">
-                                                    <input
-                                                      type="checkbox"
-                                                      checked={isSelected}
-                                                      onChange={() => handleToggleSelectLink(link.id)}
-                                                      className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
-                                                      title={`Select ${link.influencer_name || link.creator_code || 'link'}`}
-                                                    />
-                                                  </td>
+                                  const allInPageSelected = paginatedLinks.length > 0 &&
+                                    paginatedLinks.every(l => selectedLinkIds.has(l.id));
+                                  const someInPageSelected = paginatedLinks.some(l => selectedLinkIds.has(l.id));
 
-                                                  {/* 1. Influencer */}
-                                                  <td className="px-4 py-2.5 font-semibold text-white whitespace-nowrap">
-                                                    <div className="flex items-center gap-2">
-                                                      <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
-                                                        {(link.influencer_name || 'U').charAt(0).toUpperCase()}
-                                                      </div>
-                                                      <span className="truncate max-w-[170px]">
-                                                        {link.influencer_name || 'Influencer'}
-                                                      </span>
-                                                    </div>
-                                                  </td>
+                                  // Toggle select all on current page
+                                  const handleToggleSelectPage = () => {
+                                    const pageIds = paginatedLinks.map(l => l.id);
+                                    setSelectedLinkIds(prev => {
+                                      const next = new Set(prev);
+                                      if (allInPageSelected) {
+                                        pageIds.forEach(id => next.delete(id));
+                                      } else {
+                                        pageIds.forEach(id => next.add(id));
+                                      }
+                                      return next;
+                                    });
+                                  };
 
-                                                  {/* 2. Creator Code (Ascending Numerical Order preserved) */}
-                                                  <td className="px-4 py-2.5 whitespace-nowrap">
-                                                    <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 font-mono font-bold text-[11px] border border-purple-500/30">
-                                                      {link.influencer_code || link.creator_code
-                                                        ? `#${(link.creator_code || link.influencer_code || '').replace(/^#+/, '').toUpperCase()}`
-                                                        : '-'}
-                                                    </span>
-                                                  </td>
+                                  // Select all across all pages in this platform
+                                  const handleSelectAllPlatformPages = () => {
+                                    const allIds = platformGroup.links.map(l => l.id);
+                                    setSelectedLinkIds(prev => {
+                                      const next = new Set(prev);
+                                      allIds.forEach(id => next.add(id));
+                                      return next;
+                                    });
+                                  };
 
-                                                  {/* 3. Video */}
-                                                  <td className="px-4 py-2.5 whitespace-nowrap">
-                                                    <span className="px-2 py-0.5 rounded-lg bg-purple-950/40 border border-purple-500/30 text-purple-300 font-bold text-[11px]">
-                                                      {videoText}
-                                                    </span>
-                                                  </td>
+                                  return (
+                                    <div className="border-t border-slate-800/80 bg-[#070c18]">
+                                      {/* Sub-toolbar: Refresh Click Counts & Selection stats */}
+                                      <div className="px-4 py-2.5 bg-[#090f21] border-b border-slate-800/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                        <div className="flex items-center gap-2.5 flex-wrap">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRefreshClickCounts(platformGroup.links)}
+                                            disabled={isRefreshingClicks}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/40 text-purple-300 hover:text-white transition-all cursor-pointer disabled:opacity-50 font-semibold"
+                                            title="Refresh Click Counts for all links in this channel from Redis"
+                                          >
+                                            <RefreshCw size={13} className={isRefreshingClicks ? 'animate-spin text-purple-400' : 'text-purple-400'} />
+                                            <span>{isRefreshingClicks ? 'Refreshing...' : 'Refresh Click Counts'}</span>
+                                          </button>
 
-                                                  {/* 4. Tracking Link */}
-                                                  <td className="px-4 py-2.5 font-mono text-[11px]">
-                                                    <div
-                                                      className="max-w-md truncate text-purple-300 bg-purple-950/20 px-2 py-1 rounded-lg border border-purple-500/20 select-all cursor-pointer hover:text-purple-200 transition-colors"
-                                                      title={link.tracking_url}
-                                                      onClick={() => handleCopyLink(link)}
-                                                    >
-                                                      {link.tracking_url}
-                                                    </div>
-                                                  </td>
+                                          {lastClicksUpdated && (
+                                            <span className="flex items-center gap-1 text-[11px] text-slate-400">
+                                              <Clock size={11} className="text-slate-500" />
+                                              <span>Last updated: {lastClicksUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                            </span>
+                                          )}
+                                        </div>
 
-                                                  {/* 5. Clicks (Atomic server-side counter) */}
-                                                  <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                                                    {(() => {
-                                                      const isAmazonLink =
-                                                        link.destination_type === 'amazon' ||
-                                                        Boolean(link.custom_slug) ||
-                                                        Boolean(link.branded_url) ||
-                                                        (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('link.justmixx.com') || (link.tracking_url.includes('justmixx.com') && !link.tracking_url.includes('utm_source')))) ||
-                                                        (link.platform && link.platform.toLowerCase() === 'amazon');
+                                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                                          <span>
+                                            Showing <span className="text-purple-300 font-bold">{totalPlatformLinks === 0 ? 0 : startIndex + 1}–{endIndex}</span> of <span className="text-slate-200 font-bold">{totalPlatformLinks}</span> links
+                                          </span>
+                                        </div>
+                                      </div>
 
-                                                      if (!isAmazonLink) {
-                                                        return (
-                                                          <span
-                                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-950/40 text-purple-300/80 border border-purple-500/20"
-                                                            title="Direct Shopify link. Clicks and sales are tracked natively in Shopify Analytics via UTM tags"
-                                                          >
-                                                            Shopify UTM
-                                                          </span>
-                                                        );
-                                                      }
+                                      {/* Select All Page banner if all on page selected and more exist */}
+                                      {allInPageSelected && totalPlatformLinks > paginatedLinks.length && !allInPlatformSelected && (
+                                        <div className="px-4 py-2 bg-purple-950/30 border-b border-purple-500/30 flex items-center justify-between text-xs text-purple-300">
+                                          <span>
+                                            All <strong className="text-white">{paginatedLinks.length}</strong> links on page {safePage} are selected.
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={handleSelectAllPlatformPages}
+                                            className="font-bold underline text-purple-300 hover:text-white cursor-pointer ml-2"
+                                          >
+                                            Select all {totalPlatformLinks} links in {platformGroup.platformName}
+                                          </button>
+                                        </div>
+                                      )}
 
-                                                      if (isLoadingClicks) {
-                                                        return (
-                                                          <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-mono">
-                                                            <Loader2 size={11} className="animate-spin text-purple-400" />
-                                                            <span>...</span>
-                                                          </span>
-                                                        );
-                                                      }
+                                      {viewMode === 'table' ? (
+                                        /* 7-Column Clean Table: Checkbox, Influencer, Creator Code, Video, Tracking Link, Clicks, Actions */
+                                        <div className="overflow-x-auto">
+                                          <table className="w-full text-left text-xs text-slate-300">
+                                            <thead className="bg-[#050914] border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                                              <tr>
+                                                <th scope="col" className="w-10 px-3 py-3 text-center">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={allInPageSelected}
+                                                    ref={(el) => {
+                                                      if (el) el.indeterminate = !allInPageSelected && someInPageSelected;
+                                                    }}
+                                                    onChange={handleToggleSelectPage}
+                                                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                                                    title={allInPageSelected ? 'Deselect all rows on this page' : 'Select all rows on this page'}
+                                                  />
+                                                </th>
+                                                <th scope="col" className="px-4 py-3 min-w-[170px]">Influencer</th>
+                                                <th scope="col" className="px-4 py-3 min-w-[110px]">Creator Code</th>
+                                                <th scope="col" className="px-4 py-3 min-w-[90px]">Video</th>
+                                                <th scope="col" className="px-4 py-3 min-w-[280px]">Tracking Link</th>
+                                                <th scope="col" className="px-4 py-3 text-center min-w-[100px]">Clicks</th>
+                                                <th scope="col" className="px-4 py-3 text-right min-w-[140px]">Actions</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-800/60">
+                                              {paginatedLinks.map((link) => {
+                                                const isCopied = copiedId === link.id;
+                                                const isSelected = selectedLinkIds.has(link.id);
+                                                const videoText = link.video_number || 'Video 1';
 
-                                                      if (!isClicksConfigured) {
-                                                        return (
-                                                          <span
-                                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-950/40 text-amber-300 border border-amber-500/30"
-                                                            title={clicksError || 'Redis click counter not configured on server'}
-                                                          >
-                                                            Unconfigured
-                                                          </span>
-                                                        );
-                                                      }
+                                                return (
+                                                  <tr
+                                                    key={link.id}
+                                                    className={`transition-colors group ${
+                                                      isSelected ? 'bg-purple-950/25 hover:bg-purple-950/35' : 'hover:bg-slate-900/50'
+                                                    }`}
+                                                  >
+                                                    {/* 0. Row Selection Checkbox */}
+                                                    <td className="w-10 px-3 py-2.5 text-center">
+                                                      <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => handleToggleSelectLink(link.id)}
+                                                        className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                                                        title={`Select ${link.influencer_name || link.creator_code || 'link'}`}
+                                                      />
+                                                    </td>
 
-                                                      if (clicksError) {
-                                                        return (
-                                                          <span
-                                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-950/40 text-rose-300 border border-rose-500/30"
-                                                            title={`Unable to load click counts: ${clicksError}`}
-                                                          >
-                                                            Unavailable
-                                                          </span>
-                                                        );
-                                                      }
-
-                                                      const count = clicksMap[link.id] ?? 0;
-                                                      return (
-                                                        <span
-                                                          className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold border ${
-                                                            count > 0
-                                                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm'
-                                                              : 'bg-slate-900 border-slate-800 text-slate-400'
-                                                          }`}
-                                                          title={`${count} recorded clicks`}
-                                                        >
-                                                          {count.toLocaleString()}
+                                                    {/* 1. Influencer */}
+                                                    <td className="px-4 py-2.5 font-semibold text-white whitespace-nowrap">
+                                                      <div className="flex items-center gap-2">
+                                                        <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
+                                                          {(link.influencer_name || 'U').charAt(0).toUpperCase()}
+                                                        </div>
+                                                        <span className="truncate max-w-[170px]">
+                                                          {link.influencer_name || 'Influencer'}
                                                         </span>
-                                                      );
-                                                    })()}
-                                                  </td>
+                                                      </div>
+                                                    </td>
 
-                                                  {/* 6. Actions (Copy, Open, Edit, Delete) */}
-                                                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                                                    <div className="flex items-center justify-end gap-1.5">
-                                                      <button
-                                                        type="button"
+                                                    {/* 2. Creator Code (Ascending Numerical Order preserved) */}
+                                                    <td className="px-4 py-2.5 whitespace-nowrap">
+                                                      <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 font-mono font-bold text-[11px] border border-purple-500/30">
+                                                        {link.influencer_code || link.creator_code
+                                                          ? `#${(link.creator_code || link.influencer_code || '').replace(/^#+/, '').toUpperCase()}`
+                                                          : '-'}
+                                                      </span>
+                                                    </td>
+
+                                                    {/* 3. Video */}
+                                                    <td className="px-4 py-2.5 whitespace-nowrap">
+                                                      <span className="px-2 py-0.5 rounded-lg bg-purple-950/40 border border-purple-500/30 text-purple-300 font-bold text-[11px]">
+                                                        {videoText}
+                                                      </span>
+                                                    </td>
+
+                                                    {/* 4. Tracking Link */}
+                                                    <td className="px-4 py-2.5 font-mono text-[11px]">
+                                                      <div
+                                                        className="max-w-md truncate text-purple-300 bg-purple-950/20 px-2 py-1 rounded-lg border border-purple-500/20 select-all cursor-pointer hover:text-purple-200 transition-colors"
+                                                        title={link.tracking_url}
                                                         onClick={() => handleCopyLink(link)}
-                                                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                                                          isCopied
-                                                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                                                            : 'bg-purple-600/10 hover:bg-purple-600/20 text-purple-300 border-purple-500/30'
-                                                        }`}
-                                                        title="Copy complete tracking link"
                                                       >
-                                                        {isCopied ? (
-                                                          <Check size={12} className="text-emerald-400" />
-                                                        ) : (
-                                                          <Copy size={12} />
-                                                        )}
-                                                        <span>{isCopied ? 'Copied!' : 'Copy'}</span>
-                                                      </button>
+                                                        {link.tracking_url}
+                                                      </div>
+                                                    </td>
 
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleOpenLink(link.tracking_url)}
-                                                        className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
-                                                        title="Open tracking URL in new tab"
-                                                      >
-                                                        <ExternalLink size={13} />
-                                                      </button>
+                                                    {/* 5. Clicks (Atomic server-side counter) */}
+                                                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                                                      {(() => {
+                                                        const isAmazonLink =
+                                                          link.destination_type === 'amazon' ||
+                                                          Boolean(link.custom_slug) ||
+                                                          Boolean(link.branded_url) ||
+                                                          (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('link.justmixx.com') || (link.tracking_url.includes('justmixx.com') && !link.tracking_url.includes('utm_source')))) ||
+                                                          (link.platform && link.platform.toLowerCase() === 'amazon');
 
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleOpenEdit(link)}
-                                                        className="p-1 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
-                                                        title="Edit tracking link"
-                                                      >
-                                                        <Edit3 size={13} />
-                                                      </button>
+                                                        if (!isAmazonLink) {
+                                                          return (
+                                                            <span
+                                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-950/40 text-purple-300/80 border border-purple-500/20"
+                                                              title="Direct Shopify link. Clicks and sales are tracked natively in Shopify Analytics via UTM tags"
+                                                            >
+                                                              Shopify UTM
+                                                            </span>
+                                                          );
+                                                        }
 
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => setLinkToDelete(link)}
-                                                        className="p-1 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-slate-800 transition-colors cursor-pointer"
-                                                        title="Delete tracking link"
-                                                      >
-                                                        <Trash2 size={13} />
-                                                      </button>
-                                                    </div>
-                                                  </td>
-                                                </tr>
-                                              );
-                                            })}
-                                          </tbody>
-                                        </table>
+                                                        if (isLoadingClicks || isRefreshingClicks) {
+                                                          return (
+                                                            <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-mono">
+                                                              <Loader2 size={11} className="animate-spin text-purple-400" />
+                                                              <span>...</span>
+                                                            </span>
+                                                          );
+                                                        }
+
+                                                        if (!isClicksConfigured) {
+                                                          return (
+                                                            <span
+                                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-950/40 text-amber-300 border border-amber-500/30"
+                                                              title={clicksError || 'Redis click counter not configured on server'}
+                                                            >
+                                                              Unconfigured
+                                                            </span>
+                                                          );
+                                                        }
+
+                                                        if (clicksError) {
+                                                          return (
+                                                            <span
+                                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-950/40 text-rose-300 border border-rose-500/30"
+                                                              title={`Unable to load click counts: ${clicksError}`}
+                                                            >
+                                                              Unavailable
+                                                            </span>
+                                                          );
+                                                        }
+
+                                                        const count = clicksMap[link.id] ?? 0;
+                                                        return (
+                                                          <span
+                                                            className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold border ${
+                                                              count > 0
+                                                                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm'
+                                                                : 'bg-slate-900 border-slate-800 text-slate-400'
+                                                            }`}
+                                                            title={`${count} recorded clicks`}
+                                                          >
+                                                            {count.toLocaleString()}
+                                                          </span>
+                                                        );
+                                                      })()}
+                                                    </td>
+
+                                                    {/* 6. Actions (Copy, Open, Edit, Delete) */}
+                                                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                                                      <div className="flex items-center justify-end gap-1.5">
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => handleCopyLink(link)}
+                                                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                                                            isCopied
+                                                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                                              : 'bg-purple-600/10 hover:bg-purple-600/20 text-purple-300 border-purple-500/30'
+                                                          }`}
+                                                          title="Copy complete tracking link"
+                                                        >
+                                                          {isCopied ? (
+                                                            <Check size={12} className="text-emerald-400" />
+                                                          ) : (
+                                                            <Copy size={12} />
+                                                          )}
+                                                          <span>{isCopied ? 'Copied!' : 'Copy'}</span>
+                                                        </button>
+
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => handleOpenLink(link.tracking_url)}
+                                                          className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
+                                                          title="Open tracking URL in new tab"
+                                                        >
+                                                          <ExternalLink size={13} />
+                                                        </button>
+
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => handleOpenEdit(link)}
+                                                          className="p-1 rounded-lg text-slate-400 hover:text-purple-300 hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
+                                                          title="Edit tracking link"
+                                                        >
+                                                          <Edit3 size={13} />
+                                                        </button>
+
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => setLinkToDelete(link)}
+                                                          className="p-1 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-slate-800 transition-colors cursor-pointer"
+                                                          title="Delete tracking link"
+                                                        >
+                                                          <Trash2 size={13} />
+                                                        </button>
+                                                      </div>
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : (
+                                        /* Grid View inside platform */
+                                        <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+                                          {paginatedLinks.map((link) => (
+                                            <CampaignTrackingLinkCard
+                                              key={link.id}
+                                              link={link}
+                                              clicks={clicksMap[link.id] ?? 0}
+                                              isClicksConfigured={isClicksConfigured}
+                                              clicksError={clicksError}
+                                              isLoadingClicks={isLoadingClicks || isRefreshingClicks}
+                                              onEdit={handleOpenEdit}
+                                              onDelete={(l) => setLinkToDelete(l)}
+                                            />
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      {/* COMPACT RESPONSIVE PAGINATION FOOTER */}
+                                      <div className="px-4 py-3 bg-[#080e1e] border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                                        {/* Status & Page Size Selector */}
+                                        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
+                                          <span className="text-slate-400">
+                                            Showing <span className="font-semibold text-slate-200">{totalPlatformLinks === 0 ? 0 : startIndex + 1}–{endIndex}</span> of{' '}
+                                            <span className="font-semibold text-purple-300">{totalPlatformLinks}</span> links
+                                          </span>
+
+                                          <div className="flex items-center gap-1.5 bg-[#050914] border border-slate-800 rounded-lg px-2 py-1">
+                                            <span className="text-[11px] text-slate-500">Per page:</span>
+                                            <select
+                                              value={pageSize}
+                                              onChange={(e) => {
+                                                setPageSize(Number(e.target.value));
+                                                setCurrentPage(1);
+                                              }}
+                                              className="bg-transparent text-xs text-purple-300 font-bold focus:outline-none cursor-pointer"
+                                            >
+                                              <option value={10} className="bg-slate-900 text-slate-200">10</option>
+                                              <option value={20} className="bg-slate-900 text-slate-200">20</option>
+                                              <option value={50} className="bg-slate-900 text-slate-200">50</option>
+                                              <option value={100} className="bg-slate-900 text-slate-200">100</option>
+                                            </select>
+                                          </div>
+                                        </div>
+
+                                        {/* Page Navigation Buttons (Previous, 1 2 3 ... Next) */}
+                                        {totalPages > 1 && (
+                                          <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                                            <button
+                                              type="button"
+                                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                              disabled={safePage <= 1}
+                                              className="px-2.5 py-1 rounded-lg bg-[#0a1124] hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                            >
+                                              Previous
+                                            </button>
+
+                                            {/* Page numbers with ellipsis */}
+                                            {(() => {
+                                              const pages: (number | string)[] = [];
+                                              if (totalPages <= 7) {
+                                                for (let p = 1; p <= totalPages; p++) pages.push(p);
+                                              } else {
+                                                pages.push(1);
+                                                if (safePage > 3) pages.push('...');
+                                                const start = Math.max(2, safePage - 1);
+                                                const end = Math.min(totalPages - 1, safePage + 1);
+                                                for (let p = start; p <= end; p++) pages.push(p);
+                                                if (safePage < totalPages - 2) pages.push('...');
+                                                pages.push(totalPages);
+                                              }
+
+                                              return pages.map((page, pIdx) => {
+                                                if (typeof page === 'string') {
+                                                  return (
+                                                    <span key={`ellipsis-${pIdx}`} className="px-1 text-slate-500 font-bold">
+                                                      ...
+                                                    </span>
+                                                  );
+                                                }
+                                                const isCurrent = page === safePage;
+                                                return (
+                                                  <button
+                                                    key={`page-${page}`}
+                                                    type="button"
+                                                    onClick={() => setCurrentPage(page)}
+                                                    className={`min-w-[28px] h-7 px-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                                      isCurrent
+                                                        ? 'bg-purple-600 text-white shadow-sm shadow-purple-900/50'
+                                                        : 'bg-[#0a1124] hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800/80'
+                                                    }`}
+                                                  >
+                                                    {page}
+                                                  </button>
+                                                );
+                                              });
+                                            })()}
+
+                                            <button
+                                              type="button"
+                                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                              disabled={safePage >= totalPages}
+                                              className="px-2.5 py-1 rounded-lg bg-[#0a1124] hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                            >
+                                              Next
+                                            </button>
+                                          </div>
+                                        )}
                                       </div>
-                                    ) : (
-                                      /* Grid View inside platform */
-                                      <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
-                                        {platformGroup.links.map((link) => (
-                                          <CampaignTrackingLinkCard
-                                            key={link.id}
-                                            link={link}
-                                            clicks={clicksMap[link.id] ?? 0}
-                                            isClicksConfigured={isClicksConfigured}
-                                            clicksError={clicksError}
-                                            isLoadingClicks={isLoadingClicks}
-                                            onEdit={handleOpenEdit}
-                                            onDelete={(l) => setLinkToDelete(l)}
-                                          />
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             );
                           })}
