@@ -483,6 +483,59 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     return groups;
   }, [filteredLinks]);
 
+  // Product Summaries for the 4-column Product Card Grid (Includes all standard products and DB products)
+  const allProductSummaries = useMemo(() => {
+    // Collect active links
+    const activeEligibleLinks = links.filter(
+      l => !eliminatedInfluencerIds.has(String(l.influencer_id))
+    );
+
+    // Group links by normalized product name
+    const countMap = new Map<string, { total: number; platforms: Set<string>; categories: Set<string> }>();
+    activeEligibleLinks.forEach(l => {
+      const pName = l.product || 'Unassigned';
+      if (!countMap.has(pName)) {
+        countMap.set(pName, { total: 0, platforms: new Set(), categories: new Set() });
+      }
+      const entry = countMap.get(pName)!;
+      entry.total += 1;
+      if (l.platform) entry.platforms.add(l.platform);
+      if (l.platform_category) entry.categories.add(l.platform_category);
+    });
+
+    // Ensure all standard SCRIPT_PRODUCTS are presented, plus any extra products found in DB
+    const allProdNames = Array.from(new Set([
+      ...SCRIPT_PRODUCTS,
+      ...Array.from(countMap.keys())
+    ]));
+
+    return allProdNames.map(name => {
+      // Find matching case-insensitive entry if any
+      let matchedEntry = countMap.get(name);
+      if (!matchedEntry) {
+        for (const [key, val] of countMap.entries()) {
+          if (key.toLowerCase() === name.toLowerCase()) {
+            matchedEntry = val;
+            break;
+          }
+        }
+      }
+
+      return {
+        name,
+        totalLinks: matchedEntry ? matchedEntry.total : 0,
+        platformsCount: matchedEntry ? matchedEntry.platforms.size : 0,
+        categoriesCount: matchedEntry ? matchedEntry.categories.size : 0
+      };
+    }).sort((a, b) => {
+      // Products with links first, then alphabetical
+      if (b.totalLinks !== a.totalLinks) {
+        return b.totalLinks - a.totalLinks;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [links, eliminatedInfluencerIds]);
+
   // Toggle handlers for collapsible sections
   const toggleProduct = (prodName: string) => {
     setExpandedProducts(prev => {
@@ -779,6 +832,84 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
             Try Again
           </button>
         </div>
+      ) : selectedProduct === 'All' && !isSearching ? (
+        /* =========================================================================
+           1. PRODUCT CARD GRID OVERVIEW (Desktop: 4 cols, Tablet: 2 cols, Mobile: 1 col)
+           ========================================================================= */
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                <ShoppingBag size={15} className="text-purple-400" />
+                <span>Select a Product to View Tracking Links</span>
+              </h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Click any product card to access its dedicated tracking links and influencer assignments
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-slate-400 bg-[#070c18] border border-slate-800 px-3 py-1 rounded-xl">
+              {allProductSummaries.length} Products Available
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {allProductSummaries.map((pSummary) => {
+              const hasLinks = pSummary.totalLinks > 0;
+              return (
+                <div
+                  key={pSummary.name}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedProduct(pSummary.name)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedProduct(pSummary.name);
+                    }
+                  }}
+                  className="group relative flex flex-col justify-between bg-[#0b1329] hover:bg-[#0f1938] border border-slate-800/90 hover:border-purple-500/50 rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-purple-950/20 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                >
+                  <div className="space-y-3.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-purple-600/15 border border-purple-500/30 text-purple-300 flex items-center justify-center text-2xl shrink-0 group-hover:scale-105 group-hover:border-purple-500/50 transition-all shadow-sm">
+                        🧴
+                      </div>
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                          hasLinks
+                            ? 'bg-purple-500/20 text-purple-300 border-purple-500/30 group-hover:bg-purple-500/30'
+                            : 'bg-slate-800/60 text-slate-500 border-slate-700/40'
+                        }`}
+                      >
+                        {pSummary.totalLinks} {pSummary.totalLinks === 1 ? 'Link' : 'Links'}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h5 className="text-sm font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors line-clamp-1">
+                        {pSummary.name}
+                      </h5>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {hasLinks
+                          ? `${pSummary.categoriesCount} channel category • ${pSummary.platformsCount} platforms`
+                          : 'No tracking links generated yet'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 group-hover:text-purple-300 transition-colors">
+                    <span className="font-medium text-[11px]">
+                      {hasLinks ? 'Open tracking table' : 'Create tracking link'}
+                    </span>
+                    <div className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 group-hover:border-purple-500/40 flex items-center justify-center text-slate-400 group-hover:text-purple-300 transition-colors">
+                      <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       ) : filteredLinks.length === 0 ? (
         /* Empty States: Distinct for specific filtered product vs general empty */
         <div className="bg-[#0b1329]/60 border border-slate-800/90 rounded-2xl p-12 sm:p-16 flex flex-col items-center justify-center text-center shadow-sm">
@@ -799,23 +930,65 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                 ? `Get started by clicking Create Tracking Link to automatically generate unique UTM tracking links for all eligible influencers in ${campaign.campaign_name}.`
                 : 'No tracking links match the selected filters or search query. Try adjusting filters or create a new link.'}
           </p>
-          <button
-            type="button"
-            onClick={() => handleOpenCreate(selectedProduct !== 'All' ? selectedProduct : undefined)}
-            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md shadow-purple-900/25 cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>Create Tracking Link</span>
-          </button>
+          <div className="flex items-center gap-3">
+            {selectedProduct !== 'All' && (
+              <button
+                type="button"
+                onClick={() => setSelectedProduct('All')}
+                className="flex items-center gap-2 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
+              >
+                <ArrowLeft size={16} />
+                <span>Back to All Products</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => handleOpenCreate(selectedProduct !== 'All' ? selectedProduct : undefined)}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md shadow-purple-900/25 cursor-pointer"
+            >
+              <Plus size={16} />
+              <span>Create Tracking Link</span>
+            </button>
+          </div>
         </div>
       ) : (
-        /* Hierarchical Grouped View: PRODUCT -> PLATFORM CATEGORY -> PLATFORM -> INFLUENCER TABLE */
+        /* =========================================================================
+           2. DEDICATED SELECTED PRODUCT VIEW / SEARCH RESULTS VIEW
+           ========================================================================= */
         <div className="space-y-6">
+          {/* Breadcrumb / Back to Products Bar when drilled into a single product */}
+          {selectedProduct !== 'All' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0b1329] border border-slate-800 p-3.5 sm:p-4 rounded-2xl">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedProduct('All')}
+                  className="flex items-center gap-2 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-purple-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm"
+                >
+                  <ArrowLeft size={15} />
+                  <span>Back to Products</span>
+                </button>
+                <div className="h-5 w-[1px] bg-slate-800 hidden sm:block" />
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 font-medium">Viewing Product:</span>
+                  <span className="text-sm font-bold text-white uppercase tracking-wide px-2.5 py-0.5 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300">
+                    {selectedProduct}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto text-xs text-slate-400">
+                <span className="font-semibold text-slate-300">
+                  {filteredLinks.length} {filteredLinks.length === 1 ? 'Tracking Link' : 'Tracking Links'}
+                </span>
+              </div>
+            </div>
+          )}
+
           {productGroups.map((productGroup, prodIndex) => {
-            // Collapsible state: first product is expanded by default (index === 0)
-            // or if user searched, auto-expand
-            const isProductExpanded = isSearching
-              ? true
+            // Collapsible state: if dedicated single product view, always expand by default
+            const isProductExpanded = (selectedProduct !== 'All') || isSearching
+              ? (expandedProducts[productGroup.product] !== false)
               : (expandedProducts[productGroup.product] !== undefined
                   ? expandedProducts[productGroup.product]
                   : prodIndex === 0);
