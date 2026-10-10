@@ -23,6 +23,7 @@ interface CampaignTrackingLinkCardProps {
   link: InfluencerTrackingLink;
   clicks?: number;
   isClicksConfigured?: boolean;
+  clicksError?: string | null;
   isLoadingClicks?: boolean;
   onEdit: (link: InfluencerTrackingLink) => void;
   onDelete: (link: InfluencerTrackingLink) => void;
@@ -32,6 +33,7 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
   link,
   clicks = 0,
   isClicksConfigured = true,
+  clicksError = null,
   isLoadingClicks = false,
   onEdit,
   onDelete
@@ -236,10 +238,22 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
               return (
                 <div
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] bg-amber-950/30 border-amber-500/30 text-amber-300"
-                  title="Redis click tracking not configured on server"
+                  title={clicksError || 'Redis click tracking not configured on server'}
                 >
                   <AlertTriangle size={11} className="text-amber-400" />
                   <span>Clicks: Unconfigured</span>
+                </div>
+              );
+            }
+
+            if (clicksError) {
+              return (
+                <div
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] bg-rose-950/30 border-rose-500/30 text-rose-300"
+                  title={`Unable to load click counts: ${clicksError}`}
+                >
+                  <AlertTriangle size={11} className="text-rose-400" />
+                  <span>Clicks: Unavailable</span>
                 </div>
               );
             }

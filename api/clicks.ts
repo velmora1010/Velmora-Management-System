@@ -1,6 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 
-const getBody = (req: IncomingMessage): Promise<string> => {
+const getBody = (req: IncomingMessage & { body?: any }): Promise<any> => {
+  if (req.body !== undefined && req.body !== null) {
+    return Promise.resolve(req.body);
+  }
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => {
@@ -15,7 +18,7 @@ const DEFAULT_UPSTASH_REDIS_URL = 'https://still-griffon-217114.upstash.io';
 const DEFAULT_UPSTASH_REDIS_TOKEN = 'gQAAAAAAA1AaAQIgcDE4N2EzMzUyNWVhNzQ0MjZiOWEyOTk2YTU5M2IxMmFlOA';
 
 export default async function handler(
-  req: IncomingMessage & { query?: Record<string, string> },
+  req: IncomingMessage & { query?: Record<string, string>; body?: any },
   res: ServerResponse
 ) {
   res.setHeader('Content-Type', 'application/json');
@@ -47,8 +50,8 @@ export default async function handler(
 
   if (req.method === 'POST') {
     try {
-      const rawBody = await getBody(req);
-      const parsed = JSON.parse(rawBody || '{}');
+      const raw = await getBody(req);
+      const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw || {});
       if (Array.isArray(parsed.ids)) {
         requestedIds = parsed.ids.map((id: any) => String(id).trim()).filter(Boolean);
       }

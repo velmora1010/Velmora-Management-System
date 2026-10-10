@@ -216,33 +216,109 @@ export interface FetchClicksResult {
   configured: boolean;
   clicks: Record<string, number>;
   error?: string;
+  isError?: boolean;
 }
 
+const CLICKS_BATCH_SIZE = 50;
+
 /**
- * Fetches server-side persistent click counts from /api/clicks
+ * Fetches server-side persistent click counts from /api/clicks in bounded POST batches.
+ * Deduplicates link IDs and omits ambient cookies to prevent HTTP 431 header overflow.
  */
 export async function fetchTrackingLinkClicks(linkIds: string[]): Promise<FetchClicksResult> {
   if (!Array.isArray(linkIds) || linkIds.length === 0) {
     return { configured: true, clicks: {} };
   }
+
+  // Deduplicate and filter non-empty IDs
+  const cleanIds = Array.from(new Set(linkIds.map(id => String(id).trim()).filter(Boolean)));
+  if (cleanIds.length === 0) {
+    return { configured: true, clicks: {} };
+  }
+
+  // Split into bounded batches of 50 IDs each
+  const batches: string[][] = [];
+  for (let i = 0; i < cleanIds.length; i += CLICKS_BATCH_SIZE) {
+    batches.push(cleanIds.slice(i, i + CLICKS_BATCH_SIZE));
+  }
+
+  const mergedClicks: Record<string, number> = {};
+  let isConfigured = true;
+  let hasBatchError = false;
+  let errorMsg: string | undefined;
+
   try {
-    const cleanIds = linkIds.map(id => String(id).trim()).filter(Boolean);
-    const res = await fetch(`/api/clicks?ids=${encodeURIComponent(cleanIds.join(','))}`);
-    if (!res.ok) {
-      throw new Error(`Click count API returned HTTP ${res.status}`);
+    const results = await Promise.all(
+      batches.map(async (batch) => {
+        try {
+          const res = await fetch('/api/clicks', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            credentials: 'omit',
+            body: JSON.stringify({ ids: batch })
+          });
+
+          if (!res.ok) {
+            let msg = `Click count API returned HTTP ${res.status}`;
+            try {
+              const errBody = await res.json();
+              if (errBody?.error) msg = errBody.error;
+              if (errBody?.configured === false) {
+                return { configured: false, clicks: {}, error: msg, isError: false };
+              }
+            } catch {
+              // Ignore JSON parse failure on non-200 responses
+            }
+            return { configured: true, clicks: {}, error: msg, isError: true };
+          }
+
+          const data = await res.json();
+          return {
+            configured: data.configured !== false,
+            clicks: data.clicks || {},
+            error: data.error,
+            isError: false
+          };
+        } catch (fetchErr: any) {
+          return {
+            configured: true,
+            clicks: {},
+            error: fetchErr?.message || 'Network error fetching clicks',
+            isError: true
+          };
+        }
+      })
+    );
+
+    for (const res of results) {
+      if (res.configured === false) {
+        isConfigured = false;
+        errorMsg = res.error || 'Redis tracking storage not configured';
+      }
+      if (res.isError) {
+        hasBatchError = true;
+        if (!errorMsg) errorMsg = res.error;
+      }
+      if (res.clicks) {
+        Object.assign(mergedClicks, res.clicks);
+      }
     }
-    const data = await res.json();
+
     return {
-      configured: data.configured !== false,
-      clicks: data.clicks || {},
-      error: data.error
+      configured: isConfigured,
+      clicks: mergedClicks,
+      error: !isConfigured ? errorMsg : (hasBatchError ? errorMsg : undefined),
+      isError: hasBatchError
     };
   } catch (err: any) {
     console.warn('Failed to fetch tracking clicks from API:', err);
     return {
-      configured: false,
+      configured: true,
       clicks: {},
-      error: err?.message || 'Failed to fetch clicks'
+      error: err?.message || 'Failed to fetch clicks',
+      isError: true
     };
   }
 }

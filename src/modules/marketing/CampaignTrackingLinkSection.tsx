@@ -712,18 +712,28 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         </div>
       </div>
 
-      {/* Redis Unconfigured Banner */}
-      {!isClicksConfigured && (
+      {/* Notice Banners */}
+      {!isClicksConfigured ? (
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-200">
           <AlertTriangle size={18} className="shrink-0 text-amber-400 mt-0.5" />
           <div className="space-y-1">
-            <span className="font-bold text-amber-300">Click Tracking Notice</span>
+            <span className="font-bold text-amber-300">Click Tracking Not Configured</span>
             <p className="text-slate-300 text-[11px] leading-relaxed">
               {clicksError || 'The persistent Redis click tracking counter is currently unconfigured. Clicks on Amazon links will redirect visitors, but counts will display as unconfigured until UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set in Vercel.'}
             </p>
           </div>
         </div>
-      )}
+      ) : clicksError ? (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-rose-200">
+          <AlertCircle size={18} className="shrink-0 text-rose-400 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-bold text-rose-300">Unable to Load Click Counts</span>
+            <p className="text-slate-300 text-[11px] leading-relaxed">
+              {clicksError}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {/* Main Content Area */}
       {isLoading ? (
@@ -996,6 +1006,17 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                         );
                                                       }
 
+                                                      if (clicksError) {
+                                                        return (
+                                                          <span
+                                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-950/40 text-rose-300 border border-rose-500/30"
+                                                            title={`Unable to load click counts: ${clicksError}`}
+                                                          >
+                                                            Unavailable
+                                                          </span>
+                                                        );
+                                                      }
+
                                                       const count = clicksMap[link.id] ?? 0;
                                                       return (
                                                         <span
@@ -1076,6 +1097,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                             link={link}
                                             clicks={clicksMap[link.id] ?? 0}
                                             isClicksConfigured={isClicksConfigured}
+                                            clicksError={clicksError}
                                             isLoadingClicks={isLoadingClicks}
                                             onEdit={handleOpenEdit}
                                             onDelete={(l) => setLinkToDelete(l)}
