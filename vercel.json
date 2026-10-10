@@ -41,6 +41,10 @@
       "destination": "/api/r?slug=$1"
     },
     {
+      "source": "/:slug([a-zA-Z0-9_]+-v[0-9]+.*)",
+      "destination": "/api/r?slug=:slug"
+    },
+    {
       "source": "/r/(.*)",
       "destination": "/api/r?id=$1"
     },
