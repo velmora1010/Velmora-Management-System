@@ -3525,6 +3525,114 @@ export const isInfluencerCompletedPostForDate = (
 };
 
 /**
+ * Single source of truth predicate to determine whether a post for a specific video
+ * has been manually rescheduled by an admin or authorized user.
+ *
+ * Requirements:
+ * 1. Must have at least one genuine manual/admin date change entry in post_date history.
+ * 2. An admin reschedule requires old_date !== new_date (both valid dates, old_date != 'None').
+ * 3. Automatic adjustments (e.g. "Automatically updated from Draft Date (+3 days)") and
+ *    initial assignments ("Manual Post Date assigned") are strictly excluded.
+ */
+export const isPostAdminRescheduled = (
+  record: StatusTrackingRecord,
+  videoNumber: number
+): boolean => {
+  if (!record) return false;
+
+  // 1. Resolve history from workflow post_date step data
+  const vWorkflow = getVideoWorkflow(record, videoNumber);
+  const postStepData = vWorkflow?.steps?.['post_date']?.data || {};
+  let history: PostDateHistoryEntry[] = Array.isArray(postStepData.history) ? postStepData.history : [];
+
+  // Fallback to record notes metadata if workflow step hasn't populated data yet
+  if (history.length === 0) {
+    const metadata: any = getRecordNotesMetadata(record);
+    const storedVideo = metadata?.videos?.[String(videoNumber)] || metadata?.videos?.[videoNumber];
+    const storedHistory = storedVideo?.steps?.['post_date']?.data?.history;
+    if (Array.isArray(storedHistory)) {
+      history = storedHistory;
+    }
+  }
+
+  if (history.length === 0) return false;
+
+  // 2. Check for at least one genuine manual/admin reschedule entry
+  return history.some(entry => {
+    if (!entry) return false;
+    const oldDate = String(entry.old_date || '').trim();
+    const newDate = String(entry.new_date || '').trim();
+
+    // Must have an established previous date (not 'None', 'Not Assigned', or empty)
+    if (!oldDate || oldDate === 'None' || oldDate === 'Not Assigned') {
+      return false;
+    }
+    // Must have a valid new date
+    if (!newDate || newDate === 'None' || newDate === 'Not Assigned') {
+      return false;
+    }
+
+    // Must be an actual calendar date change
+    if (oldDate === newDate) {
+      return false;
+    }
+    const oldYmd = parseToYMD(oldDate, 2026);
+    const newYmd = parseToYMD(newDate, 2026);
+    if (oldYmd && newYmd && oldYmd === newYmd) {
+      return false;
+    }
+
+    const reason = String(entry.reason || '').trim().toLowerCase();
+    const changedBy = String(entry.changed_by || '').trim().toLowerCase();
+
+    // Explicitly exclude automatic date adjustments
+    if (
+      reason.includes('automatically') ||
+      reason.includes('from draft date') ||
+      reason.includes('auto-update') ||
+      changedBy === 'system' ||
+      changedBy === 'auto'
+    ) {
+      return false;
+    }
+
+    // Exclude initial date assignment
+    if (reason.includes('manual post date assigned') || reason.includes('initial')) {
+      return false;
+    }
+
+    // Confirm it is a manual/admin edit or reschedule
+    if (
+      reason.includes('post date edited') ||
+      reason.includes('reschedul') ||
+      reason.includes('edited') ||
+      reason.includes('manual') ||
+      changedBy !== 'system'
+    ) {
+      return true;
+    }
+
+    return false;
+  });
+};
+
+/**
+ * Checks if an influencer's post for a target date is scheduled AND manually rescheduled by admin.
+ * Used for the secondary amber rescheduled badge inside the date filter box (e.g. "↻ 3").
+ * Guarantees that a post is only counted in its CURRENT scheduled date bucket.
+ */
+export const isInfluencerRescheduledPostForDate = (
+  record: StatusTrackingRecord,
+  videoNumber: number,
+  mode: 'yesterday' | 'today' | 'tomorrow'
+): boolean => {
+  if (!isInfluencerScheduledForDate(record, videoNumber, mode)) {
+    return false;
+  }
+  return isPostAdminRescheduled(record, videoNumber);
+};
+
+/**
  * Reusable single predicate matching step ID for both counts and filtered list.
  * Guarantees that summary filter count exactly equals the number of matching rows when clicked!
  */
@@ -3614,6 +3722,11 @@ export const validateFilterCounts = (
   counts.today_completed = assignedRecords.filter(r => isInfluencerCompletedPostForDate(r, videoNumber, 'today')).length;
   counts.tomorrow_completed = assignedRecords.filter(r => isInfluencerCompletedPostForDate(r, videoNumber, 'tomorrow')).length;
 
+  // Secondary admin-rescheduled counts for the 3 scheduled date filter boxes
+  counts.yesterday_rescheduled = assignedRecords.filter(r => isInfluencerRescheduledPostForDate(r, videoNumber, 'yesterday')).length;
+  counts.today_rescheduled = assignedRecords.filter(r => isInfluencerRescheduledPostForDate(r, videoNumber, 'today')).length;
+  counts.tomorrow_rescheduled = assignedRecords.filter(r => isInfluencerRescheduledPostForDate(r, videoNumber, 'tomorrow')).length;
+
   // Debug audit logging for date filters per user specification
   if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
     const todayYMD = getLocalTodayYMD();
@@ -3629,6 +3742,7 @@ export const validateFilterCounts = (
         const pdStepDone = isInfluencerPostDateCompleted(r, videoNumber);
         const apDone = isFullyCompletedPost(r, videoNumber);
         const isIncludedInFilter = isInfluencerScheduledForDate(r, videoNumber, normDate === todayYMD ? 'today' : (normDate === tomorrowYMD ? 'tomorrow' : 'yesterday'));
+        const isRescheduled = isPostAdminRescheduled(r, videoNumber);
         const code = r.dispatch?.influencer_code || r.influencer?.code || (r as any).code || '—';
         nearRecords.push({
           code,
@@ -3637,6 +3751,7 @@ export const validateFilterCounts = (
           targetDate: normDate === todayYMD ? `TODAY (${todayYMD})` : (normDate === tomorrowYMD ? `TOMORROW (${tomorrowYMD})` : `YESTERDAY (${yesterdayYMD})`),
           postDateStepCompleted: pdStepDone,
           afterPostCompleted: apDone,
+          isRescheduled,
           includedInFilter: isIncludedInFilter
         });
       }
@@ -3654,6 +3769,11 @@ export const validateFilterCounts = (
           yesterday: counts.yesterday_completed,
           today: counts.today_completed,
           tomorrow: counts.tomorrow_completed
+        },
+        rescheduledCounts: {
+          yesterday: counts.yesterday_rescheduled,
+          today: counts.today_rescheduled,
+          tomorrow: counts.tomorrow_rescheduled
         },
         overallCompleted: counts['after_post'],
         records: nearRecords
@@ -7027,6 +7147,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   const StepIcon = step.icon;
                   const isDateFilter = step.id === 'yesterday' || step.id === 'today' || step.id === 'tomorrow';
                   const completedCount = isDateFilter ? (workflowStepCounts[`${step.id}_completed`] || 0) : 0;
+                  const rescheduledCount = isDateFilter ? (workflowStepCounts[`${step.id}_rescheduled`] || 0) : 0;
 
                   return (
                     <button
@@ -7042,7 +7163,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       }`}
                       title={
                         isDateFilter
-                          ? `Filter by ${step.label} (${count} scheduled, ${completedCount} completed)`
+                          ? `Filter by ${step.label} (${count} scheduled, ${completedCount} completed, ${rescheduledCount} admin-rescheduled)`
                           : `Filter by ${step.label} (${count})`
                       }
                     >
@@ -7067,15 +7188,24 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                         <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
                           {count}
                         </span>
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                           {isDateFilter && (
-                            <span 
-                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-700/60 text-[9.5px] sm:text-[10px] font-bold text-emerald-400 leading-none shadow-sm"
-                              title={`${completedCount} completed of ${count} scheduled`}
-                            >
-                              <Check size={9} strokeWidth={2.5} />
-                              <span>{completedCount}</span>
-                            </span>
+                            <>
+                              <span 
+                                className="inline-flex items-center gap-0.5 px-1 sm:px-1.5 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-700/60 text-[9px] sm:text-[9.5px] font-bold text-emerald-400 leading-none shadow-sm whitespace-nowrap"
+                                title={`${completedCount} completed of ${count} scheduled`}
+                              >
+                                <Check size={8.5} strokeWidth={2.5} />
+                                <span>{completedCount}</span>
+                              </span>
+                              <span 
+                                className="inline-flex items-center gap-0.5 px-1 sm:px-1.5 py-0.5 rounded-md bg-amber-950/80 border border-amber-600/60 text-[9px] sm:text-[9.5px] font-bold text-amber-400 leading-none shadow-sm whitespace-nowrap"
+                                title="Admin-rescheduled posts"
+                              >
+                                <RotateCcw size={8} strokeWidth={2.5} />
+                                <span>{rescheduledCount}</span>
+                              </span>
+                            </>
                           )}
                           {isSelected && (
                             <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
@@ -15602,23 +15732,42 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
     }
 
     const normalizedNewYmd = parseToYMD(tempPostDate, 2026) || tempPostDate;
+    const normalizedOldYmd = parseToYMD(effectivePostDate, 2026) || effectivePostDate;
     const previousDateFormatted = formatDisplayDateLocal(effectivePostDate);
     const newDateFormatted = formatDisplayDateLocal(normalizedNewYmd);
     const platformString = selectedPlatforms.join(' + ');
 
+    // Determine whether this is a genuine date change vs initial assignment vs no date change
+    const hasPreviousDate = Boolean(effectivePostDate && previousDateFormatted !== 'Not Assigned');
+    const isDateActuallyChanged = hasPreviousDate && (previousDateFormatted !== newDateFormatted || normalizedOldYmd !== normalizedNewYmd);
+    const isInitialAssignment = !hasPreviousDate;
+
     setIsSavingDate(true);
     try {
       const userName = await getCurrentUserName();
-      const changeEntry: PostDateHistoryEntry = {
-        id: `pdh-${Date.now()}`,
-        old_date: previousDateFormatted !== 'Not Assigned' ? previousDateFormatted : 'None',
-        new_date: newDateFormatted,
-        changed_by: userName,
-        changed_at: new Date().toISOString(),
-        reason: effectivePostDate ? `Post Date edited (${platformString})` : `Manual Post Date assigned (${platformString})`
-      };
+      let updatedHistory = historyList;
 
-      const updatedHistory = [changeEntry, ...historyList];
+      if (isDateActuallyChanged) {
+        const changeEntry: PostDateHistoryEntry = {
+          id: `pdh-${Date.now()}`,
+          old_date: previousDateFormatted,
+          new_date: newDateFormatted,
+          changed_by: userName,
+          changed_at: new Date().toISOString(),
+          reason: `Post Date edited (${platformString})`
+        };
+        updatedHistory = [changeEntry, ...historyList];
+      } else if (isInitialAssignment) {
+        const changeEntry: PostDateHistoryEntry = {
+          id: `pdh-${Date.now()}`,
+          old_date: 'None',
+          new_date: newDateFormatted,
+          changed_by: userName,
+          changed_at: new Date().toISOString(),
+          reason: `Manual Post Date assigned (${platformString})`
+        };
+        updatedHistory = [changeEntry, ...historyList];
+      }
       const primaryPlat = selectedPlatforms[0];
       const primaryDeliverable = primaryPlat ? platformDeliverables[primaryPlat] : null;
       const finalPostLink = primaryDeliverable?.final_post_link || existingData.final_post_link || existingData.finalL || '';
