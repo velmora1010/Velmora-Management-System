@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { InfluencerTrackingLink } from '../../types';
 import { TRACKING_PLATFORMS } from '../../services/influencerTrackingLinkService';
+import { isComboProduct } from '../../services/campaignScriptService';
 
 interface CampaignTrackingLinkCardProps {
   link: InfluencerTrackingLink;
@@ -109,9 +110,16 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
               <Link2 size={16} />
             </div>
             <div className="min-w-0">
-              <h4 className="text-sm font-bold text-white uppercase tracking-wider leading-tight truncate">
-                {link.product}
-              </h4>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider leading-tight truncate">
+                  {link.product}
+                </h4>
+                {isComboProduct(link.product) && (
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+                    COMBO
+                  </span>
+                )}
+              </div>
               {formattedDate && (
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
                   <Calendar size={12} className="text-slate-500" />

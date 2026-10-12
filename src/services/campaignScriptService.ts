@@ -18,7 +18,35 @@ export const SCRIPT_PRODUCTS = [
   'Bamboo Kitchen Towel'
 ] as const;
 
+export const COMBO_PRODUCTS = [
+  'DIY Home Care Combo',
+  'DIY Laundry Care Combo',
+  'DIY Kitchen & Pooja Care Combo',
+  'DIY Kitchen Care Combo',
+  'DIY Surface Care Combo',
+  'DIY Daily Essentials Combo',
+  'Kitchen Cleaning Combo',
+  'Car Care Combo',
+  'Bike Care Combo'
+] as const;
+
+export const ALL_CAMPAIGN_PRODUCTS = [
+  ...SCRIPT_PRODUCTS,
+  ...COMBO_PRODUCTS
+] as const;
+
 export type ScriptProduct = typeof SCRIPT_PRODUCTS[number];
+export type ComboProduct = typeof COMBO_PRODUCTS[number];
+export type CampaignProduct = typeof ALL_CAMPAIGN_PRODUCTS[number];
+
+export function isComboProduct(productName?: string | null): boolean {
+  if (!productName || typeof productName !== 'string') return false;
+  const clean = productName.trim().toLowerCase();
+  return (
+    COMBO_PRODUCTS.some(c => c.toLowerCase() === clean) ||
+    clean.includes('combo')
+  );
+}
 
 /**
  * Return public URL for an audio file in script-audio bucket

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   X, 
   AlertCircle, 
@@ -10,18 +10,23 @@ import {
   ShoppingBag, 
   CheckCircle2, 
   RefreshCw,
-  Info,
-  ExternalLink,
-  UserCheck,
-  UserX
+  UserCheck, 
+  UserX,
+  ChevronDown,
+  Search,
+  Package
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
-import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
+import { 
+  SCRIPT_PRODUCTS, 
+  COMBO_PRODUCTS, 
+  ALL_CAMPAIGN_PRODUCTS, 
+  isComboProduct 
+} from '../../services/campaignScriptService';
 import { 
   TRACKING_PLATFORMS, 
   TRACKING_VIDEOS, 
   buildInfluencerTrackingUrl, 
-  buildAmazonRedirectTrackingUrl,
   isValidAmazonUrl,
   extractBaseProductUrl, 
   extractCodeNumber,
@@ -29,13 +34,264 @@ import {
   updateInfluencerTrackingLink,
   buildTrackingSlug,
   buildBrandedTrackingUrl,
-  BRANDED_TRACKING_DOMAIN,
   type TrackingPlatformConfig,
   type TrackingVideoConfig
 } from '../../services/influencerTrackingLinkService';
 import { isActiveStatus } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
+export const getDefaultProductUrl = (prodName: string): string => {
+  if (!prodName) return '';
+  const slug = prodName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return `https://www.justmixx.com/products/${slug}`;
+};
+
+// =========================================================================
+// CUSTOM SEARCHABLE PRODUCT DROPDOWN COMPONENT
+// =========================================================================
+interface SearchableProductSelectProps {
+  value: string;
+  onChange: (val: string) => void;
+  disabled?: boolean;
+}
+
+const SearchableProductSelect: React.FC<SearchableProductSelectProps> = ({
+  value,
+  onChange,
+  disabled
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [highlightIndex, setHighlightIndex] = useState(0);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Close on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  // Focus search input when opened
+  useEffect(() => {
+    if (isOpen) {
+      setSearch('');
+      setHighlightIndex(0);
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+    }
+  }, [isOpen]);
+
+  // Filtered lists
+  const filteredStandard = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return SCRIPT_PRODUCTS;
+    return SCRIPT_PRODUCTS.filter(p => p.toLowerCase().includes(q));
+  }, [search]);
+
+  const filteredCombos = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return COMBO_PRODUCTS;
+    return COMBO_PRODUCTS.filter(c => c.toLowerCase().includes(q));
+  }, [search]);
+
+  const allFilteredItems = useMemo(() => {
+    return [...filteredStandard, ...filteredCombos];
+  }, [filteredStandard, filteredCombos]);
+
+  // Keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!isOpen) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setIsOpen(true);
+      }
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsOpen(false);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIndex(prev => (prev + 1 < allFilteredItems.length ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIndex(prev => (prev - 1 >= 0 ? prev - 1 : allFilteredItems.length - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (allFilteredItems[highlightIndex]) {
+        onChange(allFilteredItems[highlightIndex]);
+        setIsOpen(false);
+      }
+    }
+  };
+
+  const isCurrentCombo = isComboProduct(value);
+
+  return (
+    <div className="relative w-full" ref={dropdownRef} onKeyDown={handleKeyDown}>
+      {/* Trigger Button */}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full bg-[#070c18] border border-slate-700/80 hover:border-purple-500/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 flex items-center justify-between transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-1 focus:ring-purple-500"
+      >
+        <div className="flex items-center gap-2.5 min-w-0 pr-2">
+          <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 text-xs ${
+            isCurrentCombo 
+              ? 'bg-purple-600/25 border border-purple-500/40 text-purple-300' 
+              : 'bg-slate-800 border border-slate-700 text-slate-300'
+          }`}>
+            {isCurrentCombo ? <Package size={14} className="text-purple-300" /> : <span>🧴</span>}
+          </div>
+          <span className="font-semibold truncate text-white">{value || 'Select a Product or Combo'}</span>
+          {isCurrentCombo && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+              COMBO
+            </span>
+          )}
+        </div>
+        <ChevronDown size={16} className={`text-slate-400 transition-transform shrink-0 ${isOpen ? 'rotate-180 text-purple-400' : ''}`} />
+      </button>
+
+      {/* Popover Dropdown Menu */}
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full mt-1.5 z-40 bg-[#0c142c] border border-slate-700/90 rounded-xl shadow-2xl p-2 space-y-2 animate-in fade-in-50 zoom-in-95">
+          {/* Search Input */}
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setHighlightIndex(0);
+              }}
+              placeholder="Search products or combos..."
+              className="w-full bg-[#070c18] border border-slate-700 focus:border-purple-500 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            />
+          </div>
+
+          {/* Options List */}
+          <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 text-xs">
+            {allFilteredItems.length === 0 ? (
+              <div className="py-4 text-center text-slate-500 text-xs">
+                No products or combos found matching "{search}"
+              </div>
+            ) : (
+              <>
+                {/* Standard Products Group */}
+                {filteredStandard.length > 0 && (
+                  <div>
+                    <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Standard Products</span>
+                      <span className="text-slate-500">{filteredStandard.length}</span>
+                    </div>
+                    {filteredStandard.map((prod) => {
+                      const isSelected = value === prod;
+                      const globalIndex = allFilteredItems.indexOf(prod);
+                      const isHighlighted = highlightIndex === globalIndex;
+                      return (
+                        <div
+                          key={prod}
+                          role="option"
+                          aria-selected={isSelected}
+                          onClick={() => {
+                            onChange(prod);
+                            setIsOpen(false);
+                          }}
+                          onMouseEnter={() => setHighlightIndex(globalIndex)}
+                          className={`flex items-center justify-between px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
+                            isSelected
+                              ? 'bg-purple-600/25 text-white font-bold border border-purple-500/40'
+                              : isHighlighted
+                                ? 'bg-slate-800 text-purple-200'
+                                : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <span className="text-xs">🧴</span>
+                            <span className="truncate">{prod}</span>
+                          </div>
+                          {isSelected && <Check size={14} className="text-purple-400 shrink-0" />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Combos Group */}
+                {filteredCombos.length > 0 && (
+                  <div>
+                    <div className="px-2 py-1 text-[10px] font-bold text-purple-400 uppercase tracking-wider flex items-center justify-between pt-1 border-t border-slate-800">
+                      <span className="flex items-center gap-1">
+                        <Package size={11} />
+                        Combo Products
+                      </span>
+                      <span className="text-purple-400/80">{filteredCombos.length}</span>
+                    </div>
+                    {filteredCombos.map((combo) => {
+                      const isSelected = value === combo;
+                      const globalIndex = allFilteredItems.indexOf(combo);
+                      const isHighlighted = highlightIndex === globalIndex;
+                      return (
+                        <div
+                          key={combo}
+                          role="option"
+                          aria-selected={isSelected}
+                          onClick={() => {
+                            onChange(combo);
+                            setIsOpen(false);
+                          }}
+                          onMouseEnter={() => setHighlightIndex(globalIndex)}
+                          className={`flex items-center justify-between px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${
+                            isSelected
+                              ? 'bg-purple-600/25 text-white font-bold border border-purple-500/40'
+                              : isHighlighted
+                                ? 'bg-slate-800 text-purple-200'
+                                : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <Package size={13} className="text-purple-400 shrink-0" />
+                            <span className="truncate">{combo}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              COMBO
+                            </span>
+                            {isSelected && <Check size={14} className="text-purple-400" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// =========================================================================
+// MAIN MODAL COMPONENT
+// =========================================================================
 interface CampaignTrackingLinkModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -107,6 +363,17 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     });
   }, [eligibleInfluencers]);
 
+  // Prevent background page scrolling while modal is open
+  useEffect(() => {
+    if (isOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen]);
+
   // Reset or initialize state on open
   useEffect(() => {
     if (isOpen) {
@@ -131,7 +398,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
             setEditTrackingUrl(buildBrandedTrackingUrl(initialSlug));
           }
         } else {
-          setProductUrl(linkToEdit.base_product_url || '');
+          setProductUrl(linkToEdit.base_product_url || getDefaultProductUrl(linkToEdit.product || 'Kitchen Cleaner'));
           setAmazonUrl('');
         }
         const matchedPlat = TRACKING_PLATFORMS.find(
@@ -146,11 +413,9 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         setCustomSlug('');
         const initialProd = (defaultProduct && defaultProduct !== 'All')
           ? defaultProduct
-          : (SCRIPT_PRODUCTS.includes('Kitchen Cleaner' as any)
-            ? 'Kitchen Cleaner'
-            : SCRIPT_PRODUCTS[0] || 'Kitchen Cleaner');
+          : 'Kitchen Cleaner';
         setSelectedProduct(initialProd);
-        setProductUrl(extractBaseProductUrl(initialProd));
+        setProductUrl(getDefaultProductUrl(initialProd));
         setAmazonUrl('');
         setSelectedPlatformId('instagram');
         setSelectedVideoId('Video 1');
@@ -159,6 +424,20 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       }
     }
   }, [isOpen, linkToEdit, defaultProduct]);
+
+  // Handle product change in batch form
+  const handleProductChange = (newProd: string) => {
+    const prevDefault = getDefaultProductUrl(selectedProduct);
+    setSelectedProduct(newProd);
+    setValidationError(null);
+
+    // Update productUrl if it was empty, previously default, or had an unencoded space
+    if (destinationType === 'shopify') {
+      if (!productUrl.trim() || productUrl.trim() === prevDefault || productUrl.includes('%20')) {
+        setProductUrl(getDefaultProductUrl(newProd));
+      }
+    }
+  };
 
   // Active configurations
   const currentPlatform: TrackingPlatformConfig = useMemo(() => {
@@ -187,21 +466,19 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
 
   // Live Sample Preview URL
   const samplePreviewUrl = useMemo(() => {
+    const sampleCode = sampleInfluencer?.code || (sampleInfluencer as any)?.influencer_code || 'HIS1';
     if (destinationType === 'amazon') {
-      if (!amazonUrl.trim()) return '';
-      const sampleCode = sampleInfluencer?.code || (sampleInfluencer as any)?.influencer_code || 'HIS1';
       const sampleSlug = buildTrackingSlug(sampleCode, currentVideo.name, currentVideo.utmContent);
       return buildBrandedTrackingUrl(sampleSlug);
     }
-    if (!productUrl.trim()) return '';
-    const code = sampleInfluencer?.code || (sampleInfluencer as any)?.influencer_code || 'HIS1';
+    const effectiveUrl = productUrl.trim() || getDefaultProductUrl(selectedProduct);
     return buildInfluencerTrackingUrl(
-      productUrl,
+      effectiveUrl,
       currentPlatform.utmSource,
       currentVideo.utmContent,
-      code
+      sampleCode
     );
-  }, [destinationType, amazonUrl, productUrl, currentPlatform, currentVideo, sampleInfluencer]);
+  }, [destinationType, productUrl, selectedProduct, currentPlatform, currentVideo, sampleInfluencer]);
 
   if (!isOpen) return null;
 
@@ -370,32 +647,44 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     const failedInfluencers = sortedEligibleInfluencers.filter(i =>
       generationResult.failedIds.includes(i.id)
     );
-    handleConfirmAndGenerate(failedInfluencers);
+    if (failedInfluencers.length > 0) {
+      handleConfirmAndGenerate(failedInfluencers);
+    }
   };
 
-  const websitePlatforms = TRACKING_PLATFORMS.filter(p => p.category === 'WEBSITE');
-  const marketplacePlatforms = TRACKING_PLATFORMS.filter(p => p.category === 'MARKETPLACE');
+  // Website Platforms
+  const websitePlatforms = useMemo(() => {
+    return TRACKING_PLATFORMS.filter(p => p.category === 'WEBSITE');
+  }, []);
+
+  // Marketplace Platforms
+  const marketplacePlatforms = useMemo(() => {
+    return TRACKING_PLATFORMS.filter(p => p.category === 'MARKETPLACE');
+  }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
-      <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-5 my-6 text-slate-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+      {/* Centered Modal Container with Responsive Max Width and 90dvh Max Height */}
+      <div className="bg-[#0b1329] border border-slate-700/80 rounded-2xl max-w-[740px] w-full max-h-[90dvh] flex flex-col shadow-2xl text-slate-200 overflow-hidden">
         
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-400 flex items-center justify-center shadow-inner">
+        {/* =========================================================================
+            1. FIXED HEADER (Always visible)
+            ========================================================================= */}
+        <div className="shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-slate-800 bg-[#0b1329]">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/40 text-purple-400 flex items-center justify-center shadow-inner shrink-0">
               <Link2 size={20} />
             </div>
-            <div>
-              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide uppercase">
+            <div className="min-w-0">
+              <h3 className="text-sm sm:text-base font-bold text-white tracking-wide uppercase truncate">
                 {isEditMode ? 'EDIT INFLUENCER TRACKING LINK' : 'CREATE INFLUENCER TRACKING LINKS'}
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 mt-0.5 truncate">
                 {campaign.campaign_name}
                 {!isEditMode && (
                   <span className="text-purple-400 ml-2 font-semibold">
                     • {sortedEligibleInfluencers.length} Eligible Influencers
-                    {eliminatedCount > 0 && ` (${eliminatedCount} Eliminated Excluded)`}
+                    {eliminatedCount > 0 && ` (${eliminatedCount} Excluded)`}
                   </span>
                 )}
               </p>
@@ -405,82 +694,236 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
             type="button"
             onClick={onClose}
             disabled={isGenerating}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-40"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-40 shrink-0"
+            aria-label="Close modal"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Validation Error Banner */}
-        {validationError && (
-          <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-            <AlertCircle size={15} className="text-rose-400 shrink-0" />
-            <span>{validationError}</span>
-          </div>
-        )}
+        {/* =========================================================================
+            2. SCROLLABLE BODY (Independently scrollable)
+            ========================================================================= */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5 min-h-0">
+          
+          {/* Validation Error Banner */}
+          {validationError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+              <AlertCircle size={15} className="text-rose-400 shrink-0" />
+              <span>{validationError}</span>
+            </div>
+          )}
 
-        {/* Edit Mode Content */}
-        {isEditMode && linkToEdit ? (
-          <form onSubmit={handleEditSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Influencer
-              </label>
-              <div className="bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 flex items-center justify-between">
-                <span className="font-medium text-white">{linkToEdit.influencer_name || 'Influencer'}</span>
-                <span className="font-mono text-purple-400 font-bold">{linkToEdit.influencer_code}</span>
+          {/* Edit Mode Content */}
+          {isEditMode && linkToEdit ? (
+            <form id="edit-tracking-link-form" onSubmit={handleEditSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Influencer
+                </label>
+                <div className="bg-[#070c18] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 flex items-center justify-between">
+                  <span className="font-medium text-white">{linkToEdit.influencer_name || 'Influencer'}</span>
+                  <span className="font-mono text-purple-400 font-bold">{linkToEdit.influencer_code}</span>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Product *
-              </label>
-              <select
-                value={selectedProduct}
-                onChange={(e) => setSelectedProduct(e.target.value)}
-                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer"
-              >
-                {SCRIPT_PRODUCTS.map((prod) => (
-                  <option key={prod} value={prod}>
-                    {prod}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Product / Combo *
+                </label>
+                <SearchableProductSelect
+                  value={selectedProduct}
+                  onChange={(val) => setSelectedProduct(val)}
+                  disabled={isGenerating}
+                />
+              </div>
 
-            {destinationType === 'amazon' ? (
-              <>
-                <div>
-                  <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1.5">
-                    Branded Short Code / Slug *
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-amber-300/80 font-mono select-none">
-                      link.justmixx.com/
-                    </span>
+              {destinationType === 'amazon' ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1.5">
+                      Branded Short Code / Slug *
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <span className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-amber-300/80 font-mono select-none">
+                        /r/
+                      </span>
+                      <input
+                        type="text"
+                        value={customSlug}
+                        onChange={(e) => {
+                          const val = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+                          setCustomSlug(val);
+                          setEditTrackingUrl(val ? buildBrandedTrackingUrl(val) : '');
+                          setValidationError(null);
+                        }}
+                        placeholder="his1-v1"
+                        className="flex-1 bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1.5">
+                      Original Amazon Destination URL *
+                    </label>
                     <input
                       type="text"
-                      value={customSlug}
+                      value={amazonUrl}
                       onChange={(e) => {
-                        const val = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '');
-                        setCustomSlug(val);
-                        setEditTrackingUrl(val ? buildBrandedTrackingUrl(val) : '');
+                        setAmazonUrl(e.target.value);
                         setValidationError(null);
                       }}
-                      placeholder="his1-v1"
-                      className="flex-1 bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors"
+                      placeholder="https://www.amazon.in/dp/B0..."
+                      className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors"
                     />
                   </div>
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    Custom short link for this influencer (e.g. <span className="text-amber-300 font-mono">his1-v1</span>, <span className="text-amber-300 font-mono">his1-v2</span>, <span className="text-amber-300 font-mono">his2-v1</span>).
-                  </p>
-                </div>
 
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Tracking Link Preview *
+                    </label>
+                    <input
+                      type="text"
+                      value={editTrackingUrl}
+                      onChange={(e) => setEditTrackingUrl(e.target.value)}
+                      placeholder="https://velmora-management-system.vercel.app/r/..."
+                      className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-amber-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+                    />
+                  </div>
+                </>
+              ) : (
                 <div>
-                  <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1.5">
-                    Original Amazon Destination URL *
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Tracking URL *
                   </label>
+                  <input
+                    type="text"
+                    value={editTrackingUrl}
+                    onChange={(e) => setEditTrackingUrl(e.target.value)}
+                    placeholder="https://www.justmixx.com/products/..."
+                    className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Notes
+                </label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="Notes or comments"
+                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+                />
+              </div>
+            </form>
+          ) : (
+            /* Batch Generation Form Content */
+            <div className="space-y-4">
+              
+              {/* 0. DESTINATION TYPE: SHOPIFY VS AMAZON */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                  Destination Type <span className="text-purple-400">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDestinationType('shopify');
+                      setValidationError(null);
+                      if (!productUrl.trim()) {
+                        setProductUrl(getDefaultProductUrl(selectedProduct));
+                      }
+                    }}
+                    disabled={isGenerating}
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer border ${
+                      destinationType === 'shopify'
+                        ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                        : 'bg-[#070c18] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    <Globe size={15} className={destinationType === 'shopify' ? 'text-purple-400' : 'text-slate-500'} />
+                    <span>Shopify (Website)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDestinationType('amazon');
+                      setValidationError(null);
+                    }}
+                    disabled={isGenerating}
+                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer border ${
+                      destinationType === 'amazon'
+                        ? 'bg-amber-500/20 border-amber-500 text-amber-200 shadow-sm ring-1 ring-amber-500/50'
+                        : 'bg-[#070c18] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    <ShoppingBag size={15} className={destinationType === 'amazon' ? 'text-amber-400' : 'text-slate-500'} />
+                    <span>Amazon (Marketplace)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 1. PRODUCT & COMBO SELECTION (Searchable Dropdown) */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Product / Combo <span className="text-purple-400">*</span>
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    {ALL_CAMPAIGN_PRODUCTS.length} options available
+                  </span>
+                </div>
+                <SearchableProductSelect
+                  value={selectedProduct}
+                  onChange={handleProductChange}
+                  disabled={isGenerating}
+                />
+              </div>
+
+              {/* 2. PRODUCT LINK (Conditional based on Destination Type) */}
+              {destinationType === 'shopify' ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                      Shopify Product Link <span className="text-purple-400">*</span>
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      UTMs auto-appended
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={productUrl}
+                    onChange={(e) => {
+                      setProductUrl(e.target.value);
+                      setValidationError(null);
+                    }}
+                    disabled={isGenerating}
+                    placeholder="https://www.justmixx.com/products/..."
+                    className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors disabled:opacity-50"
+                  />
+                  {cleanBaseUrl && (
+                    <div className="mt-1.5 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-400 truncate flex items-center gap-1.5">
+                      <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Base URL:</span>
+                      <span className="text-slate-300 font-mono truncate">{cleanBaseUrl}</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider">
+                      Original Amazon Product URL <span className="text-amber-400">*</span>
+                    </label>
+                    <span className="text-[11px] text-amber-400 font-medium">
+                      Atomic Click Tracking
+                    </span>
+                  </div>
                   <input
                     type="text"
                     value={amazonUrl}
@@ -488,429 +931,307 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                       setAmazonUrl(e.target.value);
                       setValidationError(null);
                     }}
-                    placeholder="https://www.amazon.in/dp/B0..."
-                    className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors"
+                    disabled={isGenerating}
+                    placeholder="https://www.amazon.in/dp/B0... or https://www.amazon.com/..."
+                    className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors disabled:opacity-50"
                   />
-                  <p className="mt-1 text-[11px] text-slate-400">
-                    Visitors opening the short link are atomically counted and 302 redirected here.
+                  <p className="mt-1.5 text-[11px] text-slate-400">
+                    Each influencer receives a unique branded short link (<code className="text-amber-300">/r/{'{slug}'}</code> e.g. <code className="text-amber-300">his1-v1</code>). Visitor clicks are counted atomically in Redis before 302 redirecting to Amazon.
                   </p>
                 </div>
+              )}
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Tracking Link Preview *
-                  </label>
-                  <input
-                    type="text"
-                    value={editTrackingUrl}
-                    onChange={(e) => setEditTrackingUrl(e.target.value)}
-                    placeholder="https://link.justmixx.com/..."
-                    className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-amber-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
-                  />
-                </div>
-              </>
-            ) : (
+              {/* 3. PLATFORM */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Tracking URL *
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                  Platform <span className="text-purple-400">*</span>
                 </label>
-                <input
-                  type="text"
-                  value={editTrackingUrl}
-                  onChange={(e) => setEditTrackingUrl(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
-                />
+                
+                <div className="space-y-3 bg-[#070c18] border border-slate-800 rounded-2xl p-3 sm:p-3.5">
+                  {/* Category 1: WEBSITE */}
+                  <div>
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      <Globe size={13} className="text-purple-400" />
+                      <span>Website</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {websitePlatforms.map((plat) => {
+                        const isSelected = selectedPlatformId === plat.id;
+                        return (
+                          <button
+                            key={plat.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedPlatformId(plat.id);
+                              setValidationError(null);
+                            }}
+                            disabled={isGenerating}
+                            className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                              isSelected
+                                ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                                : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                            }`}
+                          >
+                            <div
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: plat.brandColor }}
+                            />
+                            <span>{plat.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="h-[1px] bg-slate-800/80" />
+
+                  {/* Category 2: MARKETPLACE */}
+                  <div>
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      <ShoppingBag size={13} className="text-purple-400" />
+                      <span>Marketplace</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {marketplacePlatforms.map((plat) => {
+                        const isSelected = selectedPlatformId === plat.id;
+                        return (
+                          <button
+                            key={plat.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedPlatformId(plat.id);
+                              setValidationError(null);
+                            }}
+                            disabled={isGenerating}
+                            className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                              isSelected
+                                ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                                : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                            }`}
+                          >
+                            <div
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: plat.brandColor }}
+                            />
+                            <span>{plat.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
-            )}
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Notes
-              </label>
-              <input
-                type="text"
-                value={editNotes}
-                onChange={(e) => setEditNotes(e.target.value)}
-                placeholder="Notes or comments"
-                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
-              />
+              {/* 4. VIDEO */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Video <span className="text-purple-400">*</span>
+                  </label>
+                  <span className="text-[11px] text-purple-400 font-mono">
+                    utm_content={currentVideo.utmContent}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {TRACKING_VIDEOS.map((vid) => {
+                    const isSelected = selectedVideoId === vid.id;
+                    return (
+                      <button
+                        key={vid.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedVideoId(vid.id);
+                          setValidationError(null);
+                        }}
+                        disabled={isGenerating}
+                        className={`py-2 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer border text-center ${
+                          isSelected
+                            ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                            : 'bg-[#070c18] border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                        }`}
+                      >
+                        {vid.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 5. COMPACT RESPONSIVE GENERATION SUMMARY & PREVIEW */}
+              <div className="bg-slate-900/70 border border-purple-500/30 rounded-2xl p-3.5 sm:p-4 space-y-3">
+                <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-800">
+                  <span className="font-semibold text-slate-300 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+                    <Sparkles size={13} className="text-purple-400" />
+                    Generation Summary
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold text-[11px] border border-purple-500/30">
+                    {sortedEligibleInfluencers.length} Links to Generate
+                  </span>
+                </div>
+
+                {/* Compact summary cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                  {/* Product Card */}
+                  <div 
+                    className="col-span-2 sm:col-span-1 bg-[#070c18] p-2.5 rounded-xl border border-slate-800/80 flex flex-col justify-between min-h-[58px]"
+                    title={selectedProduct}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[10px] text-slate-500 uppercase font-semibold">Product</span>
+                      {isComboProduct(selectedProduct) && (
+                        <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          COMBO
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-slate-100 font-semibold text-xs leading-snug line-clamp-2 mt-0.5 break-words">
+                      {selectedProduct}
+                    </span>
+                  </div>
+
+                  {/* Platform Card */}
+                  <div className="bg-[#070c18] p-2.5 rounded-xl border border-slate-800/80 flex flex-col justify-between min-h-[58px]">
+                    <span className="text-[10px] text-slate-500 uppercase font-semibold">Platform</span>
+                    <span className="text-purple-300 font-semibold truncate block mt-0.5">
+                      {currentPlatform.name}
+                    </span>
+                  </div>
+
+                  {/* Video Card */}
+                  <div className="bg-[#070c18] p-2.5 rounded-xl border border-slate-800/80 flex flex-col justify-between min-h-[58px]">
+                    <span className="text-[10px] text-slate-500 uppercase font-semibold">Video</span>
+                    <span className="text-slate-200 font-semibold truncate block mt-0.5">
+                      {currentVideo.name}
+                    </span>
+                  </div>
+
+                  {/* Eligible Card */}
+                  <div className="bg-[#070c18] p-2.5 rounded-xl border border-slate-800/80 flex flex-col justify-between min-h-[58px]">
+                    <span className="text-[10px] text-slate-500 uppercase font-semibold flex items-center gap-1">
+                      <UserCheck size={11} className="text-emerald-400" />
+                      Eligible
+                    </span>
+                    <span className="text-emerald-400 font-bold truncate block mt-0.5">
+                      {sortedEligibleInfluencers.length}
+                    </span>
+                  </div>
+
+                  {/* Excluded Card */}
+                  <div className="bg-[#070c18] p-2.5 rounded-xl border border-slate-800/80 flex flex-col justify-between min-h-[58px]">
+                    <span className="text-[10px] text-slate-500 uppercase font-semibold flex items-center gap-1">
+                      <UserX size={11} className="text-rose-400" />
+                      Excluded
+                    </span>
+                    <span className="text-rose-400 font-bold truncate block mt-0.5">
+                      {eliminatedCount}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Sample Preview Link */}
+                {samplePreviewUrl && (
+                  <div className="bg-[#070c18] p-3 rounded-xl border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                        <Link2 size={13} className="text-purple-400" />
+                        Sample Link Preview ({sampleInfluencer?.code || '#HIS1'}):
+                      </span>
+                      {destinationType === 'amazon' ? (
+                        <span className="text-amber-400 text-[10px] font-semibold flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                          302 Redirect &bull; Redis Click Tracking
+                        </span>
+                      ) : (
+                        <span className="text-purple-300 text-[10px] font-mono bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-md">
+                          utm_campaign={(sampleInfluencer?.code || 'his1').replace(/^#+/, '').toLowerCase()}
+                        </span>
+                      )}
+                    </div>
+                    <p className={`text-[11px] font-mono break-all break-words select-all leading-relaxed p-2.5 rounded-lg border max-h-24 overflow-y-auto ${
+                      destinationType === 'amazon'
+                        ? 'text-amber-300/90 bg-amber-950/20 border-amber-500/20'
+                        : 'text-purple-300/90 bg-purple-950/20 border-purple-500/20'
+                    }`}>
+                      {samplePreviewUrl}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* 6. PROGRESS BAR / RESULT DISPLAY */}
+              {isGenerating && (
+                <div className="bg-[#070c18] border border-purple-500/40 rounded-2xl p-4 space-y-2 animate-fade-in">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-300 font-semibold flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin text-purple-400" />
+                      Generating influencer tracking links...
+                    </span>
+                    <span className="font-mono text-purple-400 font-bold">
+                      {generationProgress.current} / {generationProgress.total} links ({generationProgress.percentage}%)
+                    </span>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-purple-600 to-indigo-500 transition-all duration-300 ease-out rounded-full"
+                      style={{ width: `${generationProgress.percentage}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Failure Feedback & Retry Option */}
+              {generationResult && !generationResult.success && (
+                <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs animate-fade-in">
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-rose-300 flex items-center gap-1.5">
+                      <AlertCircle size={15} />
+                      <span>Generation Partially Failed</span>
+                    </div>
+                    <p className="text-slate-400">
+                      {generationResult.successCount} links generated, {generationResult.failedCount} failed.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRetryFailed}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
+                  >
+                    <RefreshCw size={13} />
+                    <span>Retry Failed Records</span>
+                  </button>
+                </div>
+              )}
+
             </div>
+          )}
+        </div>
 
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+        {/* =========================================================================
+            3. FIXED FOOTER (Always visible)
+            ========================================================================= */}
+        <div className="shrink-0 p-4 sm:p-5 border-t border-slate-800 bg-[#0b1329] flex items-center justify-end gap-3">
+          {isEditMode && linkToEdit ? (
+            <>
               <button
                 type="button"
                 onClick={onClose}
                 disabled={isGenerating}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
+                className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                type="submit"
+                type="button"
+                onClick={(e) => handleEditSubmit(e as any)}
                 disabled={isGenerating}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white shadow-md shadow-purple-900/25 transition-all cursor-pointer"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white shadow-md shadow-purple-900/25 transition-all cursor-pointer"
               >
-                {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                 <span>Save Changes</span>
               </button>
-            </div>
-          </form>
-        ) : (
-          /* Batch Generation Form */
-          <div className="space-y-4">
-            {/* 0. DESTINATION TYPE: SHOPIFY VS AMAZON */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Destination Type <span className="text-purple-400">*</span>
-              </label>
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDestinationType('shopify');
-                    setValidationError(null);
-                  }}
-                  disabled={isGenerating}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer border ${
-                    destinationType === 'shopify'
-                      ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
-                      : 'bg-[#070c18] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                  }`}
-                >
-                  <Globe size={15} className={destinationType === 'shopify' ? 'text-purple-400' : 'text-slate-500'} />
-                  <span>Shopify (Website)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDestinationType('amazon');
-                    setValidationError(null);
-                  }}
-                  disabled={isGenerating}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer border ${
-                    destinationType === 'amazon'
-                      ? 'bg-amber-500/20 border-amber-500 text-amber-200 shadow-sm ring-1 ring-amber-500/50'
-                      : 'bg-[#070c18] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                  }`}
-                >
-                  <ShoppingBag size={15} className={destinationType === 'amazon' ? 'text-amber-400' : 'text-slate-500'} />
-                  <span>Amazon (Marketplace)</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 1. PRODUCT * */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Product <span className="text-purple-400">*</span>
-              </label>
-              <select
-                value={selectedProduct}
-                onChange={(e) => {
-                  setSelectedProduct(e.target.value);
-                  setValidationError(null);
-                }}
-                disabled={isGenerating}
-                className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {SCRIPT_PRODUCTS.map((prod) => (
-                  <option key={prod} value={prod}>
-                    {prod}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* 2. PRODUCT LINK * (Conditional based on Destination Type) */}
-            {destinationType === 'shopify' ? (
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    Shopify Product Link <span className="text-purple-400">*</span>
-                  </label>
-                  <span className="text-[11px] text-slate-400">
-                    UTMs will be auto-replaced
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  value={productUrl}
-                  onChange={(e) => {
-                    setProductUrl(e.target.value);
-                    setValidationError(null);
-                  }}
-                  disabled={isGenerating}
-                  placeholder="https://www.justmixx.com/products/kitchen-cleaner"
-                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors disabled:opacity-50"
-                />
-                {cleanBaseUrl && (
-                  <div className="mt-1.5 px-2.5 py-1 rounded-lg bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-400 truncate flex items-center gap-1.5">
-                    <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px]">Base URL:</span>
-                    <span className="text-slate-300 font-mono truncate">{cleanBaseUrl}</span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider">
-                    Original Amazon Product URL <span className="text-amber-400">*</span>
-                  </label>
-                  <span className="text-[11px] text-amber-400 font-medium">
-                    Click Tracking Enabled
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  value={amazonUrl}
-                  onChange={(e) => {
-                    setAmazonUrl(e.target.value);
-                    setValidationError(null);
-                  }}
-                  disabled={isGenerating}
-                  placeholder="https://www.amazon.in/dp/B0... or https://www.amazon.com/..."
-                  className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors disabled:opacity-50"
-                />
-                <p className="mt-1.5 text-[11px] text-slate-400">
-                  A unique branded short link (<code className="text-amber-300">https://link.justmixx.com/{'{slug}'}</code> e.g. <code className="text-amber-300">his1-v1</code>) will be generated for each influencer. Visitor clicks are atomically tracked in Redis before 302 redirecting to Amazon.
-                </p>
-              </div>
-            )}
-
-            {/* 3. PLATFORM * */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Platform <span className="text-purple-400">*</span>
-              </label>
-              
-              <div className="space-y-3 bg-[#070c18] border border-slate-800 rounded-2xl p-3.5">
-                {/* Category 1: WEBSITE */}
-                <div>
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                    <Globe size={13} className="text-purple-400" />
-                    <span>Website</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {websitePlatforms.map((plat) => {
-                      const isSelected = selectedPlatformId === plat.id;
-                      return (
-                        <button
-                          key={plat.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedPlatformId(plat.id);
-                            setValidationError(null);
-                          }}
-                          disabled={isGenerating}
-                          className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                            isSelected
-                              ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
-                              : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-                          }`}
-                        >
-                          <div
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: plat.brandColor }}
-                          />
-                          <span>{plat.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Divider */}
-                <div className="h-[1px] bg-slate-800/80" />
-
-                {/* Category 2: MARKETPLACE */}
-                <div>
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                    <ShoppingBag size={13} className="text-purple-400" />
-                    <span>Marketplace</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {marketplacePlatforms.map((plat) => {
-                      const isSelected = selectedPlatformId === plat.id;
-                      return (
-                        <button
-                          key={plat.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedPlatformId(plat.id);
-                            setValidationError(null);
-                          }}
-                          disabled={isGenerating}
-                          className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                            isSelected
-                              ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
-                              : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-                          }`}
-                        >
-                          <div
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: plat.brandColor }}
-                          />
-                          <span>{plat.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. VIDEO * */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                  Video <span className="text-purple-400">*</span>
-                </label>
-                <span className="text-[11px] text-purple-400 font-mono">
-                  utm_content={currentVideo.utmContent}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                {TRACKING_VIDEOS.map((vid) => {
-                  const isSelected = selectedVideoId === vid.id;
-                  return (
-                    <button
-                      key={vid.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedVideoId(vid.id);
-                        setValidationError(null);
-                      }}
-                      disabled={isGenerating}
-                      className={`py-2 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer border text-center ${
-                        isSelected
-                          ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
-                          : 'bg-[#070c18] border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-                      }`}
-                    >
-                      {vid.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 5. CONFIRMATION SUMMARY & SAMPLE PREVIEW */}
-            <div className="bg-slate-900/70 border border-purple-500/30 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-800">
-                <span className="font-semibold text-slate-300 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
-                  <Sparkles size={13} className="text-purple-400" />
-                  Generation Summary
-                </span>
-                <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold text-[11px] border border-purple-500/30">
-                  {sortedEligibleInfluencers.length} Links to Generate
-                </span>
-              </div>
-
-              {/* Exact summary metrics requested: Product, Platform, Video, Eligible Influencers, Excluded/Eliminated, Links to Generate */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
-                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Product</span>
-                  <span className="text-slate-200 font-semibold truncate block mt-0.5">{selectedProduct}</span>
-                </div>
-                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
-                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Platform</span>
-                  <span className="text-purple-300 font-semibold truncate block mt-0.5">{currentPlatform.name}</span>
-                </div>
-                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
-                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Video</span>
-                  <span className="text-slate-200 font-semibold truncate block mt-0.5">{currentVideo.name}</span>
-                </div>
-                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
-                  <span className="text-[10px] text-slate-500 block uppercase font-semibold flex items-center gap-1">
-                    <UserCheck size={11} className="text-emerald-400" />
-                    Eligible
-                  </span>
-                  <span className="text-emerald-400 font-bold truncate block mt-0.5">{sortedEligibleInfluencers.length}</span>
-                </div>
-                <div className="bg-[#070c18] p-2 rounded-xl border border-slate-800/80">
-                  <span className="text-[10px] text-slate-500 block uppercase font-semibold flex items-center gap-1">
-                    <UserX size={11} className="text-rose-400" />
-                    Excluded
-                  </span>
-                  <span className="text-rose-400 font-bold truncate block mt-0.5">{eliminatedCount}</span>
-                </div>
-              </div>
-
-              {/* Sample Preview Link */}
-              {samplePreviewUrl && (
-                <div className="bg-[#070c18] p-2.5 rounded-xl border border-slate-800 space-y-1">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400">
-                    <span className="font-medium">
-                      Sample Link Preview ({sampleInfluencer?.code || '#HIS1'}):
-                    </span>
-                    {destinationType === 'amazon' ? (
-                      <span className="text-amber-400 text-[10px] font-medium flex items-center gap-1">
-                        302 Redirect &bull; Redis Click Tracking
-                      </span>
-                    ) : (
-                      <span className="text-purple-400 text-[10px] font-mono">
-                        utm_campaign={(sampleInfluencer?.code || 'his1').replace(/^#+/, '').toLowerCase()}
-                      </span>
-                    )}
-                  </div>
-                  <p className={`text-[11px] font-mono break-all select-all leading-relaxed p-2 rounded-lg border ${
-                    destinationType === 'amazon'
-                      ? 'text-amber-300/90 bg-amber-950/20 border-amber-500/20'
-                      : 'text-purple-300/90 bg-purple-950/20 border-purple-500/20'
-                  }`}>
-                    {samplePreviewUrl}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* 6. PROGRESS BAR / RESULT DISPLAY */}
-            {isGenerating && (
-              <div className="bg-[#070c18] border border-purple-500/40 rounded-2xl p-4 space-y-2 animate-fade-in">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-300 font-semibold flex items-center gap-2">
-                    <Loader2 size={14} className="animate-spin text-purple-400" />
-                    Generating influencer tracking links...
-                  </span>
-                  <span className="font-mono text-purple-400 font-bold">
-                    {generationProgress.current} / {generationProgress.total} links ({generationProgress.percentage}%)
-                  </span>
-                </div>
-                <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-purple-600 to-indigo-500 transition-all duration-300 ease-out rounded-full"
-                    style={{ width: `${generationProgress.percentage}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Failure Feedback & Retry Option */}
-            {generationResult && !generationResult.success && (
-              <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs animate-fade-in">
-                <div className="space-y-0.5">
-                  <div className="font-bold text-rose-300 flex items-center gap-1.5">
-                    <AlertCircle size={15} />
-                    <span>Generation Partially Failed</span>
-                  </div>
-                  <p className="text-slate-400">
-                    {generationResult.successCount} links generated, {generationResult.failedCount} failed.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRetryFailed}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
-                >
-                  <RefreshCw size={13} />
-                  <span>Retry Failed Records</span>
-                </button>
-              </div>
-            )}
-
-            {/* Footer Actions */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            </>
+          ) : (
+            <>
               <button
                 type="button"
                 onClick={onClose}
@@ -941,9 +1262,10 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                   </>
                 )}
               </button>
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </div>
+
       </div>
     </div>
   );

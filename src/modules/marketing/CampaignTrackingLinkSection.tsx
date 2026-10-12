@@ -26,10 +26,16 @@ import {
   ChevronRight,
   ChevronsUpDown,
   MousePointerClick,
-  Clock
+  Clock,
+  Package
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
-import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
+import { 
+  SCRIPT_PRODUCTS, 
+  COMBO_PRODUCTS, 
+  ALL_CAMPAIGN_PRODUCTS, 
+  isComboProduct 
+} from '../../services/campaignScriptService';
 import { 
   fetchInfluencerTrackingLinks, 
   deleteInfluencerTrackingLink,
@@ -608,9 +614,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       if (l.platform_category) entry.categories.add(l.platform_category);
     });
 
-    // Ensure all standard SCRIPT_PRODUCTS are presented, plus any extra products found in DB
+    // Ensure all standard SCRIPT_PRODUCTS and COMBO_PRODUCTS are presented, plus any extra products found in DB
     const allProdNames = Array.from(new Set([
       ...SCRIPT_PRODUCTS,
+      ...COMBO_PRODUCTS,
       ...Array.from(countMap.keys())
     ]));
 
@@ -626,17 +633,25 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         }
       }
 
+      const isCombo = isComboProduct(name);
+
       return {
         name,
+        isCombo,
         totalLinks: matchedEntry ? matchedEntry.total : 0,
         platformsCount: matchedEntry ? matchedEntry.platforms.size : 0,
         categoriesCount: matchedEntry ? matchedEntry.categories.size : 0
       };
     }).sort((a, b) => {
-      // Products with links first, then alphabetical
+      // 1. Products with links first (descending)
       if (b.totalLinks !== a.totalLinks) {
         return b.totalLinks - a.totalLinks;
       }
+      // 2. Standard products before combo products if both have 0 links
+      if (a.isCombo !== b.isCombo) {
+        return a.isCombo ? 1 : -1;
+      }
+      // 3. Alphabetical order within group
       return a.name.localeCompare(b.name);
     });
   }, [links, eliminatedInfluencerIds]);
@@ -871,12 +886,21 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
               onChange={(e) => setSelectedProduct(e.target.value)}
               className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer w-full truncate"
             >
-              <option value="All" className="bg-slate-900">All Products</option>
-              {SCRIPT_PRODUCTS.map((prod) => (
-                <option key={prod} value={prod} className="bg-slate-900">
-                  {prod}
-                </option>
-              ))}
+              <option value="All" className="bg-slate-900 font-semibold">All Products ({allProductSummaries.length})</option>
+              <optgroup label="Standard Products" className="bg-slate-900 text-slate-400 font-semibold">
+                {SCRIPT_PRODUCTS.map((prod) => (
+                  <option key={prod} value={prod} className="bg-slate-900 text-slate-200">
+                    {prod}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Combo Products" className="bg-slate-900 text-purple-400 font-semibold">
+                {COMBO_PRODUCTS.map((combo) => (
+                  <option key={combo} value={combo} className="bg-slate-900 text-slate-200">
+                    {combo}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
 
@@ -1090,6 +1114,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {allProductSummaries.map((pSummary) => {
               const hasLinks = pSummary.totalLinks > 0;
+              const isCombo = isComboProduct(pSummary.name);
+
               return (
                 <div
                   key={pSummary.name}
@@ -1102,29 +1128,51 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                       setSelectedProduct(pSummary.name);
                     }
                   }}
-                  className="group relative flex flex-col justify-between bg-[#0b1329] hover:bg-[#0f1938] border border-slate-800/90 hover:border-purple-500/50 rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-purple-950/20 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  className={`group relative flex flex-col justify-between h-full min-h-[195px] bg-[#0b1329] hover:bg-[#0f1938] border ${
+                    isCombo 
+                      ? 'border-purple-900/60 hover:border-purple-500/60' 
+                      : 'border-slate-800/90 hover:border-purple-500/50'
+                  } rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-purple-950/25 focus:outline-none focus:ring-2 focus:ring-purple-500/50`}
                 >
                   <div className="space-y-3.5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-purple-600/15 border border-purple-500/30 text-purple-300 flex items-center justify-center text-2xl shrink-0 group-hover:scale-105 group-hover:border-purple-500/50 transition-all shadow-sm">
-                        🧴
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-all shadow-sm ${
+                        isCombo
+                          ? 'bg-gradient-to-br from-purple-600/25 to-indigo-600/25 border border-purple-500/40 text-purple-300'
+                          : 'bg-purple-600/15 border border-purple-500/30 text-purple-300 text-2xl'
+                      }`}>
+                        {isCombo ? (
+                          <Package size={22} className="text-purple-300" />
+                        ) : (
+                          <span>🧴</span>
+                        )}
                       </div>
-                      <span
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
-                          hasLinks
-                            ? 'bg-purple-500/20 text-purple-300 border-purple-500/30 group-hover:bg-purple-500/30'
-                            : 'bg-slate-800/60 text-slate-500 border-slate-700/40'
-                        }`}
-                      >
-                        {pSummary.totalLinks} {pSummary.totalLinks === 1 ? 'Link' : 'Links'}
-                      </span>
+                      <div className="flex flex-col items-end gap-1.5">
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                            hasLinks
+                              ? 'bg-purple-500/20 text-purple-300 border-purple-500/30 group-hover:bg-purple-500/30'
+                              : 'bg-slate-800/60 text-slate-500 border-slate-700/40'
+                          }`}
+                        >
+                          {pSummary.totalLinks} {pSummary.totalLinks === 1 ? 'Link' : 'Links'}
+                        </span>
+                        {isCombo && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                            COMBO
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div>
-                      <h5 className="text-sm font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors line-clamp-1">
+                      <h5 
+                        className="text-sm font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors leading-snug line-clamp-2 min-h-[2.5rem]"
+                        title={pSummary.name}
+                      >
                         {pSummary.name}
                       </h5>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
+                      <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">
                         {hasLinks
                           ? `${pSummary.categoriesCount} channel category • ${pSummary.platformsCount} platforms`
                           : 'No tracking links generated yet'}
@@ -1136,8 +1184,23 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                     <span className="font-medium text-[11px]">
                       {hasLinks ? 'Open tracking table' : 'Create tracking link'}
                     </span>
-                    <div className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 group-hover:border-purple-500/40 flex items-center justify-center text-slate-400 group-hover:text-purple-300 transition-colors">
-                      <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                    <div 
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        if (!hasLinks) {
+                          e.stopPropagation();
+                          setSelectedProduct(pSummary.name);
+                          handleOpenCreate(pSummary.name);
+                        }
+                      }}
+                      className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 group-hover:border-purple-500/40 flex items-center justify-center text-slate-400 group-hover:text-purple-300 transition-colors cursor-pointer"
+                    >
+                      {hasLinks ? (
+                        <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                      ) : (
+                        <Plus size={14} className="group-hover:scale-110 transition-transform text-purple-400" />
+                      )}
                     </div>
                   </div>
                 </div>

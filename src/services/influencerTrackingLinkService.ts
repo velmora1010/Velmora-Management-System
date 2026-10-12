@@ -3,6 +3,15 @@ import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignInfluencer, InfluencerTrackingLink } from '../types';
 import { isActiveStatus } from '../utils/marketingUtils';
+export { 
+  SCRIPT_PRODUCTS, 
+  COMBO_PRODUCTS, 
+  ALL_CAMPAIGN_PRODUCTS, 
+  isComboProduct, 
+  type ScriptProduct, 
+  type ComboProduct, 
+  type CampaignProduct 
+} from './campaignScriptService';
 
 const LOCAL_STORAGE_KEY_PREFIX = 'velmora_influencer_tracking_links_';
 
