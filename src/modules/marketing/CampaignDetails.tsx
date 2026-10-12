@@ -203,16 +203,24 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
           });
           if (sumVideoX > 0) v = sumVideoX;
           else if (Array.isArray(p.video_pricing_list) && p.video_pricing_list.length > 0) v = p.video_pricing_list.length;
+          else if (p.product_pricing?.videos && Array.isArray(p.product_pricing.videos) && p.product_pricing.videos.length > 0) v = p.product_pricing.videos.length;
           else if (p.product_pricing && typeof p.product_pricing === 'object' && Object.keys(p.product_pricing).length > 0) v = Object.keys(p.product_pricing).length;
         }
       }
 
       if (v <= 0) {
-        if (Array.isArray(inf.postDates) && inf.postDates.length > 0) v = inf.postDates.length;
-        else if (Array.isArray(inf.products) && inf.products.length > 0) v = inf.products.length;
-        else v = 6;
+        if (Array.isArray(inf.postDates) && inf.postDates.length > 0) {
+          const maxPd = Math.max(...inf.postDates.map((pd: any) => Number(pd?.video_number) || 0));
+          v = maxPd > 0 ? maxPd : inf.postDates.length;
+        } else if (Array.isArray(inf.products) && inf.products.length > 0) {
+          const validProds = inf.products.filter((pr: any) => pr && !String(pr.product_name || pr.name || '').toLowerCase().startsWith('video'));
+          const prodsToEval = validProds.length > 0 ? validProds : inf.products;
+          const maxV = Math.max(...prodsToEval.map((pr: any) => Number(pr?.video_number) || 0));
+          v = maxV > 0 ? maxV : prodsToEval.length;
+        }
       }
-      return sum + v;
+
+      return sum + (Number.isFinite(v) && v > 0 ? v : 0);
     }, 0);
   }, [activeInfluencers]);
 

@@ -192,7 +192,13 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           supabase.from(SUPABASE_TABLES.influencerBrandPerformance).select('*').in('influencer_id', influencerIds),
           supabase.from(SUPABASE_TABLES.influencerDispatch).select('*').in('influencer_id', influencerIds).eq('campaign_id', campaignId),
           fetchAllInChunks(
-            chunk => supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk),
+            chunk => {
+              let query = supabase.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk);
+              if (campaignId) {
+                query = query.eq('campaign_id', String(campaignId));
+              }
+              return query;
+            },
             influencerIds,
             50
           )
@@ -250,7 +256,7 @@ export const useCampaignInfluencers = (campaignId?: string) => {
           });
 
           (postDatesData || [])
-            .filter(pd => String(pd.influencer_id) === String(inf.id))
+            .filter(pd => String(pd.influencer_id) === String(inf.id) && (!pd.campaign_id || !campaignId || String(pd.campaign_id) === String(campaignId)))
             .forEach((pd, pIdx) => {
               const hasPost = pd.post_date && String(pd.post_date).trim() !== '';
               const hasDraft = pd.draft_date && String(pd.draft_date).trim() !== '';

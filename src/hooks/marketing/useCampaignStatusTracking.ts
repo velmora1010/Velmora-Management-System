@@ -199,7 +199,13 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           200
         ),
         fetchAllInChunks(
-          chunk => supabaseAdmin.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk),
+          chunk => {
+            let query = supabaseAdmin.from(SUPABASE_TABLES.influencerPostDates).select('*').in('influencer_id', chunk);
+            if (cleanCampaignId) {
+              query = query.eq('campaign_id', String(cleanCampaignId));
+            }
+            return query;
+          },
           activeInfluencerIds,
           200
         ),
@@ -334,7 +340,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
         }
 
         (postDatesData || [])
-          .filter((pd: any) => String(pd.influencer_id) === String(info.id))
+          .filter((pd: any) => String(pd.influencer_id) === String(info.id) && (!pd.campaign_id || !cleanCampaignId || String(pd.campaign_id) === String(cleanCampaignId)))
           .forEach((pd: any, pIdx: number) => {
             const hasPost = pd.post_date && String(pd.post_date).trim() !== '';
             const hasDraft = pd.draft_date && String(pd.draft_date).trim() !== '';
