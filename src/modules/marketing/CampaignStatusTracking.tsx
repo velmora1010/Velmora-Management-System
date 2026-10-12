@@ -185,8 +185,8 @@ export interface WorkflowSummaryBoxConfig {
 }
 
 export const WORKFLOW_SUMMARY_BOX_CONFIGS: WorkflowSummaryBoxConfig[] = [
-  { id: 'offer_agreement', label: 'Offer Agreement', shortLabel: 'Offer Agr.', icon: FileCheck },
-  { id: 'after_dispatch', label: 'After Dispatch', shortLabel: 'After Disp.', icon: Send },
+  { id: 'offer_agreement', label: 'Offer Agreement', shortLabel: 'Offer Agreement', icon: FileCheck },
+  { id: 'after_dispatch', label: 'After Dispatch', shortLabel: 'After Dispatch', icon: Send },
   { id: 'delivered', label: 'Delivered', shortLabel: 'Delivered', icon: Truck },
   { id: 'not_started', label: 'Not Started', shortLabel: 'Not Started', icon: Clock },
   { id: 'share_script', label: 'Share Script', shortLabel: 'Share Script', icon: FileText },
@@ -7103,41 +7103,36 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
             </div>
           </div>
 
-          {/* 2. RESPONSIVE FIXED 2-ROW WORKFLOW STEP SUMMARY GRID (EXACTLY 11 + 11 = 22 SLOTS, NO HORIZONTAL SCROLL) */}
+          {/* 2. RESPONSIVE WORKFLOW STEP SUMMARY GRID (FULL LABELS, NO TRUNCATION, NO HORIZONTAL SCROLL) */}
           <div className="flex flex-col gap-2.5 shrink-0">
-            {/* Fixed 2-Row Filter Grid: 11 Columns */}
+            {/* Filter Grid: Responsive columns fitting all 20 active cards perfectly */}
             <div className="w-full">
-              <div 
-                className="w-full grid gap-1.5 sm:gap-2"
-                style={{
-                  gridTemplateColumns: 'repeat(11, minmax(0, 1fr))'
-                }}
-              >
-                {/* 1. All Box (Slot 1 of Row 1) */}
+              <div className="w-full grid gap-1.5 sm:gap-2 grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-10">
+                {/* 1. All Box */}
                 <button
                   type="button"
                   onClick={() => setSelectedSummaryStep(null)}
-                  className={`group relative flex flex-col justify-between p-1.5 sm:p-2 xl:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 w-full ${
+                  className={`group relative flex flex-col justify-between p-1.5 sm:p-2 xl:p-2.5 min-h-[70px] sm:min-h-[74px] h-full rounded-xl border text-left transition-all duration-200 cursor-pointer shadow-sm min-w-0 w-full ${
                     selectedSummaryStep === null
                       ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                       : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
                   }`}
                   title="View All Influencers"
                 >
-                  <div className="flex items-center justify-between gap-1 mb-1 w-full min-w-0">
-                    <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold truncate ${
+                  <div className="flex items-start justify-between gap-1 mb-1 w-full min-w-0">
+                    <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold leading-snug break-words ${
                       selectedSummaryStep === null ? 'text-purple-200' : 'text-slate-300 group-hover:text-white'
                     }`}>
                       All
                     </span>
                     <Users 
                       size={12} 
-                      className={`shrink-0 transition-colors ${
+                      className={`shrink-0 mt-0.5 transition-colors ${
                         selectedSummaryStep === null ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-300'
                       }`} 
                     />
                   </div>
-                  <div className="flex items-baseline justify-between w-full min-w-0">
+                  <div className="flex items-baseline justify-between w-full min-w-0 mt-auto pt-1">
                     <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
                       {workflowStepCounts.all}
                     </span>
@@ -7147,7 +7142,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                   </div>
                 </button>
 
-                {/* Slots 2 to 17: Active Workflow Step Boxes */}
+                {/* Slots 2 to 20: Active Workflow Step Boxes */}
                 {getVideoSummaryBoxConfigs(selectedVideoNumber).filter(step => step.id !== 'all').map(step => {
                   const isSelected = selectedSummaryStep === step.id;
                   const count = workflowStepCounts[step.id] || 0;
@@ -7163,7 +7158,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       onClick={() => {
                         setSelectedSummaryStep(prev => prev === step.id ? null : step.id);
                       }}
-                      className={`group relative flex flex-col justify-between p-1.5 sm:p-2 xl:p-2.5 h-[68px] sm:h-[72px] rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 w-full cursor-pointer ${
+                      className={`group relative flex flex-col justify-between p-1.5 sm:p-2 xl:p-2.5 min-h-[70px] sm:min-h-[74px] h-full rounded-xl border text-left transition-all duration-200 shadow-sm min-w-0 w-full cursor-pointer ${
                         isSelected
                           ? 'bg-gradient-to-b from-purple-900/40 via-purple-900/20 to-[#0b1329] border-purple-500 shadow-md shadow-purple-950/40 ring-1 ring-purple-500/50'
                           : 'bg-[#0b1329] border-slate-800/80 hover:border-slate-700 hover:bg-[#0e1834] text-slate-300'
@@ -7174,24 +7169,24 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                           : `Filter by ${step.label} (${count})`
                       }
                     >
-                      <div className="flex items-center justify-between gap-1 mb-1 w-full min-w-0">
-                        <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold truncate ${
+                      <div className="flex items-start justify-between gap-1 mb-1 w-full min-w-0">
+                        <span className={`text-[10px] sm:text-[10.5px] xl:text-[11px] font-semibold leading-snug break-words ${
                           isSelected 
                             ? 'text-purple-200' 
                             : 'text-slate-300 group-hover:text-white'
                         }`}>
-                          {step.shortLabel || step.label}
+                          {step.label}
                         </span>
                         <StepIcon 
                           size={12} 
-                          className={`shrink-0 transition-colors ${
+                          className={`shrink-0 mt-0.5 transition-colors ${
                             isSelected 
                               ? 'text-purple-400' 
                               : 'text-slate-500 group-hover:text-slate-300'
                           }`} 
                         />
                       </div>
-                      <div className="flex items-baseline justify-between w-full min-w-0">
+                      <div className="flex items-baseline justify-between w-full min-w-0 mt-auto pt-1">
                         <span className="text-base sm:text-lg xl:text-xl font-black text-white tracking-tight">
                           {count}
                         </span>
@@ -7222,15 +7217,6 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     </button>
                   );
                 })}
-
-                {/* Slots 21 to 22: 2 Empty Placeholder Slots in Row 2 (20 active filter boxes + 2 placeholders = 22 total slots across 11 columns) */}
-                {[1, 2].map((slotIdx) => (
-                  <div
-                    key={`filter-empty-placeholder-${slotIdx}`}
-                    className="h-[68px] sm:h-[72px] rounded-xl border border-slate-800/40 bg-[#070c1a]/30 min-w-0 w-full select-none pointer-events-none"
-                    aria-hidden="true"
-                  />
-                ))}
               </div>
             </div>
 
