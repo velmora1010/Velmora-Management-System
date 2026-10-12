@@ -46,6 +46,9 @@ export const getDefaultProductUrl = (prodName: string): string => {
   return `https://www.justmixx.com/products/${slug}`;
 };
 
+export const WEBSITE_PLATFORMS: TrackingPlatformConfig[] = TRACKING_PLATFORMS.filter(p => p.category === 'WEBSITE');
+export const MARKETPLACE_PLATFORMS: TrackingPlatformConfig[] = TRACKING_PLATFORMS.filter(p => p.category === 'MARKETPLACE');
+
 // =========================================================================
 // CUSTOM SEARCHABLE PRODUCT DROPDOWN COMPONENT
 // =========================================================================
@@ -480,8 +483,6 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     );
   }, [destinationType, productUrl, selectedProduct, currentPlatform, currentVideo, sampleInfluencer]);
 
-  if (!isOpen) return null;
-
   // Validate form before batch generation
   const validateForm = (): boolean => {
     if (!selectedProduct.trim()) {
@@ -652,15 +653,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     }
   };
 
-  // Website Platforms
-  const websitePlatforms = useMemo(() => {
-    return TRACKING_PLATFORMS.filter(p => p.category === 'WEBSITE');
-  }, []);
-
-  // Marketplace Platforms
-  const marketplacePlatforms = useMemo(() => {
-    return TRACKING_PLATFORMS.filter(p => p.category === 'MARKETPLACE');
-  }, []);
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
@@ -955,7 +948,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                       <span>Website</span>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      {websitePlatforms.map((plat) => {
+                      {WEBSITE_PLATFORMS.map((plat) => {
                         const isSelected = selectedPlatformId === plat.id;
                         return (
                           <button
@@ -993,7 +986,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                       <span>Marketplace</span>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      {marketplacePlatforms.map((plat) => {
+                      {MARKETPLACE_PLATFORMS.map((plat) => {
                         const isSelected = selectedPlatformId === plat.id;
                         return (
                           <button

@@ -187,6 +187,12 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [isRefreshingClicks, setIsRefreshingClicks] = useState<boolean>(false);
   const [lastClicksUpdated, setLastClicksUpdated] = useState<Date | null>(null);
 
+  // Accordion expansion state:
+  // expandedProducts: { [productName: string]: boolean }
+  // expandedPlatforms: { [`${productName}::${platformName}`]: boolean }
+  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
+  const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
+
   // Clear selection, selected marketplace, and reset page whenever selected product changes
   useEffect(() => {
     setSelectedLinkIds(new Set());
@@ -198,12 +204,6 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedMarketplace, selectedPlatform, selectedVideo, searchQuery, pageSize]);
-
-  // Accordion expansion state:
-  // expandedProducts: { [productName: string]: boolean }
-  // expandedPlatforms: { [`${productName}::${platformName}`]: boolean }
-  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
-  const [expandedPlatforms, setExpandedPlatforms] = useState<Record<string, boolean>>({});
 
   // Fetch campaign influencers
   const { influencers, refresh: refreshInfluencers } = useCampaignInfluencers(campaign.id);
