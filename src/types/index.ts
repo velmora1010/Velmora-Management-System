@@ -289,7 +289,7 @@ export interface InfluencerTrackingLink {
   creator_code?: string;
   base_product_url?: string;
   tracking_url: string;
-  destination_type?: 'shopify' | 'amazon';
+  destination_type?: 'shopify' | 'website' | 'amazon' | 'flipkart' | 'meesho';
   original_destination_url?: string;
   custom_slug?: string;
   branded_url?: string;

@@ -677,6 +677,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
 
     // Default channels to display for easy link creation/viewing
     const defaultChannels = [
+      { name: 'Website', category: 'WEBSITE', brandColor: '#8B5CF6', description: 'Direct brand store links with influencer UTM parameters' },
       { name: 'Amazon', category: 'MARKETPLACE', brandColor: '#FF9900', description: 'Amazon short links redirecting to product ASINs' },
       { name: 'Flipkart', category: 'MARKETPLACE', brandColor: '#2874F0', description: 'Flipkart marketplace influencer tracking' },
       { name: 'Meesho', category: 'MARKETPLACE', brandColor: '#F43397', description: 'Meesho reseller & influencer campaign links' },
@@ -1742,14 +1743,16 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     {/* 5. Clicks (Atomic server-side counter) */}
                                                     <td className="px-4 py-2.5 text-center whitespace-nowrap">
                                                       {(() => {
-                                                        const isAmazonLink =
+                                                        const isRedirectLink =
                                                           link.destination_type === 'amazon' ||
+                                                          link.destination_type === 'flipkart' ||
+                                                          link.destination_type === 'meesho' ||
                                                           Boolean(link.custom_slug) ||
                                                           Boolean(link.branded_url) ||
                                                           (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('link.justmixx.com') || (link.tracking_url.includes('justmixx.com') && !link.tracking_url.includes('utm_source')))) ||
-                                                          (link.platform && link.platform.toLowerCase() === 'amazon');
+                                                          (link.platform && (link.platform.toLowerCase() === 'amazon' || link.platform.toLowerCase() === 'flipkart' || link.platform.toLowerCase() === 'meesho'));
 
-                                                        if (!isAmazonLink) {
+                                                        if (!isRedirectLink) {
                                                           return (
                                                             <span
                                                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-purple-950/40 text-purple-300/80 border border-purple-500/20"

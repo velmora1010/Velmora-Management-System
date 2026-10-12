@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 
-// Allowed Amazon domains to prevent open-redirect vulnerabilities
+// Allowed marketplace domains to prevent open-redirect vulnerabilities
 const ALLOWED_AMAZON_DOMAINS = [
   'amazon.in',
   'amazon.com',
@@ -17,6 +17,18 @@ const ALLOWED_AMAZON_DOMAINS = [
   'amzn.eu'
 ];
 
+const ALLOWED_FLIPKART_DOMAINS = [
+  'flipkart.com',
+  'dl.flipkart.com',
+  'fkrt.it',
+  'fkrt.co'
+];
+
+const ALLOWED_MEESHO_DOMAINS = [
+  'meesho.com',
+  'www.meesho.com'
+];
+
 export function isValidAmazonUrl(urlStr: string): boolean {
   if (!urlStr || typeof urlStr !== 'string') return false;
   try {
@@ -30,21 +42,51 @@ export function isValidAmazonUrl(urlStr: string): boolean {
   }
 }
 
-// Helper to extract the original Amazon URL from a Supabase record
-function extractAmazonDestinationUrl(row: any): string {
+export function isValidFlipkartUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const clean = urlStr.trim();
+    const test = clean.startsWith('http://') || clean.startsWith('https://') ? clean : `https://${clean}`;
+    const parsed = new URL(test);
+    const host = parsed.hostname.toLowerCase();
+    return ALLOWED_FLIPKART_DOMAINS.some(domain => host === domain || host.endsWith('.' + domain));
+  } catch {
+    return false;
+  }
+}
+
+export function isValidMeeshoUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const clean = urlStr.trim();
+    const test = clean.startsWith('http://') || clean.startsWith('https://') ? clean : `https://${clean}`;
+    const parsed = new URL(test);
+    const host = parsed.hostname.toLowerCase();
+    return ALLOWED_MEESHO_DOMAINS.some(domain => host === domain || host.endsWith('.' + domain));
+  } catch {
+    return false;
+  }
+}
+
+export function isValidMarketplaceRedirectUrl(urlStr: string): boolean {
+  return isValidAmazonUrl(urlStr) || isValidFlipkartUrl(urlStr) || isValidMeeshoUrl(urlStr);
+}
+
+// Helper to extract the original marketplace URL from a Supabase record
+function extractMarketplaceDestinationUrl(row: any): string {
   if (!row) return '';
 
-  // 1. Check notes JSON payload for original_amazon_url or original_destination_url
+  // 1. Check notes JSON payload for original_destination_url, original_amazon_url, etc.
   if (row.notes && typeof row.notes === 'string' && row.notes.startsWith('{')) {
     try {
       const parsed = JSON.parse(row.notes);
-      if (parsed.original_amazon_url && isValidAmazonUrl(parsed.original_amazon_url)) {
-        return parsed.original_amazon_url.trim();
-      }
-      if (parsed.original_destination_url && isValidAmazonUrl(parsed.original_destination_url)) {
+      if (parsed.original_destination_url && isValidMarketplaceRedirectUrl(parsed.original_destination_url)) {
         return parsed.original_destination_url.trim();
       }
-      if (parsed.base_product_url && isValidAmazonUrl(parsed.base_product_url)) {
+      if (parsed.original_amazon_url && isValidMarketplaceRedirectUrl(parsed.original_amazon_url)) {
+        return parsed.original_amazon_url.trim();
+      }
+      if (parsed.base_product_url && isValidMarketplaceRedirectUrl(parsed.base_product_url)) {
         return parsed.base_product_url.trim();
       }
     } catch {
@@ -53,12 +95,12 @@ function extractAmazonDestinationUrl(row: any): string {
   }
 
   // 2. Check original_destination_url column
-  if (row.original_destination_url && isValidAmazonUrl(row.original_destination_url)) {
+  if (row.original_destination_url && isValidMarketplaceRedirectUrl(row.original_destination_url)) {
     return row.original_destination_url.trim();
   }
 
   // 3. Check base_product_url column
-  if (row.base_product_url && isValidAmazonUrl(row.base_product_url)) {
+  if (row.base_product_url && isValidMarketplaceRedirectUrl(row.base_product_url)) {
     return row.base_product_url.trim();
   }
 
@@ -204,7 +246,7 @@ export default async function handler(
         if (slugRes.ok) {
           const rows = await slugRes.json();
           if (Array.isArray(rows) && rows.length > 0) {
-            matchedRow = rows.find(r => Boolean(extractAmazonDestinationUrl(r))) || rows[0];
+            matchedRow = rows.find(r => Boolean(extractMarketplaceDestinationUrl(r))) || rows[0];
           }
         }
       }
@@ -225,7 +267,7 @@ export default async function handler(
           if (codeRes.ok) {
             const rows = await codeRes.json();
             if (Array.isArray(rows) && rows.length > 0) {
-              matchedRow = rows.find(r => Boolean(extractAmazonDestinationUrl(r))) || rows[0];
+              matchedRow = rows.find(r => Boolean(extractMarketplaceDestinationUrl(r))) || rows[0];
             }
           }
         }
@@ -240,14 +282,14 @@ export default async function handler(
         if (fbRes.ok) {
           const fbRows = await fbRes.json();
           if (Array.isArray(fbRows) && fbRows.length > 0) {
-            matchedRow = fbRows.find(r => Boolean(extractAmazonDestinationUrl(r))) || fbRows[0];
+            matchedRow = fbRows.find(r => Boolean(extractMarketplaceDestinationUrl(r))) || fbRows[0];
           }
         }
       }
 
       if (matchedRow) {
         canonicalLinkId = String(matchedRow.id).trim();
-        destinationUrl = extractAmazonDestinationUrl(matchedRow);
+        destinationUrl = extractMarketplaceDestinationUrl(matchedRow);
 
         // Cache persistent slug and destination in Redis for ultra-fast subsequent visits
         if (isRedisConfigured) {
@@ -282,11 +324,11 @@ export default async function handler(
   }
 
   // 5. Validate destination URL to prevent open redirect vulnerabilities
-  if (!isValidAmazonUrl(destinationUrl)) {
-    console.warn(`[Tracking Redirect] 400: Destination "${destinationUrl}" is not a recognized Amazon URL for ID: "${canonicalLinkId}"`);
+  if (!isValidMarketplaceRedirectUrl(destinationUrl)) {
+    console.warn(`[Tracking Redirect] 400: Destination "${destinationUrl}" is not a recognized marketplace URL for ID: "${canonicalLinkId}"`);
     res.statusCode = 400;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end('<h1>400 Invalid Destination</h1><p>The destination URL is not a recognized Amazon store address.</p>');
+    res.end('<h1>400 Invalid Destination</h1><p>The destination URL is not a recognized marketplace store address.</p>');
     return;
   }
 

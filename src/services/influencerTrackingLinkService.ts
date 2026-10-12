@@ -41,6 +41,24 @@ export const TRACKING_PLATFORMS: TrackingPlatformConfig[] = [
   { id: 'meesho', name: 'Meesho', category: 'MARKETPLACE', utmSource: 'meesho', brandColor: '#F43397' },
 ];
 
+export type MarketplaceType = 'website' | 'amazon' | 'flipkart' | 'meesho';
+
+export interface TrackingMarketplaceConfig {
+  id: MarketplaceType;
+  name: 'Website' | 'Amazon' | 'Flipkart' | 'Meesho';
+  utmSource: string;
+  brandColor: string;
+  isRedirect: boolean;
+  destinationType: 'shopify' | 'amazon' | 'flipkart' | 'meesho';
+}
+
+export const TRACKING_MARKETPLACES: TrackingMarketplaceConfig[] = [
+  { id: 'website', name: 'Website', utmSource: 'website', brandColor: '#8B5CF6', isRedirect: false, destinationType: 'shopify' },
+  { id: 'amazon', name: 'Amazon', utmSource: 'amazon', brandColor: '#FF9900', isRedirect: true, destinationType: 'amazon' },
+  { id: 'flipkart', name: 'Flipkart', utmSource: 'flipkart', brandColor: '#2874F0', isRedirect: true, destinationType: 'flipkart' },
+  { id: 'meesho', name: 'Meesho', utmSource: 'meesho', brandColor: '#F43397', isRedirect: true, destinationType: 'meesho' },
+];
+
 export interface TrackingVideoConfig {
   id: string;
   name: string;
@@ -195,6 +213,18 @@ export const ALLOWED_AMAZON_DOMAINS = [
   'amzn.eu'
 ];
 
+export const ALLOWED_FLIPKART_DOMAINS = [
+  'flipkart.com',
+  'dl.flipkart.com',
+  'fkrt.it',
+  'fkrt.co'
+];
+
+export const ALLOWED_MEESHO_DOMAINS = [
+  'meesho.com',
+  'www.meesho.com'
+];
+
 /**
  * Validates whether a URL is a legitimate Amazon marketplace URL
  */
@@ -209,6 +239,45 @@ export function isValidAmazonUrl(urlStr: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Validates whether a URL is a legitimate Flipkart marketplace URL
+ */
+export function isValidFlipkartUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const clean = urlStr.trim();
+    const test = clean.startsWith('http://') || clean.startsWith('https://') ? clean : `https://${clean}`;
+    const parsed = new URL(test);
+    const host = parsed.hostname.toLowerCase();
+    return ALLOWED_FLIPKART_DOMAINS.some(domain => host === domain || host.endsWith('.' + domain));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates whether a URL is a legitimate Meesho marketplace URL
+ */
+export function isValidMeeshoUrl(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  try {
+    const clean = urlStr.trim();
+    const test = clean.startsWith('http://') || clean.startsWith('https://') ? clean : `https://${clean}`;
+    const parsed = new URL(test);
+    const host = parsed.hostname.toLowerCase();
+    return ALLOWED_MEESHO_DOMAINS.some(domain => host === domain || host.endsWith('.' + domain));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates whether a URL is a legitimate redirect marketplace URL (Amazon, Flipkart, Meesho)
+ */
+export function isValidMarketplaceRedirectUrl(urlStr: string): boolean {
+  return isValidAmazonUrl(urlStr) || isValidFlipkartUrl(urlStr) || isValidMeeshoUrl(urlStr);
 }
 
 export const BRANDED_TRACKING_DOMAIN = 'https://velmora-management-system.vercel.app/r';
@@ -487,14 +556,34 @@ export function normalizeTrackingLink(raw: any): InfluencerTrackingLink {
 
   const base_product_url = raw.base_product_url || extra.base_product_url || urlBase || '';
 
-  // Determine destination type (Shopify or Amazon)
-  const isAmazon = 
-    raw.destination_type === 'amazon' || 
-    extra.destination_type === 'amazon' ||
+  // Determine destination type (shopify/website, amazon, flipkart, meesho)
+  let destination_type: 'shopify' | 'website' | 'amazon' | 'flipkart' | 'meesho' = 'shopify';
+  const rawDest = (raw.destination_type || extra.destination_type || '').toLowerCase();
+  const rawPlat = (raw.platform || extra.platform || '').toLowerCase();
+
+  if (rawDest === 'flipkart' || rawPlat === 'flipkart' || isValidFlipkartUrl(base_product_url)) {
+    destination_type = 'flipkart';
+  } else if (rawDest === 'meesho' || rawPlat === 'meesho' || isValidMeeshoUrl(base_product_url)) {
+    destination_type = 'meesho';
+  } else if (
+    rawDest === 'amazon' ||
+    rawPlat === 'amazon' ||
     isValidAmazonUrl(base_product_url) ||
-    (raw.tracking_url && (raw.tracking_url.includes('/r/') || raw.tracking_url.includes('/api/r')));
-  const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
-  const original_destination_url = raw.original_destination_url || extra.original_amazon_url || extra.original_destination_url || (isAmazon ? base_product_url : undefined);
+    (raw.tracking_url && (raw.tracking_url.includes('/r/') || raw.tracking_url.includes('/api/r')))
+  ) {
+    destination_type = 'amazon';
+  } else if (rawDest === 'website' || rawDest === 'shopify') {
+    destination_type = rawDest === 'website' ? 'website' : 'shopify';
+  } else {
+    destination_type = 'shopify';
+  }
+
+  const isRedirect = destination_type === 'amazon' || destination_type === 'flipkart' || destination_type === 'meesho';
+  const original_destination_url =
+    raw.original_destination_url ||
+    extra.original_destination_url ||
+    extra.original_amazon_url ||
+    (isRedirect ? base_product_url : undefined);
 
   const cleanNotes = extra.userNotes !== undefined
     ? extra.userNotes
@@ -502,15 +591,15 @@ export function normalizeTrackingLink(raw: any): InfluencerTrackingLink {
 
   const clicks = typeof raw.clicks === 'number' ? raw.clicks : (typeof extra.clicks === 'number' ? extra.clicks : undefined);
 
-  // Compute branded short code / slug for Amazon links
+  // Compute branded short code / slug for redirect links
   const recordId = String(raw.id || `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`);
   const custom_slug = extra.custom_slug || 
                       raw.custom_slug || 
-                      (isAmazon && creator_code ? buildTrackingSlug(creator_code, video_number, utm_content) : undefined);
+                      (isRedirect && creator_code ? buildTrackingSlug(creator_code, video_number, utm_content) : undefined);
   const branded_url = custom_slug ? buildBrandedTrackingUrl(custom_slug) : undefined;
 
   let tracking_url = raw.tracking_url || '';
-  if (isAmazon) {
+  if (isRedirect) {
     if (branded_url) {
       tracking_url = branded_url;
     } else if (!tracking_url) {
@@ -591,9 +680,10 @@ export async function fetchInfluencerTrackingLinks(
       const normalized = (data as any[]).map(normalizeTrackingLink).sort(compareTrackingLinksByCodeAsc);
       saveLocalTrackingLinks(cleanId, normalized);
 
-      // Asynchronously register any Amazon custom slugs to Redis so redirects resolve instantly
+      // Asynchronously register any marketplace custom slugs to Redis so redirects resolve instantly
       normalized.forEach(l => {
-        if (l.destination_type === 'amazon' && l.custom_slug) {
+        const isRedir = l.destination_type === 'amazon' || l.destination_type === 'flipkart' || l.destination_type === 'meesho';
+        if (isRedir && l.custom_slug) {
           persistSlugMapping(l.custom_slug, l.id).catch(() => {});
         }
       });
@@ -616,11 +706,12 @@ export interface BatchGenerateParams {
   campaign_id: string | number;
   product: string;
   base_product_url: string;
-  destination_type?: 'shopify' | 'amazon';
+  destination_type?: 'shopify' | 'website' | 'amazon' | 'flipkart' | 'meesho';
+  original_destination_url?: string;
   original_amazon_url?: string;
-  platform: string; // 'Instagram', 'YouTube', etc.
+  platform: string; // 'Website', 'Amazon', 'Flipkart', 'Meesho', or legacy platform name
   platform_category: PlatformCategory;
-  utm_source: string; // 'instagram', 'youtube', etc.
+  utm_source: string; // 'website', 'amazon', 'flipkart', 'meesho', etc.
   video_number: string; // 'Video 1', 'Video 2', etc.
   utm_content: string; // 'v1', 'v2', etc.
   influencers: CampaignInfluencer[];
@@ -673,9 +764,28 @@ export async function batchGenerateInfluencerTrackingLinks(
   const existingLinks = await fetchInfluencerTrackingLinks(cleanCampaignId);
   const now = new Date().toISOString();
   const cleanBaseUrl = extractBaseProductUrl(params.base_product_url);
-  const isAmazon = params.destination_type === 'amazon' || isValidAmazonUrl(params.base_product_url);
-  const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
-  const original_destination_url = isAmazon ? (params.original_amazon_url || params.base_product_url).trim() : undefined;
+
+  // Determine marketplace destination type
+  let destination_type: 'shopify' | 'website' | 'amazon' | 'flipkart' | 'meesho' = 'shopify';
+  const paramDest = (params.destination_type || '').toLowerCase();
+  const paramPlat = (params.platform || '').toLowerCase();
+
+  if (paramDest === 'flipkart' || paramPlat === 'flipkart' || isValidFlipkartUrl(params.base_product_url)) {
+    destination_type = 'flipkart';
+  } else if (paramDest === 'meesho' || paramPlat === 'meesho' || isValidMeeshoUrl(params.base_product_url)) {
+    destination_type = 'meesho';
+  } else if (paramDest === 'amazon' || paramPlat === 'amazon' || isValidAmazonUrl(params.base_product_url)) {
+    destination_type = 'amazon';
+  } else if (paramDest === 'website' || paramDest === 'shopify') {
+    destination_type = paramDest === 'website' ? 'website' : 'shopify';
+  } else {
+    destination_type = 'shopify';
+  }
+
+  const isRedirect = destination_type === 'amazon' || destination_type === 'flipkart' || destination_type === 'meesho';
+  const original_destination_url = isRedirect 
+    ? (params.original_destination_url || params.original_amazon_url || params.base_product_url).trim() 
+    : undefined;
 
   // Prepare link records for each eligible influencer in ascending order
   const recordsToUpsert: InfluencerTrackingLink[] = sortedInfluencers.map((inf) => {
@@ -700,13 +810,13 @@ export async function batchGenerateInfluencerTrackingLinks(
         : `link_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
     );
 
-    // Derive unique branded slug for Amazon links
-    const baseSlug = isAmazon ? buildTrackingSlug(cleanCode, params.video_number, params.utm_content) : '';
-    const custom_slug = isAmazon ? getDisambiguatedSlug(baseSlug, recordId, existingLinks, params.product) : undefined;
+    // Derive unique branded slug for redirect links
+    const baseSlug = isRedirect ? buildTrackingSlug(cleanCode, params.video_number, params.utm_content) : '';
+    const custom_slug = isRedirect ? getDisambiguatedSlug(baseSlug, recordId, existingLinks, params.product) : undefined;
     const branded_url = custom_slug ? buildBrandedTrackingUrl(custom_slug) : undefined;
 
     // Build unique tracking URL (prefer branded domain)
-    const trackingUrl = isAmazon
+    const trackingUrl = isRedirect
       ? (branded_url || buildAmazonRedirectTrackingUrl(recordId))
       : buildInfluencerTrackingUrl(
           params.base_product_url,
@@ -717,7 +827,8 @@ export async function batchGenerateInfluencerTrackingLinks(
 
     const notesPayload = JSON.stringify({
       destination_type,
-      original_amazon_url: original_destination_url,
+      original_destination_url,
+      original_amazon_url: destination_type === 'amazon' ? original_destination_url : undefined,
       custom_slug,
       platform: params.platform,
       platform_category: params.platform_category,
@@ -726,7 +837,7 @@ export async function batchGenerateInfluencerTrackingLinks(
       utm_medium: 'influencer',
       utm_content: params.utm_content,
       creator_code: cleanCode,
-      base_product_url: isAmazon ? (original_destination_url || cleanBaseUrl) : cleanBaseUrl,
+      base_product_url: isRedirect ? (original_destination_url || cleanBaseUrl) : cleanBaseUrl,
       userNotes: existing?.notes || ''
     });
 
@@ -744,7 +855,7 @@ export async function batchGenerateInfluencerTrackingLinks(
       utm_source: params.utm_source.toLowerCase(),
       utm_medium: 'influencer',
       utm_content: params.utm_content.toLowerCase(),
-      base_product_url: isAmazon ? (original_destination_url || cleanBaseUrl) : cleanBaseUrl,
+      base_product_url: isRedirect ? (original_destination_url || cleanBaseUrl) : cleanBaseUrl,
       tracking_url: trackingUrl,
       destination_type,
       original_destination_url,
@@ -843,8 +954,8 @@ export async function batchGenerateInfluencerTrackingLinks(
   const finalLocalLinks = Array.from(mergedMap.values()).sort(compareTrackingLinksByCodeAsc);
   saveLocalTrackingLinks(cleanCampaignId, finalLocalLinks);
 
-  // Asynchronously register any Amazon custom slugs to Redis
-  if (isAmazon) {
+  // Asynchronously register any marketplace custom slugs to Redis
+  if (isRedirect) {
     successfulLinks.forEach(link => {
       if (link.custom_slug) {
         persistSlugMapping(link.custom_slug, link.id).catch(() => {});
@@ -872,7 +983,7 @@ export interface CreateTrackingLinkParams {
   influencer_name?: string;
   influencer_code?: string;
   product: string;
-  destination_type?: 'shopify' | 'amazon';
+  destination_type?: 'shopify' | 'website' | 'amazon' | 'flipkart' | 'meesho';
   original_destination_url?: string;
   custom_slug?: string;
   platform?: string;
@@ -898,30 +1009,48 @@ export async function createInfluencerTrackingLink(
   const cleanCode = rawCode.replace(/^#+/, '').trim().toLowerCase();
   const displayCode = cleanCode ? `#${cleanCode.toUpperCase()}` : '';
 
-  const isAmazon = params.destination_type === 'amazon' || isValidAmazonUrl(params.base_product_url || '');
-  const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
-  const original_destination_url = params.original_destination_url || (isAmazon ? params.base_product_url : undefined);
+  let destination_type: 'shopify' | 'website' | 'amazon' | 'flipkart' | 'meesho' = 'shopify';
+  const paramDest = (params.destination_type || '').toLowerCase();
+  const paramPlat = (params.platform || '').toLowerCase();
 
-  const custom_slug = isAmazon 
+  if (paramDest === 'flipkart' || paramPlat === 'flipkart' || isValidFlipkartUrl(params.base_product_url || '')) {
+    destination_type = 'flipkart';
+  } else if (paramDest === 'meesho' || paramPlat === 'meesho' || isValidMeeshoUrl(params.base_product_url || '')) {
+    destination_type = 'meesho';
+  } else if (paramDest === 'amazon' || paramPlat === 'amazon' || isValidAmazonUrl(params.base_product_url || '')) {
+    destination_type = 'amazon';
+  } else if (paramDest === 'website' || paramDest === 'shopify') {
+    destination_type = paramDest === 'website' ? 'website' : 'shopify';
+  } else {
+    destination_type = 'shopify';
+  }
+
+  const isRedirect = destination_type === 'amazon' || destination_type === 'flipkart' || destination_type === 'meesho';
+  const original_destination_url = isRedirect 
+    ? (params.original_destination_url || params.base_product_url) 
+    : undefined;
+
+  const custom_slug = isRedirect 
     ? (params.custom_slug?.trim().toLowerCase() || buildTrackingSlug(cleanCode, params.video_number, params.utm_content))
     : undefined;
   const branded_url = custom_slug ? buildBrandedTrackingUrl(custom_slug) : undefined;
-  const finalTrackingUrl = isAmazon 
+  const finalTrackingUrl = isRedirect 
     ? (branded_url || params.tracking_url.trim())
     : params.tracking_url.trim();
 
   const notesPayload = JSON.stringify({
     destination_type,
-    original_amazon_url: original_destination_url,
+    original_destination_url,
+    original_amazon_url: destination_type === 'amazon' ? original_destination_url : undefined,
     custom_slug,
-    platform: params.platform || 'Instagram',
-    platform_category: params.platform_category || 'WEBSITE',
+    platform: params.platform || 'Website',
+    platform_category: params.platform_category || (isRedirect ? 'MARKETPLACE' : 'WEBSITE'),
     video_number: params.video_number || 'Video 1',
-    utm_source: (params.utm_source || 'instagram').toLowerCase(),
+    utm_source: (params.utm_source || (isRedirect ? destination_type : 'website')).toLowerCase(),
     utm_medium: 'influencer',
     utm_content: (params.utm_content || 'v1').toLowerCase(),
     creator_code: cleanCode,
-    base_product_url: params.base_product_url || '',
+    base_product_url: isRedirect ? (original_destination_url || params.base_product_url || '') : (params.base_product_url || ''),
     userNotes: params.notes?.trim() || ''
   });
 
@@ -933,13 +1062,13 @@ export async function createInfluencerTrackingLink(
     influencer_code: displayCode,
     creator_code: cleanCode,
     product: params.product.trim(),
-    platform: params.platform || 'Instagram',
-    platform_category: params.platform_category || 'WEBSITE',
+    platform: params.platform || 'Website',
+    platform_category: params.platform_category || (isRedirect ? 'MARKETPLACE' : 'WEBSITE'),
     video_number: params.video_number || 'Video 1',
-    utm_source: (params.utm_source || 'instagram').toLowerCase(),
+    utm_source: (params.utm_source || (isRedirect ? destination_type : 'website')).toLowerCase(),
     utm_medium: 'influencer',
     utm_content: (params.utm_content || 'v1').toLowerCase(),
-    base_product_url: isAmazon ? (original_destination_url || params.base_product_url || '') : (params.base_product_url || ''),
+    base_product_url: isRedirect ? (original_destination_url || params.base_product_url || '') : (params.base_product_url || ''),
     tracking_url: finalTrackingUrl,
     destination_type,
     original_destination_url,
@@ -951,7 +1080,7 @@ export async function createInfluencerTrackingLink(
     updated_at: now
   };
 
-  if (destination_type === 'amazon' && custom_slug) {
+  if (isRedirect && custom_slug) {
     persistSlugMapping(custom_slug, newRecord.id).catch(() => {});
   }
 
@@ -999,7 +1128,7 @@ export interface UpdateTrackingLinkParams {
   influencer_name?: string;
   influencer_code?: string;
   product: string;
-  destination_type?: 'shopify' | 'amazon';
+  destination_type?: 'shopify' | 'website' | 'amazon' | 'flipkart' | 'meesho';
   original_destination_url?: string;
   platform?: string;
   platform_category?: PlatformCategory;
@@ -1027,21 +1156,39 @@ export async function updateInfluencerTrackingLink(
   const cleanCode = rawCode.replace(/^#+/, '').trim().toLowerCase();
   const displayCode = cleanCode ? `#${cleanCode.toUpperCase()}` : '';
 
-  const isAmazon = params.destination_type === 'amazon' || isValidAmazonUrl(params.base_product_url || '');
-  const destination_type: 'shopify' | 'amazon' = isAmazon ? 'amazon' : 'shopify';
-  const original_destination_url = params.original_destination_url || (isAmazon ? params.base_product_url : undefined);
+  let destination_type: 'shopify' | 'website' | 'amazon' | 'flipkart' | 'meesho' = 'shopify';
+  const paramDest = (params.destination_type || '').toLowerCase();
+  const paramPlat = (params.platform || '').toLowerCase();
 
-  const custom_slug = isAmazon 
+  if (paramDest === 'flipkart' || paramPlat === 'flipkart' || isValidFlipkartUrl(params.base_product_url || '')) {
+    destination_type = 'flipkart';
+  } else if (paramDest === 'meesho' || paramPlat === 'meesho' || isValidMeeshoUrl(params.base_product_url || '')) {
+    destination_type = 'meesho';
+  } else if (paramDest === 'amazon' || paramPlat === 'amazon' || isValidAmazonUrl(params.base_product_url || '')) {
+    destination_type = 'amazon';
+  } else if (paramDest === 'website' || paramDest === 'shopify') {
+    destination_type = paramDest === 'website' ? 'website' : 'shopify';
+  } else {
+    destination_type = 'shopify';
+  }
+
+  const isRedirect = destination_type === 'amazon' || destination_type === 'flipkart' || destination_type === 'meesho';
+  const original_destination_url = isRedirect 
+    ? (params.original_destination_url || params.base_product_url) 
+    : undefined;
+
+  const custom_slug = isRedirect 
     ? (params.custom_slug?.trim().toLowerCase() || buildTrackingSlug(cleanCode, params.video_number, params.utm_content))
     : undefined;
   const branded_url = custom_slug ? buildBrandedTrackingUrl(custom_slug) : undefined;
-  const finalTrackingUrl = isAmazon 
+  const finalTrackingUrl = isRedirect 
     ? (branded_url || params.tracking_url.trim())
     : params.tracking_url.trim();
 
   const notesPayload = JSON.stringify({
     destination_type,
-    original_amazon_url: original_destination_url,
+    original_destination_url,
+    original_amazon_url: destination_type === 'amazon' ? original_destination_url : undefined,
     custom_slug,
     platform: params.platform,
     platform_category: params.platform_category,
@@ -1064,7 +1211,7 @@ export async function updateInfluencerTrackingLink(
     updated_at: now
   };
 
-  if (destination_type === 'amazon' && custom_slug) {
+  if (isRedirect && custom_slug) {
     persistSlugMapping(custom_slug, id).catch(() => {});
   }
 

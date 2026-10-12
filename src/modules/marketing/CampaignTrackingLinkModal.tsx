@@ -8,6 +8,8 @@ import {
   Sparkles, 
   Globe, 
   ShoppingBag, 
+  ShoppingCart,
+  Store,
   CheckCircle2, 
   RefreshCw,
   UserCheck, 
@@ -24,16 +26,22 @@ import {
   isComboProduct 
 } from '../../services/campaignScriptService';
 import { 
+  TRACKING_MARKETPLACES,
   TRACKING_PLATFORMS, 
   TRACKING_VIDEOS, 
   buildInfluencerTrackingUrl, 
   isValidAmazonUrl,
+  isValidFlipkartUrl,
+  isValidMeeshoUrl,
+  isValidMarketplaceRedirectUrl,
   extractBaseProductUrl, 
   extractCodeNumber,
   batchGenerateInfluencerTrackingLinks,
   updateInfluencerTrackingLink,
   buildTrackingSlug,
   buildBrandedTrackingUrl,
+  type TrackingMarketplaceConfig,
+  type MarketplaceType,
   type TrackingPlatformConfig,
   type TrackingVideoConfig
 } from '../../services/influencerTrackingLinkService';
@@ -45,9 +53,6 @@ export const getDefaultProductUrl = (prodName: string): string => {
   const slug = prodName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `https://www.justmixx.com/products/${slug}`;
 };
-
-export const WEBSITE_PLATFORMS: TrackingPlatformConfig[] = TRACKING_PLATFORMS.filter(p => p.category === 'WEBSITE');
-export const MARKETPLACE_PLATFORMS: TrackingPlatformConfig[] = TRACKING_PLATFORMS.filter(p => p.category === 'MARKETPLACE');
 
 // =========================================================================
 // CUSTOM SEARCHABLE PRODUCT DROPDOWN COMPONENT
@@ -317,13 +322,12 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   // Modal State
   const isEditMode = Boolean(linkToEdit);
 
-  // Form Fields
-  const [destinationType, setDestinationType] = useState<'shopify' | 'amazon'>('shopify');
+  // Form Fields: Unified Marketplace Selection
+  const [selectedMarketplace, setSelectedMarketplace] = useState<MarketplaceType>('website');
   const [selectedProduct, setSelectedProduct] = useState<string>('Kitchen Cleaner');
-  const [productUrl, setProductUrl] = useState<string>('');
-  const [amazonUrl, setAmazonUrl] = useState<string>('');
+  const [productUrl, setProductUrl] = useState<string>(''); // For Website / Shopify
+  const [destinationUrl, setDestinationUrl] = useState<string>(''); // For Amazon, Flipkart, Meesho
   const [customSlug, setCustomSlug] = useState<string>('');
-  const [selectedPlatformId, setSelectedPlatformId] = useState<string>('instagram');
   const [selectedVideoId, setSelectedVideoId] = useState<string>('Video 1');
 
   // Edit Mode Specific Field
@@ -385,42 +389,52 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       setIsGenerating(false);
 
       if (linkToEdit) {
-        const dest = linkToEdit.destination_type || (isValidAmazonUrl(linkToEdit.base_product_url || '') ? 'amazon' : 'shopify');
-        setDestinationType(dest);
+        // Resolve marketplace from linkToEdit
+        let mType: MarketplaceType = 'website';
+        const dType = (linkToEdit.destination_type || '').toLowerCase();
+        const pName = (linkToEdit.platform || '').toLowerCase();
+        const bUrl = linkToEdit.base_product_url || '';
+
+        if (dType === 'flipkart' || pName === 'flipkart' || isValidFlipkartUrl(bUrl)) {
+          mType = 'flipkart';
+        } else if (dType === 'meesho' || pName === 'meesho' || isValidMeeshoUrl(bUrl)) {
+          mType = 'meesho';
+        } else if (dType === 'amazon' || pName === 'amazon' || isValidAmazonUrl(bUrl)) {
+          mType = 'amazon';
+        } else {
+          mType = 'website';
+        }
+
+        setSelectedMarketplace(mType);
         setSelectedProduct(linkToEdit.product || 'Kitchen Cleaner');
         setEditTrackingUrl(linkToEdit.tracking_url || '');
         setEditNotes(linkToEdit.notes || '');
 
-        const initialSlug = linkToEdit.custom_slug || (dest === 'amazon' ? buildTrackingSlug(linkToEdit.creator_code || linkToEdit.influencer_code, linkToEdit.video_number, linkToEdit.utm_content) : '');
+        const isRedir = mType !== 'website';
+        const initialSlug = linkToEdit.custom_slug || (isRedir ? buildTrackingSlug(linkToEdit.creator_code || linkToEdit.influencer_code, linkToEdit.video_number, linkToEdit.utm_content) : '');
         setCustomSlug(initialSlug);
 
-        if (dest === 'amazon') {
-          setAmazonUrl(linkToEdit.original_destination_url || linkToEdit.base_product_url || '');
+        if (isRedir) {
+          setDestinationUrl(linkToEdit.original_destination_url || linkToEdit.base_product_url || '');
           setProductUrl('');
           if (initialSlug && (!linkToEdit.tracking_url || linkToEdit.tracking_url.includes('/r/'))) {
             setEditTrackingUrl(buildBrandedTrackingUrl(initialSlug));
           }
         } else {
           setProductUrl(linkToEdit.base_product_url || getDefaultProductUrl(linkToEdit.product || 'Kitchen Cleaner'));
-          setAmazonUrl('');
+          setDestinationUrl('');
         }
-        const matchedPlat = TRACKING_PLATFORMS.find(
-          p => p.name.toLowerCase() === (linkToEdit.platform || '').toLowerCase() ||
-               p.utmSource.toLowerCase() === (linkToEdit.utm_source || '').toLowerCase()
-        );
-        setSelectedPlatformId(matchedPlat ? matchedPlat.id : 'instagram');
         setSelectedVideoId(linkToEdit.video_number || 'Video 1');
       } else {
         // Defaults for batch generation
-        setDestinationType('shopify');
+        setSelectedMarketplace('website');
         setCustomSlug('');
         const initialProd = (defaultProduct && defaultProduct !== 'All')
           ? defaultProduct
           : 'Kitchen Cleaner';
         setSelectedProduct(initialProd);
         setProductUrl(getDefaultProductUrl(initialProd));
-        setAmazonUrl('');
-        setSelectedPlatformId('instagram');
+        setDestinationUrl('');
         setSelectedVideoId('Video 1');
         setEditTrackingUrl('');
         setEditNotes('');
@@ -434,21 +448,21 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     setSelectedProduct(newProd);
     setValidationError(null);
 
-    // Update productUrl if it was empty, previously default, or had an unencoded space
-    if (destinationType === 'shopify') {
+    // Update productUrl if Website is selected and URL was empty, previously default, or had an unencoded space
+    if (selectedMarketplace === 'website') {
       if (!productUrl.trim() || productUrl.trim() === prevDefault || productUrl.includes('%20')) {
         setProductUrl(getDefaultProductUrl(newProd));
       }
     }
   };
 
-  // Active configurations
-  const currentPlatform: TrackingPlatformConfig = useMemo(() => {
+  // Active marketplace config
+  const currentMarketplace: TrackingMarketplaceConfig = useMemo(() => {
     return (
-      TRACKING_PLATFORMS.find(p => p.id === selectedPlatformId) ||
-      TRACKING_PLATFORMS[0]
+      TRACKING_MARKETPLACES.find(m => m.id === selectedMarketplace) ||
+      TRACKING_MARKETPLACES[0]
     );
-  }, [selectedPlatformId]);
+  }, [selectedMarketplace]);
 
   const currentVideo: TrackingVideoConfig = useMemo(() => {
     return (
@@ -457,7 +471,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     );
   }, [selectedVideoId]);
 
-  // Clean base URL preview
+  // Clean base URL preview for Website
   const cleanBaseUrl = useMemo(() => {
     return extractBaseProductUrl(productUrl);
   }, [productUrl]);
@@ -470,18 +484,18 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   // Live Sample Preview URL
   const samplePreviewUrl = useMemo(() => {
     const sampleCode = sampleInfluencer?.code || (sampleInfluencer as any)?.influencer_code || 'HIS1';
-    if (destinationType === 'amazon') {
+    if (currentMarketplace.isRedirect) {
       const sampleSlug = buildTrackingSlug(sampleCode, currentVideo.name, currentVideo.utmContent);
       return buildBrandedTrackingUrl(sampleSlug);
     }
     const effectiveUrl = productUrl.trim() || getDefaultProductUrl(selectedProduct);
     return buildInfluencerTrackingUrl(
       effectiveUrl,
-      currentPlatform.utmSource,
+      currentMarketplace.utmSource,
       currentVideo.utmContent,
       sampleCode
     );
-  }, [destinationType, productUrl, selectedProduct, currentPlatform, currentVideo, sampleInfluencer]);
+  }, [currentMarketplace, productUrl, selectedProduct, currentVideo, sampleInfluencer]);
 
   // Validate form before batch generation
   const validateForm = (): boolean => {
@@ -489,18 +503,10 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       setValidationError('Please select a product.');
       return false;
     }
-    if (destinationType === 'amazon') {
-      if (!amazonUrl.trim()) {
-        setValidationError('Please enter the original Amazon product URL.');
-        return false;
-      }
-      if (!isValidAmazonUrl(amazonUrl)) {
-        setValidationError('Please enter a valid Amazon product URL (e.g. https://www.amazon.in/dp/B0... or https://www.amazon.com/...).');
-        return false;
-      }
-    } else {
+
+    if (selectedMarketplace === 'website') {
       if (!productUrl.trim()) {
-        setValidationError('Please enter a valid product link.');
+        setValidationError('Please enter a valid website product link.');
         return false;
       }
       try {
@@ -510,7 +516,35 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         setValidationError('Please enter a valid URL (e.g. https://www.justmixx.com/products/kitchen-cleaner).');
         return false;
       }
+    } else if (selectedMarketplace === 'amazon') {
+      if (!destinationUrl.trim()) {
+        setValidationError('Please enter the Amazon product URL.');
+        return false;
+      }
+      if (!isValidAmazonUrl(destinationUrl)) {
+        setValidationError('Please enter a valid Amazon product URL (e.g. https://www.amazon.in/dp/... or https://amzn.in/...).');
+        return false;
+      }
+    } else if (selectedMarketplace === 'flipkart') {
+      if (!destinationUrl.trim()) {
+        setValidationError('Please enter the Flipkart product URL.');
+        return false;
+      }
+      if (!isValidFlipkartUrl(destinationUrl)) {
+        setValidationError('Please enter a valid Flipkart product URL (e.g. https://www.flipkart.com/... or https://fkrt.it/...).');
+        return false;
+      }
+    } else if (selectedMarketplace === 'meesho') {
+      if (!destinationUrl.trim()) {
+        setValidationError('Please enter the Meesho product URL.');
+        return false;
+      }
+      if (!isValidMeeshoUrl(destinationUrl)) {
+        setValidationError('Please enter a valid Meesho product URL (e.g. https://www.meesho.com/...).');
+        return false;
+      }
     }
+
     if (sortedEligibleInfluencers.length === 0) {
       setValidationError('No eligible (non-eliminated) influencers found in this campaign.');
       return false;
@@ -529,38 +563,48 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       return;
     }
 
-    if (destinationType === 'amazon') {
-      if (amazonUrl.trim() && !isValidAmazonUrl(amazonUrl)) {
-        setValidationError('Please enter a valid Amazon product URL.');
-        return;
-      }
-      if (!customSlug.trim()) {
-        setValidationError('Short code / slug is required for Amazon branded links.');
-        return;
-      }
+    const isRedir = currentMarketplace.isRedirect;
+
+    if (selectedMarketplace === 'amazon' && destinationUrl.trim() && !isValidAmazonUrl(destinationUrl)) {
+      setValidationError('Please enter a valid Amazon product URL.');
+      return;
+    }
+    if (selectedMarketplace === 'flipkart' && destinationUrl.trim() && !isValidFlipkartUrl(destinationUrl)) {
+      setValidationError('Please enter a valid Flipkart product URL.');
+      return;
+    }
+    if (selectedMarketplace === 'meesho' && destinationUrl.trim() && !isValidMeeshoUrl(destinationUrl)) {
+      setValidationError('Please enter a valid Meesho product URL.');
+      return;
+    }
+    if (isRedir && !customSlug.trim()) {
+      setValidationError('Short code / slug is required for redirect links.');
+      return;
     }
 
     setIsGenerating(true);
     const toastId = toast.loading('Updating tracking link...');
 
     try {
-      const cleanSlug = destinationType === 'amazon' ? customSlug.trim().toLowerCase() : undefined;
-      const finalTrackingUrl = destinationType === 'amazon' && cleanSlug 
+      const cleanSlug = isRedir ? customSlug.trim().toLowerCase() : undefined;
+      const finalTrackingUrl = isRedir && cleanSlug 
         ? buildBrandedTrackingUrl(cleanSlug) 
         : editTrackingUrl.trim();
+
+      const effectiveDestUrl = isRedir ? destinationUrl.trim() : productUrl.trim();
 
       const updated = await updateInfluencerTrackingLink(linkToEdit.id, campaign.id, {
         influencer_id: linkToEdit.influencer_id,
         influencer_name: linkToEdit.influencer_name,
         influencer_code: linkToEdit.influencer_code,
         product: selectedProduct,
-        destination_type: destinationType,
-        original_destination_url: destinationType === 'amazon' ? amazonUrl.trim() : undefined,
-        base_product_url: destinationType === 'amazon' ? amazonUrl.trim() : productUrl.trim(),
-        platform: currentPlatform.name,
-        platform_category: currentPlatform.category,
+        destination_type: currentMarketplace.destinationType,
+        original_destination_url: isRedir ? effectiveDestUrl : undefined,
+        base_product_url: effectiveDestUrl,
+        platform: currentMarketplace.name,
+        platform_category: isRedir ? 'MARKETPLACE' : 'WEBSITE',
         video_number: currentVideo.name,
-        utm_source: currentPlatform.utmSource,
+        utm_source: currentMarketplace.utmSource,
         utm_content: currentVideo.utmContent,
         tracking_url: finalTrackingUrl,
         custom_slug: cleanSlug,
@@ -586,16 +630,19 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
     setGenerationResult(null);
     setGenerationProgress({ current: 0, total: influencersToProcess.length, percentage: 0 });
 
+    const isRedir = currentMarketplace.isRedirect;
+    const effectiveBaseUrl = isRedir ? destinationUrl.trim() : productUrl.trim();
+
     try {
       const result = await batchGenerateInfluencerTrackingLinks({
         campaign_id: campaign.id,
         product: selectedProduct,
-        base_product_url: destinationType === 'amazon' ? amazonUrl.trim() : productUrl.trim(),
-        destination_type: destinationType,
-        original_amazon_url: destinationType === 'amazon' ? amazonUrl.trim() : undefined,
-        platform: currentPlatform.name,
-        platform_category: currentPlatform.category,
-        utm_source: currentPlatform.utmSource,
+        base_product_url: effectiveBaseUrl,
+        destination_type: currentMarketplace.destinationType,
+        original_destination_url: isRedir ? effectiveBaseUrl : undefined,
+        platform: currentMarketplace.name,
+        platform_category: isRedir ? 'MARKETPLACE' : 'WEBSITE',
+        utm_source: currentMarketplace.utmSource,
         video_number: currentVideo.name,
         utm_content: currentVideo.utmContent,
         influencers: influencersToProcess, // ONLY ELIGIBLE INFLUENCERS
@@ -731,14 +778,14 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                 />
               </div>
 
-              {destinationType === 'amazon' ? (
+              {currentMarketplace.isRedirect ? (
                 <>
                   <div>
-                    <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1.5">
+                    <label className="block text-xs font-semibold text-purple-300 uppercase tracking-wider mb-1.5">
                       Branded Short Code / Slug *
                     </label>
                     <div className="flex items-center gap-2">
-                      <span className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-amber-300/80 font-mono select-none">
+                      <span className="px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-purple-300/80 font-mono select-none">
                         /r/
                       </span>
                       <input
@@ -751,24 +798,24 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                           setValidationError(null);
                         }}
                         placeholder="his1-v1"
-                        className="flex-1 bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors"
+                        className="flex-1 bg-[#070c18] border border-purple-500/40 focus:border-purple-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider mb-1.5">
-                      Original Amazon Destination URL *
+                    <label className="block text-xs font-semibold text-purple-300 uppercase tracking-wider mb-1.5">
+                      {currentMarketplace.name} Destination URL *
                     </label>
                     <input
                       type="text"
-                      value={amazonUrl}
+                      value={destinationUrl}
                       onChange={(e) => {
-                        setAmazonUrl(e.target.value);
+                        setDestinationUrl(e.target.value);
                         setValidationError(null);
                       }}
-                      placeholder="https://www.amazon.in/dp/B0..."
-                      className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors"
+                      placeholder={`https://www.${selectedMarketplace === 'amazon' ? 'amazon.in/dp/...' : selectedMarketplace === 'flipkart' ? 'flipkart.com/...' : 'meesho.com/...'}`}
+                      className="w-full bg-[#070c18] border border-purple-500/40 focus:border-purple-400 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-100 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
                     />
                   </div>
 
@@ -781,14 +828,14 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                       value={editTrackingUrl}
                       onChange={(e) => setEditTrackingUrl(e.target.value)}
                       placeholder="https://velmora-management-system.vercel.app/r/..."
-                      className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-amber-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+                      className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-purple-200 font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
                     />
                   </div>
                 </>
               ) : (
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Tracking URL *
+                    Shopify Tracking URL *
                   </label>
                   <input
                     type="text"
@@ -817,50 +864,6 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
             /* Batch Generation Form Content */
             <div className="space-y-4">
               
-              {/* 0. DESTINATION TYPE: SHOPIFY VS AMAZON */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Destination Type <span className="text-purple-400">*</span>
-                </label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDestinationType('shopify');
-                      setValidationError(null);
-                      if (!productUrl.trim()) {
-                        setProductUrl(getDefaultProductUrl(selectedProduct));
-                      }
-                    }}
-                    disabled={isGenerating}
-                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer border ${
-                      destinationType === 'shopify'
-                        ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
-                        : 'bg-[#070c18] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                    }`}
-                  >
-                    <Globe size={15} className={destinationType === 'shopify' ? 'text-purple-400' : 'text-slate-500'} />
-                    <span>Shopify (Website)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDestinationType('amazon');
-                      setValidationError(null);
-                    }}
-                    disabled={isGenerating}
-                    className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer border ${
-                      destinationType === 'amazon'
-                        ? 'bg-amber-500/20 border-amber-500 text-amber-200 shadow-sm ring-1 ring-amber-500/50'
-                        : 'bg-[#070c18] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                    }`}
-                  >
-                    <ShoppingBag size={15} className={destinationType === 'amazon' ? 'text-amber-400' : 'text-slate-500'} />
-                    <span>Amazon (Marketplace)</span>
-                  </button>
-                </div>
-              </div>
-
               {/* 1. PRODUCT & COMBO SELECTION (Searchable Dropdown) */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -878,8 +881,68 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                 />
               </div>
 
-              {/* 2. PRODUCT LINK (Conditional based on Destination Type) */}
-              {destinationType === 'shopify' ? (
+              {/* 2. UNIFIED MARKETPLACE SELECTION (4 Selectable Cards in Responsive Grid) */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Marketplace <span className="text-purple-400">*</span>
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    4 destination options
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {TRACKING_MARKETPLACES.map((m) => {
+                    const isSelected = selectedMarketplace === m.id;
+                    const getIcon = () => {
+                      switch (m.id) {
+                        case 'website':
+                          return <Globe size={16} className={isSelected ? 'text-purple-400' : 'text-slate-400'} />;
+                        case 'amazon':
+                          return <ShoppingBag size={16} style={{ color: isSelected ? m.brandColor : undefined }} className={!isSelected ? 'text-slate-400' : ''} />;
+                        case 'flipkart':
+                          return <ShoppingCart size={16} style={{ color: isSelected ? m.brandColor : undefined }} className={!isSelected ? 'text-slate-400' : ''} />;
+                        case 'meesho':
+                          return <Store size={16} style={{ color: isSelected ? m.brandColor : undefined }} className={!isSelected ? 'text-slate-400' : ''} />;
+                      }
+                    };
+
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMarketplace(m.id);
+                          setValidationError(null);
+                          if (m.id === 'website' && !productUrl.trim()) {
+                            setProductUrl(getDefaultProductUrl(selectedProduct));
+                          }
+                        }}
+                        disabled={isGenerating}
+                        className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all cursor-pointer relative ${
+                          isSelected
+                            ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                            : 'bg-[#070c18] border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-center mb-1.5">
+                          {getIcon()}
+                        </div>
+                        <span className="text-xs font-bold leading-none">{m.name}</span>
+                        {/* Subtle brand color dot indicator */}
+                        <div 
+                          className="w-1.5 h-1.5 rounded-full mt-1.5"
+                          style={{ backgroundColor: m.brandColor }}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. DESTINATION PRODUCT URL (Marketplace-specific) */}
+              {selectedMarketplace === 'website' ? (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
@@ -907,11 +970,11 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : selectedMarketplace === 'amazon' ? (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-xs font-semibold text-amber-300 uppercase tracking-wider">
-                      Original Amazon Product URL <span className="text-amber-400">*</span>
+                      Amazon Product URL <span className="text-amber-400">*</span>
                     </label>
                     <span className="text-[11px] text-amber-400 font-medium">
                       Atomic Click Tracking
@@ -919,102 +982,70 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                   </div>
                   <input
                     type="text"
-                    value={amazonUrl}
+                    value={destinationUrl}
                     onChange={(e) => {
-                      setAmazonUrl(e.target.value);
+                      setDestinationUrl(e.target.value);
                       setValidationError(null);
                     }}
                     disabled={isGenerating}
-                    placeholder="https://www.amazon.in/dp/B0... or https://www.amazon.com/..."
+                    placeholder="https://www.amazon.in/dp/B0... or https://amzn.in/..."
                     className="w-full bg-[#070c18] border border-amber-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition-colors disabled:opacity-50"
                   />
                   <p className="mt-1.5 text-[11px] text-slate-400">
-                    Each influencer receives a unique branded short link (<code className="text-amber-300">/r/{'{slug}'}</code> e.g. <code className="text-amber-300">his1-v1</code>). Visitor clicks are counted atomically in Redis before 302 redirecting to Amazon.
+                    Each influencer receives a unique branded short link (<code className="text-amber-300">/r/{'{slug}'}</code> e.g. <code className="text-amber-300">his1-v1</code>). Visitor clicks are counted atomically in Redis before redirecting to Amazon.
+                  </p>
+                </div>
+              ) : selectedMarketplace === 'flipkart' ? (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-blue-300 uppercase tracking-wider">
+                      Flipkart Product URL <span className="text-blue-400">*</span>
+                    </label>
+                    <span className="text-[11px] text-blue-400 font-medium">
+                      Atomic Click Tracking
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={destinationUrl}
+                    onChange={(e) => {
+                      setDestinationUrl(e.target.value);
+                      setValidationError(null);
+                    }}
+                    disabled={isGenerating}
+                    placeholder="https://www.flipkart.com/... or https://fkrt.it/..."
+                    className="w-full bg-[#070c18] border border-blue-500/40 focus:border-blue-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors disabled:opacity-50"
+                  />
+                  <p className="mt-1.5 text-[11px] text-slate-400">
+                    Each influencer receives a unique branded short link (<code className="text-blue-300">/r/{'{slug}'}</code> e.g. <code className="text-blue-300">his1-v1</code>). Visitor clicks are counted atomically in Redis before redirecting to Flipkart.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-pink-300 uppercase tracking-wider">
+                      Meesho Product URL <span className="text-pink-400">*</span>
+                    </label>
+                    <span className="text-[11px] text-pink-400 font-medium">
+                      Atomic Click Tracking
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={destinationUrl}
+                    onChange={(e) => {
+                      setDestinationUrl(e.target.value);
+                      setValidationError(null);
+                    }}
+                    disabled={isGenerating}
+                    placeholder="https://www.meesho.com/..."
+                    className="w-full bg-[#070c18] border border-pink-500/40 focus:border-pink-400 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-pink-500 transition-colors disabled:opacity-50"
+                  />
+                  <p className="mt-1.5 text-[11px] text-slate-400">
+                    Each influencer receives a unique branded short link (<code className="text-pink-300">/r/{'{slug}'}</code> e.g. <code className="text-pink-300">his1-v1</code>). Visitor clicks are counted atomically in Redis before redirecting to Meesho.
                   </p>
                 </div>
               )}
-
-              {/* 3. PLATFORM */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Platform <span className="text-purple-400">*</span>
-                </label>
-                
-                <div className="space-y-3 bg-[#070c18] border border-slate-800 rounded-2xl p-3 sm:p-3.5">
-                  {/* Category 1: WEBSITE */}
-                  <div>
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                      <Globe size={13} className="text-purple-400" />
-                      <span>Website</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {WEBSITE_PLATFORMS.map((plat) => {
-                        const isSelected = selectedPlatformId === plat.id;
-                        return (
-                          <button
-                            key={plat.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedPlatformId(plat.id);
-                              setValidationError(null);
-                            }}
-                            disabled={isGenerating}
-                            className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                              isSelected
-                                ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
-                                : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-                            }`}
-                          >
-                            <div
-                              className="w-2 h-2 rounded-full shrink-0"
-                              style={{ backgroundColor: plat.brandColor }}
-                            />
-                            <span>{plat.name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Divider */}
-                  <div className="h-[1px] bg-slate-800/80" />
-
-                  {/* Category 2: MARKETPLACE */}
-                  <div>
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                      <ShoppingBag size={13} className="text-purple-400" />
-                      <span>Marketplace</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {MARKETPLACE_PLATFORMS.map((plat) => {
-                        const isSelected = selectedPlatformId === plat.id;
-                        return (
-                          <button
-                            key={plat.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedPlatformId(plat.id);
-                              setValidationError(null);
-                            }}
-                            disabled={isGenerating}
-                            className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                              isSelected
-                                ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
-                                : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
-                            }`}
-                          >
-                            <div
-                              className="w-2 h-2 rounded-full shrink-0"
-                              style={{ backgroundColor: plat.brandColor }}
-                            />
-                            <span>{plat.name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               {/* 4. VIDEO */}
               <div>
@@ -1083,11 +1114,11 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                     </span>
                   </div>
 
-                  {/* Platform Card */}
+                  {/* Marketplace Card */}
                   <div className="bg-[#070c18] p-2.5 rounded-xl border border-slate-800/80 flex flex-col justify-between min-h-[58px]">
-                    <span className="text-[10px] text-slate-500 uppercase font-semibold">Platform</span>
-                    <span className="text-purple-300 font-semibold truncate block mt-0.5">
-                      {currentPlatform.name}
+                    <span className="text-[10px] text-slate-500 uppercase font-semibold">Marketplace</span>
+                    <span className="font-semibold truncate block mt-0.5" style={{ color: currentMarketplace.brandColor }}>
+                      {currentMarketplace.name}
                     </span>
                   </div>
 
@@ -1130,8 +1161,15 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                         <Link2 size={13} className="text-purple-400" />
                         Sample Link Preview ({sampleInfluencer?.code || '#HIS1'}):
                       </span>
-                      {destinationType === 'amazon' ? (
-                        <span className="text-amber-400 text-[10px] font-semibold flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                      {currentMarketplace.isRedirect ? (
+                        <span 
+                          className="text-[10px] font-semibold flex items-center gap-1 px-2 py-0.5 rounded-md border"
+                          style={{
+                            color: currentMarketplace.brandColor,
+                            backgroundColor: `${currentMarketplace.brandColor}15`,
+                            borderColor: `${currentMarketplace.brandColor}30`
+                          }}
+                        >
                           302 Redirect &bull; Redis Click Tracking
                         </span>
                       ) : (
@@ -1141,8 +1179,8 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                       )}
                     </div>
                     <p className={`text-[11px] font-mono break-all break-words select-all leading-relaxed p-2.5 rounded-lg border max-h-24 overflow-y-auto ${
-                      destinationType === 'amazon'
-                        ? 'text-amber-300/90 bg-amber-950/20 border-amber-500/20'
+                      currentMarketplace.isRedirect
+                        ? 'text-purple-200/90 bg-purple-950/20 border-purple-500/20'
                         : 'text-purple-300/90 bg-purple-950/20 border-purple-500/20'
                     }`}>
                       {samplePreviewUrl}

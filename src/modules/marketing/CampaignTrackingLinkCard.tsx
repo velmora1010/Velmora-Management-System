@@ -12,12 +12,14 @@ import {
   Calendar,
   Globe,
   ShoppingBag,
+  ShoppingCart,
+  Store,
   Video,
   MousePointerClick,
   Loader2
 } from 'lucide-react';
 import type { InfluencerTrackingLink } from '../../types';
-import { TRACKING_PLATFORMS } from '../../services/influencerTrackingLinkService';
+import { TRACKING_PLATFORMS, TRACKING_MARKETPLACES } from '../../services/influencerTrackingLinkService';
 import { isComboProduct } from '../../services/campaignScriptService';
 
 interface CampaignTrackingLinkCardProps {
@@ -90,14 +92,20 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
       })
     : '';
 
+  const matchedMarketplace = TRACKING_MARKETPLACES.find(
+    m => m.name.toLowerCase() === (link.platform || '').toLowerCase() ||
+         m.utmSource.toLowerCase() === (link.utm_source || '').toLowerCase() ||
+         m.destinationType === link.destination_type
+  );
+
   const matchedPlatform = TRACKING_PLATFORMS.find(
     p => p.name.toLowerCase() === (link.platform || '').toLowerCase() ||
          p.utmSource.toLowerCase() === (link.utm_source || '').toLowerCase()
   );
 
-  const platformName = link.platform || matchedPlatform?.name || 'Instagram';
-  const platformColor = matchedPlatform?.brandColor || '#A855F7';
-  const isMarketplace = link.platform_category === 'MARKETPLACE' || matchedPlatform?.category === 'MARKETPLACE';
+  const platformName = link.platform || matchedMarketplace?.name || matchedPlatform?.name || 'Website';
+  const platformColor = matchedMarketplace?.brandColor || matchedPlatform?.brandColor || '#8B5CF6';
+  const isMarketplace = link.platform_category === 'MARKETPLACE' || matchedPlatform?.category === 'MARKETPLACE' || Boolean(matchedMarketplace?.isRedirect);
   const videoName = link.video_number || 'Video 1';
 
   return (
@@ -186,17 +194,27 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
           )}
         </div>
 
-        {/* Platform, Video & Clicks Badges */}
+        {/* Marketplace / Platform, Video & Clicks Badges */}
         <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
-          {/* Destination Type Badge (if Amazon) */}
-          {link.destination_type === 'amazon' && (
+          {/* Destination Type Badge (if Amazon, Flipkart, or Meesho) */}
+          {link.destination_type === 'amazon' ? (
             <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold">
               <ShoppingBag size={11} className="text-amber-400" />
               <span>Amazon</span>
             </div>
-          )}
+          ) : link.destination_type === 'flipkart' ? (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 font-bold">
+              <ShoppingCart size={11} className="text-blue-400" />
+              <span>Flipkart</span>
+            </div>
+          ) : link.destination_type === 'meesho' ? (
+            <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-pink-500/15 border border-pink-500/30 text-pink-300 font-bold">
+              <Store size={11} className="text-pink-400" />
+              <span>Meesho</span>
+            </div>
+          ) : null}
 
-          {/* Platform Badge */}
+          {/* Marketplace / Platform Badge */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-800 font-semibold text-slate-300">
             <div
               className="w-2 h-2 rounded-full shrink-0"
@@ -216,14 +234,15 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
 
           {/* Clicks Badge */}
           {(() => {
-            const isAmazonLink =
+            const isRedirectLink =
               link.destination_type === 'amazon' ||
+              link.destination_type === 'flipkart' ||
+              link.destination_type === 'meesho' ||
               Boolean(link.custom_slug) ||
               Boolean(link.branded_url) ||
-              (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('link.justmixx.com') || (link.tracking_url.includes('justmixx.com') && !link.tracking_url.includes('utm_source')))) ||
-              (link.platform && link.platform.toLowerCase() === 'amazon');
+              (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('link.justmixx.com') || (link.tracking_url.includes('justmixx.com') && !link.tracking_url.includes('utm_source'))));
 
-            if (!isAmazonLink) {
+            if (!isRedirectLink) {
               return (
                 <div
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] bg-purple-950/30 border-purple-500/20 text-purple-300/80"
