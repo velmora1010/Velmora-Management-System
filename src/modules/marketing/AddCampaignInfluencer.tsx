@@ -633,10 +633,6 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         }
       }
 
-      if (initialVideos.length === 0) {
-        initialVideos.push({ combination: '', amount: 0, products: [] });
-      }
-
       const v1c = Number(initialData.pricing?.video1_count) || 0;
       const v1p = Number(initialData.pricing?.video1_price) || 0;
       const v2c = Number(initialData.pricing?.video2_count) || 0;
@@ -725,7 +721,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               post_date: pd.post_date || '',
               draft_date: pd.draft_date || calculateDraftDate(pd.post_date)
             }))
-          : [{ video_number: 1, post_date: '', draft_date: '' }]
+          : []
       };
     }
 
@@ -765,19 +761,17 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
         { platform: 'Youtube', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' },
         { platform: 'Facebook', username: '', profile_link: '', followers_count: 0, video_views: Array(15).fill('') as unknown as number[], video_views_dates: Array(15).fill(''), performance_code: '' }
       ],
-      videos: [
-        { video_number: 1, amount: 0, combination: '', platforms: [], products: [] }
-      ],
+      videos: [],
       pricing: {
         instagram_per_video: 0,
         youtube_per_video: 0,
         facebook_per_video: 0,
-        total_videos: 1,
+        total_videos: 0,
         total_amount: 0
       },
       products: [],
       performance: [],
-      postDates: [{ video_number: 1, post_date: '', draft_date: '' }]
+      postDates: []
     };
   });
 
@@ -1174,7 +1168,7 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
   const handleDeleteVideo = (videoIndex: number) => {
     setFormState(prev => {
       const nextVideos = prev.videos.filter((_, i) => i !== videoIndex);
-      const finalVideos = nextVideos.length > 0 ? nextVideos : [{ combination: '', amount: 0, products: [] }];
+      const finalVideos = nextVideos;
       
       const flatProducts: InfluencerProduct[] = [];
       finalVideos.forEach((v, idx) => {
@@ -1983,145 +1977,166 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               </div>
 
               {/* Video Pricing Rows */}
-              <div className="space-y-4">
-                {videos.map((v, idx) => {
-                  const videoNum = idx + 1;
-                  return (
-                    <div key={idx} className="flex flex-col lg:flex-row lg:items-center gap-4 bg-slate-900/40 p-4 rounded-2xl border border-slate-800 hover:border-slate-700/80 transition-all min-w-0">
-                      {/* Video Badge */}
-                      <div className="shrink-0 flex flex-col items-center justify-center bg-purple-950/30 border border-purple-800/20 w-14 h-14 rounded-xl">
-                        <span className="text-[9px] font-bold text-purple-400 uppercase tracking-wider select-none">Video</span>
-                        <span className="text-xl font-extrabold text-purple-300 leading-none mt-0.5">{videoNum}</span>
-                      </div>
+              {videos.length === 0 ? (
+                <div className="bg-slate-900/30 border border-dashed border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center">
+                  <div className="w-12 h-12 rounded-xl bg-purple-950/40 border border-purple-800/30 flex items-center justify-center text-purple-400 mb-3">
+                    <Video size={22} />
+                  </div>
+                  <h4 className="text-sm font-semibold text-slate-300 mb-1">No videos added yet</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mb-4">
+                    Click &ldquo;+ Add Video&rdquo; to add a video slot, configure product combinations, and set negotiated video pricing.
+                  </p>
+                  <button 
+                    type="button"
+                    onClick={handleAddVideo}
+                    className="h-9 px-4 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-500 text-white shadow-sm flex items-center gap-1.5 transition-colors"
+                  >
+                    <Plus size={14} /> Add First Video
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-4">
+                    {videos.map((v, idx) => {
+                      const videoNum = idx + 1;
+                      return (
+                        <div key={idx} className="flex flex-col lg:flex-row lg:items-center gap-4 bg-slate-900/40 p-4 rounded-2xl border border-slate-800 hover:border-slate-700/80 transition-all min-w-0">
+                          {/* Video Badge */}
+                          <div className="shrink-0 flex flex-col items-center justify-center bg-purple-950/30 border border-purple-800/20 w-14 h-14 rounded-xl">
+                            <span className="text-[9px] font-bold text-purple-400 uppercase tracking-wider select-none">Video</span>
+                            <span className="text-xl font-extrabold text-purple-300 leading-none mt-0.5">{videoNum}</span>
+                          </div>
 
-                      {/* Combination Dropdown */}
-                      <div className="shrink-0 w-full lg:w-[220px]">
-                        <label className="block text-[11px] text-slate-500 mb-1.5 font-medium tracking-wide">Combination</label>
-                        <select 
-                          value={v.combination}
-                          onChange={e => handleCombinationChange(idx, e.target.value)}
-                          className="w-full h-10 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-xs focus:border-purple-500 focus:outline-none"
-                        >
-                          <option value="">Select Combination</option>
-                          {v.combination && !COMBINATIONS.includes(v.combination) && (
-                            <option value={v.combination}>{v.combination}</option>
-                          )}
-                          {COMBINATIONS.map(c => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Products & Quantity */}
-                      <div className="flex-1 min-w-0">
-                        <label className="block text-[11px] text-slate-500 mb-1.5 font-medium tracking-wide">Products & Quantity</label>
-                        <div className="flex items-center gap-2 flex-wrap min-h-[40px]">
-                          {v.combination ? (
-                            <>
-                              {/* Special Select list for 5-6 products */}
-                              {v.combination === '5-6 Products' && (
-                                <div className="flex items-center gap-1.5 flex-wrap shrink-0 border-r border-slate-800 pr-2 mr-1">
-                                  {PRODUCT_LIST.map(prodName => {
-                                    const isSelected = (v.products || []).some(p => p.product_name === prodName);
-                                    return (
-                                      <button
-                                        type="button"
-                                        key={prodName}
-                                        onClick={() => handleToggleSpecialProduct(idx, prodName)}
-                                        className={`px-2 py-1 rounded text-[10px] border transition-colors shrink-0 font-medium ${
-                                          isSelected
-                                            ? 'bg-purple-900/30 border-purple-500/80 text-purple-200 shadow-sm shadow-purple-500/10'
-                                            : 'bg-slate-950 border-slate-800 text-slate-500 hover:bg-slate-900'
-                                        }`}
-                                        title={prodName}
-                                      >
-                                        {isSelected ? '✓ ' : ''}{prodName}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
+                          {/* Combination Dropdown */}
+                          <div className="shrink-0 w-full lg:w-[220px]">
+                            <label className="block text-[11px] text-slate-500 mb-1.5 font-medium tracking-wide">Combination</label>
+                            <select 
+                              value={v.combination}
+                              onChange={e => handleCombinationChange(idx, e.target.value)}
+                              className="w-full h-10 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-xs focus:border-purple-500 focus:outline-none"
+                            >
+                              <option value="">Select Combination</option>
+                              {v.combination && !COMBINATIONS.includes(v.combination) && (
+                                <option value={v.combination}>{v.combination}</option>
                               )}
+                              {COMBINATIONS.map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
 
-                              {/* Selected constituent products with steppers */}
-                              {v.products && v.products.length > 0 ? (
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  {v.products.map((prod, pIdx) => (
-                                    <div key={prod.product_name} className="flex items-center gap-3 bg-slate-900 border border-slate-800/80 px-3 h-10 rounded-lg shadow-sm">
-                                      <span className="text-[11px] text-slate-300 font-semibold select-none truncate max-w-[120px]" title={prod.product_name}>
-                                        {prod.product_name}
-                                      </span>
-                                      <div className="flex items-center gap-1.5 shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleUpdateProductQty(idx, pIdx, prod.qty - 1)}
-                                          className="stepper-btn w-5 h-5 rounded flex items-center justify-center text-xs font-bold border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
-                                        >
-                                          &minus;
-                                        </button>
-                                        <span className="w-4 text-center text-xs font-bold text-slate-100 select-none">
-                                          {prod.qty}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleUpdateProductQty(idx, pIdx, prod.qty + 1)}
-                                          className="stepper-btn w-5 h-5 rounded flex items-center justify-center text-xs font-bold border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
-                                        >
-                                          &#43;
-                                        </button>
-                                      </div>
+                          {/* Products & Quantity */}
+                          <div className="flex-1 min-w-0">
+                            <label className="block text-[11px] text-slate-500 mb-1.5 font-medium tracking-wide">Products & Quantity</label>
+                            <div className="flex items-center gap-2 flex-wrap min-h-[40px]">
+                              {v.combination ? (
+                                <>
+                                  {/* Special Select list for 5-6 products */}
+                                  {v.combination === '5-6 Products' && (
+                                    <div className="flex items-center gap-1.5 flex-wrap shrink-0 border-r border-slate-800 pr-2 mr-1">
+                                      {PRODUCT_LIST.map(prodName => {
+                                        const isSelected = (v.products || []).some(p => p.product_name === prodName);
+                                        return (
+                                          <button
+                                            type="button"
+                                            key={prodName}
+                                            onClick={() => handleToggleSpecialProduct(idx, prodName)}
+                                            className={`px-2 py-1 rounded text-[10px] border transition-colors shrink-0 font-medium ${
+                                              isSelected
+                                                ? 'bg-purple-900/30 border-purple-500/80 text-purple-200 shadow-sm shadow-purple-500/10'
+                                                : 'bg-slate-950 border-slate-800 text-slate-500 hover:bg-slate-900'
+                                            }`}
+                                            title={prodName}
+                                          >
+                                            {isSelected ? '✓ ' : ''}{prodName}
+                                          </button>
+                                        );
+                                      })}
                                     </div>
-                                  ))}
-                                </div>
+                                  )}
+
+                                  {/* Selected constituent products with steppers */}
+                                  {v.products && v.products.length > 0 ? (
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {v.products.map((prod, pIdx) => (
+                                        <div key={prod.product_name} className="flex items-center gap-3 bg-slate-900 border border-slate-800/80 px-3 h-10 rounded-lg shadow-sm">
+                                          <span className="text-[11px] text-slate-300 font-semibold select-none truncate max-w-[120px]" title={prod.product_name}>
+                                            {prod.product_name}
+                                          </span>
+                                          <div className="flex items-center gap-1.5 shrink-0">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleUpdateProductQty(idx, pIdx, prod.qty - 1)}
+                                              className="stepper-btn w-5 h-5 rounded flex items-center justify-center text-xs font-bold border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+                                            >
+                                              &minus;
+                                            </button>
+                                            <span className="w-4 text-center text-xs font-bold text-slate-100 select-none">
+                                              {prod.qty}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleUpdateProductQty(idx, pIdx, prod.qty + 1)}
+                                              className="stepper-btn w-5 h-5 rounded flex items-center justify-center text-xs font-bold border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+                                            >
+                                              &#43;
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-slate-500 italic select-none">Select at least one product</span>
+                                  )}
+                                </>
                               ) : (
-                                <span className="text-xs text-slate-500 italic select-none">Select at least one product</span>
+                                <span className="text-xs text-slate-600 italic select-none">Select combination first</span>
                               )}
-                            </>
-                          ) : (
-                            <span className="text-xs text-slate-600 italic select-none">Select combination first</span>
-                          )}
+                            </div>
+                          </div>
+
+                          {/* Amount */}
+                          <div className="shrink-0 w-full lg:w-[130px]">
+                            <label className="block text-[11px] text-slate-500 mb-1.5 font-medium tracking-wide">Amount</label>
+                            <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-3 h-10 focus-within:border-purple-500">
+                              <span className="text-slate-500 text-sm font-semibold select-none">₹</span>
+                              <input 
+                                type="number" 
+                                value={v.amount === 0 ? '' : v.amount} 
+                                onChange={e => handleVideoAmountChange(idx, e.target.value)}
+                                className="w-full bg-transparent border-0 p-0 text-slate-200 text-sm focus:ring-0 focus:outline-none font-semibold" 
+                                placeholder="Amount" min="0"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Delete button */}
+                          <div className="shrink-0 self-end pb-1">
+                            <button 
+                              type="button"
+                              onClick={() => handleDeleteVideo(idx)}
+                              className="text-slate-500 hover:text-rose-450 transition-colors p-2 rounded-lg hover:bg-rose-950/20"
+                              title="Remove Video"
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+
                         </div>
-                      </div>
-
-                      {/* Amount */}
-                      <div className="shrink-0 w-full lg:w-[130px]">
-                        <label className="block text-[11px] text-slate-500 mb-1.5 font-medium tracking-wide">Amount</label>
-                        <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-3 h-10 focus-within:border-purple-500">
-                          <span className="text-slate-500 text-sm font-semibold select-none">₹</span>
-                          <input 
-                            type="number" 
-                            value={v.amount === 0 ? '' : v.amount} 
-                            onChange={e => handleVideoAmountChange(idx, e.target.value)}
-                            className="w-full bg-transparent border-0 p-0 text-slate-200 text-sm focus:ring-0 focus:outline-none font-semibold" 
-                            placeholder="Amount" min="0"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Delete button */}
-                      <div className="shrink-0 self-end pb-1">
-                        <button 
-                          type="button"
-                          onClick={() => handleDeleteVideo(idx)}
-                          className="text-slate-500 hover:text-rose-450 transition-colors p-2 rounded-lg hover:bg-rose-950/20"
-                          title="Remove Video"
-                        >
-                          <X size={18} />
-                        </button>
-                      </div>
-
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex justify-start mt-4">
-                <button 
-                  type="button"
-                  onClick={handleAddVideo}
-                  className="h-10 px-4 text-xs font-semibold rounded-lg border border-purple-500/30 text-purple-300 hover:bg-purple-950/20 hover:border-purple-500 bg-slate-900/60 shadow-sm flex items-center gap-1.5"
-                >
-                  <Plus size={14} /> Add Video
-                </button>
-              </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-start mt-4">
+                    <button 
+                      type="button"
+                      onClick={handleAddVideo}
+                      className="h-10 px-4 text-xs font-semibold rounded-lg border border-purple-500/30 text-purple-300 hover:bg-purple-950/20 hover:border-purple-500 bg-slate-900/60 shadow-sm flex items-center gap-1.5"
+                    >
+                      <Plus size={14} /> Add Video
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Total negotiated summary cards */}
@@ -2411,15 +2426,37 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
             </div>
 
             <div className="space-y-4">
-              {(formState.postDates || []).map((item, idx) => (
-                <div key={item.video_number || idx} className="bg-slate-900 border border-slate-700 rounded-xl p-5 relative">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="px-3 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold rounded-lg uppercase tracking-wider">
-                        VIDEO {item.video_number}
-                      </span>
-                    </div>
-                    {formState.postDates.length > 1 && (
+              {(!formState.postDates || formState.postDates.length === 0) ? (
+                <div className="bg-slate-900/30 border border-dashed border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center">
+                  <div className="w-12 h-12 rounded-xl bg-purple-950/40 border border-purple-800/30 flex items-center justify-center text-purple-400 mb-3">
+                    <Calendar size={22} />
+                  </div>
+                  <h4 className="text-sm font-semibold text-slate-300 mb-1">No post dates scheduled</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mb-4">
+                    Click &ldquo;+ Add Video&rdquo; to add a post date schedule. Draft date will be automatically calculated.
+                  </p>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setFormState(prev => ({
+                        ...prev,
+                        postDates: [{ video_number: 1, post_date: '', draft_date: '' }]
+                      }));
+                    }}
+                    className="h-9 px-4 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-500 text-white shadow-sm flex items-center gap-1.5 transition-colors"
+                  >
+                    <Plus size={14} /> Add Video 1 Schedule
+                  </button>
+                </div>
+              ) : (
+                formState.postDates.map((item, idx) => (
+                  <div key={item.video_number || idx} className="bg-slate-900 border border-slate-700 rounded-xl p-5 relative">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="px-3 py-1 bg-purple-950/60 border border-purple-800/40 text-purple-300 text-xs font-bold rounded-lg uppercase tracking-wider">
+                          VIDEO {item.video_number}
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => {
@@ -2438,61 +2475,61 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
                       >
                         <X size={18} />
                       </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                        Post Date
-                      </label>
-                      <input
-                        type="date"
-                        value={item.post_date || ''}
-                        onChange={e => {
-                          const newPostDate = e.target.value;
-                          const newDraftDate = calculateDraftDate(newPostDate);
-                          setFormState(prev => {
-                            const updated = [...(prev.postDates || [])];
-                            updated[idx] = {
-                              ...updated[idx],
-                              post_date: newPostDate,
-                              draft_date: newDraftDate
-                            };
-                            return { ...prev, postDates: updated };
-                          });
-                        }}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-purple-500 font-mono"
-                      />
-                      {item.post_date && (
-                        <span className="block text-[11px] text-slate-500 mt-1">
-                          Formatted: {formatDisplayDate(item.post_date)}
-                        </span>
-                      )}
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                        <span>Draft Date</span>
-                        <span className="text-[10px] text-purple-400 font-normal lowercase">Automatically calculated • 3 days before</span>
-                      </label>
-                      <div className="relative">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                          Post Date
+                        </label>
                         <input
                           type="date"
-                          readOnly
-                          value={item.draft_date || ''}
-                          className="w-full bg-slate-950/50 border border-slate-800 rounded-lg px-3 py-2 text-slate-400 text-sm cursor-not-allowed select-none font-mono"
+                          value={item.post_date || ''}
+                          onChange={e => {
+                            const newPostDate = e.target.value;
+                            const newDraftDate = calculateDraftDate(newPostDate);
+                            setFormState(prev => {
+                              const updated = [...(prev.postDates || [])];
+                              updated[idx] = {
+                                ...updated[idx],
+                                post_date: newPostDate,
+                                draft_date: newDraftDate
+                              };
+                              return { ...prev, postDates: updated };
+                            });
+                          }}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-purple-500 font-mono"
                         />
-                        {item.draft_date && (
-                          <span className="block text-[11px] text-purple-300 font-medium mt-1">
-                            Formatted: {formatDisplayDate(item.draft_date)}
+                        {item.post_date && (
+                          <span className="block text-[11px] text-slate-500 mt-1">
+                            Formatted: {formatDisplayDate(item.post_date)}
                           </span>
                         )}
                       </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                          <span>Draft Date</span>
+                          <span className="text-[10px] text-purple-400 font-normal lowercase">Automatically calculated • 3 days before</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="date"
+                            readOnly
+                            value={item.draft_date || ''}
+                            className="w-full bg-slate-950/50 border border-slate-800 rounded-lg px-3 py-2 text-slate-400 text-sm cursor-not-allowed select-none font-mono"
+                          />
+                          {item.draft_date && (
+                            <span className="block text-[11px] text-purple-300 font-medium mt-1">
+                              Formatted: {formatDisplayDate(item.draft_date)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
             <button

@@ -609,7 +609,12 @@ export const getInfluencerAssignedVideos = (record: StatusTrackingRecord): numbe
     }
   } catch (e) {}
 
-  if (count <= 0) count = DEFAULT_CAMPAIGN_VIDEOS_COUNT;
+  if (count <= 0) {
+    if (typeof record === 'object' && record !== null) {
+      assignedVideosCache.set(record, []);
+    }
+    return [];
+  }
 
   const result: number[] = [];
   for (let i = 1; i <= count; i++) {
@@ -7025,8 +7030,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
           <div className="w-full bg-[#080e1e] border border-blue-900/30 rounded-[20px] px-4 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between gap-4 shrink-0 shadow-lg">
             {/* Center / Video Navigation (Clean line, no outer subcard) */}
             <div className="flex-1 flex items-center justify-center sm:justify-start md:justify-center overflow-x-auto no-scrollbar min-w-0 py-1">
-              <div className="flex items-center min-w-[420px] max-w-2xl w-full justify-between px-2">
-                {[1, 2, 3, 4, 5, 6].map((vNum, idx) => {
+              <div className="flex items-center min-w-[320px] max-w-2xl w-full justify-between px-2">
+                {availableFilterVideos.map((vNum, idx) => {
                   const stepKey = `video${vNum}` as WorkflowStepKey;
                   const isSelected = selectedWorkflowStep === stepKey;
                   const isLineActive = isSelected || (idx === 0 && selectedVideoNumber >= 2);
@@ -7067,7 +7072,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                       </div>
 
                       {/* Connecting Line between Video Steps */}
-                      {idx !== 5 && (
+                      {idx !== availableFilterVideos.length - 1 && (
                         <div className="flex-1 min-w-[16px] sm:min-w-[28px] h-[2px] mx-1.5 sm:mx-2.5 -mt-6 sm:-mt-7 transition-colors duration-300">
                           <div
                             className={`h-full w-full rounded-full transition-all duration-300 ${
