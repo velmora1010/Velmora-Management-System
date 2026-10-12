@@ -4771,7 +4771,14 @@ export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps>
               <span className="px-2.5 py-1 rounded-md bg-purple-500/15 border border-purple-500/30 text-purple-300 font-semibold text-xs">
                 Video {selectedVideoNumber}
               </span>
-              <span className="px-2.5 py-1 rounded-md bg-blue-500/15 border border-blue-500/30 text-blue-400 font-mono font-bold text-xs">
+              <span 
+                className={`px-2.5 py-1 rounded-md font-mono font-bold text-xs transition-colors ${
+                  isPostAdminRescheduled(record, selectedVideoNumber)
+                    ? 'bg-amber-950/80 border border-amber-600/60 text-amber-400'
+                    : 'bg-blue-500/15 border border-blue-500/30 text-blue-400'
+                }`}
+                title={isPostAdminRescheduled(record, selectedVideoNumber) ? 'Admin-rescheduled post' : undefined}
+              >
                 {influencerCode}
               </span>
             </div>
@@ -7552,6 +7559,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 const draftStepData = currentVideoData.steps['draft']?.data || {};
                 const rawPostTime = postStepData.post_time || postStepData.scheduled_post_time || scheduleEntry?.post_time || draftStepData?.timing_time || '';
                 const scheduledTimeFormatted = formatDisplayTime12h(rawPostTime);
+                const isRescheduled = isPostAdminRescheduled(record, selectedVideoNumber);
 
                 return (
                   <div 
@@ -7567,8 +7575,17 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                     {/* LEFT SECTION: Compact Code Badge, Profile Avatar, Name + Price + Product */}
                     <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 w-auto min-w-0">
                       {/* Creator Code Badge */}
-                      <div className="flex items-center justify-center min-w-[56px] sm:min-w-[64px] px-2.5 py-1.5 rounded-lg bg-[#070c18] border border-slate-700/80 shrink-0 shadow-sm text-center">
-                        <span className="font-mono font-bold text-white text-xs sm:text-[13px] tracking-wider leading-tight">
+                      <div 
+                        className={`flex items-center justify-center min-w-[56px] sm:min-w-[64px] px-2.5 py-1.5 rounded-lg shrink-0 shadow-sm text-center transition-colors ${
+                          isRescheduled 
+                            ? 'bg-amber-950/80 border border-amber-600/60' 
+                            : 'bg-[#070c18] border border-slate-700/80'
+                        }`}
+                        title={isRescheduled ? 'Admin-rescheduled post' : undefined}
+                      >
+                        <span className={`font-mono font-bold text-xs sm:text-[13px] tracking-wider leading-tight ${
+                          isRescheduled ? 'text-amber-400' : 'text-white'
+                        }`}>
                           {influencerCode}
                         </span>
                       </div>
@@ -8326,7 +8343,14 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
 
           {/* Influencer Badge & Info */}
           <div className="flex items-center gap-3">
-            <div className="px-2.5 py-1 rounded-lg bg-[#070c18] border border-slate-700 text-white font-mono font-bold text-xs tracking-wider">
+            <div 
+              className={`px-2.5 py-1 rounded-lg font-mono font-bold text-xs tracking-wider transition-colors ${
+                isPostAdminRescheduled(record, videoNumber)
+                  ? 'bg-amber-950/80 border border-amber-600/60 text-amber-400'
+                  : 'bg-[#070c18] border border-slate-700 text-white'
+              }`}
+              title={isPostAdminRescheduled(record, videoNumber) ? 'Admin-rescheduled post' : undefined}
+            >
               {influencerCode}
             </div>
             <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-700 bg-slate-900 flex items-center justify-center shrink-0">
