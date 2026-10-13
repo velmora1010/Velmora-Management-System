@@ -1,17 +1,11 @@
 export type OrderSource = 'shopify' | 'upload' | 'dexie';
 
 export type UnifiedWorkflowStage =
-  | 'all'
-  | 'imported'
-  | 'order_verification'
-  | 'ready_to_dispatch'
+  | 'active'
+  | 'pending'
   | 'prepare_dispatch'
   | 'dispatched'
-  | 'in_transit'
-  | 'out_for_delivery'
-  | 'delivered'
-  | 'exceptions'
-  | 'rto';
+  | 'tracking';
 
 export type UnifiedTrackingStatus =
   | 'Not Tracked'
@@ -40,6 +34,7 @@ export interface UnifiedLogisticsOrder {
   customerName: string;
   phoneNumber: string;
   rawPhoneNumber?: string;
+  alternatePhone?: string;
   address?: string;
   city?: string;
   state?: string;
@@ -51,6 +46,7 @@ export interface UnifiedLogisticsOrder {
   orderType: string; // 'Prepaid' | 'COD' | 'Partial COD' | etc.
   amount: number; // numeric amount in INR
   products: string; // summarized product names or SKU list
+  quantity?: number;
   lineItems?: Array<{
     name: string;
     quantity: number;
@@ -60,7 +56,9 @@ export interface UnifiedLogisticsOrder {
   // Logistics & Shipment
   courier?: string; // 'Delhivery' | 'ST Courier' | 'Amazon' | 'Ekart' | 'India Post'
   awbNumber?: string;
-  stage: 'order_data' | 'tracking' | 'trash';
+  dispatchDate?: string;
+  estimatedDeliveryDate?: string;
+  stage: string;
   workflowStage: UnifiedWorkflowStage;
   status: UnifiedTrackingStatus;
   rawStatus?: string;
@@ -73,7 +71,6 @@ export interface UnifiedLogisticsOrder {
   trackingError?: string;
   syncState?: 'queued' | 'checking' | 'retrying' | 'idle';
   deliveryDays?: number;
-  expectedDeliveryDate?: string;
 }
 
 export interface UnifiedCustomer {
@@ -99,16 +96,14 @@ export interface UnifiedCustomer {
   orders: UnifiedLogisticsOrder[];
 }
 
-export interface LogisticsSummaryCounts {
+export interface WorkflowStageCounts {
+  active: number;
+  pending: number;
+  prepareDispatch: number;
+  dispatched: number;
+  tracking: number;
   totalOrders: number;
   totalCustomers: number;
-  imported: number;
-  readyToDispatch: number;
-  dispatched: number;
-  inTransit: number;
-  outForDelivery: number;
-  delivered: number;
-  exceptions: number;
-  rto: number;
-  totalValue: number;
 }
+
+export type LogisticsMainView = 'customers' | 'orders';

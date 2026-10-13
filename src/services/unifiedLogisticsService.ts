@@ -6,7 +6,7 @@ import type {
   UnifiedCustomer,
   UnifiedTrackingStatus,
   UnifiedWorkflowStage,
-  LogisticsSummaryCounts
+  WorkflowStageCounts
 } from '../types/unifiedLogistics';
 
 /**
@@ -45,63 +45,127 @@ export const cleanOrderId = (val?: string | null): string => {
 
 /**
  * Standardizes raw status strings from spreadsheets, Shopify, and courier APIs
- * into unified tracking status and workflow stage.
+ * into unified tracking status and Influencer Logistics workflow stage.
+ * Stages:
+ * 1. Active — imported orders that have not yet been moved into dispatch preparation.
+ * 2. Pending — orders waiting for required info (e.g. missing address, phone, or courier).
+ * 3. Prepare Dispatch — orders selected by user and moved here in bulk for dispatch preparation.
+ * 4. Dispatched — orders for which dispatch has actually been completed and saved.
+ * 5. Tracking — dispatched orders whose shipment tracking is being monitored.
  */
-export const mapToUnifiedStatus = (
+export const mapToUnifiedWorkflowStage = (
   rawStatus?: string | null,
-  stage?: 'order_data' | 'tracking' | 'trash',
-  awbNumber?: string | null
+  stage?: string | null,
+  awbNumber?: string | null,
+  hasRequiredInfo?: boolean
 ): { status: UnifiedTrackingStatus; workflowStage: UnifiedWorkflowStage } => {
   const s = (rawStatus || '').trim().toLowerCase();
+  const currentStage = (stage || '').trim().toLowerCase();
+  const hasAwb = !!(awbNumber && awbNumber.trim().length > 0);
 
+  // 1. Explicit stage overrides saved on the record
+  if (currentStage === 'prepare_dispatch') {
+    return {
+      status: 'Pending',
+      workflowStage: 'prepare_dispatch'
+    };
+  }
+
+  if (currentStage === 'dispatched') {
+    // If it has tracking activity, it's also monitorable in tracking
+    const trackingStatus = resolveTrackingStatus(s, hasAwb);
+    return {
+      status: trackingStatus,
+      workflowStage: hasAwb ? 'tracking' : 'dispatched'
+    };
+  }
+
+  // 2. Legacy stage 'tracking' from Dexie
+  if (currentStage === 'tracking') {
+    const trackingStatus = resolveTrackingStatus(s, hasAwb);
+    return {
+      status: trackingStatus,
+      workflowStage: 'tracking'
+    };
+  }
+
+  // 3. Status string analysis for dispatched / tracking states
+  if (
+    s.includes('delivered') ||
+    s.includes('in transit') ||
+    s.includes('transit') ||
+    s.includes('out for delivery') ||
+    s.includes('rto') ||
+    s.includes('returned') ||
+    s.includes('exception') ||
+    s.includes('failed attempt')
+  ) {
+    return {
+      status: resolveTrackingStatus(s, hasAwb),
+      workflowStage: 'tracking'
+    };
+  }
+
+  if (s.includes('dispatched')) {
+    return {
+      status: hasAwb ? 'In Transit' : 'Pending',
+      workflowStage: hasAwb ? 'tracking' : 'dispatched'
+    };
+  }
+
+  // 4. Missing required info -> Pending stage
+  if (hasRequiredInfo === false) {
+    return {
+      status: 'Pending',
+      workflowStage: 'pending'
+    };
+  }
+
+  // 5. Default stage: Active
+  return {
+    status: hasAwb ? 'Info Received' : 'Not Tracked',
+    workflowStage: 'active'
+  };
+};
+
+export const resolveTrackingStatus = (s: string, hasAwb: boolean): UnifiedTrackingStatus => {
   if (s.includes('rto') || s.includes('returned') || s.includes('return to origin')) {
-    return { status: 'RTO', workflowStage: 'rto' };
+    return 'RTO';
   }
   if (s.includes('delivered')) {
-    return { status: 'Delivered', workflowStage: 'delivered' };
+    return 'Delivered';
   }
   if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
-    return { status: 'Out for Delivery', workflowStage: 'out_for_delivery' };
+    return 'Out for Delivery';
   }
   if (
     s.includes('in transit') ||
-    s.includes('in_transit') ||
     s.includes('transit') ||
     s.includes('processed') ||
     s.includes('forwarded') ||
     s.includes('hub reached')
   ) {
-    return { status: 'In Transit', workflowStage: 'in_transit' };
+    return 'In Transit';
   }
   if (s.includes('failed attempt') || s.includes('undelivered') || s.includes('attempted')) {
-    return { status: 'Failed Attempt', workflowStage: 'exceptions' };
+    return 'Failed Attempt';
   }
   if (
     s.includes('exception') ||
     s.includes('error') ||
     s.includes('unable to fetch') ||
     s.includes('sync failed') ||
-    s.includes('delivery delay') ||
     s.includes('expired')
   ) {
-    return { status: 'Delivery Exception', workflowStage: 'exceptions' };
+    return 'Delivery Exception';
   }
   if (s.includes('cancelled') || s.includes('canceled')) {
-    return { status: 'Cancelled', workflowStage: 'exceptions' };
-  }
-  if (s.includes('dispatched')) {
-    return { status: 'In Transit', workflowStage: 'dispatched' };
+    return 'Cancelled';
   }
   if (s.includes('booked') || s.includes('info received') || s.includes('manifest')) {
-    return { status: 'Info Received', workflowStage: 'ready_to_dispatch' };
+    return 'Info Received';
   }
-
-  // Fallbacks based on Dexie stage and AWB presence
-  if (stage === 'tracking' || (awbNumber && awbNumber.trim().length > 0)) {
-    return { status: 'Pending', workflowStage: 'prepare_dispatch' };
-  }
-
-  return { status: 'Not Tracked', workflowStage: 'imported' };
+  return hasAwb ? 'Pending' : 'Not Tracked';
 };
 
 /**
@@ -112,7 +176,20 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
   const normalizedPhone = normalizePhoneNumber(order.phoneNumber);
   const customerKey = normalizedPhone || `order_${cleanedId || order.id}`;
   const parsedAmount = parseFloat(String(order.amount || '0').replace(/[^0-9.]/g, '')) || 0;
-  const { status, workflowStage } = mapToUnifiedStatus(order.status, order.stage, order.awbNumber);
+  
+  // An order has required info if customer name, address/city/pincode, and phone exist
+  const hasRequiredInfo = !!(
+    (order.customerName && order.customerName.trim().length > 0) &&
+    (normalizedPhone.length >= 10) &&
+    (order.pincode || order.city || order.address)
+  );
+
+  const { status, workflowStage } = mapToUnifiedWorkflowStage(
+    order.status,
+    order.stage,
+    order.awbNumber,
+    hasRequiredInfo
+  );
 
   return {
     id: `dexie_${order.id || cleanedId}`,
@@ -181,11 +258,9 @@ export const groupOrdersIntoCustomers = (orders: UnifiedLogisticsOrder[]): Unifi
       map.set(key, customer);
     }
 
-    // Append order
     customer.orders.push(order);
     customer.totalOrders += 1;
 
-    // Only add non-cancelled / non-RTO to positive lifetime value, or sum full spend
     if (order.status !== 'Cancelled') {
       customer.totalSpent += order.amount;
     }
@@ -198,7 +273,6 @@ export const groupOrdersIntoCustomers = (orders: UnifiedLogisticsOrder[]): Unifi
       customer.activeOrders += 1;
     }
 
-    // Keep the most complete customer profile details
     if (!customer.city && order.city) customer.city = order.city;
     if (!customer.state && order.state) customer.state = order.state;
     if (!customer.pincode && order.pincode) customer.pincode = order.pincode;
@@ -208,7 +282,6 @@ export const groupOrdersIntoCustomers = (orders: UnifiedLogisticsOrder[]): Unifi
     }
   }
 
-  // Sort each customer's orders newest to oldest and assign latestStatus
   const customers = Array.from(map.values()).map(c => {
     c.orders.sort((a, b) => {
       const dateA = new Date(a.orderDate || 0).getTime();
@@ -225,80 +298,144 @@ export const groupOrdersIntoCustomers = (orders: UnifiedLogisticsOrder[]): Unifi
     return c;
   });
 
-  // Sort customers with highest order count and spend first
   return customers.sort((a, b) => b.totalOrders - a.totalOrders || b.totalSpent - a.totalSpent);
 };
 
 /**
- * Calculates high-level summary KPIs across the canonical orders.
+ * Calculates toolbar stage counts matching Influencer Logistics:
+ * [ Active ] [ Pending ] [ Prepare Dispatch ] [ Dispatched ] [ Tracking ]
  */
-export const calculateLogisticsSummary = (
+export const calculateWorkflowCounts = (
   orders: UnifiedLogisticsOrder[],
   customers: UnifiedCustomer[]
-): LogisticsSummaryCounts => {
-  let imported = 0;
-  let readyToDispatch = 0;
+): WorkflowStageCounts => {
+  let active = 0;
+  let pending = 0;
+  let prepareDispatch = 0;
   let dispatched = 0;
-  let inTransit = 0;
-  let outForDelivery = 0;
-  let delivered = 0;
-  let exceptions = 0;
-  let rto = 0;
-  let totalValue = 0;
+  let tracking = 0;
 
-  for (const order of orders) {
-    totalValue += order.amount;
-    switch (order.workflowStage) {
-      case 'imported':
-      case 'order_verification':
-        imported++;
+  for (const o of orders) {
+    switch (o.workflowStage) {
+      case 'active':
+        active++;
         break;
-      case 'ready_to_dispatch':
+      case 'pending':
+        pending++;
+        break;
       case 'prepare_dispatch':
-        readyToDispatch++;
+        prepareDispatch++;
         break;
       case 'dispatched':
         dispatched++;
         break;
-      case 'in_transit':
-        inTransit++;
-        break;
-      case 'out_for_delivery':
-        outForDelivery++;
-        break;
-      case 'delivered':
-        delivered++;
-        break;
-      case 'exceptions':
-        exceptions++;
-        break;
-      case 'rto':
-        rto++;
+      case 'tracking':
+        tracking++;
         break;
       default:
-        imported++;
+        active++;
     }
   }
 
   return {
-    totalOrders: orders.length,
-    totalCustomers: customers.length,
-    imported,
-    readyToDispatch,
+    active,
+    pending,
+    prepareDispatch,
     dispatched,
-    inTransit,
-    outForDelivery,
-    delivered,
-    exceptions,
-    rto,
-    totalValue
+    tracking,
+    totalOrders: orders.length,
+    totalCustomers: customers.length
   };
 };
 
 /**
- * Fetches Shopify website orders from Supabase on demand (e.g. for sync/merging).
+ * Bulk moves orders from Active to Prepare Dispatch in Dexie
  */
-export const fetchShopifyOrders = async (limit = 100): Promise<UnifiedLogisticsOrder[]> => {
+export const bulkMoveToPrepareDispatch = async (
+  rawOrderIds: number[]
+): Promise<{ success: boolean; movedCount: number; errors: string[] }> => {
+  const errors: string[] = [];
+  let movedCount = 0;
+
+  try {
+    await db.transaction('rw', db.logistics_orders, async () => {
+      for (const rawId of rawOrderIds) {
+        const ord = await db.logistics_orders.get(rawId);
+        if (!ord) {
+          errors.push(`Order ID #${rawId} not found`);
+          continue;
+        }
+
+        // Update stage to prepare_dispatch
+        await db.logistics_orders.update(rawId, {
+          stage: 'prepare_dispatch' as any
+        });
+        movedCount++;
+      }
+    });
+
+    return {
+      success: movedCount > 0,
+      movedCount,
+      errors
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      movedCount,
+      errors: [err.message || 'Transaction error moving orders to Prepare Dispatch']
+    };
+  }
+};
+
+/**
+ * Bulk or single confirm dispatch for an order
+ */
+export const confirmOrderDispatch = async (payload: {
+  rawId: number;
+  courier: string;
+  awbNumber: string;
+  dispatchDate?: string;
+  estimatedDeliveryDate?: string;
+}): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const ord = await db.logistics_orders.get(payload.rawId);
+    if (!ord) {
+      return { success: false, error: 'Order not found in database' };
+    }
+
+    await db.logistics_orders.update(payload.rawId, {
+      courier: payload.courier,
+      awbNumber: payload.awbNumber.trim(),
+      stage: 'dispatched' as any,
+      status: 'In Transit',
+      syncedAt: new Date().toLocaleString()
+    });
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to confirm dispatch' };
+  }
+};
+
+/**
+ * Return an order back from Prepare Dispatch to Active
+ */
+export const returnToActiveStage = async (rawId: number): Promise<boolean> => {
+  try {
+    await db.logistics_orders.update(rawId, {
+      stage: 'order_data' as any
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Fetches Shopify website orders from Supabase
+ */
+export const fetchShopifyOrders = async (limit = 150): Promise<UnifiedLogisticsOrder[]> => {
   try {
     const { data, error } = await supabase
       .from('sales_orders')
@@ -315,7 +452,12 @@ export const fetchShopifyOrders = async (limit = 100): Promise<UnifiedLogisticsO
       const cleanedId = cleanOrderId(so.order_id);
       const normalizedPhone = normalizePhoneNumber(so.phone);
       const customerKey = normalizedPhone || `shopify_${cleanedId || so.id}`;
-      const { status, workflowStage } = mapToUnifiedStatus(so.dispatch_status || so.order_status, 'order_data', null);
+      const { status, workflowStage } = mapToUnifiedWorkflowStage(
+        so.dispatch_status || so.order_status,
+        'order_data',
+        null,
+        true
+      );
 
       return {
         id: `shopify_${so.id}`,

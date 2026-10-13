@@ -3,8 +3,6 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import db from '../../lib/db';
 import { 
   Search, 
-  RefreshCw, 
-  SlidersHorizontal, 
   Grid, 
   List, 
   RotateCcw, 
@@ -13,7 +11,11 @@ import {
   AlertTriangle,
   Download,
   Check,
-  X
+  X,
+  UploadCloud,
+  CheckCircle2,
+  Clock,
+  ArrowRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { LogisticsOrder } from '../../types/logistics';
@@ -26,79 +28,79 @@ import type {
 import { 
   fromDexieOrder, 
   groupOrdersIntoCustomers, 
-  calculateLogisticsSummary,
-  fetchShopifyOrders
+  calculateWorkflowCounts,
+  fetchShopifyOrders,
+  bulkMoveToPrepareDispatch,
+  returnToActiveStage
 } from '../../services/unifiedLogisticsService';
 import { LogisticsViewSwitch } from './components/LogisticsViewSwitch';
-import { LogisticsWorkflowFilters } from './components/LogisticsWorkflowFilters';
+import { LogisticsWorkflowToolbar } from './components/LogisticsWorkflowToolbar';
 import { CustomerCard } from './components/CustomerCard';
 import { CustomerDetailModal } from './components/CustomerDetailModal';
 import { OrderCard } from './components/OrderCard';
 import { OrderTableView } from './components/OrderTableView';
+import { OrderImportModal } from './components/OrderImportModal';
+import { DispatchOrderModal } from './components/DispatchOrderModal';
 import { TrackingModal } from './TrackingModal';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
 
-interface UnifiedLogisticsWorkspaceProps {
-  onNavigateTab?: (tab: 'import' | 'data' | 'tracking' | 'analytics' | 'trash') => void;
-}
-
-export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps> = ({
-  onNavigateTab
-}) => {
-  // Main view: Customers or Orders
+export const UnifiedLogisticsWorkspace: React.FC = () => {
+  // Main View: Customers vs Orders
   const [currentView, setCurrentView] = useState<LogisticsMainView>('orders');
   
-  // Layout mode for Orders: Grid cards vs Table rows
+  // Layout mode for Orders: Grid cards vs Table
   const [orderLayout, setOrderLayout] = useState<'grid' | 'table'>('grid');
 
-  // Search and workflow filter states
+  // Active Workflow Stage: 'active' | 'pending' | 'prepare_dispatch' | 'dispatched' | 'tracking'
+  const [currentStage, setCurrentStage] = useState<UnifiedWorkflowStage>('active');
+
+  // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStage, setSelectedStage] = useState<UnifiedWorkflowStage>('all');
-  const [selectedCourier, setSelectedCourier] = useState('all');
+  const [selectedCourier, setSelectedCourier] = useState<string>('all');
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
-  // Shopify sync state
-  const [shopifyOrders, setShopifyOrders] = useState<UnifiedLogisticsOrder[]>([]);
-  const [isLoadingShopify, setIsLoadingShopify] = useState(false);
+  // Bulk Selection Mode
+  const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [isMovingToPrepare, setIsMovingToPrepare] = useState(false);
 
-  // Modal inspection states
+  // Modals
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [orderToDispatch, setOrderToDispatch] = useState<UnifiedLogisticsOrder | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<UnifiedCustomer | null>(null);
   const [activeTrackingOrder, setActiveTrackingOrder] = useState<LogisticsOrder | null>(null);
 
-  // Syncing state for single order courier sync
+  // Live Syncing State for Tracking
   const [syncingOrderIds, setSyncingOrderIds] = useState<Set<number>>(new Set());
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // 1. Live Query of all Dexie Logistics Orders (excluding trash)
+  // 1. Live Query: All Dexie Logistics Orders (excluding trash)
   const dexieOrdersRaw = useLiveQuery(
     () => db.logistics_orders.where('stage').notEqual('trash').reverse().toArray(),
     []
   ) ?? [];
 
-  // Optional: load Shopify website orders from Supabase on mount
-  useEffect(() => {
-    let isMounted = true;
-    const loadShopify = async () => {
-      setIsLoadingShopify(true);
-      try {
-        const data = await fetchShopifyOrders(150);
-        if (isMounted) {
-          setShopifyOrders(data);
-        }
-      } catch (e) {
-        console.warn('Could not load shopify orders:', e);
-      } finally {
-        if (isMounted) setIsLoadingShopify(false);
-      }
-    };
-    loadShopify();
-    return () => { isMounted = false; };
+  // Optional: load Shopify website orders from Supabase
+  const [shopifyOrders, setShopifyOrders] = useState<UnifiedLogisticsOrder[]>([]);
+
+  const loadShopify = useCallback(async () => {
+    try {
+      const data = await fetchShopifyOrders(150);
+      setShopifyOrders(data);
+    } catch (e) {
+      console.warn('Could not load Shopify sales_orders:', e);
+    }
   }, []);
 
-  // 2. Canonical Unified Orders: Transform Dexie orders + merge Shopify orders without duplication
+  useEffect(() => {
+    loadShopify();
+  }, [loadShopify]);
+
+  // 2. Canonical Unified Orders: Transform Dexie orders + merge Shopify orders safely
   const unifiedOrders = useMemo(() => {
     const list: UnifiedLogisticsOrder[] = dexieOrdersRaw.map(fromDexieOrder);
     const existingOrderIds = new Set(list.map(o => o.orderId.toLowerCase()));
 
-    // Append Shopify orders that do not collide with an existing uploaded Dexie order
     for (const sOrder of shopifyOrders) {
       if (!existingOrderIds.has(sOrder.orderId.toLowerCase())) {
         list.push(sOrder);
@@ -108,17 +110,17 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
     return list;
   }, [dexieOrdersRaw, shopifyOrders]);
 
-  // 3. Canonical Unified Customers: Grouped strictly by phone number / customerKey
+  // 3. Canonical Unified Customers: Grouped strictly by phone number / unique customerKey
   const unifiedCustomers = useMemo(() => {
     return groupOrdersIntoCustomers(unifiedOrders);
   }, [unifiedOrders]);
 
-  // 4. Global Summary KPIs across Canonical data
-  const summaryCounts = useMemo(() => {
-    return calculateLogisticsSummary(unifiedOrders, unifiedCustomers);
+  // 4. Live Workflow Counts (Toolbar)
+  const counts = useMemo(() => {
+    return calculateWorkflowCounts(unifiedOrders, unifiedCustomers);
   }, [unifiedOrders, unifiedCustomers]);
 
-  // List of unique couriers present in orders
+  // Courier list detected across orders
   const courierList = useMemo(() => {
     const set = new Set<string>();
     for (const o of unifiedOrders) {
@@ -129,79 +131,127 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
     return Array.from(set).sort();
   }, [unifiedOrders]);
 
-  // 5. Filtered Orders based on Search, Stage and Courier
+  // 5. Filtered Orders based on current stage and search
   const filteredOrders = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
     return unifiedOrders.filter((order) => {
-      // Courier filter
+      // 1. Stage filter
+      if (order.workflowStage !== currentStage) {
+        return false;
+      }
+
+      // 2. Courier filter
       if (selectedCourier !== 'all') {
         if (!order.courier || order.courier.toLowerCase() !== selectedCourier.toLowerCase()) {
           return false;
         }
       }
 
-      // Stage filter
-      if (selectedStage !== 'all') {
-        if (order.workflowStage !== selectedStage) {
-          return false;
-        }
-      }
-
-      // Search query
+      // 3. Search term
       if (term) {
         const matchesOrder = order.orderId.toLowerCase().includes(term);
         const matchesName = order.customerName.toLowerCase().includes(term);
         const matchesPhone = order.phoneNumber.toLowerCase().includes(term);
         const matchesAwb = (order.awbNumber || '').toLowerCase().includes(term);
         const matchesCity = (order.city || '').toLowerCase().includes(term);
-        const matchesState = (order.state || '').toLowerCase().includes(term);
         const matchesProducts = (order.products || '').toLowerCase().includes(term);
 
-        if (!matchesOrder && !matchesName && !matchesPhone && !matchesAwb && !matchesCity && !matchesState && !matchesProducts) {
+        if (!matchesOrder && !matchesName && !matchesPhone && !matchesAwb && !matchesCity && !matchesProducts) {
           return false;
         }
       }
 
       return true;
     });
-  }, [unifiedOrders, searchTerm, selectedStage, selectedCourier]);
+  }, [unifiedOrders, currentStage, selectedCourier, searchTerm]);
 
-  // 6. Filtered Customers based on Search and Stage
+  // 6. Filtered Customers based on current stage
   const filteredCustomers = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
     return unifiedCustomers.filter((cust) => {
-      // Courier filter against customer orders
+      // Must have orders in the current stage
+      const hasStageOrders = cust.orders.some(o => o.workflowStage === currentStage);
+      if (!hasStageOrders) return false;
+
+      // Courier filter
       if (selectedCourier !== 'all') {
         const hasCourier = cust.orders.some(o => o.courier && o.courier.toLowerCase() === selectedCourier.toLowerCase());
         if (!hasCourier) return false;
       }
 
-      // Stage filter against customer orders
-      if (selectedStage !== 'all') {
-        const hasStage = cust.orders.some(o => o.workflowStage === selectedStage);
-        if (!hasStage) return false;
-      }
-
-      // Search query
+      // Search term
       if (term) {
         const matchesName = cust.name.toLowerCase().includes(term);
         const matchesPhone = cust.phoneNumber.toLowerCase().includes(term);
         const matchesCity = cust.city.toLowerCase().includes(term);
-        const matchesState = cust.state.toLowerCase().includes(term);
         const matchesOrder = cust.orders.some(o => o.orderId.toLowerCase().includes(term) || (o.awbNumber || '').toLowerCase().includes(term));
 
-        if (!matchesName && !matchesPhone && !matchesCity && !matchesState && !matchesOrder) {
+        if (!matchesName && !matchesPhone && !matchesCity && !matchesOrder) {
           return false;
         }
       }
 
       return true;
     });
-  }, [unifiedCustomers, searchTerm, selectedStage, selectedCourier]);
+  }, [unifiedCustomers, currentStage, selectedCourier, searchTerm]);
 
-  // Handle single order live sync
+  // Bulk Selection Handlers
+  const handleToggleSelect = (orderId: string) => {
+    setSelectedOrderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) {
+        next.delete(orderId);
+      } else {
+        next.add(orderId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedOrderIds.size === filteredOrders.length && filteredOrders.length > 0) {
+      setSelectedOrderIds(new Set());
+    } else {
+      setSelectedOrderIds(new Set(filteredOrders.map(o => o.id)));
+    }
+  };
+
+  // Bulk Move to Prepare Dispatch
+  const handlePrepareDispatchBulk = async () => {
+    if (selectedOrderIds.size === 0) {
+      toast.error('Please select at least one order to prepare dispatch');
+      return;
+    }
+
+    const selectedOrders = unifiedOrders.filter(o => selectedOrderIds.has(o.id));
+    const validRawIds = selectedOrders.map(o => o.rawId).filter((id): id is number => typeof id === 'number');
+
+    if (validRawIds.length === 0) {
+      toast.error('Selected orders cannot be moved (external/non-database records)');
+      return;
+    }
+
+    setIsMovingToPrepare(true);
+    try {
+      const res = await bulkMoveToPrepareDispatch(validRawIds);
+      if (res.success) {
+        toast.success(`Moved ${res.movedCount} orders to Prepare Dispatch!`);
+        setSelectedOrderIds(new Set());
+        setIsBulkSelectMode(false);
+        setCurrentStage('prepare_dispatch');
+      } else {
+        toast.error('Failed to move orders: ' + res.errors.join(', '));
+      }
+    } catch (err: any) {
+      toast.error('Error: ' + (err.message || 'Bulk transition failed'));
+    } finally {
+      setIsMovingToPrepare(false);
+    }
+  };
+
+  // Sync Single Order Live Tracking
   const handleSyncOrder = async (order: UnifiedLogisticsOrder) => {
     if (!order.rawId || !order.awbNumber) {
       toast.error('No AWB number available to sync tracking');
@@ -212,7 +262,7 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
     try {
       const res = await trackingEngine.syncOrder(order.rawId, order.rawStatus);
       if (res.success) {
-        toast.success(`Updated tracking status: ${res.status}`);
+        toast.success(`Tracking updated: ${res.status}`);
       } else {
         toast.error(res.error || 'Courier sync failed');
       }
@@ -227,7 +277,18 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
     }
   };
 
-  // Handle opening live tracking modal
+  // Refresh handler
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await loadShopify();
+      toast.success('Workspace refreshed');
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
+  // Tracking Modal Open
   const handleTrackOrder = (order: UnifiedLogisticsOrder) => {
     const dexieItem = dexieOrdersRaw.find(o => o.id === order.rawId) || {
       orderId: order.orderId,
@@ -249,19 +310,10 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
     setActiveTrackingOrder(dexieItem as LogisticsOrder);
   };
 
-  // Handle opening customer modal directly from an order
-  const handleViewCustomerByKey = (customerKey: string) => {
-    const cust = unifiedCustomers.find(c => c.customerKey === customerKey);
-    if (cust) {
-      setSelectedCustomer(cust);
-    }
-  };
-
   return (
-    <div className="flex flex-col gap-4 w-full h-full overflow-hidden">
-      {/* Top Header Row: View Switch, Search & Quick Actions */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 shrink-0">
-        {/* Left: View Switcher */}
+    <div className="flex flex-col gap-3.5 w-full h-full overflow-hidden">
+      {/* 1. TOP CONTROLS: Customer/Order View Switch & Action Tools */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
           <LogisticsViewSwitch
             currentView={currentView}
@@ -270,105 +322,121 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
             orderCount={unifiedOrders.length}
           />
 
-          {/* Quick tab jump helper buttons if onNavigateTab provided */}
-          {onNavigateTab && (
-            <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-800">
-              <button
-                type="button"
-                onClick={() => onNavigateTab('import')}
-                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
-              >
-                <Download size={13} className="text-purple-400" />
-                <span>Upload CSV</span>
-              </button>
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={() => setIsImportModalOpen(true)}
+            className="h-9 px-3.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/30 flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <UploadCloud size={14} />
+            <span>Import Orders</span>
+          </button>
         </div>
 
-        {/* Right: Search, Table/Grid Toggle & Refresh */}
-        <div className="flex items-center gap-2">
-          {/* Search Box */}
-          <div className="relative flex-1 sm:w-64 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder={currentView === 'customers' ? 'Search customers, phones...' : 'Search orders, AWB, phones...'}
-              className="w-full h-9 bg-slate-900/90 border border-slate-700/80 rounded-xl pl-9 pr-8 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={() => setSearchTerm('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-              >
-                <X size={13} />
-              </button>
-            )}
+        {/* View Toggle (Grid / List) */}
+        {currentView === 'orders' && (
+          <div className="flex items-center self-end sm:self-auto p-1 bg-slate-900 border border-slate-800 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setOrderLayout('grid')}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                orderLayout === 'grid'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Compact Cards View"
+            >
+              <Grid size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrderLayout('table')}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                orderLayout === 'table'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Dense Table View"
+            >
+              <List size={14} />
+            </button>
           </div>
+        )}
+      </div>
 
-          {/* Table / Grid Toggle (Orders view only) */}
-          {currentView === 'orders' && (
-            <div className="flex items-center p-1 bg-slate-900/90 border border-slate-700/80 rounded-xl">
-              <button
-                type="button"
-                onClick={() => setOrderLayout('grid')}
-                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                  orderLayout === 'grid'
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Grid Card View"
-              >
-                <Grid size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setOrderLayout('table')}
-                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                  orderLayout === 'table'
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="Compact Table View"
-              >
-                <List size={14} />
-              </button>
-            </div>
-          )}
+      {/* 2. COMPACT INFLUENCER-STYLE WORKFLOW TOOLBAR */}
+      <LogisticsWorkflowToolbar
+        currentStage={currentStage}
+        onSelectStage={setCurrentStage}
+        counts={counts}
+        isBulkSelectMode={isBulkSelectMode}
+        onToggleBulkSelect={() => {
+          setIsBulkSelectMode(prev => !prev);
+          if (isBulkSelectMode) {
+            setSelectedOrderIds(new Set());
+          }
+        }}
+        selectedOrderCount={selectedOrderIds.size}
+        onPrepareDispatch={handlePrepareDispatchBulk}
+        isMovingToPrepare={isMovingToPrepare}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        onToggleFilters={() => setIsFilterDrawerOpen(prev => !prev)}
+        activeFilterCount={selectedCourier !== 'all' ? 1 : 0}
+        onRefresh={handleRefresh}
+        isRefreshing={isRefreshing}
+      />
+
+      {/* Optional Courier Filter Chips */}
+      {courierList.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 custom-scrollbar text-xs shrink-0">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider shrink-0 mr-1">
+            Courier:
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectedCourier('all')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 border transition-colors cursor-pointer ${
+              selectedCourier === 'all'
+                ? 'bg-purple-950/80 border-purple-500 text-purple-300'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            All
+          </button>
+          {courierList.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setSelectedCourier(c)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold shrink-0 border transition-colors cursor-pointer ${
+                selectedCourier === c
+                  ? 'bg-purple-950/80 border-purple-500 text-purple-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {c}
+            </button>
+          ))}
         </div>
-      </div>
+      )}
 
-      {/* Stage Filters Row */}
-      <div className="shrink-0">
-        <LogisticsWorkflowFilters
-          currentStage={selectedStage}
-          onSelectStage={setSelectedStage}
-          counts={summaryCounts}
-          selectedCourier={selectedCourier}
-          onSelectCourier={setSelectedCourier}
-          courierList={courierList}
-        />
-      </div>
-
-      {/* Main Workspace Body */}
+      {/* 3. MAIN WORKSPACE CONTENT */}
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         {/* CUSTOMER VIEW */}
         {currentView === 'customers' && (
           <div>
             {filteredCustomers.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center bg-slate-900/40 border border-slate-800/80 rounded-2xl">
+              <div className="flex flex-col items-center justify-center py-20 text-center bg-slate-900/40 border border-slate-800/80 rounded-2xl">
                 <div className="w-12 h-12 rounded-2xl bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 mb-3">
                   <Package size={22} />
                 </div>
-                <h3 className="text-sm font-bold text-white mb-1">No customers match criteria</h3>
+                <h3 className="text-sm font-bold text-white mb-1">No customers in {currentStage}</h3>
                 <p className="text-xs text-slate-500 max-w-sm">
-                  Try adjusting your search terms or active status filters to discover customer profiles.
+                  Customer records appear here when their associated orders are in this stage.
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 pb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 pb-6">
                 {filteredCustomers.map((cust) => (
                   <CustomerCard
                     key={cust.customerKey}
@@ -385,13 +453,15 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
         {currentView === 'orders' && (
           <div>
             {filteredOrders.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center bg-slate-900/40 border border-slate-800/80 rounded-2xl">
+              <div className="flex flex-col items-center justify-center py-20 text-center bg-slate-900/40 border border-slate-800/80 rounded-2xl">
                 <div className="w-12 h-12 rounded-2xl bg-purple-950/60 border border-purple-800/50 flex items-center justify-center text-purple-400 mb-3">
                   <Truck size={22} />
                 </div>
-                <h3 className="text-sm font-bold text-white mb-1">No orders found</h3>
+                <h3 className="text-sm font-bold text-white mb-1">No orders in {currentStage}</h3>
                 <p className="text-xs text-slate-500 max-w-sm">
-                  No orders match the selected filters. Upload orders or clear filters to view shipments.
+                  {currentStage === 'active' 
+                    ? 'Import orders via Excel/CSV or sync from Shopify to begin dispatch preparation.' 
+                    : `No orders currently match the ${currentStage} stage.`}
                 </p>
               </div>
             ) : orderLayout === 'table' ? (
@@ -400,20 +470,36 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
                   orders={filteredOrders}
                   onTrackOrder={handleTrackOrder}
                   onSyncOrder={handleSyncOrder}
-                  onViewCustomer={handleViewCustomerByKey}
+                  onViewCustomer={(key) => {
+                    const c = unifiedCustomers.find(cu => cu.customerKey === key);
+                    if (c) setSelectedCustomer(c);
+                  }}
+                  onOpenDispatchModal={setOrderToDispatch}
                   syncingOrderIds={syncingOrderIds}
+                  isSelectable={isBulkSelectMode}
+                  selectedOrderIds={selectedOrderIds}
+                  onToggleSelect={handleToggleSelect}
+                  onToggleSelectAll={handleToggleSelectAll}
+                  allSelected={selectedOrderIds.size === filteredOrders.length && filteredOrders.length > 0}
                 />
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 pb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 pb-6">
                 {filteredOrders.map((order) => (
                   <OrderCard
                     key={order.id}
                     order={order}
                     onTrackOrder={handleTrackOrder}
                     onSyncOrder={handleSyncOrder}
-                    onViewCustomer={handleViewCustomerByKey}
+                    onViewCustomer={(key) => {
+                      const c = unifiedCustomers.find(cu => cu.customerKey === key);
+                      if (c) setSelectedCustomer(c);
+                    }}
+                    onOpenDispatchModal={setOrderToDispatch}
                     isSyncing={order.rawId ? syncingOrderIds.has(order.rawId) : false}
+                    isSelectable={isBulkSelectMode}
+                    isSelected={selectedOrderIds.has(order.id)}
+                    onToggleSelect={handleToggleSelect}
                   />
                 ))}
               </div>
@@ -427,6 +513,23 @@ export const UnifiedLogisticsWorkspace: React.FC<UnifiedLogisticsWorkspaceProps>
         customer={selectedCustomer}
         onClose={() => setSelectedCustomer(null)}
         onTrackOrder={handleTrackOrder}
+      />
+
+      {/* Dispatch Single Order Confirmation Modal */}
+      <DispatchOrderModal
+        order={orderToDispatch}
+        onClose={() => setOrderToDispatch(null)}
+        onSuccess={() => {
+          setOrderToDispatch(null);
+          setCurrentStage('dispatched');
+        }}
+      />
+
+      {/* Excel / CSV Import Modal */}
+      <OrderImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportSuccess={() => setCurrentStage('active')}
       />
 
       {/* Live Courier Tracking Modal */}

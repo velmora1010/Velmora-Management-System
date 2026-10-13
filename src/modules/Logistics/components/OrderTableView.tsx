@@ -11,7 +11,10 @@ import {
   CheckCircle2,
   Clock,
   User,
-  Phone
+  Phone,
+  CheckSquare,
+  Square,
+  ArrowRight
 } from 'lucide-react';
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 
@@ -20,7 +23,15 @@ interface OrderTableViewProps {
   onTrackOrder: (order: UnifiedLogisticsOrder) => void;
   onSyncOrder?: (order: UnifiedLogisticsOrder) => void;
   onViewCustomer?: (customerKey: string) => void;
+  onOpenDispatchModal?: (order: UnifiedLogisticsOrder) => void;
   syncingOrderIds?: Set<number>;
+
+  // Selection
+  isSelectable?: boolean;
+  selectedOrderIds?: Set<string>;
+  onToggleSelect?: (orderId: string) => void;
+  onToggleSelectAll?: () => void;
+  allSelected?: boolean;
 }
 
 export const OrderTableView: React.FC<OrderTableViewProps> = ({
@@ -28,7 +39,13 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
   onTrackOrder,
   onSyncOrder,
   onViewCustomer,
-  syncingOrderIds = new Set()
+  onOpenDispatchModal,
+  syncingOrderIds = new Set(),
+  isSelectable = false,
+  selectedOrderIds = new Set(),
+  onToggleSelect,
+  onToggleSelectAll,
+  allSelected = false
 }) => {
   const getBadgeStyle = (status: string) => {
     switch (status) {
@@ -51,6 +68,21 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
       <table className="w-full text-left text-xs border-collapse">
         <thead>
           <tr className="border-b border-slate-800/90 bg-slate-950/50 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+            {isSelectable && (
+              <th className="py-3 px-3 w-8">
+                <button
+                  type="button"
+                  onClick={onToggleSelectAll}
+                  className="text-slate-400 hover:text-purple-400 transition-colors cursor-pointer"
+                >
+                  {allSelected ? (
+                    <CheckSquare size={16} className="text-purple-400" />
+                  ) : (
+                    <Square size={16} className="text-slate-500" />
+                  )}
+                </button>
+              </th>
+            )}
             <th className="py-3 px-4">Order ID</th>
             <th className="py-3 px-4">Customer</th>
             <th className="py-3 px-4">Products</th>
@@ -64,12 +96,32 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
         <tbody className="divide-y divide-slate-800/60 font-medium">
           {orders.map((order) => {
             const isSyncing = order.rawId ? syncingOrderIds.has(order.rawId) : false;
+            const isSelected = selectedOrderIds.has(order.id);
 
             return (
               <tr 
                 key={order.id} 
-                className="hover:bg-slate-800/40 transition-colors group"
+                className={`transition-colors group ${
+                  isSelected ? 'bg-purple-950/20 hover:bg-purple-950/30' : 'hover:bg-slate-800/40'
+                }`}
               >
+                {/* Select Checkbox */}
+                {isSelectable && (
+                  <td className="py-3 px-3">
+                    <button
+                      type="button"
+                      onClick={() => onToggleSelect && onToggleSelect(order.id)}
+                      className="text-slate-400 hover:text-purple-400 transition-colors cursor-pointer"
+                    >
+                      {isSelected ? (
+                        <CheckSquare size={16} className="text-purple-400" />
+                      ) : (
+                        <Square size={16} className="text-slate-500" />
+                      )}
+                    </button>
+                  </td>
+                )}
+
                 {/* Order ID */}
                 <td className="py-3 px-4 whitespace-nowrap">
                   <div className="flex items-center gap-1.5">
@@ -145,6 +197,17 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                 {/* Actions */}
                 <td className="py-3 px-4 whitespace-nowrap text-right">
                   <div className="flex items-center justify-end gap-1.5">
+                    {order.workflowStage === 'prepare_dispatch' && onOpenDispatchModal && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenDispatchModal(order)}
+                        className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <span>Dispatch</span>
+                        <ArrowRight size={11} />
+                      </button>
+                    )}
+
                     {order.awbNumber && (
                       <button
                         type="button"
