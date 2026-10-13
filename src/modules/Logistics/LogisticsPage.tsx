@@ -6,20 +6,21 @@ import { OrderData } from './OrderData';
 import { TrackingStatus } from './TrackingStatus';
 import { LogisticsAnalytics } from './LogisticsAnalytics';
 import { CodTrash } from './CodTrash';
-import { Database, FileSpreadsheet, Recycle, Truck, LayoutDashboard, BarChart3 } from 'lucide-react';
+import { UnifiedLogisticsWorkspace } from './UnifiedLogisticsWorkspace';
+import { Database, FileSpreadsheet, Recycle, Truck, LayoutDashboard, BarChart3, Layers } from 'lucide-react';
 
 export const LogisticsPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const validTabs = ['dashboard', 'import', 'data', 'tracking', 'analytics', 'trash'];
-  const activeTab: 'dashboard' | 'import' | 'data' | 'tracking' | 'analytics' | 'trash' = 
+  const validTabs = ['workspace', 'dashboard', 'import', 'data', 'tracking', 'analytics', 'trash'];
+  const activeTab: 'workspace' | 'dashboard' | 'import' | 'data' | 'tracking' | 'analytics' | 'trash' = 
     (tabParam && validTabs.includes(tabParam))
       ? (tabParam as any)
-      : 'dashboard';
+      : 'workspace';
 
-  const setActiveTab = (tab: 'dashboard' | 'import' | 'data' | 'tracking' | 'analytics' | 'trash') => {
+  const setActiveTab = (tab: 'workspace' | 'dashboard' | 'import' | 'data' | 'tracking' | 'analytics' | 'trash') => {
     const newParams = new URLSearchParams(searchParams);
-    if (tab === 'dashboard') {
+    if (tab === 'workspace') {
       newParams.delete('tab');
     } else {
       newParams.set('tab', tab);
@@ -118,7 +119,23 @@ export const LogisticsPage: React.FC = () => {
       {/* Redesigned Tab Navigation Pill Container */}
       <div className="bg-slate-900/60 border border-slate-800/80 p-1.5 rounded-2xl shrink-0 flex items-center overflow-x-auto custom-scrollbar shadow-lg">
         <div className="flex items-center gap-1.5">
-          {/* Dashboard (Group 1) */}
+          {/* Unified Workspace (Primary Redesign) */}
+          <button
+            onClick={() => {
+              setActiveTab('workspace');
+              setSelectedFileId(null);
+            }}
+            className={`flex items-center gap-2 py-2 px-5 rounded-xl text-[13px] font-bold transition-all duration-200 whitespace-nowrap ${
+              activeTab === 'workspace'
+                ? 'text-white bg-gradient-to-r from-purple-600 to-indigo-600 shadow-md shadow-purple-600/25 border border-purple-500/50'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+            }`}
+          >
+            <Layers size={16} />
+            <span>Workspace</span>
+          </button>
+
+          {/* Dashboard */}
           <button
             onClick={() => {
               setActiveTab('dashboard');
@@ -220,6 +237,7 @@ export const LogisticsPage: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 min-h-0 bg-transparent flex flex-col overflow-hidden">
+        {activeTab === 'workspace' && <UnifiedLogisticsWorkspace onNavigateTab={handleNavigateTab} />}
         {activeTab === 'dashboard' && <LogisticsDashboard onNavigateTab={handleNavigateTab} />}
         {activeTab === 'import' && <ImportOrders initialFileId={selectedFileId} />}
         {activeTab === 'data' && <OrderData />}
