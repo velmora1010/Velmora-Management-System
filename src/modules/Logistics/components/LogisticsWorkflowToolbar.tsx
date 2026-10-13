@@ -8,7 +8,9 @@ import {
   Search, 
   SlidersHorizontal, 
   RotateCcw,
-  Square
+  UploadCloud,
+  Grid,
+  List
 } from 'lucide-react';
 import type { UnifiedWorkflowStage, WorkflowStageCounts } from '../../../types/unifiedLogistics';
 
@@ -31,6 +33,13 @@ interface LogisticsWorkflowToolbarProps {
   activeFilterCount?: number;
   onRefresh: () => void;
   isRefreshing?: boolean;
+
+  // Layout mode (Grid vs Table)
+  orderLayout?: 'grid' | 'table';
+  onToggleLayout?: (layout: 'grid' | 'table') => void;
+
+  // Import Orders Action
+  onOpenImportModal: () => void;
 }
 
 export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> = ({
@@ -47,12 +56,15 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
   onToggleFilters,
   activeFilterCount = 0,
   onRefresh,
-  isRefreshing = false
+  isRefreshing = false,
+  orderLayout = 'grid',
+  onToggleLayout,
+  onOpenImportModal
 }) => {
   return (
-    <div className="bg-slate-900/90 border border-slate-800/90 p-1.5 rounded-2xl shadow-xl flex items-center gap-1.5 overflow-x-auto custom-scrollbar shrink-0 select-none">
+    <div className="bg-slate-900/90 border border-slate-800/90 p-1.5 rounded-2xl shadow-xl flex items-center justify-between gap-2 overflow-x-auto custom-scrollbar shrink-0 select-none">
       
-      {/* GROUP 1: [Active: X] [Pending: Y] */}
+      {/* LEFT SIDE: Order Workflow Stages */}
       <div className="flex items-center gap-1.5 shrink-0">
         {/* 1. Active */}
         <button
@@ -85,13 +97,10 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
           <span>Pending:</span>
           <strong className="text-white font-extrabold">{counts.pending}</strong>
         </button>
-      </div>
 
-      {/* Divider 1 */}
-      <div className="h-5 w-px bg-slate-700/80 mx-1 shrink-0 hidden sm:block" />
+        {/* Divider */}
+        <div className="h-5 w-px bg-slate-700/80 mx-0.5 shrink-0 hidden sm:block" />
 
-      {/* GROUP 2: [Bulk Select] [Prepare Dispatch] [Dispatched] [Tracking] */}
-      <div className="flex items-center gap-1.5 shrink-0">
         {/* 3. Bulk Select (Only in Active/Pending) */}
         <button
           type="button"
@@ -197,20 +206,17 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
         </button>
       </div>
 
-      {/* Divider 2 */}
-      <div className="h-5 w-px bg-slate-700/80 mx-1 shrink-0 hidden md:block" />
-
-      {/* GROUP 3: Search, Filters & Refresh */}
+      {/* RIGHT SIDE: Search, Filter, Refresh, Layout Switch & Import Orders */}
       <div className="flex items-center gap-1.5 shrink-0 ml-auto">
         {/* Search */}
-        <div className="relative min-w-[100px] w-32 sm:w-40 md:w-52">
+        <div className="relative min-w-[90px] w-28 sm:w-36 md:w-44 lg:w-48">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search code, user..."
-            className="w-full h-9 bg-slate-900 border border-slate-700/80 rounded-xl pl-8 pr-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+            className="w-full h-9 bg-slate-900 border border-slate-700/80 rounded-xl pl-8 pr-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
           />
         </div>
 
@@ -242,6 +248,48 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
           title="Refresh Data"
         >
           <RotateCcw size={14} className={isRefreshing ? 'animate-spin text-purple-400' : ''} />
+        </button>
+
+        {/* Layout Mode (Grid / List) */}
+        {onToggleLayout && (
+          <div className="hidden sm:flex items-center p-0.5 bg-slate-900 border border-slate-700/80 rounded-xl">
+            <button
+              type="button"
+              onClick={() => onToggleLayout('grid')}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                orderLayout === 'grid'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Compact Cards View"
+            >
+              <Grid size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleLayout('table')}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                orderLayout === 'table'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Dense Table View"
+            >
+              <List size={13} />
+            </button>
+          </div>
+        )}
+
+        {/* Import Orders Button placed at the far right of the top toolbar */}
+        <button
+          type="button"
+          onClick={onOpenImportModal}
+          className="h-9 px-3 sm:px-3.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/30 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+          title="Import Orders from Shopify or Spreadsheet"
+        >
+          <UploadCloud size={14} />
+          <span className="hidden xs:inline">Import Orders</span>
+          <span className="xs:hidden">Import</span>
         </button>
       </div>
 
