@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, InfluencerPricing, InfluencerProduct, InfluencerBrandPerformance, InfluencerPostDate } from '../../types';
-import { Save, X, Plus, Upload, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
+import { Save, X, Plus, Upload, Trash2, AlertTriangle, Loader2, Video, Calendar } from 'lucide-react';
 import { useCampaignInfluencers, notifyInfluencerChange, notifyPostDateChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { ImportAutoDmModal } from '../../components/marketing/ImportAutoDmModal';
