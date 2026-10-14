@@ -5,6 +5,7 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 export interface FormattedDateResult {
   isoDate: string;        // e.g. "2026-04-13" or ""
   displayDate: string;    // e.g. "13 Apr 2026" or ""
+  timeStr?: string;       // e.g. "10:24 AM" or ""
   displayDateTime?: string; // e.g. "13 Apr 2026, 10:00 AM"
   raw: any;
 }
@@ -21,7 +22,7 @@ export interface FormattedDateResult {
  */
 export function parseAndFormatLogisticsDate(val: any): FormattedDateResult {
   if (val === null || val === undefined || val === '') {
-    return { isoDate: '', displayDate: '', raw: val };
+    return { isoDate: '', displayDate: '', timeStr: '', raw: val };
   }
 
   const str = String(val).trim();
@@ -32,7 +33,7 @@ export function parseAndFormatLogisticsDate(val: any): FormattedDateResult {
     str.toLowerCase() === 'nan' ||
     str.toLowerCase() === 'invalid date'
   ) {
-    return { isoDate: '', displayDate: '', raw: val };
+    return { isoDate: '', displayDate: '', timeStr: '', raw: val };
   }
 
   // 1. Check for numeric string or number (Excel serial or Unix timestamp)
@@ -40,7 +41,7 @@ export function parseAndFormatLogisticsDate(val: any): FormattedDateResult {
   if (!isNaN(num)) {
     // Pure integers under 35000 (e.g. order IDs like 1132, prices like 449) are NOT dates!
     if (num < 35000) {
-      return { isoDate: '', displayDate: '', raw: val };
+      return { isoDate: '', displayDate: '', timeStr: '', raw: val };
     }
 
     // Modern Excel serial dates (~1995 to ~2055, corresponding to serials 35000 to 60000)
@@ -52,14 +53,16 @@ export function parseAndFormatLogisticsDate(val: any): FormattedDateResult {
           const displayDate = `${p.d} ${MONTH_NAMES[p.m - 1]} ${p.y}`;
           
           let displayDateTime = displayDate;
+          let timeStr = '';
           if (p.H !== undefined && (p.H > 0 || p.M > 0)) {
             const hour12 = p.H % 12 || 12;
             const ampm = p.H >= 12 ? 'PM' : 'AM';
             const minStr = String(p.M || 0).padStart(2, '0');
-            displayDateTime = `${displayDate}, ${hour12}:${minStr} ${ampm}`;
+            timeStr = `${hour12}:${minStr} ${ampm}`;
+            displayDateTime = `${displayDate}, ${timeStr}`;
           }
 
-          return { isoDate, displayDate, displayDateTime, raw: val };
+          return { isoDate, displayDate, timeStr, displayDateTime, raw: val };
         }
       } catch (e) {
         // Fall through
@@ -108,16 +111,18 @@ export function parseAndFormatLogisticsDate(val: any): FormattedDateResult {
         const displayDate = `${day} ${MONTH_NAMES[m - 1]} ${y}`;
         
         let displayDateTime = displayDate;
+        let timeStr = '';
         const hours = d.getHours();
         const minutes = d.getMinutes();
         if (hours > 0 || minutes > 0) {
           const hour12 = hours % 12 || 12;
           const ampm = hours >= 12 ? 'PM' : 'AM';
           const minStr = String(minutes).padStart(2, '0');
-          displayDateTime = `${displayDate}, ${hour12}:${minStr} ${ampm}`;
+          timeStr = `${hour12}:${minStr} ${ampm}`;
+          displayDateTime = `${displayDate}, ${timeStr}`;
         }
 
-        return { isoDate, displayDate, displayDateTime, raw: val };
+        return { isoDate, displayDate, timeStr, displayDateTime, raw: val };
       }
     }
   }
