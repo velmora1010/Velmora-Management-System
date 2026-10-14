@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { CheckCircle, PackageSearch, Download, Search, Package, RefreshCcw, ArrowLeft, AlertTriangle, ArrowRight, Printer } from 'lucide-react';
 import { inventoryService } from '../../../services/inventoryService';
 import { departmentService } from '../../../services/departmentService';
+import { barcodeService } from '../../../services/barcodeService';
 import Barcode from 'react-barcode';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ConfirmModal } from '../../../components/ui/ConfirmModal';
@@ -11,6 +12,7 @@ import JSZip from 'jszip';
 import toast from 'react-hot-toast';
 import { deriveScanCodeFromBarcode } from '../production/productHelpers';
 import { printProductBarcodeLabel34x20 } from '../../../utils/barcodePrinter';
+import { BarcodePreview } from '../../../components/ui/BarcodePreview';
 
 const PRODUCTS = [
   { code: '1B', name: 'Blue Detergent', theme: { bg: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: 'rgba(59, 130, 246, 0.2)' } },
@@ -327,67 +329,17 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
   };
 
   const handleDownloadBarcode = async (barcodeData: any) => {
-    setDownloadTarget(barcodeData);
-    setTimeout(async () => {
-      if (!barcodeDownloadRef.current || !barcodeData) return;
-      try {
-        const canvas = await html2canvas(barcodeDownloadRef.current, {
-          backgroundColor: '#ffffff',
-          scale: 4, // 4x scale factor for 300+ DPI high resolution
-          useCORS: true,
-          logging: false
-        });
-        const link = document.createElement('a');
-        link.download = `${barcodeData.barcode_no}.png`;
-        link.href = canvas.toDataURL('image/png', 1.0);
-        link.click();
-      } catch (err) {
-        console.error('Failed to download barcode label', err);
-      } finally {
-        setDownloadTarget(null);
-      }
-    }, 100);
+    barcodeService.downloadBarcodeOnlyLabel(barcodeData, 'PRODUCT');
   };
 
   const handleDownloadAll = async () => {
     setIsDownloadingAll(true);
     try {
-      const zip = new JSZip();
-      const productFolder = zip.folder("Product_Barcodes");
-      if (!productFolder) return;
-
-      for (const barcodeData of filteredBarcodes) {
-        await new Promise<void>(resolve => {
-          setDownloadTarget(barcodeData);
-          setTimeout(resolve, 150);
-        });
-
-        if (barcodeDownloadRef.current) {
-          const canvas = await html2canvas(barcodeDownloadRef.current, {
-            backgroundColor: '#ffffff',
-            scale: 4, // 4x scale factor for 300+ DPI high resolution
-            useCORS: true,
-            logging: false
-          });
-          const imgData = canvas.toDataURL('image/png', 1.0).split(',')[1];
-          const fileName = `${barcodeData.barcode_no}.png`;
-          const subFolderName = (barcodeData.product_name || barcodeData.product_code || 'Unknown').replace(/\s+/g, '_');
-          
-          productFolder.folder(subFolderName)?.file(fileName, imgData, { base64: true });
-        }
-      }
-
-      const content = await zip.generateAsync({ type: 'blob' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(content);
-      link.download = `All_${selectedProductCode}_Barcodes.zip`;
-      link.click();
+      await barcodeService.downloadMultipleBarcodeOnlyLabels(filteredBarcodes, `All_${selectedProductCode}_Barcodes.zip`, 'PRODUCT');
     } catch (err) {
       console.error('Failed to download all barcodes', err);
-      toast.success('Failed to zip and download barcodes.');
     } finally {
       setIsDownloadingAll(false);
-      setDownloadTarget(null);
     }
   };
 
@@ -744,8 +696,14 @@ export default function ProductBarcodeList({ onBack }: ProductBarcodeListProps) 
               animate={{ opacity: 1, y: 0 }}
               style={{ background: '#1e293b', border: `1px solid ${selectedTheme.border}`, borderRadius: '20px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
             >
-              <div style={{ background: 'white', padding: '16px', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100px', position: 'relative' }}>
-                <Barcode value={displayBarcode} width={1.8} height={60} fontSize={14} margin={0} displayValue={false} />
+              <div id={`barcode-${displayBarcode}`}>
+                <BarcodePreview 
+                  record={item} 
+                  scanCode={item.scan_code || deriveScanCodeFromBarcode(displayBarcode)} 
+                  statusText={getProductBadge(item.currentStage, productSubTab).text} 
+                  statusBg={getProductBadge(item.currentStage, productSubTab).bg} 
+                  statusColor={getProductBadge(item.currentStage, productSubTab).color} 
+                />
               </div>
               
               <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>

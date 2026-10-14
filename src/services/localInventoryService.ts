@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { deriveScanCodeFromBarcode } from '../modules/inventory/production/productHelpers';
 import { barcodeService } from './barcodeService';
 import { logActivity } from './activityService';
+import { productionReadyBatchService, normalizeProductionReadyStatus } from './productionReadyBatchService';
 
 export const getMasterBarcode = (item: any) => {
   return (
@@ -63,7 +64,16 @@ export const dedupeBarcodes = (items: any[]) => {
   return Array.from(map.values());
 };
 
-export const normalizeMaterialKey = (name: string) => String(name || "").trim().toLowerCase();
+export const normalizeMaterialKey = (name: string) => {
+  let s = String(name || "").trim().toLowerCase();
+  if (s.includes('white flower')) return 'white flower fragrance';
+  if (s.includes('lemon blast')) return 'lemon blast fragrance';
+  if (s.includes('milk saffron')) return 'milk saffron fragrance';
+  if (s.includes('blue colour') || s.includes('blue color')) return 'blue colour';
+  if (s.includes('yellow colour') || s.includes('yellow color')) return 'yellow colour';
+  if (s.includes('pink colour') || s.includes('pink color') || s.includes('violet colour')) return 'pink colour';
+  return s;
+};
 
 export const convertToStandardUnit = (qty: number, unit: string): number => {
   const u = String(unit || "KG").trim().toUpperCase();
@@ -622,7 +632,13 @@ class LocalInventoryService {
 
   // ---- MATERIALS ----
   async getMaterials() {
-    return this.getSettingsList('inventory_materials');
+    const list = await this.getSettingsList('inventory_materials');
+    return (list || []).map((m: any) => {
+      if (m.name === 'Violet Colour') {
+        return { ...m, name: 'Pink Colour', color_code: '#ec4899' };
+      }
+      return m;
+    });
   }
 
   async saveMaterial(material: any) {
@@ -662,19 +678,26 @@ class LocalInventoryService {
       toast.error('Failed to load raw material batches: ' + error.message);
       throw error;
     }
-    return (data || []).map((item: any) => ({
-      ...item,
-      serial_number: item.barcode,
-      barcodeNumber: item.barcode,
-      displayBarcode: item.barcode,
-      materialName: item.material_name,
-      material_name: item.material_name,
-      batchNo: item.batch_no,
-      batch_id: item.batch_no,
-      currentStage: item.current_stage || 'Incoming',
-      original_quantity: item.quantity,
-      vendor_name: item.vendor
-    }));
+    return (data || []).map((item: any) => {
+      const derivedScan = barcodeService.deriveScanCode(item.barcode || '');
+      const isPRP = Boolean(item.barcode && String(item.barcode).toUpperCase().startsWith('PRP-'));
+      return {
+        ...item,
+        scan_code: derivedScan,
+        scanCode: derivedScan,
+        isProductionReady: isPRP,
+        serial_number: item.barcode,
+        barcodeNumber: item.barcode,
+        displayBarcode: derivedScan || item.barcode,
+        materialName: item.material_name,
+        material_name: item.material_name,
+        batchNo: item.batch_no,
+        batch_id: item.batch_no,
+        currentStage: item.current_stage || 'Incoming',
+        original_quantity: item.quantity,
+        vendor_name: item.vendor
+      };
+    });
   }
 
   async saveBatch(batch: any) {
@@ -770,6 +793,184 @@ class LocalInventoryService {
 
   async saveBarcode(batchId: string, updates: any) {
     return this.updateBatch(batchId, updates);
+  }
+
+  // ---- PACKAGING BARCODES ----
+  async getPackagingBarcodes(): Promise<any[]> {
+    try {
+      const { data, error } = await supabase.from(SUPABASE_TABLES.packagingMaterialBarcodes || 'packaging_material_barcodes').select('*');
+      if (error) {
+        console.warn('Supabase packaging_material_barcodes fetch warning, fallback to settings list:', error.message);
+        const list = await this.getSettingsList('packaging_material_barcodes');
+        return list.map(item => this.formatPackagingBarcodeRecord(item));
+      }
+      const supabaseRecords = (data || []).map((item: any) => this.formatPackagingBarcodeRecord(item));
+      const localList = await this.getSettingsList('packaging_material_barcodes');
+      const formattedLocal = localList.map(item => this.formatPackagingBarcodeRecord(item));
+
+      const merged = [...supabaseRecords];
+      for (const item of formattedLocal) {
+        if (!merged.some(x => x.id === item.id || x.barcode === item.barcode)) {
+          merged.push(item);
+        }
+      }
+      return merged;
+    } catch (err) {
+      console.warn('Fallback to local storage packaging_material_barcodes', err);
+      const list = await this.getSettingsList('packaging_material_barcodes');
+      return list.map(item => this.formatPackagingBarcodeRecord(item));
+    }
+  }
+
+  formatPackagingBarcodeRecord(item: any) {
+    const scanCode = item.scan_code || barcodeService.deriveScanCode(item.barcode || item.serial_number, 'PACKAGING');
+    return {
+      ...item,
+      id: item.id || crypto.randomUUID(),
+      barcode: item.barcode || item.serial_number,
+      serial_number: item.barcode || item.serial_number,
+      barcodeNumber: item.barcode || item.serial_number,
+      displayBarcode: item.barcode || item.serial_number,
+      scan_code: scanCode,
+      scanCode: scanCode,
+      packaging_name: item.packaging_name || item.material_name || item.name || '',
+      material_name: item.packaging_name || item.material_name || item.name || '',
+      packaging_category: item.packaging_category || item.category || 'Primary Packaging',
+      category: item.packaging_category || item.category || 'Primary Packaging',
+      batch_no: item.batch_no || '',
+      batchNo: item.batch_no || '',
+      vendor: item.vendor || item.vendor_name || '',
+      vendor_name: item.vendor || item.vendor_name || '',
+      quantity: Number(item.quantity || item.original_quantity || 0),
+      original_quantity: Number(item.quantity || item.original_quantity || 0),
+      unit: item.unit || 'PCS',
+      price_per_unit: Number(item.price_per_unit || item.price_per_kg || 0),
+      gst_percent: Number(item.gst_percent || 0),
+      po_reference: item.po_reference || '',
+      scanning_person_name: item.scanning_person_name || item.scanningPersonName || '',
+      notes: item.notes || '',
+      received_date: item.received_date || item.created_at || new Date().toISOString(),
+      inventory_in_person: item.inventory_in_person || null,
+      inventory_out_person: item.inventory_out_person || null,
+      inventory_in_at: item.inventory_in_at || null,
+      inventory_out_at: item.inventory_out_at || null,
+      currentStage: item.current_stage || item.currentStage || 'Incoming',
+      current_stage: item.current_stage || item.currentStage || 'Incoming',
+      created_at: item.created_at || new Date().toISOString()
+    };
+  }
+
+  async savePackagingIntake(inventoryInRecord: any, batchesData: any[]) {
+    const invId = crypto.randomUUID();
+    const invInList = await this.getSettingsList('packaging_inventory_in');
+    invInList.push({ ...inventoryInRecord, id: invId });
+    await this.saveSettingsList('packaging_inventory_in', invInList);
+
+    const newBatches = batchesData.map(b => ({
+      ...b,
+      id: b.id || crypto.randomUUID(),
+      inventory_in_id: invId,
+      created_at: new Date().toISOString()
+    }));
+    
+    await this.savePackagingBarcodes(newBatches);
+    return newBatches.map(b => b.id);
+  }
+
+  async savePackagingBarcodes(batches: any[]) {
+    const payloads = batches.map(batch => ({
+      id: batch.id || crypto.randomUUID(),
+      barcode: batch.barcodeNumber || batch.barcode || batch.serial_number || batch.code || batch.id,
+      scan_code: batch.scan_code || batch.scanCode || barcodeService.deriveScanCode(batch.barcode || batch.serial_number, 'PACKAGING'),
+      packaging_name: batch.packaging_name || batch.material_name || batch.name || '',
+      packaging_category: batch.packaging_category || batch.category || 'Primary Packaging',
+      batch_no: batch.batchNo || batch.batch_no || '',
+      vendor: batch.vendor || batch.vendor_name || '',
+      quantity: Number(batch.quantity || batch.original_quantity || 0),
+      unit: batch.unit || 'PCS',
+      price_per_unit: Number(batch.price_per_unit || batch.price_per_kg || 0),
+      gst_percent: Number(batch.gst_percent || 0),
+      po_reference: batch.po_reference || null,
+      scanning_person_name: batch.scanning_person_name || batch.scanningPersonName || null,
+      notes: batch.notes || null,
+      received_date: batch.received_date || batch.date_received || new Date().toISOString(),
+      inventory_in_person: batch.inventory_in_person || null,
+      inventory_out_person: batch.inventory_out_person || null,
+      inventory_in_at: batch.inventory_in_at || null,
+      inventory_out_at: batch.inventory_out_at || null,
+      current_stage: batch.currentStage || batch.current_stage || 'Incoming',
+      created_at: batch.created_at || batch.createdAt || new Date().toISOString(),
+      updated_at: batch.updated_at || new Date().toISOString()
+    }));
+
+    try {
+      const { error } = await supabase.from(SUPABASE_TABLES.packagingMaterialBarcodes || 'packaging_material_barcodes').insert(payloads);
+      if (error) {
+        console.warn('Supabase insert warning, falling back to local list:', error.message);
+      }
+    } catch (e) {
+      console.warn('Supabase offline/error for packaging_material_barcodes insert', e);
+    }
+
+    const currentList = await this.getSettingsList('packaging_material_barcodes');
+    const updated = [...currentList];
+    for (const item of payloads) {
+      const idx = updated.findIndex(x => x.id === item.id || x.barcode === item.barcode);
+      if (idx > -1) {
+        updated[idx] = item;
+      } else {
+        updated.push(item);
+      }
+    }
+    await this.saveSettingsList('packaging_material_barcodes', updated);
+  }
+
+  async updatePackagingBarcode(id: string, updates: any) {
+    const payload: any = { updated_at: new Date().toISOString() };
+    if (updates.packaging_name !== undefined || updates.material_name !== undefined) payload.packaging_name = updates.packaging_name || updates.material_name;
+    if (updates.packaging_category !== undefined || updates.category !== undefined) payload.packaging_category = updates.packaging_category || updates.category;
+    if (updates.batchNo !== undefined || updates.batch_no !== undefined) payload.batch_no = updates.batchNo || updates.batch_no;
+    if (updates.vendor !== undefined || updates.vendor_name !== undefined) payload.vendor = updates.vendor || updates.vendor_name;
+    if (updates.quantity !== undefined) payload.quantity = updates.quantity;
+    if (updates.unit !== undefined) payload.unit = updates.unit;
+    if (updates.price_per_unit !== undefined) payload.price_per_unit = updates.price_per_unit;
+    if (updates.gst_percent !== undefined) payload.gst_percent = updates.gst_percent;
+    if (updates.currentStage !== undefined || updates.current_stage !== undefined) payload.current_stage = updates.currentStage || updates.current_stage;
+    if (updates.inventory_in_person !== undefined) payload.inventory_in_person = updates.inventory_in_person;
+    if (updates.inventory_out_person !== undefined) payload.inventory_out_person = updates.inventory_out_person;
+    if (updates.inventory_in_at !== undefined) payload.inventory_in_at = updates.inventory_in_at;
+    if (updates.inventory_out_at !== undefined) payload.inventory_out_at = updates.inventory_out_at;
+
+    try {
+      await supabase
+        .from(SUPABASE_TABLES.packagingMaterialBarcodes || 'packaging_material_barcodes')
+        .update(payload)
+        .or(`id.eq.${id},barcode.eq.${id}`);
+    } catch (e) {
+      console.warn('Supabase update fallback to local list for packaging barcode', e);
+    }
+
+    const currentList = await this.getSettingsList('packaging_material_barcodes');
+    const idx = currentList.findIndex(x => x.id === id || x.barcode === id);
+    if (idx > -1) {
+      currentList[idx] = { ...currentList[idx], ...payload };
+      await this.saveSettingsList('packaging_material_barcodes', currentList);
+    }
+  }
+
+  async deletePackagingBarcode(id: string) {
+    try {
+      await supabase
+        .from(SUPABASE_TABLES.packagingMaterialBarcodes || 'packaging_material_barcodes')
+        .delete()
+        .or(`id.eq.${id},barcode.eq.${id}`);
+    } catch (e) {
+      console.warn('Supabase delete fallback for packaging barcode', e);
+    }
+
+    const currentList = await this.getSettingsList('packaging_material_barcodes');
+    const filtered = currentList.filter(x => x.id !== id && x.barcode !== id);
+    await this.saveSettingsList('packaging_material_barcodes', filtered);
   }
 
   // ---- RAW MATERIAL INTAKE SPECIFIC ----
@@ -2168,14 +2369,32 @@ class LocalInventoryService {
     const userId = localStorage.getItem('current_user') || 'Warehouse Admin';
 
     let record: any = null;
-    const scannedCode = normalizeBarcode(barcodeNumber);
+    let isProductionReady = false;
+    const scannedCode = String(barcodeNumber || '').trim().replace(/[\r\n\t]/g, '').toUpperCase();
 
     if (department === 'RAW_MATERIAL') {
+      // Lookup Step 1: Search in loaded state by derived scan_code, scanCode property, or full barcode
       const batches = await this.getBatches();
-      record = batches.find((item: any) => normalizeBarcode(item.barcode) === scannedCode);
+      record = batches.find((item: any) => 
+        (item.scan_code && normalizeBarcode(item.scan_code) === scannedCode) ||
+        (item.scanCode && normalizeBarcode(item.scanCode) === scannedCode) ||
+        normalizeBarcode(item.barcode) === scannedCode || 
+        normalizeBarcode(item.serial_number) === scannedCode ||
+        normalizeBarcode(barcodeService.deriveScanCode(item.barcode)) === scannedCode
+      );
+
+      // Lookup Step 2: Query productionReadyBatchService (which queries raw_material_barcodes directly)
       if (!record) {
-        throw new Error(`Barcode ${barcodeNumber} does not exist in Raw Materials.`);
+        const prpBatch = await productionReadyBatchService.findProductionReadyBatchByBarcode(scannedCode);
+        if (prpBatch) {
+          record = prpBatch;
+        }
       }
+
+      if (!record) {
+        throw new Error('Barcode not found in Raw Materials.');
+      }
+      isProductionReady = Boolean(record.isProductionReady || (record.barcode && String(record.barcode).toUpperCase().startsWith('PRP-')));
     } else if (department === 'PRODUCT') {
       const allProducts = await this.getProductBarcodes();
       record = allProducts.find((item: any) => 
@@ -2201,41 +2420,45 @@ class LocalInventoryService {
       }
     }
 
-    const currentStage = record.currentStage || 'READY_FOR_FIRST_SCAN';
+    const currentStage = record.current_stage || record.currentStage || 'Incoming';
     let nextStage = '';
     let successMessage = '';
 
     if (department === 'RAW_MATERIAL') {
+      const normalizedStatus = normalizeProductionReadyStatus(currentStage);
+
+      if (normalizedStatus === 'CANCELLED') {
+        throw new Error('This pack is cancelled and cannot be scanned.');
+      }
+      if (normalizedStatus === 'CONSUMED') {
+        throw new Error('This pack has already been consumed.');
+      }
+
       if (scanAction === 'IN') {
-        if (currentStage === 'READY_FOR_FIRST_SCAN' || currentStage === 'Incoming') {
-          nextStage = 'RAW_MATERIAL_IN';
-          successMessage = 'Raw material received into Inventory IN.';
-          record.inventory_in_person = payload?.personName || userId;
-          record.inventory_in_at = new Date().toISOString();
-        } else {
+        if (normalizedStatus === 'INCOMING') {
+          const updatedRow = await productionReadyBatchService.performInventoryIn(record.id, payload?.personName || userId);
+          return {
+            success: true,
+            message: isProductionReady ? 'Production-ready batch received into Inventory IN.' : 'Raw material batch received into Inventory IN.',
+            stage: 'RAW_MATERIAL_IN',
+            item: updatedRow
+          };
+        } else if (normalizedStatus === 'RAW_MATERIAL_IN') {
           throw new Error('Already scanned to Inventory IN. Go to Inventory OUT to release.');
+        } else {
+          throw new Error('This batch has already been scanned out.');
         }
       } else if (scanAction === 'OUT') {
-        if (currentStage === 'RAW_MATERIAL_IN') {
-          nextStage = 'RAW_MATERIAL_OUT';
-          successMessage = 'Raw material moved to Inventory OUT (Ready for Production).';
-          record.inventory_out_person = payload?.personName || userId;
-          record.inventory_out_at = new Date().toISOString();
-          
-          const released = await this.getRawMaterialsReleasedToProduct();
-          released.push({
-            type: 'RAW_MATERIAL_RELEASED_TO_PRODUCT',
-            sourceBarcode: record.barcode,
-            materialName: record.material_name,
-            quantity: record.quantity || 0,
-            unit: record.unit || 'kg',
-            batch: record.batch_no || '',
-            vendor: record.vendor || '',
-            releasedAt: now
-          });
-          await this.saveSettingsList('raw_material_released_to_product', released);
-        } else if (currentStage === 'RAW_MATERIAL_OUT') {
-          throw new Error('Already scanned to Inventory OUT / Released to Product.');
+        if (normalizedStatus === 'RAW_MATERIAL_IN') {
+          const updatedRow = await productionReadyBatchService.performInventoryOut(record.id, payload?.personName || userId);
+          return {
+            success: true,
+            message: isProductionReady ? 'Production-ready batch issued out (Ready for Production).' : 'Raw material batch issued out.',
+            stage: 'RAW_MATERIAL_OUT',
+            item: updatedRow
+          };
+        } else if (normalizedStatus === 'RAW_MATERIAL_OUT') {
+          throw new Error('This batch has already been scanned out.');
         } else {
           throw new Error('Scan to Inventory IN first.');
         }
@@ -2392,7 +2615,7 @@ class LocalInventoryService {
       throw dbError;
     }
 
-    const normalize = (name: string) => String(name || "").trim().toLowerCase();
+    const normalize = normalizeMaterialKey;
 
     const releasedStock: Record<string, number> = {};
     (barcodes || []).forEach((item: any) => {
@@ -2454,6 +2677,204 @@ class LocalInventoryService {
     }
 
     await this.saveInventoryTransactions(list);
+    return true;
+  }
+
+  async getPackagingCommittedStock(): Promise<Record<string, number>> {
+    const transactions = await this.getInventoryTransactions();
+    const normalize = normalizeMaterialKey;
+    const batchMaterialCommitted: Record<string, number> = {};
+
+    transactions.forEach((tx: any) => {
+      if (!tx.transactionType || !tx.transactionType.startsWith('PACKAGING_')) return;
+      const batchId = tx.production_batch_id || tx.batch_id || 'general';
+      const matKey = normalize(tx.itemName || tx.material_name || tx.name);
+      const qty = Number(tx.quantity || 0);
+      if (!matKey) return;
+      const compositeKey = `${batchId}:${matKey}`;
+      batchMaterialCommitted[compositeKey] = Math.max(batchMaterialCommitted[compositeKey] || 0, qty);
+    });
+
+    const committedStock: Record<string, number> = {};
+    Object.keys(batchMaterialCommitted).forEach((compKey) => {
+      const matKey = compKey.split(':')[1];
+      const qty = batchMaterialCommitted[compKey];
+      committedStock[matKey] = (committedStock[matKey] || 0) + qty;
+    });
+
+    return committedStock;
+  }
+
+  async validatePackagingAvailability(requiredPackaging: any[]) {
+    if (!requiredPackaging || requiredPackaging.length === 0) return [];
+
+    let supabaseRecords: any[] = [];
+    try {
+      const { data, error } = await supabase
+        .from(SUPABASE_TABLES.packagingMaterialBarcodes || 'packaging_material_barcodes')
+        .select('*');
+      if (!error && data) {
+        supabaseRecords = data;
+      }
+    } catch (err) {
+      console.warn('Error fetching packaging_material_barcodes from Supabase', err);
+    }
+
+    const normalize = normalizeMaterialKey;
+
+    const stockMap: Record<string, number> = {};
+    (supabaseRecords || []).forEach((item: any) => {
+      const nameKey = normalize(item.packaging_name || item.material_name || item.name);
+      const qty = Number(item.quantity || item.original_quantity || 0);
+      if (nameKey && qty > 0) {
+        stockMap[nameKey] = (stockMap[nameKey] || 0) + qty;
+      }
+    });
+
+    const committedMap = await this.getPackagingCommittedStock();
+
+    const status = [];
+    for (const pkg of requiredPackaging) {
+      const key = normalize(pkg.name);
+      const totalInStock = stockMap[key] || 0;
+      const committed = committedMap[key] || 0;
+      const availablePcs = Math.max(0, totalInStock - committed);
+      const requiredQty = Number(pkg.required_quantity || pkg.required || 0);
+      const remaining = availablePcs - requiredQty;
+      const isSufficient = availablePcs >= requiredQty && requiredQty > 0;
+
+      status.push({
+        name: pkg.name,
+        category: pkg.category || 'Primary Packaging',
+        required: requiredQty,
+        available: availablePcs,
+        remaining: remaining,
+        sufficient: isSufficient,
+        status: isSufficient ? 'SUFFICIENT' : 'INSUFFICIENT'
+      });
+    }
+
+    return status;
+  }
+
+  async reserveProductionMaterials(
+    ingredients: any[],
+    packaging: any[],
+    productionBatchId: string,
+    productCode: string
+  ) {
+    // 1. Validate raw materials
+    const rawStatus = await this.validateIngredientAvailability(ingredients);
+    for (const item of rawStatus) {
+      if (!item.sufficient) {
+        throw new Error(`Insufficient stock or material not linked for ${item.name}. Required: ${item.required}, Available: ${item.available}`);
+      }
+    }
+
+    // 2. Validate packaging
+    const pkgStatus = await this.validatePackagingAvailability(packaging);
+    for (const item of pkgStatus) {
+      if (!item.sufficient) {
+        throw new Error(`One or more required packaging materials are unavailable or insufficient in Inventory.`);
+      }
+    }
+
+    // 3. Atomically perform BOTH raw material deduction and packaging reservation
+    const list = await this.getInventoryTransactions();
+    const now = new Date().toISOString();
+
+    for (const ing of ingredients) {
+      list.push({
+        id: crypto.randomUUID(),
+        transactionType: "PRODUCTION_CONSUME",
+        itemName: ing.name,
+        quantity: ing.required_quantity,
+        fromStage: "RAW_MATERIAL_OUT",
+        toStage: "PRODUCTION_CONSUMED",
+        production_batch_id: productionBatchId,
+        product_code: productCode,
+        createdAt: now
+      });
+    }
+
+    for (const pkg of packaging) {
+      list.push({
+        id: crypto.randomUUID(),
+        transactionType: "PACKAGING_RESERVE",
+        itemName: pkg.name,
+        quantity: pkg.required_quantity,
+        unit: pkg.unit || 'PCS',
+        fromStage: "Available",
+        toStage: "Reserved",
+        production_batch_id: productionBatchId,
+        product_code: productCode,
+        createdAt: now
+      });
+    }
+
+    await this.saveInventoryTransactions(list);
+    return true;
+  }
+
+  async saveProductionPackaging(packaging: any[]) {
+    const list = await this.getSettingsList('production_packaging');
+    list.push(...packaging.map(x => ({ ...x, id: x.id || crypto.randomUUID() })));
+    await this.saveSettingsList('production_packaging', list);
+  }
+
+  async getProductionPackaging(batchId?: string) {
+    const list = await this.getSettingsList('production_packaging');
+    if (batchId) {
+      return list.filter((x: any) => x.production_batch_id === batchId);
+    }
+    return list;
+  }
+
+  async issuePackagingToProduction(batchId: string, humanReadableBatchId?: string) {
+    const list = await this.getInventoryTransactions();
+    const now = new Date().toISOString();
+    const pkgList = await this.getProductionPackaging(batchId || humanReadableBatchId);
+
+    if (pkgList.length > 0) {
+      for (const pkg of pkgList) {
+        list.push({
+          id: crypto.randomUUID(),
+          transactionType: "PACKAGING_ISSUE",
+          itemName: pkg.material_name || pkg.name,
+          quantity: pkg.required_quantity || pkg.quantity,
+          unit: pkg.unit || 'PCS',
+          fromStage: "Reserved",
+          toStage: "Issued to Production",
+          production_batch_id: batchId,
+          createdAt: now
+        });
+      }
+      await this.saveInventoryTransactions(list);
+    }
+    return true;
+  }
+
+  async consumePackagingForProduction(batchId: string, humanReadableBatchId?: string) {
+    const list = await this.getInventoryTransactions();
+    const now = new Date().toISOString();
+    const pkgList = await this.getProductionPackaging(batchId || humanReadableBatchId);
+
+    if (pkgList.length > 0) {
+      for (const pkg of pkgList) {
+        list.push({
+          id: crypto.randomUUID(),
+          transactionType: "PACKAGING_CONSUME",
+          itemName: pkg.material_name || pkg.name,
+          quantity: pkg.required_quantity || pkg.quantity,
+          unit: pkg.unit || 'PCS',
+          fromStage: "Issued to Production",
+          toStage: "Consumed",
+          production_batch_id: batchId,
+          createdAt: now
+        });
+      }
+      await this.saveInventoryTransactions(list);
+    }
     return true;
   }
 }

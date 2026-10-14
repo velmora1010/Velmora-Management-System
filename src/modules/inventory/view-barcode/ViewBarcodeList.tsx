@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import ProductBarcodeList from './ProductBarcodeList';
+import { PackagingBarcodeList } from './PackagingBarcodeList';
+import ProductionReadyBarcodeList from './ProductionReadyBarcodeList';
 
 import { inventoryService } from '../../../services/inventoryService';
-import { Download, Search, Eye, Copy, AlertTriangle, Printer, Trash2, Box, Boxes, Package, Plus, X, Clock, CheckCircle, Barcode as BarcodeIcon, AlertCircle, History, ArrowLeft } from 'lucide-react';
+import { Download, Search, Eye, Copy, AlertTriangle, Printer, Trash2, Box, Boxes, Package, Plus, X, Clock, CheckCircle, Barcode as BarcodeIcon, AlertCircle, History, ArrowLeft, Sparkles } from 'lucide-react';
 import Barcode from 'react-barcode';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,6 +13,8 @@ import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import toast from 'react-hot-toast';
 import { barcodeService } from '../../../services/barcodeService';
+import { BarcodePreview } from '../../../components/ui/BarcodePreview';
+import { productionReadyBatchService, normalizeRawMaterialStage } from '../../../services/productionReadyBatchService';
 
 
 const normalizeBarcode = (value: any) =>
@@ -29,23 +33,13 @@ const getProductTheme = (code: string) => {
   }
 };
 
-const getProductFullName = (code: string) => {
-  switch (code) {
-    case '1B': return 'Blue Detergent';
-    case '1Y': return 'Yellow Dishwash';
-    case '1P': return 'Pink Conditioner';
-    case '1S': return 'Sponge';
-    default: return code;
-  }
-};
-
-
 const getRawBadge = (stage: string, tab: string) => {
   if (tab === 'ALL') {
     if (stage === 'READY_FOR_FIRST_SCAN' || !stage) return { text: 'READY TO SCAN IN', bg: 'rgba(100, 116, 139, 0.1)', color: '#64748b' };
     if (stage === 'RAW_MATERIAL_IN') return { text: 'SCANNED IN', bg: 'rgba(16, 185, 129, 0.1)', color: '#10b981' };
     if (stage === 'RAW_MATERIAL_OUT') return { text: 'SCANNED OUT', bg: 'rgba(139, 92, 246, 0.1)', color: '#8b5cf6' };
   } else if (tab === 'IN') {
+    if (stage === 'READY_FOR_FIRST_SCAN' || !stage) return { text: 'SCAN TO IN', bg: 'rgba(100, 116, 139, 0.1)', color: '#64748b' };
     if (stage === 'RAW_MATERIAL_IN') return { text: 'SCAN TO OUT', bg: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' };
     if (stage === 'RAW_MATERIAL_OUT') return { text: 'SCANNED OUT', bg: 'rgba(16, 185, 129, 0.1)', color: '#10b981' };
   } else if (tab === 'OUT') {
@@ -57,7 +51,7 @@ const getRawBadge = (stage: string, tab: string) => {
 const ViewBarcode = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<'RAW_MATERIAL' | 'PRODUCT' | 'COMBO' | null>((location.state as any)?.activeTab || null);
+  const [activeTab, setActiveTab] = useState<'RAW_MATERIAL' | 'PRODUCT' | 'COMBO' | 'PACKAGING' | 'PRODUCTION_READY' | null>((location.state as any)?.activeTab || null);
   const [rawMaterialSubTab, setRawMaterialSubTab] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
   const [comboSubTab, setComboSubTab] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
 
@@ -151,27 +145,8 @@ const ViewBarcode = () => {
   };
 
   const handleDownloadBarcode = async (barcodeData: any) => {
-    setDownloadTarget(barcodeData);
-    // Wait for state to apply to the hidden ref
-    setTimeout(async () => {
-      if (!barcodeDownloadRef.current || !barcodeData) return;
-      try {
-        const canvas = await html2canvas(barcodeDownloadRef.current, {
-          backgroundColor: '#ffffff',
-          scale: 4, // 4x scale factor for 300+ DPI high resolution
-          useCORS: true,
-          logging: false
-        });
-        const link = document.createElement('a');
-        link.download = `${barcodeData.barcode_no || barcodeData.serial_number}.png`;
-        link.href = canvas.toDataURL('image/png', 1.0);
-        link.click();
-      } catch (err) {
-        console.error('Failed to download barcode label', err);
-      } finally {
-        setDownloadTarget(null);
-      }
-    }, 100);
+    const modType = activeTab === 'COMBO' ? 'COMBO' : 'RAW_MATERIAL';
+    barcodeService.downloadBarcodeOnlyLabel(barcodeData, modType);
   };
   const [scannerValue, setScannerValue] = useState('');
   const [deleteModal, setDeleteModal] = useState<{
@@ -210,15 +185,16 @@ const ViewBarcode = () => {
         }
       }
 
-      // 2. Fetch the newly deduplicated lists
+      // 2. Fetch raw materials and combo barcodes
       const [data, combos] = await Promise.all([
         inventoryService.getBarcodes(),
         inventoryService.getAllComboBarcodes()
       ]);
+
       setBatches(data || []);
       setComboBatches(combos || []);
     } catch (err) {
-      console.error('Failed to load barcodes locally', err);
+      console.error('Failed to load barcodes', err);
     } finally {
       setLoading(false);
     }
@@ -226,7 +202,7 @@ const ViewBarcode = () => {
 
   useEffect(() => {
     const passedTab = (location.state as any)?.activeTab;
-    if (passedTab === 'COMBO' || passedTab === 'RAW_MATERIAL') {
+    if (passedTab === 'COMBO' || passedTab === 'RAW_MATERIAL' || passedTab === 'PACKAGING') {
       setActiveTab(passedTab);
     }
   }, [location.state]);
@@ -248,48 +224,18 @@ const ViewBarcode = () => {
     try {
       if (deleteModal.type === 'raw_material') {
         await inventoryService.deleteRawMaterialBarcode(barcodeKey);
-        
-        // Immediate local state update
-        setBatches(prev => prev.filter(b => b.serial_number !== barcodeKey));
-        
-      } else if (deleteModal.type === 'combo_product') {
-        await inventoryService.deleteProductBarcode(barcodeKey);
-        
-        // Check if this was the last PRODUCT barcode in that combo box
-        const remainingProducts = comboBatchesRef.current.filter((b: any) => 
-          b.batch_id === item.batch_id && 
-          b.type === 'PRODUCT' && 
-          (b.barcode_no || b.serial_number || b.id) !== barcodeKey
-        );
-        
-        if (remainingProducts.length === 0 && item.batch_id) {
-           await inventoryService.deleteComboBoxBarcode(item.batch_id);
-        }
-        
+        toast.success('Raw material barcode deleted');
       } else if (deleteModal.type === 'combo_box') {
-        await inventoryService.deleteComboBoxBarcode(item.batch_id);
+        await inventoryService.deleteComboBoxBarcode(barcodeKey);
+        toast.success('Combo box barcode deleted');
+      } else if (deleteModal.type === 'combo_product') {
+        await (inventoryService as any).deleteProductBarcode(barcodeKey);
+        toast.success('Product barcode deleted');
       }
-
-      
-      // Update UI silently
-      await fetchBatches();
-      
       setDeleteModal({ type: null, barcode: null });
-      
-      // Simple Toast
-      const toast = document.createElement('div');
-      toast.textContent = "Barcode deleted successfully";
-      toast.style.position = 'fixed';
-      toast.style.bottom = '24px';
-      toast.style.right = '24px';
-      toast.style.background = '#10b981';
-      toast.style.color = 'white';
-      toast.style.padding = '16px 24px';
       fetchBatches();
-      
-    } catch (error: any) {
-      console.error("Delete failed:", error);
-      toast.error(error.message || "Failed to delete barcode");
+    } catch (err: any) {
+      toast.error('Failed to delete barcode: ' + err.message);
     } finally {
       setIsDeleting(false);
     }
@@ -314,7 +260,7 @@ const ViewBarcode = () => {
     let timeout: any = null;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (activeTab === null || activeTab === 'PRODUCT') return;
+      if (activeTab === null || activeTab === 'PRODUCT' || activeTab === 'PACKAGING') return;
       if (scanModal.type !== null) return;
 
       const target = e.target as HTMLElement;
@@ -343,86 +289,136 @@ const ViewBarcode = () => {
     };
   }, [activeTab, scanModal.type]);
 
+  const getProductFullName = (code: string) => {
+    switch (code) {
+      case '1B': return 'Blue Liquid';
+      case '1Y': return 'Yellow Liquid';
+      case '1P': return 'Pink Conditioner';
+      default: return code;
+    }
+  };
   // SCANNER LOGIC
   const handleScan = async (code: string) => {
-    if (!code) return;
-    if (isProcessingScan) return;
-    
-    const now = Date.now();
-    if (lastScannedCodeRef.current && lastScannedCodeRef.current.code === code) {
-      if (now - lastScannedCodeRef.current.time < 2000) {
-        return;
-      }
-    }
-    
-    lastScannedCodeRef.current = { code, time: now };
-    setIsProcessingScan(true);
-    
     const cleanCode = normalizeBarcode(code);
-    if (!cleanCode) {
-      setScanModal({ type: 'empty', barcode: null, scannedCode: code });
-      setIsProcessingScan(false);
+    if (!cleanCode) return;
+
+    // Deduplication check: prevent scanning the exact same barcode within 1.5 seconds
+    const now = Date.now();
+    if (lastScannedCodeRef.current && lastScannedCodeRef.current.code === cleanCode && (now - lastScannedCodeRef.current.time) < 1500) {
       return;
     }
-    
+    lastScannedCodeRef.current = { code: cleanCode, time: now };
+
+    setIsProcessingScan(true);
     setScannerValue('');
-    scannerInputRef.current?.focus();
 
     try {
-      if (activeTab === 'RAW_MATERIAL' || activeTab === 'COMBO') {
-        if (activeTab === 'RAW_MATERIAL') {
-           const record = batches.find((item: any) => [item.serial_number, item.batch_number, item.id].map(normalizeBarcode).includes(cleanCode));
-           if (!record) {
-             setScanModal({ type: 'not_found', barcode: null, scannedCode: code });
-             setIsProcessingScan(false);
-             return;
-           }
-           
-           if (record.currentStage === 'RAW_MATERIAL_OUT' || record.currentStage === 'DISPATCHED') {
-             setSelectedBatch(record);
-             setIsProcessingScan(false);
-             return;
-           } else if (record.currentStage === 'RAW_MATERIAL_IN') {
-             setPendingRawScan({ code: cleanCode, action: 'OUT', record });
-             setIsProcessingScan(false);
-             return;
-           } else {
-             setPendingRawScan({ code: cleanCode, action: 'IN', record });
-             setIsProcessingScan(false);
-             return;
-           }
-        }
+      if (activeTab === 'RAW_MATERIAL') {
+         // Lookup Step 1: ALWAYS query fresh from Supabase first to guarantee live current_stage
+         const freshBatch = await productionReadyBatchService.findAnyRawMaterialBatchByBarcode(cleanCode);
+         let record: any = null;
 
-        if (activeTab === 'COMBO') {
-           // Skip sub-tab scanAction checking and auto-infer behavior
-           const record = comboBatches.find((item: any) => [item.comboBoxBarcode, item.barcode_no, item.id].map(normalizeBarcode).includes(cleanCode));
-           if (!record) {
-             setScanModal({ type: 'not_found', barcode: null, scannedCode: code });
-             setIsProcessingScan(false);
-             return;
-           }
-           
-           if (record.status === 'EMPTY' || record.status === 'PARTIAL') {
-             setSelectedComboBatch({ ...record, _message: 'Add required products before Inventory IN.' });
-             setIsProcessingScan(false);
-             return;
-           } else if (record.currentStage === 'COMBO_OUT' || record.currentStage === 'DISPATCHED') {
-             setSelectedComboBatch(record);
-             setIsProcessingScan(false);
-             return;
-           } else if (record.currentStage === 'COMBO_IN') {
-             setPendingComboScan({ code: cleanCode, action: 'OUT', record });
-             setIsProcessingScan(false);
-             return;
-           } else {
-             // READY_FOR_FIRST_SCAN or READY
-             setPendingComboScan({ code: cleanCode, action: 'IN', record });
-             setIsProcessingScan(false);
-             return;
-           }
-        }
-        
+         if (freshBatch) {
+           record = {
+             ...freshBatch,
+             isProductionReady: Boolean(freshBatch.isProductionReady || (freshBatch.barcode && freshBatch.barcode.startsWith('PRP-'))),
+             serial_number: freshBatch.barcode,
+             barcodeNumber: freshBatch.barcode,
+             displayBarcode: freshBatch.scan_code || freshBatch.barcode,
+             material_name: freshBatch.material_name,
+             materialName: freshBatch.material_name,
+             quantity: freshBatch.quantity || (freshBatch.quantity_grams ? Number((freshBatch.quantity_grams / 1000).toFixed(3)) : 0),
+             unit: freshBatch.unit || 'kg',
+             currentStage: freshBatch.current_stage || 'Incoming',
+             inventoryInPersonName: freshBatch.inventory_in_person || freshBatch.prepared_by,
+             inventoryInAt: freshBatch.inventory_in_at,
+             inventoryOutPersonName: freshBatch.inventory_out_person || freshBatch.issued_by,
+             inventoryOutAt: freshBatch.inventory_out_at,
+           };
+         } else {
+           // Lookup Step 2: Fallback search in state by scan_code, derived scan_code, barcode, serial_number, etc.
+           record = batches.find((item: any) => {
+             const derived = barcodeService.deriveScanCode(item.barcode || '');
+             const candidateCodes = [
+               item.scan_code,
+               item.scanCode,
+               derived,
+               item.serial_number,
+               item.barcodeNumber,
+               item.barcode,
+               item.id
+             ].filter(Boolean).map(normalizeBarcode);
+             return candidateCodes.includes(cleanCode);
+           });
+         }
 
+         if (!record) {
+           setScanModal({ 
+             type: 'not_found', 
+             barcode: null, 
+             scannedCode: code,
+             message: 'Barcode not found in Raw Materials.' 
+           });
+           setIsProcessingScan(false);
+           return;
+         }
+
+         const stage = record.current_stage || record.currentStage || 'Incoming';
+         const normSt = normalizeRawMaterialStage(stage);
+
+         if (normSt === 'CANCELLED') {
+           toast.error('This pack is cancelled and cannot be scanned.');
+           setIsProcessingScan(false);
+           return;
+         }
+         if (normSt === 'CONSUMED') {
+           toast.error('This pack has already been consumed.');
+           setIsProcessingScan(false);
+           return;
+         }
+
+         if (normSt === 'RAW_MATERIAL_OUT') {
+           setSelectedBatch(record);
+           setIsProcessingScan(false);
+           return;
+         } else if (normSt === 'RAW_MATERIAL_IN') {
+           setPendingRawScan({ code: cleanCode, action: 'OUT', record });
+           setIsProcessingScan(false);
+           return;
+         } else {
+           setPendingRawScan({ code: cleanCode, action: 'IN', record });
+           setIsProcessingScan(false);
+           return;
+         }
+      }
+
+      if (activeTab === 'COMBO') {
+         // Skip sub-tab scanAction checking and auto-infer behavior
+         const record = comboBatches.find((item: any) => [item.comboBoxBarcode, item.barcode_no, item.id].map(normalizeBarcode).includes(cleanCode));
+         if (!record) {
+           setScanModal({ type: 'not_found', barcode: null, scannedCode: code });
+           setIsProcessingScan(false);
+           return;
+         }
+         
+         if (record.status === 'EMPTY' || record.status === 'PARTIAL') {
+           setSelectedComboBatch({ ...record, _message: 'Add required products before Inventory IN.' });
+           setIsProcessingScan(false);
+           return;
+         } else if (record.currentStage === 'COMBO_OUT' || record.currentStage === 'DISPATCHED') {
+           setSelectedComboBatch(record);
+           setIsProcessingScan(false);
+           return;
+         } else if (record.currentStage === 'COMBO_IN') {
+           setPendingComboScan({ code: cleanCode, action: 'OUT', record });
+           setIsProcessingScan(false);
+           return;
+         } else {
+           // READY_FOR_FIRST_SCAN or READY
+           setPendingComboScan({ code: cleanCode, action: 'IN', record });
+           setIsProcessingScan(false);
+           return;
+         }
       }
     } catch (error: any) {
       console.error(error);
@@ -450,23 +446,23 @@ const ViewBarcode = () => {
       const result = await inventoryService.processBarcodeScan({
         barcodeNumber: pendingRawScan.code,
         department: 'RAW_MATERIAL',
-        scanAction: pendingRawScan.action as any,
+        scanAction: pendingRawScan.action,
         payload: { personName: scanPersonName.trim() }
       });
       
-      setScanModal({ type: 'success' as any, barcode: result.item, scannedCode: pendingRawScan.code, message: result.message } as any);
-      fetchBatches();
-    } catch (error: any) {
-      console.error(error);
-      if (error.message.includes('not found')) {
-        setScanModal({ type: 'not_found', barcode: null, scannedCode: pendingRawScan.code });
-      } else {
-        setScanModal({ type: 'error' as any, barcode: null, scannedCode: pendingRawScan.code, message: error.message } as any);
-      }
-    } finally {
-      setIsProcessingScan(false);
       setPendingRawScan(null);
       setScanPersonName('');
+      setScanModal({
+        type: 'success',
+        barcode: result.item,
+        scannedCode: pendingRawScan.code,
+        message: result.message || `Successfully scanned ${pendingRawScan.action} for batch!`
+      });
+      await fetchBatches();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to process scan');
+    } finally {
+      setIsProcessingScan(false);
     }
   };
 
@@ -481,20 +477,20 @@ const ViewBarcode = () => {
         scanAction: pendingComboScan.action as any,
         payload: { personName: scanPersonName.trim() }
       });
-      
-      setScanModal({ type: 'success' as any, barcode: result.item, scannedCode: pendingComboScan.code, message: result.message } as any);
-      fetchBatches();
-    } catch (error: any) {
-      console.error(error);
-      if (error.message.includes('not found')) {
-        setScanModal({ type: 'not_found', barcode: null, scannedCode: pendingComboScan.code });
-      } else {
-        setScanModal({ type: 'error' as any, barcode: null, scannedCode: pendingComboScan.code, message: error.message } as any);
-      }
-    } finally {
-      setIsProcessingScan(false);
+
       setPendingComboScan(null);
       setScanPersonName('');
+      setScanModal({
+        type: 'success',
+        barcode: result.item,
+        scannedCode: pendingComboScan.code,
+        message: result.message || `Successfully scanned ${pendingComboScan.action} for combo!`
+      });
+      fetchBatches();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to process combo scan');
+    } finally {
+      setIsProcessingScan(false);
     }
   };
 
@@ -543,22 +539,15 @@ const ViewBarcode = () => {
     return matchesSearch && matchesType && matchesStatus;
   });
 
-  const downloadQR = (serial: string) => {
-    const wrapper = document.getElementById(`view-barcode-${serial}`);
-    const svg = wrapper?.querySelector('svg');
-    if (svg) {
-      barcodeService.downloadSVG(svg, `Barcode-${serial}.svg`);
-    } else if (wrapper) {
-      barcodeService.downloadPNG(wrapper, `Barcode-${serial}.png`);
-    }
+  const downloadQR = (serial: string, item?: any) => {
+    const targetItem = item || { serial_number: serial, barcode: serial, scan_code: barcodeService.deriveScanCode(serial) };
+    const modType = activeTab === 'COMBO' ? 'COMBO' : 'RAW_MATERIAL';
+    barcodeService.downloadBarcodeOnlyLabel(targetItem, modType);
   };
 
-  const handlePrint = (serial: string) => {
-    const scanCode = barcodeService.deriveScanCode(serial);
-    barcodeService.printLabel({
-      barcode: serial,
-      scanCode
-    });
+  const handlePrint = (serial: string, item?: any) => {
+    const targetItem = item || { serial_number: serial, barcode: serial, scan_code: barcodeService.deriveScanCode(serial) };
+    barcodeService.printBarcodeOnlyLabel(targetItem);
   };
 
   if (loading) return <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading saved barcodes...</div>;
@@ -568,6 +557,19 @@ const ViewBarcode = () => {
       
       {activeTab === 'PRODUCT' ? (
         <ProductBarcodeList onBack={() => setActiveTab(null)} />
+      ) : activeTab === 'PACKAGING' ? (
+        <PackagingBarcodeList onBack={() => setActiveTab(null)} />
+      ) : activeTab === 'PRODUCTION_READY' ? (
+        <div className="space-y-4">
+          <button 
+            onClick={() => setActiveTab(null)}
+            className="btn hover-lift mb-4"
+            style={{ padding: '10px 16px', borderRadius: '12px', background: '#1e293b', color: 'white', border: '1px solid #263244', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+          >
+            <ArrowLeft size={16} /> Back to View Barcode
+          </button>
+          <ProductionReadyBarcodeList />
+        </div>
       ) : (
         <>
           {/* HEADER */}
@@ -586,7 +588,8 @@ const ViewBarcode = () => {
 
       {/* SELECTION CARDS */}
       {activeTab === null && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px', marginBottom: '32px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '24px', marginBottom: '32px' }}>
+          {/* Card 1: Raw Material */}
           <motion.div 
             whileHover={{ y: -5, boxShadow: '0 20px 40px rgba(59, 130, 246, 0.2)' }}
             onClick={() => setActiveTab('RAW_MATERIAL')}
@@ -600,7 +603,73 @@ const ViewBarcode = () => {
               <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Raw Material</h2>
               <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and scan raw material barcode labels.</p>
             </div>
-      
+          </motion.div>
+
+          {/* Card 2: Product */}
+          <motion.div 
+            whileHover={{ y: -5, boxShadow: '0 20px 40px rgba(236, 72, 153, 0.2)' }}
+            onClick={() => setActiveTab('PRODUCT')}
+            style={{ background: 'linear-gradient(145deg, #1e293b, #0f172a)', border: '1px solid #ec4899', borderRadius: '24px', padding: '32px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px', position: 'relative', overflow: 'hidden' }}
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #ec4899, #f472b6)' }} />
+            <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'rgba(236, 72, 153, 0.1)', border: '1px solid rgba(236, 72, 153, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Package size={40} color="#ec4899" />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Product</h2>
+              <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and scan finished product bottle barcodes.</p>
+            </div>
+          </motion.div>
+
+          {/* Card 3: Combo */}
+          <motion.div 
+            whileHover={{ y: -5, boxShadow: '0 20px 40px rgba(139, 92, 246, 0.2)' }}
+            onClick={() => setActiveTab('COMBO')}
+            style={{ background: 'linear-gradient(145deg, #1e293b, #0f172a)', border: '1px solid #8b5cf6', borderRadius: '24px', padding: '32px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px', position: 'relative', overflow: 'hidden' }}
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)' }} />
+            <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Package size={40} color="#8b5cf6" />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Combo</h2>
+              <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and scan combo box and combo product barcodes.</p>
+            </div>
+          </motion.div>
+
+          {/* Card 4: Packaging */}
+          <motion.div 
+            whileHover={{ y: -5, boxShadow: '0 20px 40px rgba(245, 158, 11, 0.2)' }}
+            onClick={() => setActiveTab('PACKAGING')}
+            style={{ background: 'linear-gradient(145deg, #1e293b, #0f172a)', border: '1px solid #f59e0b', borderRadius: '24px', padding: '32px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px', position: 'relative', overflow: 'hidden' }}
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #f59e0b, #fbbf24)' }} />
+            <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Box size={40} color="#f59e0b" />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Packaging</h2>
+              <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and scan primary, secondary, and tertiary packaging barcodes.</p>
+            </div>
+          </motion.div>
+
+          {/* Card 5: Production-Ready Batches */}
+          <motion.div 
+            whileHover={{ y: -5, boxShadow: '0 20px 40px rgba(6, 182, 212, 0.2)' }}
+            onClick={() => setActiveTab('PRODUCTION_READY')}
+            style={{ background: 'linear-gradient(145deg, #1e293b, #0f172a)', border: '1px solid #06b6d4', borderRadius: '24px', padding: '32px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px', position: 'relative', overflow: 'hidden' }}
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #06b6d4, #38bdf8)' }} />
+            <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'rgba(6, 182, 212, 0.1)', border: '1px solid rgba(6, 182, 212, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Sparkles size={40} color="#06b6d4" />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Production-Ready Batches</h2>
+              <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and manage product-specific raw material batch packs.</p>
+            </div>
+          </motion.div>
+        </div>
+      )}
   {/* HIDDEN LABEL FOR DOWNLOAD */}
       <div style={{ position: 'absolute', top: '-9999px', left: '-9999px' }}>
         <div ref={barcodeDownloadRef} style={{ width: '350px', background: 'white', padding: '24px', color: 'black', fontFamily: 'sans-serif', boxSizing: 'border-box' }}>
@@ -640,48 +709,9 @@ const ViewBarcode = () => {
                 <strong>Quantity:</strong> <span>{downloadTarget?.original_quantity} KG</span>
               </div>
             )}
-            {downloadTarget?.created_at && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <strong>Date:</strong> <span>{new Date(downloadTarget.created_at).toLocaleDateString()}</span>
-              </div>
-            )}
           </div>
         </div>
       </div>
-    
-    </motion.div>
-
-          
-          <motion.div 
-            whileHover={{ y: -5, boxShadow: '0 20px 40px rgba(236, 72, 153, 0.2)' }}
-            onClick={() => setActiveTab('PRODUCT')}
-            style={{ background: 'linear-gradient(145deg, #1e293b, #0f172a)', border: '1px solid #ec4899', borderRadius: '24px', padding: '32px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px', position: 'relative', overflow: 'hidden' }}
-          >
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #ec4899, #f472b6)' }} />
-            <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'rgba(236, 72, 153, 0.1)', border: '1px solid rgba(236, 72, 153, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Package size={40} color="#ec4899" />
-            </div>
-            <div>
-              <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Product</h2>
-              <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and scan finished product bottle barcodes.</p>
-            </div>
-          </motion.div>
-<motion.div 
-            whileHover={{ y: -5, boxShadow: '0 20px 40px rgba(139, 92, 246, 0.2)' }}
-            onClick={() => setActiveTab('COMBO')}
-            style={{ background: 'linear-gradient(145deg, #1e293b, #0f172a)', border: '1px solid #8b5cf6', borderRadius: '24px', padding: '32px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '16px', position: 'relative', overflow: 'hidden' }}
-          >
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: 'linear-gradient(90deg, #8b5cf6, #a78bfa)' }} />
-            <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Package size={40} color="#8b5cf6" />
-            </div>
-            <div>
-              <h2 style={{ fontSize: '24px', color: 'white', margin: '0 0 8px 0', fontWeight: 800 }}>Combo</h2>
-              <p style={{ color: '#94a3b8', margin: 0, fontSize: '15px' }}>View and scan combo box and combo product barcodes.</p>
-            </div>
-          </motion.div>
-        </div>
-      )}
 
       {/* SCANNER INPUT (Universal) */}
       {activeTab !== null && (
@@ -763,16 +793,16 @@ const ViewBarcode = () => {
               
               return (
               <div key={b.id} style={{ display: 'flex', flexDirection: 'column', background: '#111827', borderRadius: '16px', border: `1px solid ${badgeInfo.color}40`, overflow: 'hidden' }}>
-                <div style={{ padding: '20px', background: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                  
-                  <div id={`view-barcode-${displayBarcode}`}>
-                    <Barcode value={displayBarcode} width={1.5} height={50} displayValue={false} margin={0} />
-                  </div>
-                  <div style={{ padding: '6px 12px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase', background: badgeInfo.bg, color: badgeInfo.color, width: '100%' }}>
-                    {badgeInfo.text}
-                  </div>
+                <div id={`view-barcode-${displayBarcode}`}>
+                  <BarcodePreview 
+                    record={b} 
+                    scanCode={barcodeService.deriveScanCode(displayBarcode)} 
+                    statusText={badgeInfo.text} 
+                    statusBg={badgeInfo.bg} 
+                    statusColor={badgeInfo.color} 
+                  />
                 </div>
-                <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
+                <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, paddingTop: '12px' }}>
                   <div>
                     <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', color: 'white' }}>{b.material_name}</h3>
                     <div style={{ fontSize: '13px', color: '#94a3b8', fontFamily: 'monospace' }}>{displayBarcode}</div>
@@ -790,7 +820,7 @@ const ViewBarcode = () => {
                 </div>
                 <div style={{ padding: '16px', borderTop: '1px solid #1e293b', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: '#111827' }}>
                   <button onClick={() => setSelectedBatch(b)} className="btn hover-lift" style={{ padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Eye size={14}/> Details</button>
-                  <button onClick={() => downloadQR(b.serial_number)} className="btn hover-lift" style={{ padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Download size={14}/> Label</button>
+                  <button onClick={() => downloadQR(b.serial_number, b)} className="btn hover-lift" style={{ padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Download size={14}/> Label</button>
                   <button onClick={() => { navigator.clipboard.writeText(b.serial_number); toast.success('Copied!'); }} className="btn hover-lift" style={{ padding: '8px', background: '#1e293b', border: 'none', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Copy size={14}/> Copy</button>
                   <button 
                     onClick={(e) => { e.stopPropagation(); e.preventDefault(); setDeleteModal({ type: 'raw_material', barcode: b }); }} 
@@ -853,7 +883,7 @@ const ViewBarcode = () => {
                       </button>
                     )}
                     <button onClick={() => setSelectedComboBatch(b)} className="btn hover-lift" style={{ flex: 1, padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Eye size={14}/> Details</button>
-                    <button onClick={() => downloadQR(b.comboBoxBarcode || b.barcode_no)} className="btn hover-lift" style={{ flex: 1, padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Download size={14}/> Label</button>
+                    <button onClick={() => downloadQR(b.comboBoxBarcode || b.barcode_no, b)} className="btn hover-lift" style={{ flex: 1, padding: '8px', background: 'transparent', border: '1px solid #263244', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Download size={14}/> Label</button>
                     <button onClick={() => { navigator.clipboard.writeText(b.comboBoxBarcode || b.barcode_no); toast.success('Copied!'); }} className="btn hover-lift" style={{ flex: 1, padding: '8px', background: '#1e293b', border: 'none', color: 'white', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}><Copy size={14}/> Copy</button>
                     <button 
                       onClick={(e) => { e.stopPropagation(); e.preventDefault(); setDeleteModal({ type: isBox ? 'combo_box' : 'combo_product', barcode: b }); }} 
@@ -1557,24 +1587,32 @@ const ViewBarcode = () => {
                   <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>{selectedBatch.created_at ? new Date(selectedBatch.created_at).toLocaleString() : '--'}</div>
                 </div>
                 {/* Scanned IN */}
-                {(selectedBatch.inventoryInPersonName || selectedBatch.inventoryInAt) && (
+                {(selectedBatch.inventory_in_person || selectedBatch.inventoryInPersonName || selectedBatch.inventory_in_at || selectedBatch.inventoryInAt || selectedBatch.prepared_by) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Scanned IN By/At</span>
                     <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>
-                      {selectedBatch.inventoryInPersonName || '--'}
+                      {selectedBatch.inventory_in_person || selectedBatch.inventoryInPersonName || selectedBatch.prepared_by || '--'}
                       <br />
-                      <span style={{ fontSize: '12px', color: '#64748b' }}>{selectedBatch.inventoryInAt ? new Date(selectedBatch.inventoryInAt).toLocaleString() : '--'}</span>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                        {(selectedBatch.inventory_in_at || selectedBatch.inventoryInAt || selectedBatch.prepared_at) 
+                          ? new Date(selectedBatch.inventory_in_at || selectedBatch.inventoryInAt || selectedBatch.prepared_at).toLocaleString() 
+                          : '--'}
+                      </span>
                     </div>
                   </div>
                 )}
                 {/* Scanned OUT */}
-                {(selectedBatch.inventoryOutPersonName || selectedBatch.inventoryOutAt) && (
+                {(selectedBatch.inventory_out_person || selectedBatch.inventoryOutPersonName || selectedBatch.inventory_out_at || selectedBatch.inventoryOutAt || selectedBatch.issued_by) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Scanned OUT By/At</span>
                     <div style={{ padding: '10px 14px', background: '#1e293b', borderRadius: '10px', color: 'white', fontSize: '14px', fontWeight: 500, border: '1px solid #263244' }}>
-                      {selectedBatch.inventoryOutPersonName || '--'}
+                      {selectedBatch.inventory_out_person || selectedBatch.inventoryOutPersonName || selectedBatch.issued_by || '--'}
                       <br />
-                      <span style={{ fontSize: '12px', color: '#64748b' }}>{selectedBatch.inventoryOutAt ? new Date(selectedBatch.inventoryOutAt).toLocaleString() : '--'}</span>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                        {(selectedBatch.inventory_out_at || selectedBatch.inventoryOutAt || selectedBatch.issued_at) 
+                          ? new Date(selectedBatch.inventory_out_at || selectedBatch.inventoryOutAt || selectedBatch.issued_at).toLocaleString() 
+                          : '--'}
+                      </span>
                     </div>
                   </div>
                 )}

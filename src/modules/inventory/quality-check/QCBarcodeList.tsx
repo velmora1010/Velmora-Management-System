@@ -10,6 +10,7 @@ import { inventoryService } from '../../../services/inventoryService';
 import { departmentService } from '../../../services/departmentService';
 import { supabase } from '../../../lib/supabase';
 import { barcodeService } from '../../../services/barcodeService';
+import { BarcodePreview } from '../../../components/ui/BarcodePreview';
 
 const normalizeCode = (code: any) => String(code || '').trim().toUpperCase().replace(/\s+/g, '');
 
@@ -494,8 +495,14 @@ export const QCBarcodeList = () => {
         {filteredBarcodes.map((item, index) => (
           <div key={item.id || index} style={{ background: '#1e293b', borderRadius: '20px', border: '1px solid #334155', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             
-            <div style={{ background: 'white', padding: '24px', display: 'flex', justifyContent: 'center', borderBottom: '1px dashed #e2e8f0' }}>
-              <BarcodeComponent value={item.qcBarcode || item.barcodeNumber} width={1.8} height={60} fontSize={14} background="transparent" />
+            <div id={`barcode-${item.qcBarcode || item.barcodeNumber}`}>
+              <BarcodePreview 
+                record={item} 
+                scanCode={item.scan_code || barcodeService.deriveScanCode(item.qcBarcode || item.barcodeNumber, 'QC')} 
+                statusText={item.currentStage || 'QC_IN'} 
+                statusBg="rgba(59, 130, 246, 0.1)" 
+                statusColor="#3b82f6" 
+              />
             </div>
             
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', flex: 1, gap: '16px' }}>

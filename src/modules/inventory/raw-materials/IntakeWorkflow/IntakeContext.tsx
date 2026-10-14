@@ -1,5 +1,8 @@
 import { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { ProductFormulaConfig } from '../../../../config/productionBatchFormulas';
+import type { ProductionReadyBatchRow } from '../../../../services/productionReadyBatchService';
+
 export interface RawMaterial {
   id?: string;
   name: string;
@@ -36,6 +39,16 @@ interface IntakeContextType {
   setBatches: (batches: BatchItem[]) => void;
   savedBatchIds: number[];
   setSavedBatchIds: (ids: number[]) => void;
+  selectedProduct: ProductFormulaConfig | null;
+  setSelectedProduct: (p: ProductFormulaConfig | null) => void;
+  preparedBatches: ProductionReadyBatchRow[];
+  setPreparedBatches: (rows: ProductionReadyBatchRow[]) => void;
+  looseBalanceGrams: number;
+  setLooseBalanceGrams: (g: number) => void;
+  allocatedGrams: number;
+  setAllocatedGrams: (g: number) => void;
+  remainingLooseGrams: number;
+  setRemainingLooseGrams: (g: number) => void;
   clearIntakeSession: () => void;
 }
 
@@ -57,12 +70,22 @@ export const IntakeProvider = ({ children }: { children: ReactNode }) => {
   const [formData, setFormData] = useState<IntakeFormData>(defaultFormData);
   const [batches, setBatches] = useState<BatchItem[]>([]);
   const [savedBatchIds, setSavedBatchIds] = useState<number[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<ProductFormulaConfig | null>(null);
+  const [preparedBatches, setPreparedBatches] = useState<ProductionReadyBatchRow[]>([]);
+  const [looseBalanceGrams, setLooseBalanceGrams] = useState<number>(0);
+  const [allocatedGrams, setAllocatedGrams] = useState<number>(0);
+  const [remainingLooseGrams, setRemainingLooseGrams] = useState<number>(0);
 
   const clearIntakeSession = () => {
     setSelectedMaterial(null);
     setFormData(defaultFormData);
     setBatches([]);
     setSavedBatchIds([]);
+    setSelectedProduct(null);
+    setPreparedBatches([]);
+    setLooseBalanceGrams(0);
+    setAllocatedGrams(0);
+    setRemainingLooseGrams(0);
   };
 
   return (
@@ -71,6 +94,11 @@ export const IntakeProvider = ({ children }: { children: ReactNode }) => {
       formData, setFormData, 
       batches, setBatches,
       savedBatchIds, setSavedBatchIds,
+      selectedProduct, setSelectedProduct,
+      preparedBatches, setPreparedBatches,
+      looseBalanceGrams, setLooseBalanceGrams,
+      allocatedGrams, setAllocatedGrams,
+      remainingLooseGrams, setRemainingLooseGrams,
       clearIntakeSession
     }}>
       {children}

@@ -86,7 +86,7 @@ export const useFinanceCategories = () => {
       // Do not update the exact row being edited by saveCategoryRow (it is updated independently)
       if (needsUpdate && row.id !== oldRow.id) {
         promises.push(
-          supabase.from(SUPABASE_TABLES.financeCategories).update(payload).eq('id', row.id)
+          Promise.resolve(supabase.from(SUPABASE_TABLES.financeCategories).update(payload).eq('id', row.id))
         );
       }
     });
