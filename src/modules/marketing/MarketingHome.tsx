@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
-import { Megaphone, Database } from 'lucide-react';
+import { Megaphone, Database, UserSearch } from 'lucide-react';
 import { InfluencerDashboard } from './InfluencerDashboard';
 import { InfluenceDatabase } from './InfluenceDatabase';
+import { InfluencerRnD } from './InfluencerRnD';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { saveDepartmentNavigation } from '../../utils/navigationPersistence';
 
-type MarketingView = 'home' | 'influencer-dashboard' | 'influence-db';
+type MarketingView = 'home' | 'influencer-dashboard' | 'influence-db' | 'influencer-rnd';
 
 export const MarketingHome: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -18,6 +19,8 @@ export const MarketingHome: React.FC = () => {
       ? 'influencer-dashboard'
       : tabParam === 'influence-db'
       ? 'influence-db'
+      : tabParam === 'influencer-rnd'
+      ? 'influencer-rnd'
       : 'home';
 
   const handleViewChange = (newView: MarketingView) => {
@@ -32,6 +35,12 @@ export const MarketingHome: React.FC = () => {
       newParams.set('tab', 'influencers');
     } else if (newView === 'influence-db') {
       newParams.set('tab', 'influence-db');
+      newParams.delete('view');
+      newParams.delete('campaignId');
+      newParams.delete('subview');
+      newParams.delete('editInfluencerId');
+    } else if (newView === 'influencer-rnd') {
+      newParams.set('tab', 'influencer-rnd');
       newParams.delete('view');
       newParams.delete('campaignId');
       newParams.delete('subview');
@@ -62,6 +71,8 @@ export const MarketingHome: React.FC = () => {
         return <InfluencerDashboard onBack={() => handleViewChange('home')} />;
       case 'influence-db':
         return <InfluenceDatabase onBack={() => handleViewChange('home')} />;
+      case 'influencer-rnd':
+        return <InfluencerRnD onBack={() => handleViewChange('home')} />;
       case 'home':
       default:
         return (
@@ -84,7 +95,7 @@ export const MarketingHome: React.FC = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
               {/* Option Cards matching the old UI module-cards-grid */}
               
               <button
@@ -107,6 +118,17 @@ export const MarketingHome: React.FC = () => {
                 </div>
                 <h3 className="text-xl font-semibold text-slate-200 mb-2">Influence Data Base</h3>
                 <p className="text-slate-400 text-center text-sm">Database of all registered influencers</p>
+              </button>
+
+              <button
+                onClick={() => handleViewChange('influencer-rnd')}
+                className="flex flex-col items-center justify-center p-8 bg-slate-800/50 border border-slate-700 rounded-2xl hover:bg-slate-800 hover:border-blue-500/50 hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all duration-300 group"
+              >
+                <div className="w-16 h-16 rounded-2xl bg-blue-500/10 text-blue-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                  <UserSearch size={32} />
+                </div>
+                <h3 className="text-xl font-semibold text-slate-200 mb-2 text-center">Influencer Research & Development</h3>
+                <p className="text-slate-400 text-center text-sm">Research, discover and manage new influencers</p>
               </button>
 
             </div>
