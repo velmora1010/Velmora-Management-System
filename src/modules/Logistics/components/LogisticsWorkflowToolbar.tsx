@@ -132,29 +132,17 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
         {/* 4. Prepare Dispatch */}
         <button
           type="button"
-          onClick={() => {
-            if (isBulkSelectMode && selectedOrderCount > 0) {
-              onPrepareDispatch();
-            } else {
-              onSelectStage('prepare_dispatch');
-            }
-          }}
-          disabled={isMovingToPrepare}
+          onClick={() => onSelectStage('prepare_dispatch')}
           className={`h-9 px-3 rounded-xl text-xs font-semibold transition-all border flex items-center gap-1.5 shrink-0 cursor-pointer ${
             currentStage === 'prepare_dispatch'
               ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/40'
               : 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-300'
           }`}
-          title={isBulkSelectMode && selectedOrderCount > 0 ? "Move selected orders to Prepare Dispatch" : "View Prepare Dispatch Queue"}
+          title="View Prepare Dispatch Queue"
         >
           <Truck size={14} className={currentStage === 'prepare_dispatch' ? 'text-white' : 'text-purple-400'} />
-          <span>{isMovingToPrepare ? 'Moving...' : 'Prepare Dispatch'}</span>
-          
-          {selectedOrderCount > 0 && isBulkSelectMode ? (
-            <span className="bg-white text-purple-900 text-[11px] font-extrabold rounded-full px-1.5 py-0.2 ml-0.5 animate-pulse">
-              {selectedOrderCount}
-            </span>
-          ) : counts.prepareDispatch > 0 ? (
+          <span>Prepare Dispatch</span>
+          {counts.prepareDispatch > 0 && (
             <span className={`text-[11px] font-extrabold rounded-full px-2 py-0.5 leading-none ${
               currentStage === 'prepare_dispatch'
                 ? 'bg-purple-950 text-white border border-purple-400/40'
@@ -162,7 +150,7 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
             }`}>
               {counts.prepareDispatch}
             </span>
-          ) : null}
+          )}
         </button>
 
         {/* 5. Dispatched */}

@@ -3,6 +3,7 @@ import db from '../lib/db';
 import type { LogisticsOrder } from '../types/logistics';
 import { cleanOrderId, normalizePhoneNumber } from './unifiedLogisticsService';
 import { normalizeCourier } from '../config/courierConfig';
+import { parseAndFormatLogisticsDate } from '../utils/logisticsDateUtils';
 
 export interface ParsedCustomerOrder {
   orderId: string;
@@ -19,6 +20,7 @@ export interface ParsedCustomerOrder {
   awbNumber?: string;
   courier?: string;
   orderDate?: string;
+  orderDateDisplay?: string;
   fulfillmentStatus?: string;
   financialStatus?: string;
   isEligibleActive: boolean;
@@ -211,7 +213,9 @@ export const parseAndValidateCustomerOrders = async (
     const rawDate = findHeaderValue(primaryRow, [
       'Created at', 'Order Date', 'Date', 'Created At', 'Processed at'
     ]);
-    const orderDate = rawDate ? String(rawDate).trim() : new Date().toISOString().slice(0, 10);
+    const parsedDate = parseAndFormatLogisticsDate(rawDate);
+    const orderDate = parsedDate.isoDate || (rawDate ? String(rawDate).trim() : new Date().toISOString().slice(0, 10));
+    const orderDateDisplay = parsedDate.displayDate || orderDate;
 
     // ==========================================
     // CRITICAL: Fulfillment Eligibility Analysis
@@ -272,6 +276,7 @@ export const parseAndValidateCustomerOrders = async (
       awbNumber: rawAwb ? String(rawAwb).trim() : undefined,
       courier,
       orderDate,
+      orderDateDisplay,
       fulfillmentStatus: fulfillmentStatusRaw || undefined,
       financialStatus: financialStatusRaw || undefined,
       isEligibleActive,
@@ -366,6 +371,7 @@ export const commitCustomerOrdersImport = async (
           status: order.awbNumber ? 'In Transit' : 'Delivered',
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
+          orderDateDisplay: order.orderDateDisplay,
           fulfillmentStatus: order.fulfillmentStatus,
           financialStatus: order.financialStatus
         });
@@ -387,6 +393,7 @@ export const commitCustomerOrdersImport = async (
           status: 'Pending',
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
+          orderDateDisplay: order.orderDateDisplay,
           fulfillmentStatus: order.fulfillmentStatus,
           financialStatus: order.financialStatus
         });
@@ -405,10 +412,11 @@ export const commitCustomerOrdersImport = async (
           amount: order.amount,
           orderType: order.orderType,
           stage: 'order_data', // mapped to 'active'
-          status: 'Not Tracked',
+          status: 'Unfulfilled',
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
-          fulfillmentStatus: order.fulfillmentStatus,
+          orderDateDisplay: order.orderDateDisplay,
+          fulfillmentStatus: order.fulfillmentStatus || 'unfulfilled',
           financialStatus: order.financialStatus
         });
         insertedActive++;

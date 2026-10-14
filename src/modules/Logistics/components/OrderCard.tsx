@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 
+import { parseAndFormatLogisticsDate } from '../../../utils/logisticsDateUtils';
+
 interface OrderCardProps {
   order: UnifiedLogisticsOrder;
   onTrackOrder: (order: UnifiedLogisticsOrder) => void;
@@ -45,6 +47,12 @@ export const OrderCard: React.FC<OrderCardProps> = ({
 }) => {
   const getBadgeStyle = (status: string) => {
     switch (status) {
+      case 'Unfulfilled':
+      case 'Awaiting Dispatch':
+        return {
+          badge: 'bg-purple-950/70 text-purple-300 border-purple-700/60',
+          icon: <Package size={11} className="text-purple-400" />
+        };
       case 'Delivered':
         return {
           badge: 'bg-emerald-950/60 text-emerald-300 border-emerald-700/60',
@@ -71,7 +79,9 @@ export const OrderCard: React.FC<OrderCardProps> = ({
     }
   };
 
-  const style = getBadgeStyle(order.status);
+  const effectiveStatus = order.workflowStage === 'active' ? 'Unfulfilled' : order.status;
+  const style = getBadgeStyle(effectiveStatus);
+  const formattedDate = parseAndFormatLogisticsDate(order.orderDateDisplay || order.orderDate).displayDate || order.orderDateDisplay || '';
 
   return (
     <div 
@@ -114,12 +124,12 @@ export const OrderCard: React.FC<OrderCardProps> = ({
                   </span>
                 )}
               </div>
-              {order.orderDate && (
-                <div className="flex items-center gap-1 text-[10px] text-slate-500">
-                  <Calendar size={10} />
-                  <span>{order.orderDateDisplay || order.orderDate}</span>
+              {formattedDate ? (
+                <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                  <Calendar size={10} className="text-purple-400" />
+                  <span>{formattedDate}</span>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -171,7 +181,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
         <div className="flex items-center gap-1.5 min-w-0">
           <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${style.badge}`}>
             {style.icon}
-            <span className="truncate max-w-[80px]">{order.status}</span>
+            <span className="truncate max-w-[90px]">{effectiveStatus}</span>
           </div>
 
           {order.courier && (

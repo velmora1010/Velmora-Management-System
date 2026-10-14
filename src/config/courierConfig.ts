@@ -109,7 +109,7 @@ export const isCourierActive = (courierName: string | undefined | null): boolean
 };
 
 export const normalizeCourier = (courierName?: string | null): string => {
-  if (!courierName) return 'ST Courier';
+  if (!courierName || !courierName.trim()) return '';
   const lower = courierName.toLowerCase().trim();
   
   if (lower.includes('ithink') && lower.includes('ekart')) return 'iThink Logistics – Ekart';

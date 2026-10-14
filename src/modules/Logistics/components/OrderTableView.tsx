@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 import { getCourierTrackingUrl } from '../../../config/courierConfig';
+import { parseAndFormatLogisticsDate } from '../../../utils/logisticsDateUtils';
 
 interface OrderTableViewProps {
   orders: UnifiedLogisticsOrder[];
@@ -65,6 +66,14 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
 
   const getStatusBadgeStyle = (status: string) => {
     const s = (status || '').toLowerCase();
+    if (s.includes('unfulfilled') || s.includes('awaiting')) {
+      return {
+        bg: 'bg-purple-950/70',
+        text: 'text-purple-300',
+        border: 'border-purple-700/60',
+        dot: 'bg-purple-400'
+      };
+    }
     if (s.includes('delivered')) {
       return {
         bg: 'bg-emerald-950/60',
@@ -162,7 +171,8 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
             {orders.map((order) => {
               const isSyncing = order.rawId ? syncingOrderIds.has(order.rawId) : false;
               const isSelected = selectedOrderIds.has(order.id);
-              const badgeStyle = getStatusBadgeStyle(order.status);
+              const effectiveStatus = order.workflowStage === 'active' ? 'Unfulfilled' : order.status;
+              const badgeStyle = getStatusBadgeStyle(effectiveStatus);
 
               return (
                 <tr 
@@ -246,7 +256,7 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                   <td className="px-3 py-3">
                     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${badgeStyle.dot} shrink-0`} />
-                      <span className="truncate">{order.status}</span>
+                      <span className="truncate">{effectiveStatus}</span>
                     </span>
                   </td>
 
@@ -267,7 +277,9 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                   {/* 6. DISPATCHED DATE */}
                   <td className="px-3 py-3 font-medium text-slate-200 whitespace-nowrap text-[11px]">
                     {order.dispatchDate ? (
-                      <span className="text-slate-200 font-mono">{order.dispatchDate}</span>
+                      <span className="text-slate-200 font-mono">
+                        {parseAndFormatLogisticsDate(order.dispatchDate).displayDate || order.dispatchDate}
+                      </span>
                     ) : (
                       <span className="text-slate-500 italic text-[11px]">—</span>
                     )}
@@ -276,7 +288,9 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                   {/* 7. ESTIMATED DELIVERY DATE */}
                   <td className="px-3 py-3 font-medium text-slate-200 whitespace-nowrap text-[11px]">
                     {order.estimatedDeliveryDate ? (
-                      <span className="text-slate-200 font-mono">{order.estimatedDeliveryDate}</span>
+                      <span className="text-slate-200 font-mono">
+                        {parseAndFormatLogisticsDate(order.estimatedDeliveryDate).displayDate || order.estimatedDeliveryDate}
+                      </span>
                     ) : (
                       <span className="text-slate-500 italic text-[11px]">—</span>
                     )}
@@ -285,7 +299,9 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                   {/* 8. DELIVERED DATE */}
                   <td className="px-3 py-3 font-medium text-slate-200 whitespace-nowrap text-[11px]">
                     {order.deliveredDate ? (
-                      <span className="text-slate-200 font-mono">{order.deliveredDate}</span>
+                      <span className="text-slate-200 font-mono">
+                        {parseAndFormatLogisticsDate(order.deliveredDate).displayDate || order.deliveredDate}
+                      </span>
                     ) : (
                       <span className="text-slate-500 italic text-[11px]">—</span>
                     )}

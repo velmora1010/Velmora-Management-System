@@ -9,6 +9,8 @@ import type {
   WorkflowStageCounts
 } from '../types/unifiedLogistics';
 
+import { parseAndFormatLogisticsDate } from '../utils/logisticsDateUtils';
+
 /**
  * Normalizes phone numbers to standard 10-digit Indian mobile format or clean digit string.
  * Strips "+91", leading zeros, spaces, hyphens, and parentheses.
@@ -57,11 +59,30 @@ export const mapToUnifiedWorkflowStage = (
   rawStatus?: string | null,
   stage?: string | null,
   awbNumber?: string | null,
-  hasRequiredInfo?: boolean
+  hasRequiredInfo?: boolean,
+  fulfillmentStatus?: string | null,
+  financialStatus?: string | null
 ): { status: UnifiedTrackingStatus; workflowStage: UnifiedWorkflowStage } => {
   const s = (rawStatus || '').trim().toLowerCase();
   const currentStage = (stage || '').trim().toLowerCase();
+  const fStatus = (fulfillmentStatus || '').trim().toLowerCase();
+  const finStatus = (financialStatus || '').trim().toLowerCase();
   const hasAwb = !!(awbNumber && awbNumber.trim().length > 0);
+
+  // 0. Cancelled or Refunded
+  if (
+    s.includes('cancelled') || 
+    s.includes('canceled') || 
+    fStatus.includes('cancelled') || 
+    fStatus.includes('canceled') || 
+    finStatus === 'refunded' || 
+    finStatus === 'voided'
+  ) {
+    return {
+      status: 'Cancelled',
+      workflowStage: 'pending' // Excluded from active queue
+    };
+  }
 
   // 1. Explicit stage overrides saved on the record
   if (currentStage === 'prepare_dispatch') {
@@ -72,7 +93,6 @@ export const mapToUnifiedWorkflowStage = (
   }
 
   if (currentStage === 'dispatched') {
-    // If it has tracking activity, it's also monitorable in tracking
     const trackingStatus = resolveTrackingStatus(s, hasAwb);
     return {
       status: trackingStatus,
@@ -80,8 +100,8 @@ export const mapToUnifiedWorkflowStage = (
     };
   }
 
-  // 2. Legacy stage 'tracking' from Dexie
-  if (currentStage === 'tracking') {
+  // 2. Stage 'tracking' or already fulfilled from Shopify
+  if (currentStage === 'tracking' || fStatus === 'fulfilled' || fStatus === 'shipped') {
     const trackingStatus = resolveTrackingStatus(s, hasAwb);
     return {
       status: trackingStatus,
@@ -113,6 +133,14 @@ export const mapToUnifiedWorkflowStage = (
     };
   }
 
+  // If order has an AWB number, it is already assigned to a shipment/tracking
+  if (hasAwb) {
+    return {
+      status: resolveTrackingStatus(s, true),
+      workflowStage: 'tracking'
+    };
+  }
+
   // 4. Missing required info -> Pending stage
   if (hasRequiredInfo === false) {
     return {
@@ -121,9 +149,9 @@ export const mapToUnifiedWorkflowStage = (
     };
   }
 
-  // 5. Default stage: Active
+  // 5. Default stage: Active (Unfulfilled customer order awaiting dispatch)
   return {
-    status: hasAwb ? 'Info Received' : 'Not Tracked',
+    status: 'Unfulfilled',
     workflowStage: 'active'
   };
 };
@@ -188,8 +216,15 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     order.status,
     order.stage,
     order.awbNumber,
-    hasRequiredInfo
+    hasRequiredInfo,
+    order.fulfillmentStatus,
+    order.financialStatus
   );
+
+  const parsedOrderDate = parseAndFormatLogisticsDate(order.orderDate || order.uploadedAt);
+  const parsedDispatchDate = parseAndFormatLogisticsDate(order.dispatchDate);
+  const parsedEstDeliveryDate = parseAndFormatLogisticsDate(order.estimatedDeliveryDate);
+  const parsedDeliveredDate = parseAndFormatLogisticsDate(order.deliveredDate);
 
   return {
     id: `dexie_${order.id || cleanedId}`,
@@ -205,16 +240,16 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     city: order.city || '',
     state: order.state || '',
     pincode: order.pincode || '',
-    orderDate: order.orderDate || order.uploadedAt || '',
-    orderDateDisplay: order.orderDateDisplay || order.orderDate || '',
+    orderDate: parsedOrderDate.isoDate || order.orderDate || '',
+    orderDateDisplay: parsedOrderDate.displayDate || order.orderDateDisplay || '',
     orderType: order.orderType || 'Prepaid',
     amount: parsedAmount,
     products: order.products || 'Standard Products',
     courier: order.courier || '',
     awbNumber: order.awbNumber || '',
-    dispatchDate: order.dispatchDate || order.orderDate,
-    estimatedDeliveryDate: order.estimatedDeliveryDate,
-    deliveredDate: order.deliveredDate,
+    dispatchDate: parsedDispatchDate.displayDate || order.dispatchDate || '',
+    estimatedDeliveryDate: parsedEstDeliveryDate.displayDate || order.estimatedDeliveryDate || '',
+    deliveredDate: parsedDeliveredDate.displayDate || order.deliveredDate || '',
     remarks: order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus,
     batchId: order.batchId,
     batchName: order.batchName,
@@ -422,6 +457,19 @@ export const bulkMoveToPrepareDispatch = async (
         const ord = await db.logistics_orders.get(rawId);
         if (!ord) {
           errors.push(`Order ID #${rawId} not found`);
+          continue;
+        }
+
+        // Validate eligibility: exclude cancelled or already dispatched/tracking orders
+        if (ord.stage === 'tracking' || ord.stage === 'dispatched') {
+          errors.push(`Order #${ord.orderId} is already dispatched or in tracking`);
+          continue;
+        }
+
+        const fStatus = (ord.fulfillmentStatus || '').toLowerCase();
+        const curStatus = (ord.status || '').toLowerCase();
+        if (fStatus === 'cancelled' || curStatus === 'cancelled') {
+          errors.push(`Order #${ord.orderId} is cancelled`);
           continue;
         }
 

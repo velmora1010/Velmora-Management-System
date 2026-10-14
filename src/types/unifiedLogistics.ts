@@ -8,6 +8,7 @@ export type UnifiedWorkflowStage =
   | 'tracking';
 
 export type UnifiedTrackingStatus =
+  | 'Unfulfilled'
   | 'Not Tracked'
   | 'Info Received'
   | 'Pending'

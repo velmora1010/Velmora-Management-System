@@ -15,6 +15,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import type { UnifiedCustomer, UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
+import { parseAndFormatLogisticsDate } from '../../../utils/logisticsDateUtils';
 
 interface CustomerDetailModalProps {
   customer: UnifiedCustomer | null;
@@ -156,9 +157,9 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                       )}
                     </div>
                     {order.orderDate && (
-                      <div className="flex items-center gap-1 text-[11px] text-slate-500 mt-0.5">
-                        <Calendar size={11} />
-                        <span>{order.orderDateDisplay || order.orderDate}</span>
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-0.5">
+                        <Calendar size={11} className="text-purple-400" />
+                        <span>{parseAndFormatLogisticsDate(order.orderDateDisplay || order.orderDate).displayDate || order.orderDateDisplay || order.orderDate}</span>
                       </div>
                     )}
                   </div>

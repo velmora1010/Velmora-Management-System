@@ -36,11 +36,13 @@ import { OrderImportModal } from './components/OrderImportModal';
 import { CourierTrackingImportModal } from './components/CourierTrackingImportModal';
 import { PrepareDispatchGroupedView } from './components/PrepareDispatchGroupedView';
 import { DispatchOrderModal } from './components/DispatchOrderModal';
+import { ConfirmMoveToPrepareModal } from './components/ConfirmMoveToPrepareModal';
 import { TrackingModal } from './TrackingModal';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
+import { parseAndFormatLogisticsDate } from '../../utils/logisticsDateUtils';
 
-// Status pills matching Image 2 exactly
+// Status pills for Tracking stage (Image 2 style, with Re-Dispatch removed)
 const STATUS_PILLS: Array<{ id: string; label: string }> = [
   { id: 'All', label: 'All' },
   { id: 'Exception', label: 'Exception' },
@@ -50,8 +52,14 @@ const STATUS_PILLS: Array<{ id: string; label: string }> = [
   { id: 'Delivered', label: 'Delivered' },
   { id: 'Out for Delivery', label: 'Out for Delivery' },
   { id: 'Info Received', label: 'Info Received' },
-  { id: 'Expired', label: 'Expired' },
-  { id: 'Re-Dispatch', label: 'Re-Dispatch' }
+  { id: 'Expired', label: 'Expired' }
+];
+
+// Active section filter pills (for unfulfilled customer orders awaiting dispatch)
+const ACTIVE_FILTER_PILLS: Array<{ id: string; label: string }> = [
+  { id: 'All', label: 'All Unfulfilled' },
+  { id: 'Prepaid', label: 'Prepaid' },
+  { id: 'COD', label: 'COD' }
 ];
 
 export const UnifiedLogisticsWorkspace: React.FC = () => {
@@ -59,9 +67,9 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const [orderLayout, setOrderLayout] = useState<'grid' | 'table'>('table');
 
   // Top Toolbar Workflow Stage: 'active' | 'pending' | 'prepare_dispatch' | 'dispatched' | 'tracking'
-  const [currentStage, setCurrentStage] = useState<UnifiedWorkflowStage>('tracking');
+  const [currentStage, setCurrentStage] = useState<UnifiedWorkflowStage>('active');
 
-  // Secondary Status Filter Pill (Image 2 style)
+  // Secondary Status / Type Filter Pill
   const [selectedStatusTab, setSelectedStatusTab] = useState<string>('All');
 
   // Search & Courier Filter
@@ -73,6 +81,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [isMovingToPrepare, setIsMovingToPrepare] = useState(false);
+  const [isConfirmMoveModalOpen, setIsConfirmMoveModalOpen] = useState(false);
 
   // Modals
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -118,7 +127,67 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     return unifiedOrders.filter(o => o.workflowStage === currentStage);
   }, [unifiedOrders, currentStage]);
 
-  // Secondary Status Pill Counts (Calculated dynamically from current stage shipments)
+  // One-time sanitize legacy serial dates in Dexie records on mount
+  useEffect(() => {
+    const sanitizeDexieRecords = async () => {
+      try {
+        const records = await db.logistics_orders.toArray();
+        for (const rec of records) {
+          if (!rec.id) continue;
+          let needsUpdate = false;
+          const patch: Partial<LogisticsOrder> = {};
+
+          if (
+            rec.orderDate && 
+            typeof rec.orderDate === 'string' && 
+            !isNaN(Number(rec.orderDate)) && 
+            Number(rec.orderDate) >= 35000 && 
+            Number(rec.orderDate) <= 60000
+          ) {
+            const p = parseAndFormatLogisticsDate(rec.orderDate);
+            if (p.isoDate) {
+              patch.orderDate = p.isoDate;
+              patch.orderDateDisplay = p.displayDate;
+              needsUpdate = true;
+            }
+          }
+
+          if (rec.stage === 'order_data' && rec.status === 'Not Tracked') {
+            patch.status = 'Unfulfilled';
+            needsUpdate = true;
+          }
+
+          if (needsUpdate) {
+            await db.logistics_orders.update(rec.id, patch);
+          }
+        }
+      } catch (e) {
+        console.warn('Background sanitize error:', e);
+      }
+    };
+    sanitizeDexieRecords();
+  }, []);
+
+  // Filter counts for Active unfulfilled orders
+  const activeFilterCounts = useMemo(() => {
+    let prepaid = 0;
+    let cod = 0;
+    stageShipments.forEach(s => {
+      const type = (s.orderType || '').toLowerCase();
+      if (type.includes('cod')) {
+        cod++;
+      } else {
+        prepaid++;
+      }
+    });
+    return {
+      All: stageShipments.length,
+      Prepaid: prepaid,
+      COD: cod
+    };
+  }, [stageShipments]);
+
+  // Secondary Status Pill Counts for Tracking (Recalculated dynamically from actual shipments)
   const statusTabCounts = useMemo(() => {
     const acc: Record<string, number> = {
       All: stageShipments.length,
@@ -129,21 +198,19 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       Delivered: 0,
       'Out for Delivery': 0,
       'Info Received': 0,
-      Expired: 0,
-      'Re-Dispatch': 0
+      Expired: 0
     };
 
     stageShipments.forEach(s => {
-      const st = (s.status || '').toLowerCase();
+      const st = (s.status || '').toLowerCase().trim();
       if (st.includes('delivered')) acc.Delivered = (acc.Delivered || 0) + 1;
-      else if (st.includes('out for delivery')) acc['Out for Delivery'] = (acc['Out for Delivery'] || 0) + 1;
+      else if (st.includes('out for delivery') || st.includes('out_for_delivery')) acc['Out for Delivery'] = (acc['Out for Delivery'] || 0) + 1;
       else if (st.includes('in transit') || st.includes('transit')) acc['In Transit'] = (acc['In Transit'] || 0) + 1;
-      else if (st.includes('failed attempt')) acc['Failed Attempt'] = (acc['Failed Attempt'] || 0) + 1;
-      else if (st.includes('rto') || st.includes('returned') || st.includes('re-dispatch')) acc['Re-Dispatch'] = (acc['Re-Dispatch'] || 0) + 1;
-      else if (st.includes('exception') || st.includes('error')) acc.Exception = (acc.Exception || 0) + 1;
+      else if (st.includes('failed attempt') || st.includes('undelivered') || st.includes('attempted')) acc['Failed Attempt'] = (acc['Failed Attempt'] || 0) + 1;
+      else if (st.includes('exception') || st.includes('error') || st.includes('rto') || st.includes('returned') || st.includes('re-dispatch')) acc.Exception = (acc.Exception || 0) + 1;
       else if (st.includes('info received') || st.includes('manifest') || st.includes('booked')) acc['Info Received'] = (acc['Info Received'] || 0) + 1;
       else if (st.includes('expired')) acc.Expired = (acc.Expired || 0) + 1;
-      else acc.Pending = (acc.Pending || 0) + 1;
+      else if (st.includes('pending') || st.includes('pickup pending')) acc.Pending = (acc.Pending || 0) + 1;
     });
 
     return acc;
@@ -157,6 +224,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     });
 
     stageShipments.forEach(s => {
+      if (!s.courier || !s.courier.trim()) return;
       const norm = normalizeCourier(s.courier);
       if (counts[norm] !== undefined) {
         counts[norm]++;
@@ -166,22 +234,28 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     return counts;
   }, [stageShipments]);
 
-  // 5. Filtered Orders based on current stage, status tab, courier, and search
+  // 5. Filtered Orders based on current stage, status/type tab, courier, and search
   const filteredOrders = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
     return stageShipments.filter((order) => {
-      // 1. Status Tab filter
+      // 1. Status / Type Tab filter
       if (selectedStatusTab !== 'All') {
-        const st = (order.status || '').toLowerCase();
-        if (selectedStatusTab === 'Delivered' && !st.includes('delivered')) return false;
-        if (selectedStatusTab === 'Out for Delivery' && !st.includes('out for delivery')) return false;
-        if (selectedStatusTab === 'In Transit' && (!st.includes('in transit') && !st.includes('transit'))) return false;
-        if (selectedStatusTab === 'Failed Attempt' && !st.includes('failed attempt')) return false;
-        if (selectedStatusTab === 'Exception' && (!st.includes('exception') && !st.includes('error'))) return false;
-        if (selectedStatusTab === 'Re-Dispatch' && (!st.includes('rto') && !st.includes('returned') && !st.includes('re-dispatch'))) return false;
-        if (selectedStatusTab === 'Info Received' && (!st.includes('info received') && !st.includes('manifest') && !st.includes('booked'))) return false;
-        if (selectedStatusTab === 'Pending' && (!st.includes('pending') && st !== 'not tracked' && st !== '')) return false;
+        if (currentStage === 'active') {
+          const type = (order.orderType || '').toLowerCase();
+          if (selectedStatusTab === 'Prepaid' && type.includes('cod')) return false;
+          if (selectedStatusTab === 'COD' && !type.includes('cod')) return false;
+        } else {
+          const st = (order.status || '').toLowerCase();
+          if (selectedStatusTab === 'Delivered' && !st.includes('delivered')) return false;
+          if (selectedStatusTab === 'Out for Delivery' && !st.includes('out for delivery')) return false;
+          if (selectedStatusTab === 'In Transit' && (!st.includes('in transit') && !st.includes('transit'))) return false;
+          if (selectedStatusTab === 'Failed Attempt' && !st.includes('failed attempt')) return false;
+          if (selectedStatusTab === 'Exception' && (!st.includes('exception') && !st.includes('error') && !st.includes('rto') && !st.includes('returned') && !st.includes('re-dispatch'))) return false;
+          if (selectedStatusTab === 'Info Received' && (!st.includes('info received') && !st.includes('manifest') && !st.includes('booked'))) return false;
+          if (selectedStatusTab === 'Expired' && !st.includes('expired')) return false;
+          if (selectedStatusTab === 'Pending' && !st.includes('pending')) return false;
+        }
       }
 
       // 2. Courier filter
@@ -206,7 +280,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
       return true;
     });
-  }, [stageShipments, selectedStatusTab, selectedCourier, searchTerm]);
+  }, [stageShipments, selectedStatusTab, selectedCourier, searchTerm, currentStage]);
 
   // Bulk Selection Handlers
   const handleToggleSelect = (orderId: string) => {
@@ -229,34 +303,50 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     }
   };
 
-  // Bulk Move to Prepare Dispatch
-  const handlePrepareDispatchBulk = async () => {
+  // Selected orders summary
+  const selectedOrdersList = useMemo(() => {
+    return unifiedOrders.filter(o => selectedOrderIds.has(o.id));
+  }, [unifiedOrders, selectedOrderIds]);
+
+  const totalSelectedAmount = useMemo(() => {
+    return selectedOrdersList.reduce((sum, o) => sum + (o.amount || 0), 0);
+  }, [selectedOrdersList]);
+
+  // Open confirmation modal to prepare dispatch
+  const handlePrepareDispatchBulk = () => {
     if (selectedOrderIds.size === 0) {
       toast.error('Please select at least one order to prepare dispatch');
       return;
     }
+    setIsConfirmMoveModalOpen(true);
+  };
 
-    const selectedOrders = unifiedOrders.filter(o => selectedOrderIds.has(o.id));
-    const validRawIds = selectedOrders.map(o => o.rawId).filter((id): id is number => typeof id === 'number');
+  // Confirmed Bulk Move to Prepare Dispatch
+  const handleConfirmMoveToPrepare = async () => {
+    const validRawIds = selectedOrdersList
+      .map(o => o.rawId)
+      .filter((id): id is number => typeof id === 'number');
 
     if (validRawIds.length === 0) {
-      toast.error('Selected orders cannot be moved (external/non-database records)');
+      toast.error('Selected orders cannot be moved (missing database IDs)');
       return;
     }
 
     setIsMovingToPrepare(true);
+    const toastId = toast.loading(`Moving ${validRawIds.length} orders to Prepare Dispatch...`);
     try {
       const res = await bulkMoveToPrepareDispatch(validRawIds);
       if (res.success) {
-        toast.success(`Moved ${res.movedCount} orders to Prepare Dispatch!`);
+        toast.success(`Moved ${res.movedCount} orders to Prepare Dispatch!`, { id: toastId });
         setSelectedOrderIds(new Set());
         setIsBulkSelectMode(false);
+        setIsConfirmMoveModalOpen(false);
         setCurrentStage('prepare_dispatch');
       } else {
-        toast.error('Failed to move orders: ' + res.errors.join(', '));
+        toast.error('Failed to move orders: ' + res.errors.join(', '), { id: toastId });
       }
     } catch (err: any) {
-      toast.error('Error: ' + (err.message || 'Bulk transition failed'));
+      toast.error('Error: ' + (err.message || 'Bulk transition failed'), { id: toastId });
     } finally {
       setIsMovingToPrepare(false);
     }
@@ -417,64 +507,141 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         isResetting={isResetting}
       />
 
-      {/* 2. SECONDARY CONTROLS BAR: Upload Orders, Upload Tracking, Sync & Dynamic Courier Badges */}
+      {/* 2. SECONDARY CONTROLS BAR: Stage-Specific Action Buttons & Courier Filters */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 p-1 shrink-0">
         {/* Left Action Buttons in Secondary Toolbar */}
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setIsImportModalOpen(true)}
-            className="h-9 px-3.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer"
-            title="Import customer orders from Excel or CSV"
-          >
-            <UploadCloud size={14} />
-            <span>Upload Orders</span>
-          </button>
+          {currentStage === 'active' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(true)}
+                className="h-9 px-3.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer"
+                title="Import customer orders from Excel or CSV"
+              >
+                <UploadCloud size={14} />
+                <span>Upload Orders</span>
+              </button>
+
+              {isBulkSelectMode && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleToggleSelectAll}
+                    className="h-9 px-3 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700/80 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {selectedOrderIds.size === filteredOrders.length && filteredOrders.length > 0 ? (
+                      <>
+                        <CheckSquare size={13} className="text-purple-400" />
+                        <span>Deselect All</span>
+                      </>
+                    ) : (
+                      <>
+                        <Square size={13} className="text-slate-400" />
+                        <span>Select All ({filteredOrders.length})</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedOrderIds.size === 0) {
+                        toast.error('Please select at least one order to prepare dispatch');
+                        return;
+                      }
+                      setIsConfirmMoveModalOpen(true);
+                    }}
+                    disabled={selectedOrderIds.size === 0 || isMovingToPrepare}
+                    className="h-9 px-4 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={selectedOrderIds.size === 0 ? "Select at least 1 order to move" : `Move ${selectedOrderIds.size} orders to Prepare Dispatch`}
+                  >
+                    <Truck size={14} />
+                    <span>Move to Prepare Dispatch ({selectedOrderIds.size})</span>
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
+          {currentStage === 'tracking' && (
+            <button
+              type="button"
+              onClick={() => setIsCourierTrackingModalOpen(true)}
+              className="h-9 px-3.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-cyan-600/30 cursor-pointer"
+              title="Upload tracking reports for India Post, iThink Logistics, Delhivery, etc."
+            >
+              <Truck size={14} />
+              <span>Upload Tracking</span>
+            </button>
+          )}
 
           <button
             type="button"
-            onClick={() => setIsCourierTrackingModalOpen(true)}
-            className="h-9 px-3 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-cyan-300 hover:text-white border border-cyan-800/60 flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Upload tracking reports for India Post, iThink Logistics, etc."
-          >
-            <Truck size={13} className="text-cyan-400" />
-            <span>Upload Tracking</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleBulkSyncAll}
-            disabled={isBulkSyncing}
+            onClick={currentStage === 'tracking' ? handleBulkSyncAll : handleRefresh}
+            disabled={isBulkSyncing || isRefreshing}
             className="h-9 px-3 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-            title="Sync live status for ST Courier & Delhivery"
+            title={currentStage === 'tracking' ? "Sync live status for ST Courier & Delhivery" : "Refresh orders data"}
           >
-            <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
+            <RefreshCw size={13} className={(isBulkSyncing || isRefreshing) ? 'animate-spin text-purple-400' : ''} />
             <span>Sync</span>
           </button>
         </div>
 
-        {/* Courier Filter Badges for the 6 Configured Couriers */}
-        <div className="flex items-center gap-1.5 shrink-0 ml-auto overflow-x-auto pb-0.5 custom-scrollbar">
-          {CONFIGURED_COURIERS.map((c) => {
-            const count = courierCounts[c.name] || 0;
-            const isSelected = selectedCourier === c.name;
+        {/* Courier Filter Badges: Shown in Tracking/Dispatched when couriers exist */}
+        {(currentStage === 'tracking' || currentStage === 'dispatched') && (
+          <div className="flex items-center gap-1.5 shrink-0 ml-auto overflow-x-auto pb-0.5 custom-scrollbar">
+            {CONFIGURED_COURIERS.map((c) => {
+              const count = courierCounts[c.name] || 0;
+              const isSelected = selectedCourier === c.name;
+
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setSelectedCourier(prev => prev === c.name ? 'All' : c.name)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border bg-[#0b1220] transition-all whitespace-nowrap ${
+                    isSelected
+                      ? `${c.badgeColor.bg} text-white border-purple-400 shadow-md shadow-purple-600/30`
+                      : `${c.badgeColor.border} ${c.badgeColor.text} hover:border-slate-600`
+                  }`}
+                  title={`Filter by ${c.name}`}
+                >
+                  <Truck size={12} className={isSelected ? 'text-white' : c.badgeColor.indicator.replace('bg-', 'text-')} />
+                  <span>{c.shortName}</span>
+                  <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                    isSelected ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 3. FILTER PILLS: Active Payment Filters vs Tracking Status Pills */}
+      {currentStage === 'active' ? (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar shrink-0 select-none">
+          {ACTIVE_FILTER_PILLS.map((pill) => {
+            const count = activeFilterCounts[pill.id as keyof typeof activeFilterCounts] || 0;
+            const isActive = selectedStatusTab === pill.id;
 
             return (
               <button
-                key={c.id}
+                key={pill.id}
                 type="button"
-                onClick={() => setSelectedCourier(prev => prev === c.name ? 'All' : c.name)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border bg-[#0b1220] transition-all whitespace-nowrap ${
-                  isSelected
-                    ? `${c.badgeColor.bg} text-white border-purple-400 shadow-md shadow-purple-600/30`
-                    : `${c.badgeColor.border} ${c.badgeColor.text} hover:border-slate-600`
+                onClick={() => setSelectedStatusTab(pill.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${
+                  isActive
+                    ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                    : 'border-purple-800/40 text-purple-300 hover:border-purple-600'
                 }`}
-                title={`Filter by ${c.name}`}
               >
-                <Truck size={12} className={isSelected ? 'text-white' : c.badgeColor.indicator.replace('bg-', 'text-')} />
-                <span>{c.shortName}</span>
+                <span>{pill.label}</span>
                 <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
-                  isSelected ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
+                  isActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
                 }`}>
                   {count}
                 </span>
@@ -482,66 +649,69 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
             );
           })}
         </div>
-      </div>
+      ) : currentStage === 'tracking' || currentStage === 'dispatched' ? (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar shrink-0 select-none">
+          {STATUS_PILLS.map((pill) => {
+            const count = statusTabCounts[pill.id] || 0;
+            const isActive = selectedStatusTab === pill.id;
 
-      {/* 3. STATUS FILTER PILLS (Image 2 style with counters) */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar shrink-0 select-none">
-        {STATUS_PILLS.map((pill) => {
-          const count = statusTabCounts[pill.id] || 0;
-          const isActive = selectedStatusTab === pill.id;
+            let badgeBorderClass = 'border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200';
+            if (pill.id === 'All') {
+              badgeBorderClass = isActive
+                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                : 'border-purple-800/40 text-purple-300 hover:border-purple-600';
+            } else if (pill.id === 'Exception') {
+              badgeBorderClass = isActive
+                ? 'bg-rose-600 text-white border-rose-500'
+                : 'border-rose-800/40 text-rose-400 hover:border-rose-600';
+            } else if (pill.id === 'Failed Attempt') {
+              badgeBorderClass = isActive
+                ? 'bg-amber-600 text-white border-amber-500'
+                : 'border-amber-800/40 text-amber-400 hover:border-amber-600';
+            } else if (pill.id === 'Pending') {
+              badgeBorderClass = isActive
+                ? 'bg-amber-500 text-white border-amber-400'
+                : 'border-amber-700/40 text-amber-300 hover:border-amber-500';
+            } else if (pill.id === 'In Transit') {
+              badgeBorderClass = isActive
+                ? 'bg-blue-600 text-white border-blue-500'
+                : 'border-blue-800/40 text-blue-400 hover:border-blue-600';
+            } else if (pill.id === 'Delivered') {
+              badgeBorderClass = isActive
+                ? 'bg-emerald-600 text-white border-emerald-500'
+                : 'border-emerald-800/40 text-emerald-400 hover:border-emerald-600';
+            } else if (pill.id === 'Out for Delivery') {
+              badgeBorderClass = isActive
+                ? 'bg-cyan-600 text-white border-cyan-500'
+                : 'border-cyan-800/40 text-cyan-400 hover:border-cyan-600';
+            } else if (pill.id === 'Info Received') {
+              badgeBorderClass = isActive
+                ? 'bg-indigo-600 text-white border-indigo-500'
+                : 'border-indigo-800/40 text-indigo-400 hover:border-indigo-600';
+            } else if (pill.id === 'Expired') {
+              badgeBorderClass = isActive
+                ? 'bg-slate-700 text-white border-slate-600'
+                : 'border-slate-800 text-slate-400 hover:border-slate-600';
+            }
 
-          let badgeBorderClass = 'border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200';
-          if (pill.id === 'All') {
-            badgeBorderClass = isActive
-              ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-              : 'border-purple-800/40 text-purple-300 hover:border-purple-600';
-          } else if (pill.id === 'Exception') {
-            badgeBorderClass = isActive
-              ? 'bg-rose-600 text-white border-rose-500'
-              : 'border-rose-800/40 text-rose-400 hover:border-rose-600';
-          } else if (pill.id === 'Failed Attempt') {
-            badgeBorderClass = isActive
-              ? 'bg-amber-600 text-white border-amber-500'
-              : 'border-amber-800/40 text-amber-400 hover:border-amber-600';
-          } else if (pill.id === 'Pending') {
-            badgeBorderClass = isActive
-              ? 'bg-amber-500 text-white border-amber-400'
-              : 'border-amber-700/40 text-amber-300 hover:border-amber-500';
-          } else if (pill.id === 'In Transit') {
-            badgeBorderClass = isActive
-              ? 'bg-blue-600 text-white border-blue-500'
-              : 'border-blue-800/40 text-blue-400 hover:border-blue-600';
-          } else if (pill.id === 'Delivered') {
-            badgeBorderClass = isActive
-              ? 'bg-emerald-600 text-white border-emerald-500'
-              : 'border-emerald-800/40 text-emerald-400 hover:border-emerald-600';
-          } else if (pill.id === 'Out for Delivery') {
-            badgeBorderClass = isActive
-              ? 'bg-cyan-600 text-white border-cyan-500'
-              : 'border-cyan-800/40 text-cyan-400 hover:border-cyan-600';
-          } else if (pill.id === 'Re-Dispatch') {
-            badgeBorderClass = isActive
-              ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-600/30'
-              : 'border-amber-800/40 text-amber-300 hover:border-amber-600';
-          }
-
-          return (
-            <button
-              key={pill.id}
-              type="button"
-              onClick={() => setSelectedStatusTab(pill.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${badgeBorderClass}`}
-            >
-              <span>{pill.label}</span>
-              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
-                isActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
-              }`}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+            return (
+              <button
+                key={pill.id}
+                type="button"
+                onClick={() => setSelectedStatusTab(pill.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${badgeBorderClass}`}
+              >
+                <span>{pill.label}</span>
+                <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {/* 4. MAIN WORKSPACE CONTENT: Compact Table View (Image 2) or Grouped Batches for Prepare Dispatch */}
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
@@ -669,6 +839,16 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         isOpen={isCourierTrackingModalOpen}
         onClose={() => setIsCourierTrackingModalOpen(false)}
         onSyncSuccess={() => setCurrentStage('tracking')}
+      />
+
+      {/* Confirm Move to Prepare Dispatch Modal */}
+      <ConfirmMoveToPrepareModal
+        isOpen={isConfirmMoveModalOpen}
+        onClose={() => setIsConfirmMoveModalOpen(false)}
+        onConfirm={handleConfirmMoveToPrepare}
+        selectedCount={selectedOrdersList.length}
+        totalAmount={totalSelectedAmount}
+        isMoving={isMovingToPrepare}
       />
 
       {/* Live Courier Tracking Modal */}
