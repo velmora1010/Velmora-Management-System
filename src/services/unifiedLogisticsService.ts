@@ -216,6 +216,10 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     estimatedDeliveryDate: order.estimatedDeliveryDate,
     deliveredDate: order.deliveredDate,
     remarks: order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus,
+    batchId: order.batchId,
+    batchName: order.batchName,
+    fulfillmentStatus: order.fulfillmentStatus,
+    financialStatus: order.financialStatus,
     stage: order.stage || 'order_data',
     workflowStage,
     status,
@@ -401,10 +405,16 @@ export const calculateWorkflowCounts = (
  * Bulk moves orders from Active to Prepare Dispatch in Dexie
  */
 export const bulkMoveToPrepareDispatch = async (
-  rawOrderIds: number[]
+  rawOrderIds: number[],
+  batchInfo?: { batchId?: string; batchName?: string }
 ): Promise<{ success: boolean; movedCount: number; errors: string[] }> => {
   const errors: string[] = [];
   let movedCount = 0;
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const batchId = batchInfo?.batchId || `batch_${Date.now()}`;
+  const batchName = batchInfo?.batchName || `Batch ${dateStr}`;
 
   try {
     await db.transaction('rw', db.logistics_orders, async () => {
@@ -415,9 +425,11 @@ export const bulkMoveToPrepareDispatch = async (
           continue;
         }
 
-        // Update stage to prepare_dispatch
+        // Update stage to prepare_dispatch with batch grouping metadata
         await db.logistics_orders.update(rawId, {
-          stage: 'prepare_dispatch' as any
+          stage: 'prepare_dispatch' as any,
+          batchId: ord.batchId || batchId,
+          batchName: ord.batchName || batchName
         });
         movedCount++;
       }
@@ -453,9 +465,12 @@ export const confirmOrderDispatch = async (payload: {
       return { success: false, error: 'Order not found in database' };
     }
 
+    const dDate = payload.dispatchDate || new Date().toISOString().slice(0, 10);
     await db.logistics_orders.update(payload.rawId, {
       courier: payload.courier,
       awbNumber: payload.awbNumber.trim(),
+      dispatchDate: dDate,
+      estimatedDeliveryDate: payload.estimatedDeliveryDate,
       stage: 'dispatched' as any,
       status: 'In Transit',
       syncedAt: new Date().toLocaleString()
@@ -468,12 +483,19 @@ export const confirmOrderDispatch = async (payload: {
 };
 
 /**
- * Return an order back from Prepare Dispatch to Active
+ * Return orders back from Prepare Dispatch to Active
  */
-export const returnToActiveStage = async (rawId: number): Promise<boolean> => {
+export const returnToActiveStage = async (rawIds: number[] | number): Promise<boolean> => {
+  const ids = Array.isArray(rawIds) ? rawIds : [rawIds];
   try {
-    await db.logistics_orders.update(rawId, {
-      stage: 'order_data' as any
+    await db.transaction('rw', db.logistics_orders, async () => {
+      for (const id of ids) {
+        await db.logistics_orders.update(id, {
+          stage: 'order_data' as any,
+          batchId: undefined,
+          batchName: undefined
+        });
+      }
     });
     return true;
   } catch {

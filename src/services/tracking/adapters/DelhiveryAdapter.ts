@@ -25,11 +25,14 @@ export class DelhiveryAdapter implements CourierAdapter {
       const data = await response.json();
       return {
         status: data.status || '',
+        rawStatus: data.rawStatus,
+        remarks: data.remarks,
         success: !!data.success,
         error: data.error,
         rawResponse: JSON.stringify(data),
-        supported: true,
+        supported: data.status !== 'Token Not Configured',
         deliveredDate: data.deliveryDate,
+        estimatedDeliveryDate: data.estimatedDeliveryDate,
         location: data.lastLocation
       };
     } catch (err: any) {

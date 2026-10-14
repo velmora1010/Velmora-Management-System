@@ -60,6 +60,11 @@ export interface UnifiedLogisticsOrder {
   estimatedDeliveryDate?: string;
   deliveredDate?: string;
   remarks?: string;
+  // Batch & fulfillment metadata
+  batchId?: string;
+  batchName?: string;
+  fulfillmentStatus?: string;
+  financialStatus?: string;
   stage: string;
   workflowStage: UnifiedWorkflowStage;
   status: UnifiedTrackingStatus;

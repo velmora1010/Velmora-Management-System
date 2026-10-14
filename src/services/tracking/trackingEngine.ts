@@ -130,16 +130,26 @@ export const trackingEngine = {
 
     if (result && result.success) {
       const finalStatus = result.status || 'In Transit';
-      await db.logistics_orders.update(orderId, {
+      const updatePayload: Partial<LogisticsOrder> = {
         status: finalStatus,
         syncedAt: new Date().toLocaleString(),
         trackingError: undefined,
         lastFailedAt: undefined,
         syncState: 'idle'
-      });
-      if (order.courier === 'ST Courier') {
-        console.log(`[ST TRACKING] Previous DB Status: ${prevStatusLog}`);
-        console.log(`[ST TRACKING] New DB Status: ${finalStatus}`);
+      };
+      if (result.remarks) {
+        updatePayload.remarks = result.remarks;
+      }
+      if (result.deliveredDate) {
+        updatePayload.deliveredDate = result.deliveredDate;
+      }
+      if (result.estimatedDeliveryDate) {
+        updatePayload.estimatedDeliveryDate = result.estimatedDeliveryDate;
+      }
+
+      await db.logistics_orders.update(orderId, updatePayload);
+      if (order.courier === 'ST Courier' || order.courier === 'Delhivery') {
+        console.log(`[${order.courier} TRACKING] Previous DB Status: ${prevStatusLog} -> New: ${finalStatus}`);
       }
       return { success: true, status: finalStatus };
     } else {

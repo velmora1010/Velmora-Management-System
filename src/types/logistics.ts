@@ -49,6 +49,12 @@ export interface LogisticsOrder {
   sourceSubStatus?: string;
   lastEvent?: string;
   lastMileCourier?: string;
+  // Batch & fulfillment metadata
+  batchId?: string;
+  batchName?: string;
+  fulfillmentStatus?: string;
+  financialStatus?: string;
+  lineItemsSummary?: string;
   syncState?: 'queued' | 'checking' | 'retrying' | 'idle';
 }
 

@@ -21,6 +21,7 @@ import {
   Check
 } from 'lucide-react';
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
+import { getCourierTrackingUrl } from '../../../config/courierConfig';
 
 interface OrderTableViewProps {
   orders: UnifiedLogisticsOrder[];
@@ -114,10 +115,13 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
 
   const getCourierBadgeClass = (courier?: string) => {
     const c = (courier || '').toLowerCase();
-    if (c.includes('delhivery')) return 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300';
-    if (c.includes('st courier')) return 'bg-purple-950/60 border-purple-800/60 text-purple-300';
-    if (c.includes('amazon') || c.includes('ithink')) return 'bg-amber-950/60 border-amber-800/60 text-amber-300';
+    if (c.includes('ithink') && c.includes('ekart')) return 'bg-amber-950/60 border-amber-800/60 text-amber-300';
+    if (c.includes('ithink') && c.includes('delhivery')) return 'bg-indigo-950/60 border-indigo-800/60 text-indigo-300';
+    if (c.includes('ithink') && c.includes('amazon')) return 'bg-orange-950/60 border-orange-800/60 text-orange-300';
     if (c.includes('india post')) return 'bg-rose-950/60 border-rose-800/60 text-rose-300';
+    if (c.includes('delhivery')) return 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300';
+    if (c.includes('st courier') || c.includes('stcourier')) return 'bg-purple-950/60 border-purple-800/60 text-purple-300';
+    if (c.includes('amazon')) return 'bg-amber-950/60 border-amber-800/60 text-amber-300';
     return 'bg-slate-900 border-slate-800 text-slate-300';
   };
 
@@ -150,6 +154,7 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
               <th className="px-3 py-3.5 bg-[#0e1626] whitespace-nowrap">DISPATCHED DATE</th>
               <th className="px-3 py-3.5 bg-[#0e1626] leading-tight whitespace-nowrap">ESTIMATED DELIVERY DATE</th>
               <th className="px-3 py-3.5 bg-[#0e1626] whitespace-nowrap">DELIVERED DATE</th>
+              <th className="px-3 py-3.5 bg-[#0e1626] whitespace-nowrap">LAST SYNCED</th>
               <th className="px-3 py-3.5 bg-[#0e1626] text-right">ACTIONS</th>
             </tr>
           </thead>
@@ -286,7 +291,16 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                     )}
                   </td>
 
-                  {/* 9. ACTIONS */}
+                  {/* 9. LAST SYNCED AT */}
+                  <td className="px-3 py-3 text-slate-400 whitespace-nowrap text-[10px] font-mono">
+                    {order.syncedAt ? (
+                      <span>{order.syncedAt}</span>
+                    ) : (
+                      <span className="text-slate-600 italic">Not synced</span>
+                    )}
+                  </td>
+
+                  {/* 10. ACTIONS */}
                   <td className="px-2 sm:px-3 py-3 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1 shrink-0">
                       {order.workflowStage === 'prepare_dispatch' && onOpenDispatchModal && (
@@ -299,6 +313,20 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                           <span>Dispatch</span>
                           <ArrowRight size={10} />
                         </button>
+                      )}
+
+                      {/* Official Courier Tracking Page Link */}
+                      {order.awbNumber && getCourierTrackingUrl(order.courier, order.awbNumber) && (
+                        <a
+                          href={getCourierTrackingUrl(order.courier, order.awbNumber)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-7 h-7 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 border border-slate-700/80 hover:border-cyan-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                          title={`Open ${order.courier || 'Courier'} Official Tracking Page`}
+                          aria-label="Open Courier Official Tracking"
+                        >
+                          <ExternalLink size={12} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-cyan-300" />
+                        </a>
                       )}
 
                       {/* View Shipment Details */}

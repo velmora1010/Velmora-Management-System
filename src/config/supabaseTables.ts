@@ -46,4 +46,6 @@ export const SUPABASE_TABLES = {
   campaignDescriptions: "campaign_descriptions",
   influencerTrackingLinks: "influencer_tracking_links",
   influencerConversations: "influencer_conversations",
+  customerTrackingShipments: "customer_tracking_shipments",
+  customerDispatchBatches: "customer_dispatch_batches",
 };

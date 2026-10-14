@@ -25,6 +25,10 @@ export class STCourierAdapter implements CourierAdapter {
       const data = await response.json();
       return {
         status: data.status || '',
+        rawStatus: data.rawStatus,
+        remarks: data.remarks,
+        deliveredDate: data.deliveryDate,
+        location: data.lastLocation,
         success: !!data.success,
         error: data.error,
         rawResponse: JSON.stringify(data),

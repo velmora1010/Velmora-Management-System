@@ -25,16 +25,20 @@ import {
   groupOrdersIntoCustomers, 
   calculateWorkflowCounts,
   bulkMoveToPrepareDispatch,
-  resetLogisticsDepartmentData
+  resetLogisticsDepartmentData,
+  returnToActiveStage
 } from '../../services/unifiedLogisticsService';
 import { LogisticsWorkflowToolbar } from './components/LogisticsWorkflowToolbar';
 import { OrderCard } from './components/OrderCard';
 import { OrderTableView } from './components/OrderTableView';
 import { CustomerDetailModal } from './components/CustomerDetailModal';
 import { OrderImportModal } from './components/OrderImportModal';
+import { CourierTrackingImportModal } from './components/CourierTrackingImportModal';
+import { PrepareDispatchGroupedView } from './components/PrepareDispatchGroupedView';
 import { DispatchOrderModal } from './components/DispatchOrderModal';
 import { TrackingModal } from './TrackingModal';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
+import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
 
 // Status pills matching Image 2 exactly
 const STATUS_PILLS: Array<{ id: string; label: string }> = [
@@ -72,6 +76,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Modals
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isCourierTrackingModalOpen, setIsCourierTrackingModalOpen] = useState(false);
   const [orderToDispatch, setOrderToDispatch] = useState<UnifiedLogisticsOrder | null>(null);
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
   const [activeTrackingOrder, setActiveTrackingOrder] = useState<LogisticsOrder | null>(null);
@@ -144,24 +149,21 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     return acc;
   }, [stageShipments]);
 
-  // Unique Couriers present with counts
+  // Unique Couriers present with counts for the 6 configured couriers
   const courierCounts = useMemo(() => {
-    let delhivery = 0;
-    let stCourier = 0;
-    let amazon = 0;
-    let indiaPost = 0;
-    let other = 0;
-
-    stageShipments.forEach(s => {
-      const c = (s.courier || '').toLowerCase();
-      if (c.includes('delhivery')) delhivery++;
-      else if (c.includes('st courier') || c.includes('stcourier')) stCourier++;
-      else if (c.includes('amazon') || c.includes('ithink')) amazon++;
-      else if (c.includes('india post')) indiaPost++;
-      else if (c.trim().length > 0) other++;
+    const counts: Record<string, number> = {};
+    CONFIGURED_COURIERS.forEach(c => {
+      counts[c.name] = 0;
     });
 
-    return { delhivery, stCourier, amazon, indiaPost, other };
+    stageShipments.forEach(s => {
+      const norm = normalizeCourier(s.courier);
+      if (counts[norm] !== undefined) {
+        counts[norm]++;
+      }
+    });
+
+    return counts;
   }, [stageShipments]);
 
   // 5. Filtered Orders based on current stage, status tab, courier, and search
@@ -184,12 +186,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
       // 2. Courier filter
       if (selectedCourier !== 'All') {
-        const c = (order.courier || '').toLowerCase();
-        const sel = selectedCourier.toLowerCase();
-        if (sel === 'delhivery' && !c.includes('delhivery')) return false;
-        if (sel === 'st courier' && !c.includes('st courier') && !c.includes('stcourier')) return false;
-        if (sel === 'amazon' && !c.includes('amazon') && !c.includes('ithink')) return false;
-        if (sel === 'india post' && !c.includes('india post')) return false;
+        const norm = normalizeCourier(order.courier);
+        if (norm !== selectedCourier) return false;
       }
 
       // 3. Search term
@@ -419,7 +417,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         isResetting={isResetting}
       />
 
-      {/* 2. SECONDARY CONTROLS BAR: Search input, Upload, Sync, Status Pills & Courier Filter Badges (Image 2 style) */}
+      {/* 2. SECONDARY CONTROLS BAR: Upload Orders, Upload Tracking, Sync & Dynamic Courier Badges */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 p-1 shrink-0">
         {/* Left Action Buttons in Secondary Toolbar */}
         <div className="flex items-center gap-2 shrink-0">
@@ -427,9 +425,20 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
             type="button"
             onClick={() => setIsImportModalOpen(true)}
             className="h-9 px-3.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer"
+            title="Import customer orders from Excel or CSV"
           >
             <UploadCloud size={14} />
-            <span>Upload</span>
+            <span>Upload Orders</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsCourierTrackingModalOpen(true)}
+            className="h-9 px-3 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-cyan-300 hover:text-white border border-cyan-800/60 flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Upload tracking reports for India Post, iThink Logistics, etc."
+          >
+            <Truck size={13} className="text-cyan-400" />
+            <span>Upload Tracking</span>
           </button>
 
           <button
@@ -437,94 +446,41 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
             onClick={handleBulkSyncAll}
             disabled={isBulkSyncing}
             className="h-9 px-3 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-            title="Sync all shipments in view"
+            title="Sync live status for ST Courier & Delhivery"
           >
             <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
             <span>Sync</span>
           </button>
         </div>
 
-        {/* Courier Filter Badges (Image 2 exact style) */}
-        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-          {courierCounts.delhivery > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedCourier(prev => prev === 'Delhivery' ? 'All' : 'Delhivery')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border bg-[#0b1220] transition-all ${
-                selectedCourier === 'Delhivery'
-                  ? 'bg-cyan-600 text-white border-cyan-400 shadow-md shadow-cyan-600/30'
-                  : 'border-cyan-800/50 text-cyan-300 hover:border-cyan-500'
-              }`}
-            >
-              <Truck size={12} className={selectedCourier === 'Delhivery' ? 'text-white' : 'text-cyan-400'} />
-              <span>Delhivery</span>
-              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
-                selectedCourier === 'Delhivery' ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-cyan-200'
-              }`}>
-                {courierCounts.delhivery}
-              </span>
-            </button>
-          )}
+        {/* Courier Filter Badges for the 6 Configured Couriers */}
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto overflow-x-auto pb-0.5 custom-scrollbar">
+          {CONFIGURED_COURIERS.map((c) => {
+            const count = courierCounts[c.name] || 0;
+            const isSelected = selectedCourier === c.name;
 
-          {courierCounts.stCourier > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedCourier(prev => prev === 'ST Courier' ? 'All' : 'ST Courier')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border bg-[#0b1220] transition-all ${
-                selectedCourier === 'ST Courier'
-                  ? 'bg-purple-600 text-white border-purple-400 shadow-md shadow-purple-600/30'
-                  : 'border-purple-800/50 text-purple-300 hover:border-purple-500'
-              }`}
-            >
-              <Truck size={12} className={selectedCourier === 'ST Courier' ? 'text-white' : 'text-purple-400'} />
-              <span>ST Courier</span>
-              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
-                selectedCourier === 'ST Courier' ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-purple-200'
-              }`}>
-                {courierCounts.stCourier}
-              </span>
-            </button>
-          )}
-
-          {courierCounts.amazon > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedCourier(prev => prev === 'Amazon' ? 'All' : 'Amazon')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border bg-[#0b1220] transition-all ${
-                selectedCourier === 'Amazon'
-                  ? 'bg-amber-600 text-white border-amber-400 shadow-md shadow-amber-600/30'
-                  : 'border-amber-800/50 text-amber-300 hover:border-amber-500'
-              }`}
-            >
-              <Truck size={12} className={selectedCourier === 'Amazon' ? 'text-white' : 'text-amber-400'} />
-              <span>Amazon</span>
-              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
-                selectedCourier === 'Amazon' ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-amber-200'
-              }`}>
-                {courierCounts.amazon}
-              </span>
-            </button>
-          )}
-
-          {courierCounts.indiaPost > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedCourier(prev => prev === 'India Post' ? 'All' : 'India Post')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border bg-[#0b1220] transition-all ${
-                selectedCourier === 'India Post'
-                  ? 'bg-rose-600 text-white border-rose-400 shadow-md shadow-rose-600/30'
-                  : 'border-rose-800/50 text-rose-300 hover:border-rose-500'
-              }`}
-            >
-              <Truck size={12} className={selectedCourier === 'India Post' ? 'text-white' : 'text-rose-400'} />
-              <span>India Post</span>
-              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
-                selectedCourier === 'India Post' ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-rose-200'
-              }`}>
-                {courierCounts.indiaPost}
-              </span>
-            </button>
-          )}
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setSelectedCourier(prev => prev === c.name ? 'All' : c.name)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border bg-[#0b1220] transition-all whitespace-nowrap ${
+                  isSelected
+                    ? `${c.badgeColor.bg} text-white border-purple-400 shadow-md shadow-purple-600/30`
+                    : `${c.badgeColor.border} ${c.badgeColor.text} hover:border-slate-600`
+                }`}
+                title={`Filter by ${c.name}`}
+              >
+                <Truck size={12} className={isSelected ? 'text-white' : c.badgeColor.indicator.replace('bg-', 'text-')} />
+                <span>{c.shortName}</span>
+                <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                  isSelected ? 'bg-white/20 text-white' : 'bg-slate-800/80 text-slate-300'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -587,29 +543,65 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         })}
       </div>
 
-      {/* 4. MAIN WORKSPACE CONTENT: Compact Table View (Image 2) */}
+      {/* 4. MAIN WORKSPACE CONTENT: Compact Table View (Image 2) or Grouped Batches for Prepare Dispatch */}
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        {filteredOrders.length === 0 ? (
+        {currentStage === 'prepare_dispatch' ? (
+          <PrepareDispatchGroupedView
+            orders={stageShipments}
+            onDispatchSuccess={() => {
+              setCurrentStage('tracking');
+            }}
+            onReturnToActive={async (rawIds) => {
+              const res = await returnToActiveStage(rawIds);
+              if (res.success) {
+                toast.success(`Returned ${res.returnedCount} orders to Active`);
+              } else {
+                toast.error('Failed to return orders: ' + res.errors.join(', '));
+              }
+            }}
+          />
+        ) : filteredOrders.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center bg-[#0b1220] border border-slate-800/90 rounded-2xl animate-fade-in">
             <div className="w-16 h-16 rounded-2xl bg-purple-950/40 border border-purple-800/50 flex items-center justify-center text-purple-400 mx-auto mb-4 shadow-sm">
               <Truck size={32} />
             </div>
             <h3 className="text-lg font-bold text-slate-100 mb-1">
-              {unifiedOrders.length === 0 ? 'No Orders or Shipments in Logistics' : `No shipments match ${selectedStatusTab} in ${currentStage}`}
+              {unifiedOrders.length === 0 
+                ? 'No Orders or Shipments in Logistics' 
+                : currentStage === 'active'
+                ? 'No Unfulfilled Orders in Active'
+                : currentStage === 'tracking'
+                ? 'No Shipments Available to Track'
+                : `No shipments match ${selectedStatusTab} in ${currentStage}`}
             </h3>
             <p className="text-xs text-slate-400 max-w-md mx-auto mb-6">
               {unifiedOrders.length === 0 
                 ? 'Your logistics department has been reset and is ready for fresh data. Click Import below to upload customer orders.' 
+                : currentStage === 'active'
+                ? 'All active orders have been moved to dispatch preparation or dispatched. Click Import below to upload customer orders.'
+                : currentStage === 'tracking'
+                ? 'Shipments will appear here once dispatched from Prepare Dispatch, or upload courier tracking reports.'
                 : 'Try adjusting your search query, status filters, or courier tabs above.'}
             </p>
-            <button
-              type="button"
-              onClick={() => setIsImportModalOpen(true)}
-              className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 flex items-center gap-2 transition-colors cursor-pointer"
-            >
-              <UploadCloud size={15} />
-              <span>Import Fresh Customer Orders</span>
-            </button>
+            {currentStage === 'active' || unifiedOrders.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(true)}
+                className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 flex items-center gap-2 transition-colors cursor-pointer"
+              >
+                <UploadCloud size={15} />
+                <span>Import Customer Orders</span>
+              </button>
+            ) : currentStage === 'tracking' ? (
+              <button
+                type="button"
+                onClick={() => setIsCourierTrackingModalOpen(true)}
+                className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl shadow-md shadow-cyan-600/30 flex items-center gap-2 transition-colors cursor-pointer"
+              >
+                <Truck size={15} />
+                <span>Upload Courier Tracking Report</span>
+              </button>
+            ) : null}
           </div>
         ) : orderLayout === 'table' ? (
           <div className="pb-6">
@@ -661,15 +653,22 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         onClose={() => setOrderToDispatch(null)}
         onSuccess={() => {
           setOrderToDispatch(null);
-          setCurrentStage('dispatched');
+          setCurrentStage('tracking');
         }}
       />
 
-      {/* Excel / CSV Import Modal */}
+      {/* Excel / CSV Customer Orders Import Modal */}
       <OrderImportModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImportSuccess={() => setCurrentStage('active')}
+      />
+
+      {/* Courier Tracking Report Import Modal */}
+      <CourierTrackingImportModal
+        isOpen={isCourierTrackingModalOpen}
+        onClose={() => setIsCourierTrackingModalOpen(false)}
+        onSyncSuccess={() => setCurrentStage('tracking')}
       />
 
       {/* Live Courier Tracking Modal */}
