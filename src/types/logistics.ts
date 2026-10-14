@@ -38,6 +38,10 @@ export interface LogisticsOrder {
   stage: 'active' | 'pending' | 'prepare_dispatch' | 'dispatched' | 'order_data' | 'tracking' | 'trash';
   uploadedAt: string;
   syncedAt?: string;
+  dispatchDate?: string;
+  estimatedDeliveryDate?: string;
+  deliveredDate?: string;
+  remarks?: string;
   trackingError?: string;
   lastFailedAt?: string;
   // Source tracking file fields

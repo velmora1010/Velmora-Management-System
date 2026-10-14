@@ -58,6 +58,8 @@ export interface UnifiedLogisticsOrder {
   awbNumber?: string;
   dispatchDate?: string;
   estimatedDeliveryDate?: string;
+  deliveredDate?: string;
+  remarks?: string;
   stage: string;
   workflowStage: UnifiedWorkflowStage;
   status: UnifiedTrackingStatus;

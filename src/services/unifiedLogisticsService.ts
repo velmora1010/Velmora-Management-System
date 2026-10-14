@@ -212,6 +212,10 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     products: order.products || 'Standard Products',
     courier: order.courier || '',
     awbNumber: order.awbNumber || '',
+    dispatchDate: order.dispatchDate || order.orderDate,
+    estimatedDeliveryDate: order.estimatedDeliveryDate,
+    deliveredDate: order.deliveredDate,
+    remarks: order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus,
     stage: order.stage || 'order_data',
     workflowStage,
     status,
@@ -221,6 +225,51 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     trackingError: order.trackingError,
     syncState: order.syncState || 'idle'
   };
+};
+
+/**
+ * Resets the Logistics Department Data cleanly.
+ * Clears:
+ * 1. db.logistics_orders (Dexie customer shipment/order records)
+ * 2. db.logistics_imports (imported spreadsheet tracking history)
+ * 3. db.tracking_logs (courier sync logs)
+ * 4. db.historical_delivery_data & db.delivery_history (associated historical delivery data)
+ *
+ * CRITICAL SAFETY: Does NOT touch any Supabase tables (influencers, campaigns, finance, users, etc.)!
+ */
+export const resetLogisticsDepartmentData = async (): Promise<{ success: boolean; clearedCount: number; error?: string }> => {
+  try {
+    let clearedCount = 0;
+    await db.transaction(
+      'rw',
+      [
+        db.logistics_orders,
+        db.logistics_imports,
+        db.tracking_logs,
+        db.historical_delivery_data,
+        db.delivery_history
+      ],
+      async () => {
+        clearedCount = await db.logistics_orders.count();
+        await db.logistics_orders.clear();
+        await db.logistics_imports.clear();
+        await db.tracking_logs.clear();
+        await db.historical_delivery_data.clear();
+        await db.delivery_history.clear();
+      }
+    );
+
+    // Clear any local session storage caches for logistics tracking search/status
+    try {
+      sessionStorage.removeItem('logistics_search');
+      sessionStorage.removeItem('logistics_status');
+    } catch {}
+
+    return { success: true, clearedCount };
+  } catch (err: any) {
+    console.error('Failed to reset logistics department data:', err);
+    return { success: false, clearedCount: 0, error: err.message || 'Database transaction error' };
+  }
 };
 
 /**

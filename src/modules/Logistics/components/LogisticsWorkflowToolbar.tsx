@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Users, 
   Clock, 
@@ -10,7 +10,9 @@ import {
   RotateCcw,
   UploadCloud,
   Grid,
-  List
+  List,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import type { UnifiedWorkflowStage, WorkflowStageCounts } from '../../../types/unifiedLogistics';
 
@@ -40,6 +42,10 @@ interface LogisticsWorkflowToolbarProps {
 
   // Import Orders Action
   onOpenImportModal: () => void;
+
+  // Reset Logistics Department Data Action
+  onResetLogisticsData?: () => void;
+  isResetting?: boolean;
 }
 
 export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> = ({
@@ -57,9 +63,11 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
   activeFilterCount = 0,
   onRefresh,
   isRefreshing = false,
-  orderLayout = 'grid',
+  orderLayout = 'table',
   onToggleLayout,
-  onOpenImportModal
+  onOpenImportModal,
+  onResetLogisticsData,
+  isResetting = false
 }) => {
   return (
     <div className="bg-slate-900/90 border border-slate-800/90 p-1.5 rounded-2xl shadow-xl flex items-center justify-between gap-2 overflow-x-auto custom-scrollbar shrink-0 select-none">
@@ -206,7 +214,7 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
         </button>
       </div>
 
-      {/* RIGHT SIDE: Search, Filter, Refresh, Layout Switch & Import Orders */}
+      {/* RIGHT SIDE: Search, Filter, Refresh, Layout Switch, Reset & Import Orders */}
       <div className="flex items-center gap-1.5 shrink-0 ml-auto">
         {/* Search */}
         <div className="relative min-w-[90px] w-28 sm:w-36 md:w-44 lg:w-48">
@@ -255,18 +263,6 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
           <div className="hidden sm:flex items-center p-0.5 bg-slate-900 border border-slate-700/80 rounded-xl">
             <button
               type="button"
-              onClick={() => onToggleLayout('grid')}
-              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                orderLayout === 'grid'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Compact Cards View"
-            >
-              <Grid size={13} />
-            </button>
-            <button
-              type="button"
               onClick={() => onToggleLayout('table')}
               className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
                 orderLayout === 'table'
@@ -277,7 +273,33 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
             >
               <List size={13} />
             </button>
+            <button
+              type="button"
+              onClick={() => onToggleLayout('grid')}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                orderLayout === 'grid'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Compact Cards View"
+            >
+              <Grid size={13} />
+            </button>
           </div>
+        )}
+
+        {/* Reset Logistics Data Button */}
+        {onResetLogisticsData && (
+          <button
+            type="button"
+            onClick={onResetLogisticsData}
+            disabled={isResetting}
+            className="h-9 px-2.5 sm:px-3 rounded-xl text-xs font-semibold bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 hover:border-rose-600 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+            title="Reset Logistics Department Data (Clear all orders & start fresh)"
+          >
+            <Trash2 size={13} className="text-rose-400" />
+            <span className="hidden md:inline">Reset Data</span>
+          </button>
         )}
 
         {/* Import Orders Button placed at the far right of the top toolbar */}
@@ -288,8 +310,7 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
           title="Import Orders from Shopify or Spreadsheet"
         >
           <UploadCloud size={14} />
-          <span className="hidden xs:inline">Import Orders</span>
-          <span className="xs:hidden">Import</span>
+          <span className="hidden xs:inline">Import</span>
         </button>
       </div>
 
