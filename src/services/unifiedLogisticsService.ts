@@ -196,14 +196,31 @@ export const resolveTrackingStatus = (s: string, hasAwb: boolean): UnifiedTracki
   return hasAwb ? 'Pending' : 'Not Tracked';
 };
 
+import { 
+  normalizeState, 
+  resolveStateFromPincode, 
+  parseOrderAmount, 
+  normalizeOrderPhone 
+} from '../utils/logisticsOrderUtils';
+
 /**
  * Transforms a Dexie LogisticsOrder into a Canonical UnifiedLogisticsOrder.
  */
 export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => {
   const cleanedId = cleanOrderId(order.orderId);
-  const normalizedPhone = normalizePhoneNumber(order.phoneNumber);
+  const normalizedPhone = normalizeOrderPhone(order.phoneNumber);
   const customerKey = normalizedPhone || `order_${cleanedId || order.id}`;
-  const parsedAmount = parseFloat(String(order.amount || '0').replace(/[^0-9.]/g, '')) || 0;
+
+  const rawAmt = order.amount !== undefined && order.amount !== null ? String(order.amount).trim() : '';
+  const parsedAmt = parseOrderAmount(rawAmt);
+  const isAmountKnown = parsedAmt !== null;
+  const amount = parsedAmt ?? 0;
+
+  let state = normalizeState(order.state);
+  if (!state && order.pincode) {
+    state = resolveStateFromPincode(order.pincode);
+  }
+  const city = (order.city || '').trim().replace(/\b\w/g, c => c.toUpperCase());
   
   // An order has required info if customer name, address/city/pincode, and phone exist
   const hasRequiredInfo = !!(
@@ -226,6 +243,8 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
   const parsedEstDeliveryDate = parseAndFormatLogisticsDate(order.estimatedDeliveryDate);
   const parsedDeliveredDate = parseAndFormatLogisticsDate(order.deliveredDate);
 
+  const productsSummary = order.products && order.products.trim() ? order.products.trim() : 'Standard Products';
+
   return {
     id: `dexie_${order.id || cleanedId}`,
     rawId: order.id,
@@ -234,17 +253,25 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     source: 'upload',
     customerKey,
     customerName: order.customerName || 'Customer',
-    phoneNumber: normalizedPhone || order.phoneNumber || '',
-    rawPhoneNumber: order.phoneNumber,
+    phoneNumber: normalizedPhone || (order.phoneNumber ? String(order.phoneNumber).trim() : ''),
+    phone: normalizedPhone || (order.phoneNumber ? String(order.phoneNumber).trim() : ''),
+    rawPhoneNumber: order.phoneNumber ? String(order.phoneNumber).trim() : undefined,
     address: order.address || '',
-    city: order.city || '',
-    state: order.state || '',
+    shippingAddress: order.address || '',
+    city: city,
+    shippingCity: city,
+    state: state,
+    shippingState: state,
     pincode: order.pincode || '',
     orderDate: parsedOrderDate.isoDate || order.orderDate || '',
     orderDateDisplay: parsedOrderDate.displayDate || order.orderDateDisplay || '',
     orderType: order.orderType || 'Prepaid',
-    amount: parsedAmount,
-    products: order.products || 'Standard Products',
+    amount: amount,
+    totalAmount: amount,
+    isAmountKnown: isAmountKnown,
+    products: productsSummary,
+    productSummary: productsSummary,
+    totalQuantity: 1,
     courier: order.courier || '',
     awbNumber: order.awbNumber || '',
     dispatchDate: parsedDispatchDate.displayDate || order.dispatchDate || '',
@@ -440,7 +467,7 @@ export const calculateWorkflowCounts = (
  * Bulk moves orders from Active to Prepare Dispatch in Dexie
  */
 export const bulkMoveToPrepareDispatch = async (
-  rawOrderIds: number[],
+  rawOrderIds: (number | string)[],
   batchInfo?: { batchId?: string; batchName?: string }
 ): Promise<{ success: boolean; movedCount: number; errors: string[] }> => {
   const errors: string[] = [];
@@ -454,8 +481,22 @@ export const bulkMoveToPrepareDispatch = async (
   try {
     await db.transaction('rw', db.logistics_orders, async () => {
       for (const rawId of rawOrderIds) {
-        const ord = await db.logistics_orders.get(rawId);
-        if (!ord) {
+        let ord: LogisticsOrder | undefined;
+
+        if (typeof rawId === 'number') {
+          ord = await db.logistics_orders.get(rawId);
+        } else {
+          const numId = Number(String(rawId).replace('dexie_', ''));
+          if (!isNaN(numId) && numId > 0) {
+            ord = await db.logistics_orders.get(numId);
+          }
+          if (!ord) {
+            const cleanId = cleanOrderId(String(rawId));
+            ord = await db.logistics_orders.where('orderId').equals(cleanId).first();
+          }
+        }
+
+        if (!ord || !ord.id) {
           errors.push(`Order ID #${rawId} not found`);
           continue;
         }
@@ -474,7 +515,7 @@ export const bulkMoveToPrepareDispatch = async (
         }
 
         // Update stage to prepare_dispatch with batch grouping metadata
-        await db.logistics_orders.update(rawId, {
+        await db.logistics_orders.update(ord.id, {
           stage: 'prepare_dispatch' as any,
           batchId: ord.batchId || batchId,
           batchName: ord.batchName || batchName

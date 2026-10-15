@@ -30,6 +30,10 @@ import toast from 'react-hot-toast';
 import type { UnifiedLogisticsOrder, UnifiedWorkflowStage } from '../../../types/unifiedLogistics';
 import { getCourierTrackingUrl } from '../../../config/courierConfig';
 import { parseAndFormatLogisticsDate } from '../../../utils/logisticsDateUtils';
+import { 
+  resolveCustomerLocationDisplay, 
+  formatOrderAmountDisplay 
+} from '../../../utils/logisticsOrderUtils';
 
 interface OrderTableViewProps {
   orders: UnifiedLogisticsOrder[];
@@ -115,10 +119,10 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
           cmp = (a.customerName || '').localeCompare(b.customerName || '');
           break;
         case 'phone':
-          cmp = (a.phone || '').localeCompare(b.phone || '');
+          cmp = (a.phoneNumber || a.phone || '').localeCompare(b.phoneNumber || b.phone || '');
           break;
         case 'amount':
-          cmp = (a.totalAmount || 0) - (b.totalAmount || 0);
+          cmp = (a.amount ?? a.totalAmount ?? 0) - (b.amount ?? b.totalAmount ?? 0);
           break;
         case 'payment':
           cmp = (a.orderType || '').localeCompare(b.orderType || '');
@@ -242,21 +246,23 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
           {/* THEAD */}
           <thead className="bg-[#0e1626] text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10 select-none">
             <tr>
-              {/* Checkbox */}
-              <th className="px-3.5 py-3.5 bg-[#0e1626] w-10 text-center">
-                <button
-                  type="button"
-                  onClick={onToggleSelectAll}
-                  className="text-slate-400 hover:text-purple-400 transition-colors cursor-pointer inline-flex items-center justify-center"
-                  title={allSelected ? "Deselect All" : "Select All"}
-                >
-                  {allSelected ? (
-                    <CheckSquare size={16} className="text-purple-400" />
-                  ) : (
-                    <Square size={16} className="text-slate-500 hover:text-slate-300" />
-                  )}
-                </button>
-              </th>
+              {/* Checkbox (Only when isSelectable is true) */}
+              {isSelectable && (
+                <th className="px-3.5 py-3.5 bg-[#0e1626] w-10 text-center">
+                  <button
+                    type="button"
+                    onClick={onToggleSelectAll}
+                    className="text-slate-400 hover:text-purple-400 transition-colors cursor-pointer inline-flex items-center justify-center"
+                    title={allSelected ? "Deselect All" : "Select All"}
+                  >
+                    {allSelected ? (
+                      <CheckSquare size={16} className="text-purple-400" />
+                    ) : (
+                      <Square size={16} className="text-slate-500 hover:text-slate-300" />
+                    )}
+                  </button>
+                </th>
+              )}
 
               {/* 1. ORDER ID */}
               <th 
@@ -424,20 +430,22 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                     isSelected ? 'bg-purple-950/25 hover:bg-purple-950/35' : ''
                   }`}
                 >
-                  {/* Select Checkbox */}
-                  <td className="px-3.5 py-3.5 text-center">
-                    <button
-                      type="button"
-                      onClick={() => onToggleSelect && onToggleSelect(order.id)}
-                      className="text-slate-400 hover:text-purple-400 transition-colors cursor-pointer inline-flex items-center justify-center"
-                    >
-                      {isSelected ? (
-                        <CheckSquare size={16} className="text-purple-400" />
-                      ) : (
-                        <Square size={16} className="text-slate-500 hover:text-slate-300" />
-                      )}
-                    </button>
-                  </td>
+                  {/* Select Checkbox (Only when isSelectable is true) */}
+                  {isSelectable && (
+                    <td className="px-3.5 py-3.5 text-center">
+                      <button
+                        type="button"
+                        onClick={() => onToggleSelect && onToggleSelect(order.id)}
+                        className="text-slate-400 hover:text-purple-400 transition-colors cursor-pointer inline-flex items-center justify-center"
+                      >
+                        {isSelected ? (
+                          <CheckSquare size={16} className="text-purple-400" />
+                        ) : (
+                          <Square size={16} className="text-slate-500 hover:text-slate-300" />
+                        )}
+                      </button>
+                    </td>
+                  )}
 
                   {/* 1. ORDER ID */}
                   <td className="px-3.5 py-3.5 font-mono font-bold text-slate-200">
@@ -475,31 +483,30 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                           >
                             {order.customerName}
                           </span>
-                          <span className="text-[11px] text-slate-400 truncate mt-0.5">
-                            {order.shippingCity || order.shippingState ? (
-                              `${order.shippingCity || ''}${order.shippingCity && order.shippingState ? ', ' : ''}${order.shippingState || ''}`
-                            ) : (
-                              'India'
-                            )}
+                          <span 
+                            className="text-[11px] text-slate-400 truncate mt-0.5" 
+                            title={resolveCustomerLocationDisplay(order.state || order.shippingState, order.city || order.shippingCity, order.pincode)}
+                          >
+                            {resolveCustomerLocationDisplay(order.state || order.shippingState, order.city || order.shippingCity, order.pincode)}
                           </span>
                         </div>
                       </td>
 
                       {/* 4. PHONE */}
                       <td className="px-3.5 py-3.5 font-mono text-slate-300 text-xs whitespace-nowrap">
-                        {order.phone || '—'}
+                        {order.phoneNumber || order.phone || order.rawPhoneNumber || '—'}
                       </td>
 
                       {/* 5. PRODUCTS (QTY) */}
                       <td className="px-3.5 py-3.5 text-slate-300 max-w-[240px]">
-                        <span className="truncate block font-medium text-xs" title={order.productSummary}>
-                          {order.productSummary || 'DIY Home care Combo × 1'}
+                        <span className="truncate block font-medium text-xs" title={order.products || order.productSummary}>
+                          {order.products || order.productSummary || '—'}
                         </span>
                       </td>
 
                       {/* 6. AMOUNT */}
                       <td className="px-3.5 py-3.5 font-mono font-bold text-slate-100 whitespace-nowrap text-xs">
-                        ₹ {Math.round(order.totalAmount || 0).toLocaleString('en-IN')}
+                        {formatOrderAmountDisplay(order.amount ?? order.totalAmount)}
                       </td>
 
                       {/* 7. PAYMENT */}
@@ -632,20 +639,6 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                         <Eye size={13} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
                       </button>
 
-                      {/* Copy Order Details */}
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(`${order.displayOrderId} | ${order.customerName} | ${order.phone} | ₹${order.totalAmount}`, order.id, 'Order Info')}
-                        className="w-7 h-7 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700/80 transition-colors flex items-center justify-center cursor-pointer shrink-0"
-                        title="Copy Order Summary"
-                        aria-label="Copy Details"
-                      >
-                        {copiedId === order.id ? (
-                          <Check size={12} className="text-emerald-400" />
-                        ) : (
-                          <Copy size={12} />
-                        )}
-                      </button>
 
                       {/* Official Courier Tracking Page Link if tracking */}
                       {isTrackingView && order.awbNumber && getCourierTrackingUrl(order.courier, order.awbNumber) && (

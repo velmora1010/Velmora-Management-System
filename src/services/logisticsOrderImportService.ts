@@ -1,9 +1,15 @@
 import * as XLSX from 'xlsx';
 import db from '../lib/db';
 import type { LogisticsOrder } from '../types/logistics';
-import { cleanOrderId, normalizePhoneNumber } from './unifiedLogisticsService';
+import { cleanOrderId } from './unifiedLogisticsService';
 import { normalizeCourier } from '../config/courierConfig';
 import { parseAndFormatLogisticsDate } from '../utils/logisticsDateUtils';
+import { 
+  normalizeState, 
+  resolveStateFromPincode, 
+  parseOrderAmount, 
+  normalizeOrderPhone 
+} from '../utils/logisticsOrderUtils';
 
 export interface ParsedCustomerOrder {
   orderId: string;
@@ -46,6 +52,7 @@ export interface ImportValidationResult {
  * Normalizes header strings for case-insensitive lookup
  */
 const findHeaderValue = (row: any, candidates: string[]): any => {
+  if (!row) return undefined;
   const keys = Object.keys(row);
   for (const candidate of candidates) {
     const cLower = candidate.toLowerCase().trim();
@@ -54,6 +61,22 @@ const findHeaderValue = (row: any, candidates: string[]): any => {
       const val = String(row[foundKey]).trim();
       if (val !== '' && val !== 'null' && val !== 'undefined') {
         return row[foundKey];
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Searches across multiple rows of an order for candidate header values.
+ */
+const findHeaderValueFromRows = (rows: any[], candidates: string[]): any => {
+  for (const r of rows) {
+    const val = findHeaderValue(r, candidates);
+    if (val !== undefined && val !== null) {
+      const s = String(val).trim();
+      if (s !== '' && s !== '-' && s !== 'null' && s !== 'undefined') {
+        return val;
       }
     }
   }
@@ -122,42 +145,50 @@ export const parseAndValidateCustomerOrders = async (
 
   for (const [lowerId, rows] of groupedRows.entries()) {
     const primaryRow = rows[0];
-    const orderId = cleanOrderId(findHeaderValue(primaryRow, [
+    const orderId = cleanOrderId(findHeaderValueFromRows(rows, [
       'Name', 'Order', 'Order ID', 'Order Number', 'order_id', 'Invoice No', 'order_number'
     ]));
 
     if (existingIdSet.has(lowerId)) {
       duplicateCount++;
-      // Still include in result, but marked as duplicate
     }
 
-    // Customer Name
-    const customerName = String(findHeaderValue(primaryRow, [
-      'Shipping Name', 'Customer Name', 'Billing Name', 'Customer', 'Name', 'Full Name'
+    // Customer Name (search all rows for full customer name)
+    const customerName = String(findHeaderValueFromRows(rows, [
+      'Shipping Name', 'Customer Name', 'Billing Name', 'Customer', 'Full Name', 'Name', 'Buyer Name'
     ]) || 'Customer').trim();
 
-    // Phone
-    const rawPhone = String(findHeaderValue(primaryRow, [
-      'Shipping Phone', 'Phone', 'Phone Number', 'Mobile', 'Customer Phone', 'Contact'
-    ]) || '').trim();
-    const cleanPhone = normalizePhoneNumber(rawPhone);
+    // Phone (search all rows, checking shipping, billing, and direct phone columns)
+    const rawPhoneVal = findHeaderValueFromRows(rows, [
+      'Shipping Phone', 'Billing Phone', 'Phone', 'Phone Number', 'Customer Phone', 
+      'Mobile', 'Contact', 'Telephone', 'Customer Mobile', 'Buyer Phone', 'Recipient Phone'
+    ]);
+    const rawPhone = rawPhoneVal !== undefined && rawPhoneVal !== null ? String(rawPhoneVal).trim() : '';
+    const cleanPhone = normalizeOrderPhone(rawPhone);
 
     // Address Details
-    const address = String(findHeaderValue(primaryRow, [
-      'Shipping Address1', 'Shipping Address', 'Address', 'Delivery Address', 'Street'
+    const address = String(findHeaderValueFromRows(rows, [
+      'Shipping Address1', 'Shipping Address', 'Address', 'Delivery Address', 'Street', 'Billing Address1', 'Billing Address'
     ]) || '').trim();
 
-    const city = String(findHeaderValue(primaryRow, [
-      'Shipping City', 'City', 'Town'
+    const city = String(findHeaderValueFromRows(rows, [
+      'Shipping City', 'City', 'Town', 'Billing City'
     ]) || '').trim();
 
-    const state = String(findHeaderValue(primaryRow, [
-      'Shipping Province', 'Shipping State', 'State', 'Province'
+    const rawState = findHeaderValueFromRows(rows, [
+      'Shipping Province Name', 'Billing Province Name', 'Shipping Province', 'Billing Province', 
+      'Shipping State', 'Billing State', 'State', 'Province', 'Region', 'State/Province'
+    ]);
+    let state = normalizeState(rawState ? String(rawState) : '');
+
+    const pincode = String(findHeaderValueFromRows(rows, [
+      'Shipping Zip', 'Pincode', 'Pin Code', 'Postal Code', 'Zip', 'Billing Zip'
     ]) || '').trim();
 
-    const pincode = String(findHeaderValue(primaryRow, [
-      'Shipping Zip', 'Pincode', 'Pin Code', 'Postal Code', 'Zip'
-    ]) || '').trim();
+    // If state is not found from header, resolve from 6-digit Indian pincode
+    if (!state && pincode) {
+      state = resolveStateFromPincode(pincode);
+    }
 
     // Consolidate Products / Line Items from all grouped rows
     const productItems: string[] = [];
@@ -166,7 +197,8 @@ export const parseAndValidateCustomerOrders = async (
     rows.forEach(r => {
       const pName = findHeaderValue(r, ['Lineitem name', 'Lineitem title', 'Products', 'Item Name', 'Product Name', 'SKU']);
       const pQty = findHeaderValue(r, ['Lineitem quantity', 'Quantity', 'Qty']) || 1;
-      const pPrice = parseFloat(String(findHeaderValue(r, ['Lineitem price', 'Price']) || '0').replace(/[^0-9.]/g, '')) || 0;
+      const rawPrice = findHeaderValue(r, ['Lineitem price', 'Price', 'Item Price', 'Unit Price']);
+      const pPrice = parseOrderAmount(rawPrice) ?? 0;
 
       if (pName) {
         productItems.push(`${String(pName).trim()} × ${pQty}`);
@@ -176,41 +208,50 @@ export const parseAndValidateCustomerOrders = async (
 
     const productsSummary = productItems.length > 0 ? productItems.join(' | ') : 'Standard Products';
 
-    // Amount
-    const rawTotal = findHeaderValue(primaryRow, [
-      'Total', 'Order Total', 'Amount', 'Total Price', 'Current Total Price'
+    // Amount: search all rows for order total
+    const rawTotal = findHeaderValueFromRows(rows, [
+      'Total', 'Order Total', 'order_total', 'Total Price', 'total_price', 
+      'Grand Total', 'grand_total', 'Current Total Price', 'current_total_price', 
+      'Total Paid', 'total_paid', 'Amount', 'Order Amount', 'Net Amount', 'net_amount', 
+      'Invoice Value', 'Invoice Amount', 'Value', 'Subtotal'
     ]);
-    const amount = rawTotal !== undefined && String(rawTotal).trim() !== '' 
-      ? String(rawTotal).trim() 
-      : (calculatedAmount > 0 ? String(calculatedAmount) : '0');
+    const parsedTotal = parseOrderAmount(rawTotal);
+    let amount: string;
+    if (parsedTotal !== null) {
+      amount = String(parsedTotal);
+    } else if (calculatedAmount > 0) {
+      amount = String(calculatedAmount);
+    } else {
+      amount = ''; // Unknown amount -> displays as '—'
+    }
 
     // Payment Mode
-    const paymentMode = String(findHeaderValue(primaryRow, [
+    const paymentMode = String(findHeaderValueFromRows(rows, [
       'Payment Method', 'Payment Mode', 'Financial Status', 'Type', 'Order Type'
     ]) || 'Prepaid').trim();
 
     // Fulfillment Status & Cancellation
-    const fulfillmentStatusRaw = String(findHeaderValue(primaryRow, [
+    const fulfillmentStatusRaw = String(findHeaderValueFromRows(rows, [
       'Fulfillment Status', 'Fulfillment_Status', 'Fulfilment Status', 'Status', 'Order Status'
     ]) || '').toLowerCase().trim();
 
-    const financialStatusRaw = String(findHeaderValue(primaryRow, [
+    const financialStatusRaw = String(findHeaderValueFromRows(rows, [
       'Financial Status', 'Financial_Status'
     ]) || '').toLowerCase().trim();
 
-    const cancelledAt = findHeaderValue(primaryRow, ['Cancelled at', 'Cancelled At', 'Cancel Reason']);
+    const cancelledAt = findHeaderValueFromRows(rows, ['Cancelled at', 'Cancelled At', 'Cancel Reason']);
 
     // AWB & Courier
-    const rawAwb = findHeaderValue(primaryRow, [
+    const rawAwb = findHeaderValueFromRows(rows, [
       'Tracking number', 'Tracking Number', 'AWB', 'Waybill', 'Consignment No'
     ]);
-    const rawCourier = findHeaderValue(primaryRow, [
+    const rawCourier = findHeaderValueFromRows(rows, [
       'Carrier', 'Courier', 'Shipping Company', 'Courier Partner'
     ]);
     const courier = rawCourier ? normalizeCourier(String(rawCourier)) : undefined;
 
     // Order Date
-    const rawDate = findHeaderValue(primaryRow, [
+    const rawDate = findHeaderValueFromRows(rows, [
       'Created at', 'Order Date', 'Date', 'Created At', 'Processed at'
     ]);
     const parsedDate = parseAndFormatLogisticsDate(rawDate);

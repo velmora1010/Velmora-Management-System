@@ -10,6 +10,10 @@ import {
 } from 'lucide-react';
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 import { parseAndFormatLogisticsDate } from '../../../utils/logisticsDateUtils';
+import { 
+  resolveCustomerLocationDisplay, 
+  formatOrderAmountDisplay 
+} from '../../../utils/logisticsOrderUtils';
 
 interface MoveToPrepareSidePanelProps {
   isOpen: boolean;
@@ -30,7 +34,7 @@ export const MoveToPrepareSidePanel: React.FC<MoveToPrepareSidePanelProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const totalAmount = selectedOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+  const totalAmount = selectedOrders.reduce((sum, o) => sum + (o.amount ?? o.totalAmount ?? 0), 0);
 
   return (
     <>
@@ -109,7 +113,7 @@ export const MoveToPrepareSidePanel: React.FC<MoveToPrepareSidePanelProps> = ({
 
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-emerald-400 font-bold font-mono text-xs sm:text-sm">
-                        ₹{Math.round(order.totalAmount || 0).toLocaleString('en-IN')}
+                        {formatOrderAmountDisplay(order.amount ?? order.totalAmount)}
                       </span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                         isCod 
@@ -135,14 +139,17 @@ export const MoveToPrepareSidePanel: React.FC<MoveToPrepareSidePanelProps> = ({
                     <div className="flex items-center gap-1.5 min-w-0 text-slate-200">
                       <User size={12} className="text-slate-500 shrink-0" />
                       <span className="font-semibold truncate">{order.customerName}</span>
-                      {order.phone && (
+                      {(order.phoneNumber || order.phone || order.rawPhoneNumber) && (
                         <span className="text-slate-400 font-mono text-[11px] truncate">
-                          ({order.phone})
+                          ({order.phoneNumber || order.phone || order.rawPhoneNumber})
                         </span>
                       )}
                     </div>
-                    <div className="text-slate-400 text-[11px] truncate shrink-0 max-w-[140px] text-right">
-                      {order.shippingCity || order.shippingState || '—'}
+                    <div 
+                      className="text-slate-400 text-[11px] truncate shrink-0 max-w-[140px] text-right"
+                      title={resolveCustomerLocationDisplay(order.state || order.shippingState, order.city || order.shippingCity, order.pincode)}
+                    >
+                      {resolveCustomerLocationDisplay(order.state || order.shippingState, order.city || order.shippingCity, order.pincode)}
                     </div>
                   </div>
 
@@ -169,7 +176,7 @@ export const MoveToPrepareSidePanel: React.FC<MoveToPrepareSidePanelProps> = ({
                             </div>
                           </div>
                           <span className="text-slate-300 font-mono font-bold text-xs shrink-0">
-                            ₹{Math.round(item.price || (order.totalAmount / (order.items?.length || 1))).toLocaleString('en-IN')}
+                            {formatOrderAmountDisplay(item.price || ((order.amount ?? order.totalAmount ?? 0) / (order.items?.length || 1)))}
                           </span>
                         </div>
                       ))
@@ -181,15 +188,15 @@ export const MoveToPrepareSidePanel: React.FC<MoveToPrepareSidePanelProps> = ({
                           </div>
                           <div className="min-w-0">
                             <span className="text-slate-200 font-medium block truncate text-[11px]">
-                              {order.productSummary || 'Combo Pack / Products'}
+                              {order.products || order.productSummary || '—'}
                             </span>
                             <span className="text-slate-400 text-[10px] font-mono">
-                              Qty: {order.totalQuantity || 1}
+                              Qty: {order.totalQuantity || order.quantity || 1}
                             </span>
                           </div>
                         </div>
                         <span className="text-slate-300 font-mono font-bold text-xs shrink-0">
-                          ₹{Math.round(order.totalAmount || 0).toLocaleString('en-IN')}
+                          {formatOrderAmountDisplay(order.amount ?? order.totalAmount)}
                         </span>
                       </div>
                     )}

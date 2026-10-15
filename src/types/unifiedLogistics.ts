@@ -34,11 +34,15 @@ export interface UnifiedLogisticsOrder {
   customerKey: string; // normalized phone e.g. "9567022022" or fallback "order_6674"
   customerName: string;
   phoneNumber: string;
+  phone?: string; // compatibility alias
   rawPhoneNumber?: string;
   alternatePhone?: string;
   address?: string;
+  shippingAddress?: string; // compatibility alias
   city?: string;
+  shippingCity?: string; // compatibility alias
   state?: string;
+  shippingState?: string; // compatibility alias
   pincode?: string;
 
   // Order Details
@@ -46,10 +50,19 @@ export interface UnifiedLogisticsOrder {
   orderDateDisplay?: string;
   orderType: string; // 'Prepaid' | 'COD' | 'Partial COD' | etc.
   amount: number; // numeric amount in INR
+  totalAmount?: number; // compatibility alias
+  isAmountKnown?: boolean;
   products: string; // summarized product names or SKU list
+  productSummary?: string; // compatibility alias
   quantity?: number;
+  totalQuantity?: number;
   lineItems?: Array<{
     name: string;
+    quantity: number;
+    price?: number;
+  }>;
+  items?: Array<{
+    productName: string;
     quantity: number;
     price?: number;
   }>;

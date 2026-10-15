@@ -24,12 +24,14 @@ import type {
   UnifiedWorkflowStage,
   UnifiedTrackingStatus
 } from '../../types/unifiedLogistics';
+import { supabase } from '../../lib/supabase';
 import { 
   fromDexieOrder, 
   groupOrdersIntoCustomers, 
   calculateWorkflowCounts,
   bulkMoveToPrepareDispatch,
-  returnToActiveStage
+  returnToActiveStage,
+  cleanOrderId
 } from '../../services/unifiedLogisticsService';
 import { LogisticsWorkflowToolbar } from './components/LogisticsWorkflowToolbar';
 import { OrderTableView } from './components/OrderTableView';
@@ -43,6 +45,7 @@ import { TrackingModal } from './TrackingModal';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
 import { parseAndFormatLogisticsDate } from '../../utils/logisticsDateUtils';
+import { normalizeState, resolveStateFromPincode } from '../../utils/logisticsOrderUtils';
 
 // Status pills for Tracking stage
 const STATUS_PILLS: Array<{ id: string; label: string }> = [
@@ -125,11 +128,14 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     return unifiedOrders.filter(o => o.workflowStage === currentStage);
   }, [unifiedOrders, currentStage]);
 
-  // One-time sanitize legacy serial dates in Dexie records on mount
+  // Sanitize legacy serial dates, normalize states, and enrich missing details on mount
   useEffect(() => {
     const sanitizeDexieRecords = async () => {
       try {
         const records = await db.logistics_orders.toArray();
+        if (records.length === 0) return;
+
+        // Pass 1: Local normalizations (dates, stage/status, state codes, pincode lookup)
         for (const rec of records) {
           if (!rec.id) continue;
           let needsUpdate = false;
@@ -155,8 +161,67 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
             needsUpdate = true;
           }
 
+          // Normalize 2-letter state codes (e.g. TN -> Tamil Nadu) or resolve from pincode
+          const normState = normalizeState(rec.state);
+          if (normState && normState !== rec.state) {
+            patch.state = normState;
+            needsUpdate = true;
+          } else if ((!rec.state || rec.state.toLowerCase() === 'india' || rec.state.trim() === '') && rec.pincode) {
+            const pinState = resolveStateFromPincode(rec.pincode);
+            if (pinState) {
+              patch.state = pinState;
+              needsUpdate = true;
+            }
+          }
+
           if (needsUpdate) {
             await db.logistics_orders.update(rec.id, patch);
+          }
+        }
+
+        // Pass 2: Safely check Supabase sales_orders to enrich orders missing phone, amount, or state
+        const needsEnrichment = records.filter(
+          r => (!r.phoneNumber || r.phoneNumber.trim() === '' || r.phoneNumber === '-') ||
+               (!r.amount || r.amount === '0' || r.amount === '') ||
+               (!r.state || r.state.toLowerCase() === 'india' || r.state.trim() === '')
+        );
+
+        if (needsEnrichment.length > 0) {
+          const rawIds = needsEnrichment.map(r => cleanOrderId(r.orderId)).filter(Boolean);
+          if (rawIds.length > 0) {
+            // Batch fetch matching orders from Supabase
+            const { data: sbOrders } = await supabase
+              .from('sales_orders')
+              .select('order_id, customer_name, phone, state, city, pincode, order_total, payment_mode')
+              .in('order_id', rawIds);
+
+            if (sbOrders && sbOrders.length > 0) {
+              const sbMap = new Map<string, typeof sbOrders[0]>();
+              sbOrders.forEach(so => sbMap.set(cleanOrderId(so.order_id).toLowerCase(), so));
+
+              for (const rec of needsEnrichment) {
+                if (!rec.id) continue;
+                const so = sbMap.get(cleanOrderId(rec.orderId).toLowerCase());
+                if (so) {
+                  const patch: Partial<LogisticsOrder> = {};
+                  if ((!rec.phoneNumber || rec.phoneNumber.trim() === '' || rec.phoneNumber === '-') && so.phone) {
+                    patch.phoneNumber = String(so.phone);
+                  }
+                  if ((!rec.amount || rec.amount === '0' || rec.amount === '') && so.order_total) {
+                    patch.amount = String(so.order_total);
+                  }
+                  if ((!rec.state || rec.state.toLowerCase() === 'india' || rec.state.trim() === '') && so.state) {
+                    patch.state = normalizeState(so.state);
+                  }
+                  if ((!rec.city || rec.city.trim() === '') && so.city) {
+                    patch.city = so.city;
+                  }
+                  if (Object.keys(patch).length > 0) {
+                    await db.logistics_orders.update(rec.id, patch);
+                  }
+                }
+              }
+            }
           }
         }
       } catch (e) {
@@ -238,10 +303,10 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         const q = searchTerm.toLowerCase().trim();
         const matchesId = (order.displayOrderId || '').toLowerCase().includes(q);
         const matchesCust = (order.customerName || '').toLowerCase().includes(q);
-        const matchesPhone = (order.phone || '').includes(q);
+        const matchesPhone = (order.phoneNumber || order.phone || '').includes(q);
         const matchesAwb = (order.awbNumber || '').toLowerCase().includes(q);
-        const matchesCity = (order.shippingCity || '').toLowerCase().includes(q);
-        const matchesState = (order.shippingState || '').toLowerCase().includes(q);
+        const matchesCity = (order.city || order.shippingCity || '').toLowerCase().includes(q);
+        const matchesState = (order.state || order.shippingState || '').toLowerCase().includes(q);
         if (!matchesId && !matchesCust && !matchesPhone && !matchesAwb && !matchesCity && !matchesState) {
           return false;
         }
@@ -287,6 +352,11 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const selectedOrdersList = useMemo(() => {
     return unifiedOrders.filter(o => selectedOrderIds.has(o.id));
   }, [unifiedOrders, selectedOrderIds]);
+
+  // Selected total amount
+  const selectedTotalAmount = useMemo(() => {
+    return selectedOrdersList.reduce((sum, o) => sum + (o.amount ?? o.totalAmount ?? 0), 0);
+  }, [selectedOrdersList]);
 
   // Selection handlers
   const handleToggleSelect = useCallback((orderId: string) => {
@@ -353,12 +423,12 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       'Order ID': o.displayOrderId,
       'Order Date': o.orderDateDisplay || o.orderDate,
       'Customer Name': o.customerName,
-      'Phone': o.phone,
-      'City': o.shippingCity,
-      'State': o.shippingState,
-      'Products': o.productSummary,
-      'Quantity': o.totalQuantity,
-      'Total Amount': o.totalAmount,
+      'Phone': o.phoneNumber || o.phone || '',
+      'City': o.city || o.shippingCity || '',
+      'State': o.state || o.shippingState || '',
+      'Products': o.products || o.productSummary || '',
+      'Quantity': o.totalQuantity || 1,
+      'Total Amount': o.amount ?? o.totalAmount ?? 0,
       'Payment Method': o.orderType,
       'Status': o.workflowStage === 'active' ? 'Unfulfilled' : o.status,
       'Courier': o.courier || 'Unassigned',
@@ -610,6 +680,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           {/* Bulk Select Action Buttons inline in the toolbar */}
           {isBulkSelectMode && currentStage === 'active' && (
             <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
+              {/* Select All / Deselect All */}
               <button
                 type="button"
                 onClick={handleToggleSelectAll}
@@ -628,6 +699,18 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 )}
               </button>
 
+              {/* Selected Count & Total Amount Badge */}
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-950/40 border border-purple-800/50 text-xs">
+                <span className="text-purple-300 font-semibold">
+                  <strong className="text-white font-mono font-bold">{selectedOrderIds.size}</strong> selected
+                </span>
+                <span className="text-slate-600">•</span>
+                <span className="text-emerald-400 font-mono font-bold">
+                  ₹{Math.round(selectedTotalAmount).toLocaleString('en-IN')}
+                </span>
+              </div>
+
+              {/* Move to Prepare Dispatch */}
               <button
                 type="button"
                 onClick={handlePrepareDispatchBulk}
@@ -637,6 +720,21 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               >
                 <Truck size={13} />
                 <span>Move to Prepare Dispatch ({selectedOrderIds.size})</span>
+              </button>
+
+              {/* Exit Bulk Select Mode */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBulkSelectMode(false);
+                  setSelectedOrderIds(new Set());
+                  setIsMoveReviewPanelOpen(false);
+                }}
+                className="h-8 px-2.5 rounded-xl text-xs font-medium bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 flex items-center gap-1 transition-colors cursor-pointer"
+                title="Exit Bulk Select mode"
+              >
+                <X size={13} />
+                <span>Exit</span>
               </button>
             </div>
           )}
