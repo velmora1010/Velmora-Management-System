@@ -9,7 +9,8 @@ import {
   RotateCcw,
   UploadCloud,
   X,
-  BarChart3
+  BarChart3,
+  Calendar
 } from 'lucide-react';
 import type { UnifiedWorkflowStage, WorkflowStageCounts } from '../../../types/unifiedLogistics';
 
@@ -28,6 +29,9 @@ export interface LogisticsWorkflowToolbarProps {
   onRefresh: () => void;
   isRefreshing?: boolean;
   onOpenImportModal: () => void;
+  onOpenDateCalendar?: () => void;
+  activeDateRangeText?: string;
+  isDateFilterActive?: boolean;
 }
 
 export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> = ({
@@ -41,7 +45,10 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
   activeFilterCount = 0,
   onRefresh,
   isRefreshing = false,
-  onOpenImportModal
+  onOpenImportModal,
+  onOpenDateCalendar,
+  activeDateRangeText,
+  isDateFilterActive = false
 }) => {
   // Canonical workflow stages + Analytics in single evenly spaced navigation group
   const workflowStages: Array<{
@@ -160,6 +167,27 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
         {/* Global Action Buttons */}
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 justify-end">
           
+          {/* Date Range Calendar Button */}
+          {onOpenDateCalendar && (
+            <button
+              type="button"
+              onClick={onOpenDateCalendar}
+              className={`h-10 px-3 sm:px-3.5 rounded-xl text-xs font-semibold transition-colors border flex items-center gap-2 cursor-pointer relative shrink-0 ${
+                isDateFilterActive
+                  ? 'bg-cyan-950/70 border-cyan-500 text-cyan-300 shadow-sm'
+                  : 'bg-[#0e1626] border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
+              }`}
+              title="Select Date Range"
+              aria-label="Select Date Range"
+            >
+              <Calendar size={14} className={isDateFilterActive ? 'text-cyan-400' : 'text-slate-400'} />
+              <span className="hidden md:inline font-mono text-[11px] truncate max-w-[150px]">
+                {activeDateRangeText || 'Date Range'}
+              </span>
+              <span className="md:hidden">Date</span>
+            </button>
+          )}
+
           {/* Filters Button */}
           <button
             type="button"

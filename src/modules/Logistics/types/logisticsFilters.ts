@@ -1,18 +1,21 @@
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 import { normalizeCourier } from '../../../config/courierConfig';
 import { isDispatchedOrder } from '../../../utils/logisticsOrderUtils';
+import { parseAndFormatLogisticsDate } from '../../../utils/logisticsDateUtils';
 
 export type LogisticsDatePreset = 
   | 'all' 
   | 'today' 
   | 'yesterday' 
+  | 'this_week'
   | '7d' 
-  | '30d' 
   | 'this_month' 
   | 'prev_month' 
+  | '30d' 
+  | 'this_year'
   | 'custom';
 
-export type LogisticsDateField = 'orderDate' | 'dispatchDate' | 'deliveredDate';
+export type LogisticsDateField = 'orderDate' | 'dispatchDate' | 'deliveredDate' | 'syncedAt';
 
 export interface LogisticsFilterState {
   // 1. Date & Time
@@ -73,46 +76,160 @@ export const INITIAL_LOGISTICS_FILTER_STATE: LogisticsFilterState = {
   maxAmount: ''
 };
 
+export const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const MONTH_NAMES_FULL = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
 /**
- * Resolves standard date ranges based on preset
+ * Formats a local Date into YYYY-MM-DD without UTC timezone skew
+ */
+export function formatLocalYMD(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Parses YYYY-MM-DD into a local Date object
+ */
+export function parseLocalYMD(ymdStr: string): Date {
+  if (!ymdStr) return new Date();
+  const parts = ymdStr.split('-');
+  const y = parseInt(parts[0], 10) || new Date().getFullYear();
+  const m = parseInt(parts[1], 10) || 1;
+  const d = parseInt(parts[2], 10) || 1;
+  return new Date(y, m - 1, d);
+}
+
+/**
+ * Formats a YYYY-MM-DD string into "15-Oct-2026"
+ */
+export function formatInputDate(ymd: string): string {
+  if (!ymd || !ymd.includes('-')) return '';
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return ymd;
+  return `${String(d).padStart(2, '0')}-${MONTH_NAMES_SHORT[m - 1]}-${y}`;
+}
+
+/**
+ * Formats date range into "15 Oct 2026 – 20 Oct 2026"
+ */
+export function formatRangeDisplay(startDate: string, endDate: string): string {
+  if (!startDate && !endDate) return 'All Historical Time';
+  if (startDate && !endDate) {
+    const [y, m, d] = startDate.split('-').map(Number);
+    return `${d} ${MONTH_NAMES_SHORT[m - 1]} ${y}`;
+  }
+  if (!startDate && endDate) {
+    const [y, m, d] = endDate.split('-').map(Number);
+    return `Up to ${d} ${MONTH_NAMES_SHORT[m - 1]} ${y}`;
+  }
+  const [y1, m1, d1] = startDate.split('-').map(Number);
+  const [y2, m2, d2] = endDate.split('-').map(Number);
+  const s1 = `${d1} ${MONTH_NAMES_SHORT[m1 - 1]} ${y1}`;
+  const s2 = `${d2} ${MONTH_NAMES_SHORT[m2 - 1]} ${y2}`;
+  if (startDate === endDate) return s1;
+  return `${s1} – ${s2}`;
+}
+
+/**
+ * Parses human typed dates (e.g. "15-Oct-2026", "2026-10-15", "15/10/2026") into YYYY-MM-DD
+ */
+export function parseUserInputDate(inputStr: string): string | null {
+  const str = inputStr.trim();
+  if (!str) return null;
+
+  // 1. Matches DD-MMM-YYYY or DD MMM YYYY (e.g. 15-Oct-2026 or 15 Oct 2026)
+  const dMmmYMatch = str.match(/^(\d{1,2})[\s\-]([a-zA-Z]{3,9})[\s\-](\d{4})$/);
+  if (dMmmYMatch) {
+    const day = parseInt(dMmmYMatch[1], 10);
+    const mStr = dMmmYMatch[2].slice(0, 3).toLowerCase();
+    const year = parseInt(dMmmYMatch[3], 10);
+    const mIndex = MONTH_NAMES_SHORT.findIndex(m => m.toLowerCase() === mStr);
+    if (mIndex !== -1 && day >= 1 && day <= 31 && year >= 1990 && year <= 2060) {
+      return `${year}-${String(mIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // 2. Matches YYYY-MM-DD
+  const ymdMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (ymdMatch) {
+    const year = parseInt(ymdMatch[1], 10);
+    const month = parseInt(ymdMatch[2], 10);
+    const day = parseInt(ymdMatch[3], 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1990 && year <= 2060) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // 3. Matches DD/MM/YYYY or DD-MM-YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10);
+    const year = parseInt(dmyMatch[3], 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1990 && year <= 2060) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Resolves standard date ranges based on preset using local calendar boundaries
  */
 export function resolveDateRangeForPreset(preset: LogisticsDatePreset): { start: string; end: string } {
   const now = new Date();
-  const formatYmd = (d: Date) => d.toISOString().slice(0, 10);
 
   if (preset === 'today') {
-    const today = formatYmd(now);
+    const today = formatLocalYMD(now);
     return { start: today, end: today };
   }
 
   if (preset === 'yesterday') {
-    const y = new Date(now);
-    y.setDate(y.getDate() - 1);
-    const yesterday = formatYmd(y);
+    const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const yesterday = formatLocalYMD(y);
     return { start: yesterday, end: yesterday };
   }
 
-  if (preset === '7d') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 6);
-    return { start: formatYmd(d), end: formatYmd(now) };
+  if (preset === 'this_week') {
+    const day = now.getDay();
+    const diff = (day + 6) % 7; // Monday = 0
+    const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff);
+    const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6);
+    return { start: formatLocalYMD(mon), end: formatLocalYMD(sun) };
   }
 
-  if (preset === '30d') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 29);
-    return { start: formatYmd(d), end: formatYmd(now) };
+  if (preset === '7d') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+    return { start: formatLocalYMD(start), end: formatLocalYMD(now) };
   }
 
   if (preset === 'this_month') {
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { start: formatYmd(start), end: formatYmd(now) };
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // last day of current month
+    return { start: formatLocalYMD(start), end: formatLocalYMD(end) };
   }
 
   if (preset === 'prev_month') {
     const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const end = new Date(now.getFullYear(), now.getMonth(), 0);
-    return { start: formatYmd(start), end: formatYmd(end) };
+    const end = new Date(now.getFullYear(), now.getMonth(), 0); // last day of previous month
+    return { start: formatLocalYMD(start), end: formatLocalYMD(end) };
+  }
+
+  if (preset === '30d') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+    return { start: formatLocalYMD(start), end: formatLocalYMD(now) };
+  }
+
+  if (preset === 'this_year') {
+    const start = new Date(now.getFullYear(), 0, 1);
+    const end = new Date(now.getFullYear(), 11, 31);
+    return { start: formatLocalYMD(start), end: formatLocalYMD(end) };
   }
 
   return { start: '', end: '' };
@@ -170,15 +287,25 @@ export function applyLogisticsFilters(
         rawTargetDate = order.dispatchDate || '';
       } else if (filters.dateField === 'deliveredDate') {
         rawTargetDate = order.deliveredDate || '';
+      } else if (filters.dateField === 'syncedAt') {
+        rawTargetDate = order.syncedAt || order.lastUpdated || '';
       }
 
       if (rawTargetDate) {
-        const ymd = rawTargetDate.slice(0, 10);
-        if (effectiveStart && ymd < effectiveStart) return false;
-        if (effectiveEnd && ymd > effectiveEnd) return false;
+        // Universal parser normalizes Excel serials, ISO stamps, and display strings to YYYY-MM-DD
+        const parsed = parseAndFormatLogisticsDate(rawTargetDate);
+        const ymd = parsed.isoDate || (rawTargetDate.length >= 10 && rawTargetDate.includes('-') ? rawTargetDate.slice(0, 10) : '');
+
+        if (ymd) {
+          if (effectiveStart && ymd < effectiveStart) return false;
+          if (effectiveEnd && ymd > effectiveEnd) return false;
+        } else {
+          // If date is unparseable and field is specified, exclude
+          return false;
+        }
       } else {
-        // If filtering by dispatch/delivered date and record doesn't have it, exclude
-        if (filters.dateField !== 'orderDate') return false;
+        // If filtering by a date field and the record does not have that date, exclude
+        return false;
       }
     }
 

@@ -20,7 +20,12 @@ import type {
   LogisticsDatePreset, 
   LogisticsDateField 
 } from '../types/logisticsFilters';
-import { INITIAL_LOGISTICS_FILTER_STATE, resolveDateRangeForPreset } from '../types/logisticsFilters';
+import { 
+  INITIAL_LOGISTICS_FILTER_STATE, 
+  resolveDateRangeForPreset,
+  formatRangeDisplay 
+} from '../types/logisticsFilters';
+import { DateRangeCalendarModal } from './DateRangeCalendarModal';
 import { CONFIGURED_COURIERS } from '../../../config/courierConfig';
 import { MultiSelectDropdown, OptionItem } from '../../sales/website/components/MultiSelectDropdown';
 import { MASTER_LOCATIONS } from '../../../data/indiaLocations';
@@ -39,10 +44,12 @@ const DATE_PRESET_OPTIONS: Array<{ id: LogisticsDatePreset; label: string }> = [
   { id: 'all', label: 'All Time' },
   { id: 'today', label: 'Today' },
   { id: 'yesterday', label: 'Yesterday' },
+  { id: 'this_week', label: 'This Week' },
   { id: '7d', label: 'Last 7 Days' },
-  { id: '30d', label: 'Last 30 Days' },
   { id: 'this_month', label: 'This Month' },
   { id: 'prev_month', label: 'Previous Month' },
+  { id: '30d', label: 'Last 30 Days' },
+  { id: 'this_year', label: 'This Year' },
   { id: 'custom', label: 'Custom Range' }
 ];
 
@@ -74,6 +81,7 @@ export const LogisticsFilterDrawer: React.FC<LogisticsFilterDrawerProps> = ({
 }) => {
   // Local draft state initialized whenever drawer opens
   const [draft, setDraft] = useState<LogisticsFilterState>(filters);
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -244,19 +252,19 @@ export const LogisticsFilterDrawer: React.FC<LogisticsFilterDrawerProps> = ({
             {/* Date Field Selector */}
             <div>
               <label className="block text-[11px] font-semibold text-slate-400 mb-1.5">Date Field to Filter</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['orderDate', 'dispatchDate', 'deliveredDate'] as LogisticsDateField[]).map(df => (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {(['orderDate', 'dispatchDate', 'deliveredDate', 'syncedAt'] as LogisticsDateField[]).map(df => (
                   <button
                     key={df}
                     type="button"
                     onClick={() => setDraft({ ...draft, dateField: df })}
-                    className={`py-1.5 px-2 rounded-xl text-xs font-medium border text-center transition-colors cursor-pointer ${
+                    className={`py-1.5 px-2 rounded-xl text-[11px] font-medium border text-center transition-colors cursor-pointer truncate ${
                       draft.dateField === df
                         ? 'bg-purple-600 text-white border-purple-500 font-bold shadow-sm'
                         : 'bg-[#0e1626] border-slate-800 text-slate-300 hover:border-slate-700'
                     }`}
                   >
-                    {df === 'orderDate' ? 'Order Date' : df === 'dispatchDate' ? 'Dispatch Date' : 'Delivery Date'}
+                    {df === 'orderDate' ? 'Order Date' : df === 'dispatchDate' ? 'Dispatch Date' : df === 'deliveredDate' ? 'Delivery Date' : 'Tracking Sync'}
                   </button>
                 ))}
               </div>
@@ -264,15 +272,15 @@ export const LogisticsFilterDrawer: React.FC<LogisticsFilterDrawerProps> = ({
 
             {/* Quick Date Presets */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 mb-1.5">Time Preset</label>
-              <div className="grid grid-cols-4 gap-1.5">
+              <label className="block text-[11px] font-semibold text-slate-400 mb-1.5">Quick Presets</label>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
                 {DATE_PRESET_OPTIONS.map(preset => (
                   <button
                     key={preset.id}
                     type="button"
                     onClick={() => {
                       if (preset.id === 'custom') {
-                        setDraft({ ...draft, datePreset: 'custom' });
+                        setIsCalendarModalOpen(true);
                       } else {
                         const resolved = resolveDateRangeForPreset(preset.id);
                         setDraft({
@@ -295,29 +303,32 @@ export const LogisticsFilterDrawer: React.FC<LogisticsFilterDrawerProps> = ({
               </div>
             </div>
 
-            {/* Custom Range Inputs */}
-            {draft.datePreset === 'custom' && (
-              <div className="grid grid-cols-2 gap-2 pt-1 animate-in fade-in duration-150">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    value={draft.startDate}
-                    onChange={e => setDraft({ ...draft, startDate: e.target.value })}
-                    className="w-full bg-[#0e1626] border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
-                  />
+            {/* Interactive Date Range Trigger Card */}
+            <div 
+              onClick={() => setIsCalendarModalOpen(true)}
+              className="p-3 bg-[#0e1626] border border-cyan-500/40 hover:border-cyan-400 rounded-xl flex items-center justify-between cursor-pointer transition-colors group shadow-sm"
+              title="Click to open Advanced Date-Range Calendar"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 group-hover:bg-cyan-500/20 shrink-0">
+                  <Calendar size={16} />
                 </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">End Date</label>
-                  <input
-                    type="date"
-                    value={draft.endDate}
-                    onChange={e => setDraft({ ...draft, endDate: e.target.value })}
-                    className="w-full bg-[#0e1626] border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white outline-none focus:border-cyan-400"
-                  />
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Selected Range ({draft.datePreset === 'custom' ? 'Custom' : draft.datePreset})
+                  </div>
+                  <div className="text-xs font-mono font-bold text-cyan-300 truncate">
+                    {formatRangeDisplay(draft.startDate, draft.endDate)}
+                  </div>
                 </div>
               </div>
-            )}
+              <button
+                type="button"
+                className="text-[11px] font-semibold text-cyan-300 group-hover:text-white px-3 py-1.5 rounded-lg bg-cyan-950/60 border border-cyan-800/80 group-hover:border-cyan-500 transition-colors shrink-0 cursor-pointer"
+              >
+                Open Calendar
+              </button>
+            </div>
           </div>
 
           {/* SECTION 2 — ORDER SEARCH */}
@@ -619,6 +630,27 @@ export const LogisticsFilterDrawer: React.FC<LogisticsFilterDrawerProps> = ({
         </div>
 
       </div>
+
+      {/* Date Range Calendar Modal (Opened from drawer) */}
+      {isCalendarModalOpen && (
+        <DateRangeCalendarModal
+          isOpen={isCalendarModalOpen}
+          onClose={() => setIsCalendarModalOpen(false)}
+          startDate={draft.startDate}
+          endDate={draft.endDate}
+          preset={draft.datePreset}
+          targetDateField={draft.dateField}
+          onTargetDateFieldChange={(df) => setDraft(prev => ({ ...prev, dateField: df }))}
+          onApply={(range) => {
+            setDraft(prev => ({
+              ...prev,
+              startDate: range.startDate,
+              endDate: range.endDate,
+              datePreset: range.preset
+            }));
+          }}
+        />
+      )}
     </div>
   );
 };

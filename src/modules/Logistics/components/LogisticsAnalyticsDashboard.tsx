@@ -40,6 +40,7 @@ import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../../config/courierConfig';
 import { isDispatchedOrder } from '../../../utils/logisticsOrderUtils';
 import type { LogisticsFilterState } from '../types/logisticsFilters';
+import { formatRangeDisplay } from '../types/logisticsFilters';
 
 interface LogisticsAnalyticsDashboardProps {
   orders: UnifiedLogisticsOrder[];
@@ -47,6 +48,7 @@ interface LogisticsAnalyticsDashboardProps {
   filters: LogisticsFilterState;
   onResetFilters: () => void;
   onNavigateStage?: (stage: 'active' | 'prepare_dispatch' | 'dispatched' | 'tracking') => void;
+  onOpenDateCalendar?: () => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -316,8 +318,56 @@ export const LogisticsAnalyticsDashboard: React.FC<LogisticsAnalyticsDashboardPr
   }, [orders]);
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pb-8 custom-scrollbar text-slate-200">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-5 pb-8 custom-scrollbar text-slate-200">
       
+      {/* ANALYTICS DATE-RANGE & FILTER STATUS BANNER */}
+      <div className="bg-[#0b1220] border border-slate-800 rounded-2xl p-3.5 sm:p-4 shadow-md flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0">
+            <Calendar size={18} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Analytics Timeframe & Date Filter ({filters.dateField === 'orderDate' ? 'Order Date' : filters.dateField === 'dispatchDate' ? 'Dispatch Date' : filters.dateField === 'deliveredDate' ? 'Delivery Date' : 'Tracking Sync'})
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <span className="text-sm font-mono font-bold text-cyan-300">
+                {formatRangeDisplay(filters.startDate, filters.endDate)}
+              </span>
+              {filters.datePreset !== 'all' && (
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#0e172a] text-cyan-400 border border-cyan-800/60 uppercase tracking-wider font-mono">
+                  {filters.datePreset === 'custom' ? 'Custom Range' : filters.datePreset}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+          {onOpenDateCalendar && (
+            <button
+              type="button"
+              onClick={onOpenDateCalendar}
+              className="h-9 px-3.5 rounded-xl text-xs font-bold bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 hover:text-white border border-cyan-500/40 hover:border-cyan-400 flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+              title="Open Date Range Calendar Modal"
+            >
+              <Calendar size={14} className="text-cyan-400" />
+              <span>Select Date Range</span>
+            </button>
+          )}
+          {(filters.startDate || filters.endDate || filters.datePreset !== 'all') && (
+            <button
+              type="button"
+              onClick={onResetFilters}
+              className="h-9 px-3 rounded-xl text-xs font-semibold bg-[#0e1626] hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition-colors cursor-pointer"
+              title="Clear active date filter"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* SECTION A: OVERVIEW KPI CARDS (10 Responsive Cards) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         

@@ -50,11 +50,13 @@ import { parseAndFormatLogisticsDate } from '../../utils/logisticsDateUtils';
 import { normalizeState, resolveStateFromPincode, isDispatchedOrder } from '../../utils/logisticsOrderUtils';
 import { LogisticsFilterDrawer } from './components/LogisticsFilterDrawer';
 import { LogisticsAnalyticsDashboard } from './components/LogisticsAnalyticsDashboard';
+import { DateRangeCalendarModal } from './components/DateRangeCalendarModal';
 import { 
   LogisticsFilterState, 
   INITIAL_LOGISTICS_FILTER_STATE, 
   applyLogisticsFilters, 
-  countActiveLogisticsFilters 
+  countActiveLogisticsFilters,
+  formatRangeDisplay 
 } from './types/logisticsFilters';
 
 // Status pills for Tracking stage
@@ -90,6 +92,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const [selectedCourier, setSelectedCourier] = useState<string>('All');
   const [logisticsFilters, setLogisticsFilters] = useState<LogisticsFilterState>(INITIAL_LOGISTICS_FILTER_STATE);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [isDateCalendarOpen, setIsDateCalendarOpen] = useState(false);
 
   // Bulk Selection Mode
   const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
@@ -612,6 +615,15 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
         onOpenImportModal={() => setIsImportModalOpen(true)}
+        onOpenDateCalendar={() => setIsDateCalendarOpen(true)}
+        activeDateRangeText={
+          logisticsFilters.datePreset !== 'all' && logisticsFilters.datePreset !== 'custom'
+            ? (logisticsFilters.datePreset === '7d' ? 'Last 7 Days' : logisticsFilters.datePreset === '30d' ? 'Last 30 Days' : logisticsFilters.datePreset === 'this_month' ? 'This Month' : logisticsFilters.datePreset === 'prev_month' ? 'Prev Month' : logisticsFilters.datePreset === 'today' ? 'Today' : logisticsFilters.datePreset === 'yesterday' ? 'Yesterday' : logisticsFilters.datePreset === 'this_week' ? 'This Week' : 'This Year')
+            : logisticsFilters.startDate
+            ? formatRangeDisplay(logisticsFilters.startDate, logisticsFilters.endDate)
+            : 'Date Range'
+        }
+        isDateFilterActive={logisticsFilters.datePreset !== 'all' || !!logisticsFilters.startDate}
       />
 
       {/* 3. ROW 3: CONTEXTUAL FILTERS AND SELECTION ACTIONS */}
@@ -977,13 +989,23 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
             <SlidersHorizontal size={12} /> Filters:
           </span>
 
-          {logisticsFilters.datePreset !== 'all' && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/60 border border-purple-700/50 text-purple-200 text-xs shrink-0">
-              <Calendar size={11} className="text-purple-400" />
-              <span>Date: {logisticsFilters.datePreset === 'custom' ? `${logisticsFilters.startDate} to ${logisticsFilters.endDate}` : logisticsFilters.datePreset}</span>
+          {(logisticsFilters.datePreset !== 'all' || logisticsFilters.startDate) && (
+            <span 
+              onClick={() => setIsDateCalendarOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-950/60 border border-cyan-700/50 text-cyan-200 text-xs shrink-0 cursor-pointer hover:border-cyan-400 transition-colors shadow-sm"
+              title="Click to adjust date range"
+            >
+              <Calendar size={11} className="text-cyan-400" />
+              <span>
+                Date: {formatRangeDisplay(logisticsFilters.startDate, logisticsFilters.endDate)}
+                {logisticsFilters.datePreset !== 'all' && logisticsFilters.datePreset !== 'custom' ? ` (${logisticsFilters.datePreset})` : ''}
+              </span>
               <button 
                 type="button"
-                onClick={() => setLogisticsFilters(prev => ({ ...prev, datePreset: 'all', startDate: '', endDate: '' }))}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLogisticsFilters(prev => ({ ...prev, datePreset: 'all', startDate: '', endDate: '' }));
+                }}
                 className="hover:text-white cursor-pointer ml-0.5"
                 title="Clear date filter"
               >
@@ -1120,6 +1142,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 setSelectedCourier('All');
               }}
               onNavigateStage={(st) => setCurrentStage(st)}
+              onOpenDateCalendar={() => setIsDateCalendarOpen(true)}
             />
           ) : currentStage === 'prepare_dispatch' ? (
             <PrepareDispatchGroupedView
@@ -1281,6 +1304,28 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         <TrackingModal
           order={activeTrackingOrder}
           onClose={() => setActiveTrackingOrder(null)}
+        />
+      )}
+
+      {/* Reusable Date Range Calendar Modal */}
+      {isDateCalendarOpen && (
+        <DateRangeCalendarModal
+          isOpen={isDateCalendarOpen}
+          onClose={() => setIsDateCalendarOpen(false)}
+          startDate={logisticsFilters.startDate}
+          endDate={logisticsFilters.endDate}
+          preset={logisticsFilters.datePreset}
+          targetDateField={logisticsFilters.dateField}
+          onTargetDateFieldChange={(df) => setLogisticsFilters(prev => ({ ...prev, dateField: df }))}
+          onApply={(range) => {
+            setLogisticsFilters(prev => ({
+              ...prev,
+              startDate: range.startDate,
+              endDate: range.endDate,
+              datePreset: range.preset
+            }));
+            toast.success(`Date filter applied: ${formatRangeDisplay(range.startDate, range.endDate)}`);
+          }}
         />
       )}
 
