@@ -14,7 +14,8 @@ import {
   CheckSquare, 
   Square,
   Download,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Clock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -60,11 +61,12 @@ const STATUS_PILLS: Array<{ id: string; label: string }> = [
   { id: 'Expired', label: 'Expired' }
 ];
 
-// Active section filter pills (for unfulfilled customer orders awaiting dispatch)
+// Active section filter pills (for unfulfilled customer orders awaiting dispatch + pending info)
 const ACTIVE_FILTER_PILLS: Array<{ id: string; label: string }> = [
   { id: 'All', label: 'All Unfulfilled' },
   { id: 'Prepaid', label: 'Prepaid' },
-  { id: 'COD', label: 'COD' }
+  { id: 'COD', label: 'COD' },
+  { id: 'Pending', label: 'Pending' }
 ];
 
 export const UnifiedLogisticsWorkspace: React.FC = () => {
@@ -74,9 +76,11 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   // Secondary sub-status tab
   const [selectedStatusTab, setSelectedStatusTab] = useState<string>('All');
 
-  // Search & Courier Filter
+  // Search & Filter Drawer State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourier, setSelectedCourier] = useState<string>('All');
+  const [selectedState, setSelectedState] = useState<string>('All');
+  const [selectedCity, setSelectedCity] = useState<string>('All');
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
   // Bulk Selection Mode
@@ -134,8 +138,14 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     if (currentStage === 'pending') {
       return unifiedOrders.filter(o => o.workflowStage === 'pending');
     }
+    if (currentStage === 'active') {
+      if (selectedStatusTab === 'Pending') {
+        return unifiedOrders.filter(o => o.workflowStage === 'pending');
+      }
+      return unifiedOrders.filter(o => o.workflowStage === 'active');
+    }
     return unifiedOrders.filter(o => o.workflowStage === 'active');
-  }, [unifiedOrders, currentStage]);
+  }, [unifiedOrders, currentStage, selectedStatusTab]);
 
   // Sanitize legacy serial dates, normalize states, and enrich missing details on mount
   useEffect(() => {
@@ -240,11 +250,12 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     sanitizeDexieRecords();
   }, []);
 
-  // Filter counts for Active unfulfilled orders
+  // Filter counts for Active unfulfilled orders (and pending info queue)
   const activeFilterCounts = useMemo(() => {
     let prepaid = 0;
     let cod = 0;
-    stageShipments.forEach(s => {
+    const activeList = unifiedOrders.filter(o => o.workflowStage === 'active');
+    activeList.forEach(s => {
       const type = (s.orderType || '').toLowerCase();
       if (type.includes('cod')) {
         cod++;
@@ -253,11 +264,12 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       }
     });
     return {
-      All: stageShipments.length,
+      All: activeList.length,
       Prepaid: prepaid,
-      COD: cod
+      COD: cod,
+      Pending: counts.pending
     };
-  }, [stageShipments]);
+  }, [unifiedOrders, counts.pending]);
 
   // Secondary Status Pill Counts for Tracking
   const statusTabCounts = useMemo(() => {
@@ -306,6 +318,32 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     return countsMap;
   }, [stageShipments]);
 
+  // Extract available states and cities from current stage for slide-over filter drawer
+  const availableStates = useMemo(() => {
+    const s = new Set<string>();
+    stageShipments.forEach(o => {
+      const st = o.state || o.shippingState;
+      if (st && st.toLowerCase() !== 'india' && st.trim() !== '') s.add(st);
+    });
+    return Array.from(s).sort();
+  }, [stageShipments]);
+
+  const availableCities = useMemo(() => {
+    const c = new Set<string>();
+    stageShipments.forEach(o => {
+      const ct = o.city || o.shippingCity;
+      if (ct && ct.trim() !== '') c.add(ct);
+    });
+    return Array.from(c).sort();
+  }, [stageShipments]);
+
+  // Active filter badge count for the Filters button
+  const activeFilterCount = useMemo(() => {
+    return (selectedCourier !== 'All' ? 1 : 0) + 
+      (selectedState !== 'All' ? 1 : 0) + 
+      (selectedCity !== 'All' ? 1 : 0);
+  }, [selectedCourier, selectedState, selectedCity]);
+
   // Filtered orders displayed in the view
   const filteredOrders = useMemo(() => {
     return stageShipments.filter(order => {
@@ -331,7 +369,23 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         }
       }
 
-      // 3. Stage-Specific Filters
+      // 3. State Filter
+      if (selectedState !== 'All') {
+        const normS = (order.state || order.shippingState || '').toLowerCase();
+        if (!normS.includes(selectedState.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // 4. City Filter
+      if (selectedCity !== 'All') {
+        const normC = (order.city || order.shippingCity || '').toLowerCase();
+        if (!normC.includes(selectedCity.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // 5. Stage-Specific Filters
       if (currentStage === 'active') {
         if (selectedStatusTab === 'Prepaid') {
           const type = (order.orderType || '').toLowerCase();
@@ -339,6 +393,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         } else if (selectedStatusTab === 'COD') {
           const type = (order.orderType || '').toLowerCase();
           if (!type.includes('cod')) return false;
+        } else if (selectedStatusTab === 'Pending') {
+          // Handled at stageShipments level
         }
       } else {
         // Tracking filters
@@ -359,7 +415,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
       return true;
     });
-  }, [stageShipments, searchTerm, selectedCourier, selectedStatusTab, currentStage]);
+  }, [stageShipments, searchTerm, selectedCourier, selectedState, selectedCity, selectedStatusTab, currentStage]);
 
   // Selected orders array for side panel review
   const selectedOrdersList = useMemo(() => {
@@ -566,39 +622,34 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-3 w-full h-full overflow-hidden">
+    <div className="flex flex-col gap-3.5 w-full h-full overflow-hidden">
       
-      {/* 1. TOP TOOLBAR: Left workflow stages, Right Search, Filters, Refresh, Upload Orders */}
+      {/* 1 & 2. ROW 1 (Main Workflow Navigation) + ROW 2 (Search and Global Actions) */}
       <LogisticsWorkflowToolbar
         currentStage={currentStage}
         onSelectStage={(st) => {
           setCurrentStage(st);
           setSelectedStatusTab('All');
+          setIsBulkSelectMode(false);
+          setSelectedOrderIds(new Set());
+          setIsMoveReviewPanelOpen(false);
         }}
         counts={counts}
-        isBulkSelectMode={isBulkSelectMode}
-        onToggleBulkSelect={() => {
-          setIsBulkSelectMode(prev => !prev);
-          if (isBulkSelectMode) {
-            setSelectedOrderIds(new Set());
-            setIsMoveReviewPanelOpen(false);
-          }
-        }}
-        selectedOrderCount={selectedOrderIds.size}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         onToggleFilters={() => setIsFilterDrawerOpen(prev => !prev)}
-        activeFilterCount={selectedCourier !== 'All' || selectedStatusTab !== 'All' ? 1 : 0}
+        isFilterOpen={isFilterDrawerOpen}
+        activeFilterCount={activeFilterCount}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
         onOpenImportModal={() => setIsImportModalOpen(true)}
       />
 
-      {/* 2. SECONDARY CONTROLS BAR: Stage Filter Pills + Actions (Columns, Export, Courier Pills) */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 px-1 shrink-0">
+      {/* 3. ROW 3: CONTEXTUAL FILTERS AND SELECTION ACTIONS */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-1 shrink-0 w-full min-h-[40px]">
         
-        {/* Left Side: Filter Pills (Active Payment vs Tracking Status) + Bulk Move action */}
-        <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-0.5">
+        {/* LEFT SIDE: Stage-Specific Filter Pills / Status Badges */}
+        <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-0.5 min-w-0">
           {currentStage === 'active' ? (
             <div className="flex items-center gap-1.5 shrink-0 select-none">
               {ACTIVE_FILTER_PILLS.map((pill) => {
@@ -610,15 +661,16 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                     key={pill.id}
                     type="button"
                     onClick={() => setSelectedStatusTab(pill.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border ${
+                    className={`h-9 px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shrink-0 border ${
                       isActive
                         ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-                        : 'bg-[#0b1220] border-slate-800 text-slate-300 hover:border-slate-700'
+                        : 'bg-[#0b1220] border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
                     }`}
                   >
+                    {pill.id === 'Pending' && <Clock size={13} className={isActive ? 'text-white' : 'text-amber-400'} />}
                     <span>{pill.label}</span>
-                    <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
-                      isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-black ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
                     }`}>
                       {count}
                     </span>
@@ -626,7 +678,23 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 );
               })}
             </div>
-          ) : (currentStage === 'tracking' || currentStage === 'dispatched') ? (
+          ) : currentStage === 'prepare_dispatch' ? (
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#0b1220] border border-slate-800 text-xs text-slate-300 shrink-0">
+              <Package size={14} className="text-purple-400" />
+              <span className="font-semibold text-slate-200">Prepare Dispatch Queue</span>
+              <span className="text-slate-600">•</span>
+              <span className="font-mono text-purple-300 font-bold">{stageShipments.length}</span>
+              <span className="text-slate-400 hidden sm:inline">orders awaiting courier & AWB assignment</span>
+            </div>
+          ) : currentStage === 'dispatched' ? (
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#0b1220] border border-slate-800 text-xs text-slate-300 shrink-0">
+              <Check size={14} className="text-emerald-400" />
+              <span className="font-semibold text-slate-200">Dispatched Shipments</span>
+              <span className="text-slate-600">•</span>
+              <span className="font-mono text-emerald-300 font-bold">{stageShipments.length}</span>
+              <span className="text-slate-400 hidden sm:inline">orders confirmed dispatched</span>
+            </div>
+          ) : currentStage === 'tracking' ? (
             <div className="flex items-center gap-1.5 shrink-0 select-none">
               {STATUS_PILLS.map((pill) => {
                 const count = statusTabCounts[pill.id] || 0;
@@ -676,7 +744,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                     key={pill.id}
                     type="button"
                     onClick={() => setSelectedStatusTab(pill.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${badgeBorderClass}`}
+                    className={`h-9 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border bg-[#0b1220] ${badgeBorderClass}`}
                   >
                     <span>{pill.label}</span>
                     <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
@@ -689,97 +757,147 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               })}
             </div>
           ) : null}
-
-          {/* Bulk Select Action Buttons inline in the toolbar */}
-          {isBulkSelectMode && currentStage === 'active' && (
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
-              {/* Select All / Deselect All */}
-              <button
-                type="button"
-                onClick={handleToggleSelectAll}
-                className="h-8 px-2.5 rounded-xl text-xs font-semibold bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                {selectedOrderIds.size === filteredOrders.length && filteredOrders.length > 0 ? (
-                  <>
-                    <CheckSquare size={13} className="text-purple-400" />
-                    <span>Deselect All</span>
-                  </>
-                ) : (
-                  <>
-                    <Square size={13} className="text-slate-400" />
-                    <span>Select All ({filteredOrders.length})</span>
-                  </>
-                )}
-              </button>
-
-              {/* Selected Count & Total Amount Badge */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-950/40 border border-purple-800/50 text-xs">
-                <span className="text-purple-300 font-semibold">
-                  <strong className="text-white font-mono font-bold">{selectedOrderIds.size}</strong> selected
-                </span>
-                <span className="text-slate-600">•</span>
-                <span className="text-emerald-400 font-mono font-bold">
-                  ₹{Math.round(selectedTotalAmount).toLocaleString('en-IN')}
-                </span>
-              </div>
-
-              {/* Move to Prepare Dispatch */}
-              <button
-                type="button"
-                onClick={handlePrepareDispatchBulk}
-                disabled={selectedOrderIds.size === 0 || isMovingToPrepare}
-                className="h-8 px-3 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/30 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                title={selectedOrderIds.size === 0 ? "Select at least 1 order to move" : `Review & move ${selectedOrderIds.size} orders`}
-              >
-                <Truck size={13} />
-                <span>Move to Prepare Dispatch ({selectedOrderIds.size})</span>
-              </button>
-
-              {/* Exit Bulk Select Mode */}
-              <button
-                type="button"
-                onClick={() => {
-                  setIsBulkSelectMode(false);
-                  setSelectedOrderIds(new Set());
-                  setIsMoveReviewPanelOpen(false);
-                }}
-                className="h-8 px-2.5 rounded-xl text-xs font-medium bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 flex items-center gap-1 transition-colors cursor-pointer"
-                title="Exit Bulk Select mode"
-              >
-                <X size={13} />
-                <span>Exit</span>
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Right Side: Columns & Export Actions (Active view) or Courier & Tracking Buttons (Tracking view) */}
-        <div className="flex items-center gap-2 shrink-0 ml-auto">
+        {/* RIGHT SIDE: Columns, Export, Courier Badges, and Bulk Select Actions */}
+        <div className="flex items-center gap-2 shrink-0 ml-auto flex-wrap">
           {currentStage === 'active' ? (
             <>
-              {/* Columns button */}
+              {/* If Bulk Select is INACTIVE: show Columns, Export, and compact Bulk Select button */}
+              {!isBulkSelectMode ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => toast('All columns visible', { icon: '📊' })}
+                    className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Manage Visible Columns"
+                  >
+                    <SlidersHorizontal size={13} className="text-slate-400" />
+                    <span>Columns</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportOrders}
+                    className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Export filtered orders to Excel"
+                  >
+                    <Download size={13} className="text-slate-400" />
+                    <span>Export</span>
+                  </button>
+
+                  {/* Visual separator before Bulk Select */}
+                  <div className="h-5 w-px bg-slate-800 mx-1 shrink-0" />
+
+                  {/* Compact Bulk Select Button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkSelectMode(true)}
+                    className="h-9 px-3.5 rounded-xl text-xs font-semibold bg-[#0e1626] hover:bg-purple-950/40 text-purple-300 hover:text-white border border-purple-800/60 hover:border-purple-600 flex items-center gap-2 cursor-pointer transition-colors shadow-sm"
+                    title="Enable Bulk Selection to move orders to Prepare Dispatch"
+                  >
+                    <CheckSquare size={14} className="text-purple-400" />
+                    <span>Bulk Select</span>
+                  </button>
+                </>
+              ) : (
+                /* When Bulk Select is ACTIVE */
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Select All / Deselect All */}
+                  <button
+                    type="button"
+                    onClick={handleToggleSelectAll}
+                    className="h-9 px-3 rounded-xl text-xs font-semibold bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {selectedOrderIds.size === filteredOrders.length && filteredOrders.length > 0 ? (
+                      <>
+                        <CheckSquare size={13} className="text-purple-400" />
+                        <span>Deselect All</span>
+                      </>
+                    ) : (
+                      <>
+                        <Square size={13} className="text-slate-400" />
+                        <span>Select All ({filteredOrders.length})</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Selected Count & Total Amount Badge */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-purple-950/50 border border-purple-800/70 text-xs">
+                    <span className="text-purple-200 font-semibold">
+                      <strong className="text-white font-mono font-bold">{selectedOrderIds.size}</strong> selected
+                    </span>
+                    {selectedTotalAmount > 0 && (
+                      <>
+                        <span className="text-slate-600">•</span>
+                        <span className="text-emerald-400 font-mono font-bold">
+                          ₹{Math.round(selectedTotalAmount).toLocaleString('en-IN')}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Primary Action: Move to Prepare Dispatch */}
+                  <button
+                    type="button"
+                    onClick={handlePrepareDispatchBulk}
+                    disabled={selectedOrderIds.size === 0 || isMovingToPrepare}
+                    className="h-9 px-3.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/30 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={selectedOrderIds.size === 0 ? "Select at least 1 order to move" : `Review & move ${selectedOrderIds.size} orders to Prepare Dispatch`}
+                  >
+                    <Truck size={14} />
+                    <span>Move to Prepare Dispatch ({selectedOrderIds.size})</span>
+                  </button>
+
+                  {/* Exit Selection Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsBulkSelectMode(false);
+                      setSelectedOrderIds(new Set());
+                      setIsMoveReviewPanelOpen(false);
+                    }}
+                    className="h-9 px-3 rounded-xl text-xs font-medium bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Exit selection mode"
+                  >
+                    <X size={14} />
+                    <span>Exit Selection</span>
+                  </button>
+                </div>
+              )}
+            </>
+          ) : currentStage === 'prepare_dispatch' ? (
+            <button
+              type="button"
+              onClick={handleExportOrders}
+              className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Export to Excel"
+            >
+              <Download size={13} className="text-slate-400" />
+              <span>Export</span>
+            </button>
+          ) : currentStage === 'dispatched' ? (
+            <>
               <button
                 type="button"
-                onClick={() => toast('All 10 columns visible', { icon: '📊' })}
-                className="h-8 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
-                title="Manage Visible Columns"
+                onClick={() => toast('All columns visible', { icon: '📊' })}
+                className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Manage Columns"
               >
                 <SlidersHorizontal size={13} className="text-slate-400" />
                 <span>Columns</span>
               </button>
-
-              {/* Export button */}
               <button
                 type="button"
                 onClick={handleExportOrders}
-                className="h-8 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
-                title="Export filtered orders to Excel"
+                className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Export to Excel"
               >
                 <Download size={13} className="text-slate-400" />
                 <span>Export</span>
               </button>
             </>
-          ) : (currentStage === 'tracking' || currentStage === 'dispatched') ? (
+          ) : currentStage === 'tracking' ? (
             <>
               {/* Courier Badges */}
               <div className="hidden xl:flex items-center gap-1.5 overflow-x-auto pb-0.5 custom-scrollbar">
@@ -810,14 +928,14 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 })}
               </div>
 
-              {/* Upload Tracking Button */}
+              {/* Upload Tracking Button (Only in Tracking!) */}
               <button
                 type="button"
                 onClick={() => setIsCourierTrackingModalOpen(true)}
-                className="h-8 px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                className="h-9 px-3.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl transition-colors text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
                 title="Upload tracking reports for India Post, iThink Logistics, etc."
               >
-                <Truck size={13} />
+                <Truck size={14} />
                 <span>Upload Tracking</span>
               </button>
 
@@ -826,11 +944,21 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 type="button"
                 onClick={handleBulkSyncAll}
                 disabled={isBulkSyncing}
-                className="h-8 px-2.5 bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="h-9 px-3 bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 title="Sync live tracking status"
               >
-                <RefreshCw size={12} className={isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
+                <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
                 <span>Sync</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportOrders}
+                className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Export to Excel"
+              >
+                <Download size={13} className="text-slate-400" />
+                <span>Export</span>
               </button>
             </>
           ) : null}
@@ -916,7 +1044,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 onOpenDispatchModal={setOrderToDispatch}
                 onDeleteOrder={handleDeleteOrder}
                 syncingOrderIds={syncingOrderIds}
-                isSelectable={isBulkSelectMode}
+                isSelectable={isBulkSelectMode && currentStage === 'active'}
                 selectedOrderIds={selectedOrderIds}
                 onToggleSelect={handleToggleSelect}
                 onToggleSelectAll={handleToggleSelectAll}
@@ -948,6 +1076,119 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         )}
 
       </div>
+
+      {/* Slide-over Filter Drawer */}
+      {isFilterDrawerOpen && (
+        <div 
+          onClick={() => setIsFilterDrawerOpen(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity animate-fade-in" 
+        />
+      )}
+
+      <aside 
+        className={`fixed inset-y-0 right-0 z-50 w-full max-w-sm sm:max-w-md bg-[#0b1220] text-slate-200 shadow-2xl border-l border-slate-800 flex flex-col transform transition-transform duration-300 ease-in-out ${
+          isFilterDrawerOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {/* Drawer Header */}
+        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-[#0e1626]">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-purple-600/20 rounded-xl text-purple-400 border border-purple-500/30">
+              <SlidersHorizontal size={18} />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-slate-100">Filter Orders</h2>
+              <p className="text-xs text-slate-400">Refine orders by courier, state, and city</p>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={() => setIsFilterDrawerOpen(false)}
+            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Drawer Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
+          {/* Courier Filter */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-purple-400 mb-2">
+              Courier Partner
+            </label>
+            <select
+              value={selectedCourier}
+              onChange={(e) => setSelectedCourier(e.target.value)}
+              className="w-full p-2.5 bg-[#0e1626] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+            >
+              <option value="All">All Couriers</option>
+              {CONFIGURED_COURIERS.map(c => (
+                <option key={c.id} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* State Filter */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-purple-400 mb-2">
+              Destination State
+            </label>
+            <select
+              value={selectedState}
+              onChange={(e) => {
+                setSelectedState(e.target.value);
+                setSelectedCity('All');
+              }}
+              className="w-full p-2.5 bg-[#0e1626] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+            >
+              <option value="All">All States</option>
+              {availableStates.map(st => (
+                <option key={st} value={st}>{st}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* City Filter */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-purple-400 mb-2">
+              Destination City
+            </label>
+            <select
+              value={selectedCity}
+              onChange={(e) => setSelectedCity(e.target.value)}
+              className="w-full p-2.5 bg-[#0e1626] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+            >
+              <option value="All">All Cities</option>
+              {availableCities.map(ct => (
+                <option key={ct} value={ct}>{ct}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Drawer Footer */}
+        <div className="p-4 border-t border-slate-800 bg-[#0e1626] flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedCourier('All');
+              setSelectedState('All');
+              setSelectedCity('All');
+            }}
+            className="px-4 py-2 rounded-xl text-xs font-medium bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 cursor-pointer transition-colors"
+          >
+            Reset Filters
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsFilterDrawerOpen(false)}
+            className="px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white cursor-pointer shadow-md shadow-purple-600/30 transition-all"
+          >
+            Apply Filters
+          </button>
+        </div>
+      </aside>
 
       {/* Customer Detail Drawer Modal */}
       <CustomerDetailModal
