@@ -11,8 +11,8 @@ import { ProtectedRoute } from './components/system/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
-import { 
-  TrendingUp, FolderOpen, 
+import {
+  TrendingUp, FolderOpen,
   Lightbulb, Users, Tag
 } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
@@ -28,6 +28,7 @@ const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then(module => 
 const FinanceBills = lazy(() => import('./modules/finance/FinanceBills').then(module => ({ default: module.FinanceBills })));
 const FinanceExpense = lazy(() => import('./modules/finance/FinanceExpense').then(module => ({ default: module.FinanceExpense })));
 const FinanceCredit = lazy(() => import('./modules/finance/FinanceCredit').then(module => ({ default: module.FinanceCredit })));
+const FinanceOverview = lazy(() => import('./modules/finance/FinanceOverview').then(module => ({ default: module.FinanceOverview })));
 const FinanceCategoryManagement = lazy(() => import('./modules/finance/FinanceCategoryManagement').then(module => ({ default: module.FinanceCategoryManagement })));
 const FinanceManagementLayout = lazy(() => import('./modules/finance/FinanceManagementLayout').then(module => ({ default: module.FinanceManagementLayout })));
 const TaskManager = lazy(() => import('./modules/tasks/TaskManager').then(module => ({ default: module.TaskManager })));
@@ -96,13 +97,11 @@ function App() {
                 <Route element={<MainLayout />}>
                   {/* Home Landing Page */}
                   <Route path="/" element={<HomePage />} />
-                  
+
                   {/* Dashboard */}
                   <Route path="/dashboard" element={<DashboardPage />} />
-                  
                   {/* Activity History */}
                   <Route path="/activity-history" element={<ActivityHistoryPage />} />
-                  
                   {/* Operations Department */}
                   <Route path="/operations" element={<OperationsLayout />}>
                     <Route index element={<Navigate to="/operations/vendors" replace />} />
@@ -115,19 +114,20 @@ function App() {
                   {/* Finance Department */}
                   <Route path="/finance" element={<FinanceLayout />}>
                     <Route index element={<Navigate to="/finance/management" replace />} />
-                    
+
                     <Route path="management" element={<FinanceManagementLayout />}>
-                      <Route index element={<Navigate to="bills" replace />} />
+                      <Route index element={<Navigate to="overview" replace />} />
+                      <Route path="overview" element={<FinanceOverview />} />
                       <Route path="bills" element={<FinanceBills />} />
                       <Route path="expense" element={<FinanceExpense />} />
                       <Route path="credit" element={<FinanceCredit />} />
-                      
+
                       <Route element={<ProtectedRoute />}>
                         <Route path="purchase-order" element={<PurchaseOrderPage />} />
                       </Route>
-                      
+
                       <Route path="po-history" element={<POHistoryPage />} />
-                      
+
                       <Route path="analytics" element={<AnalyticsPage />} />
                     </Route>
 
