@@ -1,20 +1,36 @@
 import { useState, useEffect } from 'react';
-import { Search, Edit2, Trash2 } from 'lucide-react';
+import { Search, X, Plus, RefreshCw } from 'lucide-react';
 import { useBills, type FinanceBill } from '../../hooks/finance/useBills';
 import { BillAnalytics } from './BillAnalytics';
 import { BillForm } from './BillForm';
 import { BillCardEditor } from './BillCardEditor';
-import { FinanceInfoCard } from '../../components/ui/FinanceInfoCard';
+import { BillCard } from './BillCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { departmentService } from '../../services/departmentService';
 import { supabase } from '../../lib/supabase';
 import type { Department, DepartmentSection } from '../../types';
+import toast from 'react-hot-toast';
 
 export const FinanceBills = () => {
   const { bills, isLoading, archiveBill, refreshBills } = useBills();
   const [activeTab, setActiveTab] = useState<'list' | 'add' | 'analytics'>('list');
   const [searchQuery, setSearchQuery] = useState('');
-  
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await refreshBills();
+      toast.success('Bills refreshed successfully.');
+    } catch (err) {
+      console.error('Failed to refresh bills:', err);
+      toast.error('Failed to refresh bills.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Form state
   const [editingBill, setEditingBill] = useState<FinanceBill | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -32,7 +48,7 @@ export const FinanceBills = () => {
       try {
         const { data: depts } = await departmentService.getAllDepartments();
         if (depts) setDepartments(depts);
-        
+
         const { data: secs } = await departmentService.getAllSections();
         if (secs) setSections(secs);
       } catch (err) {
@@ -98,39 +114,39 @@ export const FinanceBills = () => {
   return (
     <div className="flex flex-col h-full fade-in text-slate-200">
       {/* Finance Sub Navigation */}
-      <div className="flex flex-wrap gap-2.5 mb-6">
+      <div className="flex flex-wrap gap-2 mb-6">
         <button
           onClick={handleAddNew}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeTab === 'add' 
-              ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110' 
-              : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+          className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'add'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+              : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
           }`}
         >
           Add Bill
         </button>
         <button
           onClick={() => setActiveTab('list')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeTab === 'list' 
-              ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110' 
-              : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+          className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'list'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+              : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
           }`}
         >
           View Bills
         </button>
         <button
           onClick={() => {}}
-          className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5"
+          className="px-3.5 py-2 rounded-lg text-sm font-medium transition-all bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white"
         >
           Upcoming Bills
         </button>
         <button
           onClick={() => setActiveTab('analytics')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            activeTab === 'analytics' 
-              ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110' 
-              : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+          className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'analytics'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+              : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
           }`}
         >
           Bill Analytics
@@ -138,28 +154,59 @@ export const FinanceBills = () => {
       </div>
 
       {activeTab === 'list' && (
-        <div className="relative w-full md:w-64 mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
-          <input
-            type="text"
-            placeholder="Search bills..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-card border border-border/50 text-main text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-primary transition-colors"
-          />
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-5">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+            <input
+              type="text"
+              placeholder="Search bills..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-800/80 border border-slate-700/80 text-slate-100 text-sm rounded-xl pl-10 pr-9 py-2.5 placeholder-slate-400 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors p-0.5"
+                title="Clear search"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2.5 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isRefreshing || isLoading}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-800/80 px-3.5 py-2 text-xs font-semibold text-slate-200 transition-colors hover:border-purple-500/50 hover:bg-slate-700/80 hover:text-white focus:outline-none focus:ring-2 focus:ring-purple-500/40 disabled:opacity-50"
+              title="Refresh Bills"
+              aria-label="Refresh Bills"
+            >
+              <RefreshCw size={14} className={isRefreshing ? "animate-spin text-purple-400" : "text-slate-400"} />
+              <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
+            </button>
+
+            <span className="px-3 py-2 rounded-xl text-xs font-medium bg-slate-800/80 border border-slate-700/80 text-slate-400">
+              {filteredBills.length} {filteredBills.length === 1 ? 'bill' : 'bills'}
+              {searchQuery && ` of ${bills.length}`}
+            </span>
+          </div>
         </div>
       )}
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
         {activeTab === 'add' && (
-          <BillForm 
-            bill={editingBill} 
-            onClose={() => setActiveTab('list')} 
+          <BillForm
+            bill={editingBill}
+            onClose={() => setActiveTab('list')}
             onSuccess={() => {
               setActiveTab('list');
               refreshBills();
-            }} 
+            }}
           />
         )}
 
@@ -170,34 +217,59 @@ export const FinanceBills = () => {
         {activeTab === 'list' && (
           <>
             {isLoading && bills.length === 0 ? (
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <div className="flex flex-col items-center justify-center h-64 gap-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500/20 border-t-purple-500"></div>
+                <span className="text-xs text-slate-400">Loading bills...</span>
               </div>
-            ) : filteredBills.length === 0 ? (
-              <div className="flex flex-col items-center justify-center p-12 text-center bg-card rounded-2xl border border-border/50 shadow-sm mt-4 fade-in">
-                <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center text-3xl mb-4">
+            ) : bills.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-12 text-center bg-slate-800/40 rounded-2xl border border-slate-700/60 shadow-sm mt-4 fade-in">
+                <div className="w-16 h-16 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-2xl flex items-center justify-center text-3xl mb-4">
                   🧾
                 </div>
-                <h3 className="text-xl font-semibold text-main mb-2">No bills found</h3>
-                <p className="text-muted max-w-md">
-                  {searchQuery ? "Try adjusting your search criteria." : "Click '+ Add Bill' to create your first bill."}
+                <h3 className="text-lg font-semibold text-slate-100 mb-1.5">No bills recorded yet</h3>
+                <p className="text-slate-400 text-sm max-w-md mb-5">
+                  Keep track of recurring company bills, utility payments, and subscriptions in one organized place.
                 </p>
+                <button
+                  type="button"
+                  onClick={handleAddNew}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/25 transition-all"
+                >
+                  <Plus size={16} />
+                  Add First Bill
+                </button>
+              </div>
+            ) : filteredBills.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-12 text-center bg-slate-800/40 rounded-2xl border border-slate-700/60 shadow-sm mt-4 fade-in">
+                <div className="w-16 h-16 bg-slate-800 text-slate-400 border border-slate-700 rounded-2xl flex items-center justify-center text-2xl mb-4">
+                  🔍
+                </div>
+                <h3 className="text-lg font-semibold text-slate-100 mb-1.5">No matching bills found</h3>
+                <p className="text-slate-400 text-sm max-w-md mb-5">
+                  No bills matched &ldquo;{searchQuery}&rdquo;. Try checking for typos or searching by department or status.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition-colors"
+                >
+                  Clear Search
+                </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6 items-start">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
                 {filteredBills.map(bill => (
-                  <FinanceInfoCard
+                  <BillCard
                     key={bill.id}
-                    title={getDeptName(bill.main_category)}
-                    subtitle={`${getSectionName(bill.sub_category1)}${bill.sub_category2 ? ` › ${bill.sub_category2}` : ''}`}
-                    badges={[bill.bill_status].filter(Boolean) as string[]}
+                    bill={bill}
+                    departmentName={getDeptName(bill.main_category)}
+                    categoryHierarchy={`${getSectionName(bill.sub_category1)}${bill.sub_category2 ? ` › ${bill.sub_category2}` : ''}`}
                     onEdit={() => handleEdit(bill)}
                     onDelete={() => bill.id && handleDelete(bill.id)}
-                    editTooltip="Edit Bill"
-                    deleteTooltip="Archive Bill"
                     isEditing={editingId === bill.id}
-                    formId={`edit-bill-${bill.id}`}
                     onCancelEdit={() => setEditingId(null)}
+                    formId={`edit-bill-${bill.id}`}
+                    formatDate={formatDate}
                     renderEditForm={() => (
                       <BillCardEditor
                         bill={bill}
@@ -206,13 +278,6 @@ export const FinanceBills = () => {
                         onSuccess={() => setEditingId(null)}
                       />
                     )}
-                    fields={[
-                      { label: "Amount", value: `₹${bill.amount ?? '-'}` },
-                      { label: "Due Date", value: formatDate(bill.due_date) },
-                      { label: "Billing Cycle", value: bill.billing_cycle || '-' },
-                      { label: "Payment Type", value: bill.payment_type || '-' },
-                      { label: "Account", value: bill.account || '-' },
-                    ]}
                   />
                 ))}
               </div>

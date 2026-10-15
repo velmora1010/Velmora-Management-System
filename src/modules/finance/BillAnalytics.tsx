@@ -1,5 +1,15 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import {
+  BarChart3,
+  Layers,
+  Briefcase,
+  Package,
+  Tag,
+  ChevronDown,
+  FolderTree,
+  RotateCcw
+} from 'lucide-react';
 import type { FinanceBill } from '../../hooks/finance/useBills';
 
 interface BillAnalyticsProps {
@@ -32,6 +42,14 @@ const PALETTE_L4 = [
 
 const formatINR = (val: number) => '₹' + Number(val).toLocaleString('en-IN');
 
+const getCenterFontSizeStyle = (str: string) => {
+  const len = str.length;
+  if (len >= 16) return { fontSize: '0.72rem', lineHeight: '0.95rem' };
+  if (len >= 13) return { fontSize: '0.82rem', lineHeight: '1.1rem' };
+  if (len >= 10) return { fontSize: '0.95rem', lineHeight: '1.25rem' };
+  return { fontSize: '1.15rem', lineHeight: '1.4rem' };
+};
+
 interface CustomTooltipProps {
   active?: boolean;
   payload?: Array<{ payload: { name: string; value: number; count: number } }>;
@@ -43,14 +61,194 @@ const CustomTooltip = ({ active, payload, total }: CustomTooltipProps) => {
     const data = payload[0].payload;
     const pct = total > 0 ? ((data.value / total) * 100).toFixed(1) : '0.0';
     return (
-      <div className="bg-black/90 text-white p-3 rounded-lg shadow-xl text-sm border border-white/10 z-50 relative">
-        <div className="font-semibold mb-1">{data.name}</div>
-        <div>{formatINR(data.value)} ({pct}%)</div>
-        <div className="text-white/60 text-xs mt-1">{data.count} Bill{data.count !== 1 ? 's' : ''}</div>
+      <div className="bg-slate-900/95 backdrop-blur-md text-white p-3.5 rounded-xl shadow-2xl text-xs border border-slate-700/80 z-50 pointer-events-none">
+        <div className="font-bold text-slate-100 mb-1 text-sm">{data.name}</div>
+        <div className="text-purple-400 font-semibold">{formatINR(data.value)} <span className="text-slate-400 font-normal">({pct}%)</span></div>
+        <div className="text-slate-400 text-[11px] mt-1 flex items-center gap-1">
+          <span>{data.count}</span> {data.count !== 1 ? 'Bills' : 'Bill'}
+        </div>
       </div>
     );
   }
   return null;
+};
+
+interface AnalyticsChartCardProps {
+  title: string;
+  subtitle: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  data: Array<{ name: string; value: number; count: number }>;
+  total: number;
+  palette: string[];
+  activeItem: string | null;
+  onClick: (name: string) => void;
+  canDrillDown?: boolean;
+  emptyMessage: string;
+}
+
+const AnalyticsChartCard: React.FC<AnalyticsChartCardProps> = ({
+  title,
+  subtitle,
+  icon: Icon,
+  data,
+  total,
+  palette,
+  activeItem,
+  onClick,
+  canDrillDown = true,
+  emptyMessage
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const formattedTotal = formatINR(total);
+  const visibleItems = isExpanded ? data : data.slice(0, 5);
+  const isEmpty = data.length === 0 || (data.length === 1 && data[0].name === 'Other' && total === 0);
+
+  return (
+    <div className="bg-slate-900/60 hover:bg-slate-900/80 border border-slate-700/70 hover:border-slate-600/80 rounded-2xl p-5 sm:p-6 transition-all duration-200 shadow-sm flex flex-col h-full backdrop-blur-sm">
+      {/* Card Header */}
+      <div className="flex items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center shrink-0">
+            <Icon size={19} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-slate-100 tracking-tight uppercase truncate" title={title}>
+              {title}
+            </h3>
+            <p className="text-xs text-slate-400 font-medium truncate mt-0.5">
+              {subtitle}
+            </p>
+          </div>
+        </div>
+        {total > 0 && (
+          <div className="text-right shrink-0">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Total</span>
+            <span className="text-xs sm:text-sm font-bold text-purple-300 block">{formattedTotal}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Card Content */}
+      {isEmpty ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-8 rounded-xl bg-slate-800/30 border border-dashed border-slate-700/70 text-slate-400 text-center min-h-[220px]">
+          <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700/80 flex items-center justify-center text-xl mb-3">
+            📭
+          </div>
+          <p className="text-sm font-medium text-slate-300 mb-1">{emptyMessage}</p>
+          <p className="text-xs text-slate-500 max-w-xs">
+            No deeper breakdown items were defined for this hierarchy level.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col lg:flex-row items-center lg:items-start gap-6 flex-1">
+          {/* Donut Chart */}
+          <div className="relative w-full max-w-[210px] h-[210px] flex items-center justify-center shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={data}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={62}
+                  outerRadius={82}
+                  paddingAngle={data.length > 1 ? 1 : 0}
+                  dataKey="value"
+                  onClick={(e) => {
+                    if (e && e.name && canDrillDown) onClick(e.name);
+                  }}
+                  cursor={canDrillDown ? "pointer" : "default"}
+                  stroke="#131826"
+                  strokeWidth={1.5}
+                >
+                  {data.map((_, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={palette[index % palette.length]}
+                      className="transition-opacity hover:opacity-85"
+                    />
+                  ))}
+                </Pie>
+                <Tooltip content={<CustomTooltip total={total} />} />
+              </PieChart>
+            </ResponsiveContainer>
+            {/* Center Total with Dynamic Font Sizing */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-2 text-center">
+              <span
+                className="font-bold text-white tracking-tight leading-tight block truncate max-w-[110px]"
+                style={getCenterFontSizeStyle(formattedTotal)}
+                title={formattedTotal}
+              >
+                {formattedTotal}
+              </span>
+              <span className="text-[9px] text-slate-400 font-bold tracking-widest uppercase mt-0.5">
+                TOTAL
+              </span>
+            </div>
+          </div>
+
+          {/* Legend Breakdown Rows */}
+          <div className="flex-1 w-full flex flex-col justify-between min-w-0">
+            <div className="space-y-2 overflow-y-auto max-h-[220px] custom-scrollbar pr-1">
+              {visibleItems.map((item, index) => {
+                const pct = total > 0 ? ((item.value / total) * 100).toFixed(1) : '0.0';
+                const isSelected = activeItem === item.name;
+                return (
+                  <button
+                    key={item.name}
+                    type="button"
+                    disabled={!canDrillDown}
+                    onClick={() => canDrillDown && onClick(item.name)}
+                    className={`w-full flex items-center justify-between p-2.5 rounded-xl transition-all text-left group ${
+                      isSelected
+                        ? 'bg-purple-600/15 border border-purple-500/40 shadow-sm'
+                        : 'bg-slate-800/40 hover:bg-slate-800/80 border border-slate-700/40 hover:border-slate-700/80'
+                    } ${!canDrillDown ? 'cursor-default' : 'cursor-pointer'}`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                      <div
+                        className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                        style={{ backgroundColor: palette[index % palette.length] }}
+                      />
+                      <span
+                        className={`text-xs font-medium truncate ${
+                          isSelected ? 'text-purple-200 font-semibold' : 'text-slate-300 group-hover:text-white'
+                        }`}
+                        title={item.name}
+                      >
+                        {item.name}
+                      </span>
+                    </div>
+                    <div className="text-right shrink-0 flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-100">
+                        {formatINR(item.value)}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700/50 whitespace-nowrap">
+                        {pct}%
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap hidden sm:inline">
+                        {item.count} {item.count === 1 ? 'bill' : 'bills'}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {data.length > 5 && (
+              <button
+                type="button"
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="w-full mt-3 py-1.5 px-3 rounded-lg text-xs font-medium text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 transition-colors flex items-center justify-center gap-1.5 border border-purple-500/20"
+              >
+                <span>{isExpanded ? 'Show Less' : `Show All (${data.length})`}</span>
+                <ChevronDown size={14} className={`transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 export const BillAnalytics = ({ bills }: BillAnalyticsProps) => {
@@ -98,7 +296,7 @@ export const BillAnalytics = ({ bills }: BillAnalyticsProps) => {
   // LEVEL 3: Sub Category 2
   const sub2Data = useMemo(() => {
     if (!activeMain || !activeSub1) return [];
-    const filtered = bills.filter(b => 
+    const filtered = bills.filter(b =>
       (b.main_category || 'Uncategorized') === activeMain &&
       (b.sub_category1 || 'Other') === activeSub1
     );
@@ -120,7 +318,7 @@ export const BillAnalytics = ({ bills }: BillAnalyticsProps) => {
   // LEVEL 4: Sub Category 3
   const sub3Data = useMemo(() => {
     if (!activeMain || !activeSub1 || !activeSub2) return [];
-    const filtered = bills.filter(b => 
+    const filtered = bills.filter(b =>
       (b.main_category || 'Uncategorized') === activeMain &&
       (b.sub_category1 || 'Other') === activeSub1 &&
       (b.sub_category2?.trim() || 'Other') === activeSub2
@@ -156,144 +354,177 @@ export const BillAnalytics = ({ bills }: BillAnalyticsProps) => {
     setSelectedSub2(name);
   };
 
+  const handleResetDrilldown = () => {
+    setSelectedMain(null);
+    setSelectedSub1(null);
+    setSelectedSub2(null);
+  };
+
   if (bills.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 text-muted">
-        <div className="text-4xl mb-4">📊</div>
-        <p>No bill data available for analytics.</p>
+      <div className="flex flex-col items-center justify-center p-16 text-center bg-slate-800/40 rounded-2xl border border-slate-700/60 shadow-sm mt-4 fade-in">
+        <div className="w-16 h-16 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-2xl flex items-center justify-center text-3xl mb-4">
+          📊
+        </div>
+        <h3 className="text-lg font-semibold text-slate-100 mb-1.5">No bill data available</h3>
+        <p className="text-slate-400 text-sm max-w-md">
+          There are currently no recorded bills to generate category analytics and expenditure breakdowns.
+        </p>
       </div>
     );
   }
 
-  // Reusable Chart Component Helper
-  const renderChartCard = (
-    title: string, 
-    data: any[], 
-    total: number, 
-    palette: string[], 
-    activeItem: string | null,
-    onClick: (name: string) => void,
-    emptyMessage: string
-  ) => (
-    <div className="bg-[#1e2536] p-6 rounded-xl border border-slate-700 shadow-sm flex flex-col h-full">
-      <h3 className="text-sm font-semibold text-slate-100 mb-6">{title}</h3>
-      
-      {data.length === 0 || (data.length === 1 && data[0].name === 'Other' && total === 0) ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
-          <div className="text-3xl mb-2">📭</div>
-          <p className="text-sm text-center">{emptyMessage}</p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-6 flex-1">
-          {/* Top Half: Donut Chart */}
-          <div className="relative w-full h-48 flex justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={data}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={55}
-                  outerRadius={75}
-                  paddingAngle={0}
-                  dataKey="value"
-                  onClick={(e) => { if(e && e.name) onClick(e.name); }}
-                  cursor="pointer"
-                  stroke="none" // To perfectly match legacy UI (no white borders)
-                >
-                  {data.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={palette[index % palette.length]} />
-                  ))}
-                </Pie>
-                <Tooltip content={<CustomTooltip total={total} />} />
-              </PieChart>
-            </ResponsiveContainer>
-            {/* Center Total */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-1">
-              <span className="text-xl font-bold text-white tracking-tight">{formatINR(total)}</span>
-              <span className="text-[9px] text-slate-400 font-semibold tracking-widest uppercase mt-0.5">TOTAL</span>
-            </div>
-          </div>
-
-          {/* Bottom Half: Legend List */}
-          <div className="w-full flex flex-col gap-2 overflow-y-auto max-h-48 custom-scrollbar">
-            {data.map((item, index) => (
-              <button
-                key={item.name}
-                onClick={() => onClick(item.name)}
-                className={`flex items-center justify-between p-2.5 rounded-lg transition-colors text-left w-full group ${
-                  activeItem === item.name 
-                    ? 'bg-slate-700 border-l-2 border-l-purple-500' 
-                    : 'bg-[#252d41] hover:bg-slate-700/80 border-l-2 border-l-transparent'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div 
-                    className="w-2.5 h-2.5 rounded-full shrink-0" 
-                    style={{ backgroundColor: palette[index % palette.length] }} 
-                  />
-                  <span className={`text-xs font-medium truncate ${activeItem === item.name ? 'text-white' : 'text-slate-300'}`}>
-                    {item.name}
-                  </span>
-                </div>
-                <div className="text-right shrink-0 ml-3 flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-100">{formatINR(item.value)}</span>
-                  <div className="h-3 w-px bg-slate-600 mx-1"></div>
-                  <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">{item.count} Bill{item.count !== 1 ? 's' : ''}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 pb-12">
-      {/* 1. Main Category */}
-      {renderChartCard(
-        'Main Category Total Bills',
-        mainData,
-        mainTotal,
-        PALETTE_MAIN,
-        activeMain,
-        handleMainClick,
-        'No bill data available'
+    <div className="flex flex-col gap-6 fade-in pb-12">
+      {/* Dashboard Header inspired by Campaign Influencer Analytics */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl bg-slate-900/60 border border-slate-700/70 shadow-sm">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-purple-500/15 text-purple-400 border border-purple-500/30 flex items-center justify-center shrink-0 shadow-sm shadow-purple-500/10">
+            <BarChart3 size={22} />
+          </div>
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold text-slate-100 tracking-tight">
+              Bill Analytics
+            </h2>
+            <p className="text-xs text-slate-400 font-medium mt-0.5">
+              Real-time analytics dynamically generated from {bills.length} bill {bills.length === 1 ? 'record' : 'records'}
+            </p>
+          </div>
+        </div>
+
+        {/* Quick Stats Summary Badges */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="px-3.5 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700/80 text-xs flex items-center gap-2">
+            <span className="text-slate-400 font-medium">Total Spend:</span>
+            <span className="text-slate-100 font-bold">{formatINR(mainTotal)}</span>
+          </div>
+          <div className="px-3.5 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700/80 text-xs flex items-center gap-2">
+            <span className="text-slate-400 font-medium">Total Bills:</span>
+            <span className="text-purple-400 font-bold">{bills.length}</span>
+          </div>
+          <div className="px-3.5 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700/80 text-xs flex items-center gap-2">
+            <span className="text-slate-400 font-medium">Categories:</span>
+            <span className="text-slate-200 font-semibold">{mainData.length}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Drilldown Navigation Trail */}
+      {(selectedMain || selectedSub1 || selectedSub2) && (
+        <div className="flex items-center flex-wrap gap-2 px-4 py-2.5 rounded-xl bg-slate-900/40 border border-slate-800/80 text-xs">
+          <span className="text-slate-400 font-medium flex items-center gap-1.5">
+            <FolderTree size={14} className="text-purple-400" />
+            Drilldown Path:
+          </span>
+          <button
+            type="button"
+            onClick={handleResetDrilldown}
+            className={`font-semibold hover:underline ${!selectedMain ? 'text-purple-400' : 'text-slate-300'}`}
+          >
+            All Categories
+          </button>
+          {activeMain && (
+            <>
+              <span className="text-slate-500">›</span>
+              <button
+                type="button"
+                onClick={() => { setSelectedSub1(null); setSelectedSub2(null); }}
+                className={`font-semibold hover:underline ${selectedMain && !selectedSub1 ? 'text-purple-400' : 'text-slate-300'}`}
+              >
+                {activeMain}
+              </button>
+            </>
+          )}
+          {activeSub1 && (
+            <>
+              <span className="text-slate-500">›</span>
+              <button
+                type="button"
+                onClick={() => { setSelectedSub2(null); }}
+                className={`font-semibold hover:underline ${selectedSub1 && !selectedSub2 ? 'text-purple-400' : 'text-slate-300'}`}
+              >
+                {activeSub1}
+              </button>
+            </>
+          )}
+          {activeSub2 && (
+            <>
+              <span className="text-slate-500">›</span>
+              <span className="font-semibold text-purple-400">
+                {activeSub2}
+              </span>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={handleResetDrilldown}
+            className="ml-auto inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition-colors"
+            title="Reset Drilldown"
+          >
+            <RotateCcw size={12} />
+            <span>Reset</span>
+          </button>
+        </div>
       )}
 
-      {/* 2. Sub Category 1 (Operations) */}
-      {renderChartCard(
-        activeMain ? `${activeMain} Breakdown` : 'Operations Breakdown',
-        sub1Data,
-        sub1Total,
-        PALETTE_L2,
-        activeSub1,
-        handleSub1Click,
-        activeMain ? `No breakdown data available for ${activeMain}.` : 'Select a main category'
-      )}
+      {/* Analytics Cards Grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
+        {/* 1. Main Category */}
+        <AnalyticsChartCard
+          title="Main Category Total Bills"
+          subtitle={`${mainData.length} ${mainData.length === 1 ? 'category' : 'categories'}`}
+          icon={Layers}
+          data={mainData}
+          total={mainTotal}
+          palette={PALETTE_MAIN}
+          activeItem={activeMain}
+          onClick={handleMainClick}
+          canDrillDown={true}
+          emptyMessage="No bill data available"
+        />
 
-      {/* 3. Sub Category 2 (Infrastructure) */}
-      {renderChartCard(
-        activeSub1 ? `${activeSub1} Breakdown` : 'Infrastructure Breakdown',
-        sub2Data,
-        sub2Total,
-        PALETTE_L3,
-        activeSub2,
-        handleSub2Click,
-        activeSub1 ? `No deeper breakdown available for ${activeSub1}.` : 'Select a sub-category'
-      )}
+        {/* 2. Sub Category 1 */}
+        <AnalyticsChartCard
+          title={activeMain ? `${activeMain} Breakdown` : 'Operations Breakdown'}
+          subtitle={activeMain ? `${sub1Data.length} ${sub1Data.length === 1 ? 'sub-category' : 'sub-categories'}` : 'Select a main category'}
+          icon={Briefcase}
+          data={sub1Data}
+          total={sub1Total}
+          palette={PALETTE_L2}
+          activeItem={activeSub1}
+          onClick={handleSub1Click}
+          canDrillDown={true}
+          emptyMessage={activeMain ? `No breakdown data available for ${activeMain}.` : 'Select a main category'}
+        />
 
-      {/* 4. Sub Category 3 (Rent Details) */}
-      {renderChartCard(
-        activeSub2 ? `${activeSub2} Details` : 'Rent Details',
-        sub3Data,
-        sub3Total,
-        PALETTE_L4,
-        null, // Level 4 doesn't have an active selection since there is no deeper level
-        () => {}, // No click action for Level 4
-        activeSub2 ? `No deeper breakdown available for ${activeSub2}.` : 'Select a sub-category'
-      )}
+        {/* 3. Sub Category 2 */}
+        <AnalyticsChartCard
+          title={activeSub1 ? `${activeSub1} Breakdown` : 'Packaging Department Breakdown'}
+          subtitle={activeSub1 ? `${sub2Data.length} ${sub2Data.length === 1 ? 'section' : 'sections'}` : 'Select a sub-category'}
+          icon={Package}
+          data={sub2Data}
+          total={sub2Total}
+          palette={PALETTE_L3}
+          activeItem={activeSub2}
+          onClick={handleSub2Click}
+          canDrillDown={true}
+          emptyMessage={activeSub1 ? `No deeper breakdown available for ${activeSub1}.` : 'Select a sub-category'}
+        />
+
+        {/* 4. Sub Category 3 */}
+        <AnalyticsChartCard
+          title={activeSub2 ? `${activeSub2} Details` : 'Primary Packaging Details'}
+          subtitle={activeSub2 ? `${sub3Data.length} ${sub3Data.length === 1 ? 'item' : 'items'}` : 'Select a section'}
+          icon={Tag}
+          data={sub3Data}
+          total={sub3Total}
+          palette={PALETTE_L4}
+          activeItem={null}
+          onClick={() => {}}
+          canDrillDown={false}
+          emptyMessage={activeSub2 ? `No deeper breakdown available for ${activeSub2}.` : 'Select a sub-category'}
+        />
+      </div>
     </div>
   );
 };

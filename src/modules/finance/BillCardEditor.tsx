@@ -46,7 +46,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
 
   // Reusable Loader
   const loadOptions = useCallback(async (
-    targetCol: string, 
+    targetCol: string,
     filters: Record<string, string> = {}
   ): Promise<string[]> => {
     try {
@@ -57,7 +57,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
       const { data, error: err } = await query;
       if (err) throw err;
       if (!data) return [];
-      
+
       const values = data.map((row: any) => row[targetCol]).filter(Boolean);
       return Array.from(new Set(values)) as string[];
     } catch (err) {
@@ -71,7 +71,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
     let mounted = true;
     const preload = async () => {
       setIsLoadingLevels(true);
-      
+
       const pMain = loadOptions('main');
       const pSub1 = selectedMain ? loadOptions('sub1', { main: selectedMain }) : Promise.resolve([]);
       const pSub2 = selectedMain && selectedSub1 ? loadOptions('sub2', { main: selectedMain, sub1: selectedSub1 }) : Promise.resolve([]);
@@ -79,7 +79,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
       const pSub4 = selectedMain && selectedSub1 && selectedSub2 && selectedSub3 ? loadOptions('sub_sub_sub_category', { main: selectedMain, sub1: selectedSub1, sub2: selectedSub2, sub3: selectedSub3 }) : Promise.resolve([]);
 
       const [m, s1, s2, s3, s4] = await Promise.all([pMain, pSub1, pSub2, pSub3, pSub4]);
-      
+
       if (mounted) {
         setMainOptions(m);
         setSub1Options(s1);
@@ -122,9 +122,9 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ 
-      ...prev, 
-      [name]: name === 'amount' ? (value ? Number(value) : null) : value 
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'amount' ? (value ? Number(value) : null) : value
     }));
   };
 
@@ -168,9 +168,9 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
           {error}
         </div>
       )}
-      
+
       <form id={formId} onSubmit={handleSubmit} className="space-y-6">
-        
+
         {/* Section 1: Bill Details */}
         <div className="space-y-4">
           <h4 className="text-xs font-semibold text-primary uppercase tracking-wider">Bill Details</h4>
@@ -207,7 +207,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Billing Cycle</label>
               <select
                 name="billing_cycle"
-                value={formData.billing_cycle}
+                value={formData.billing_cycle || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -222,7 +222,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Payment Type</label>
               <select
                 name="payment_type"
-                value={formData.payment_type}
+                value={formData.payment_type || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -236,7 +236,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Mode of Pay</label>
               <select
                 name="mode_of_pay"
-                value={formData.mode_of_pay}
+                value={formData.mode_of_pay || ''}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -274,7 +274,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
               <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Bill Status</label>
               <select
                 name="bill_status"
-                value={formData.bill_status}
+                value={formData.bill_status || 'Pending'}
                 onChange={handleChange}
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
               >
@@ -330,7 +330,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
                 </select>
               </div>
             )}
-            
+
             {sub3Options.length > 0 && (
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Cat 2</label>
@@ -344,7 +344,7 @@ export const BillCardEditor = ({ bill, formId, onClose, onSuccess }: BillCardEdi
                 </select>
               </div>
             )}
-            
+
             {sub4Options.length > 0 && (
               <div className="col-span-2 space-y-1">
                 <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Cat 3</label>

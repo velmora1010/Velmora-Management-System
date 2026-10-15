@@ -14,7 +14,7 @@ const suggestKeyword = (notes: string | null | undefined): string => {
   if (!notes) return '';
   const parts = notes.toLowerCase().split(/[\/\-\s]+/);
   const ignored = new Set([
-    'mmt', 'imps', 'neft', 'rtgs', 'upi', 'rev', 'pos', 'inf', 'vin', 'bil', 
+    'mmt', 'imps', 'neft', 'rtgs', 'upi', 'rev', 'pos', 'inf', 'vin', 'bil',
     'trf', 'min', 'cr', 'dr', 'to', 'from', 'by', 'transfer', 'payment', 'bank', 'net', 'ach', 'deposit'
   ]);
 
@@ -58,7 +58,7 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
 
   // Reusable Loader
   const loadOptions = useCallback(async (
-    targetCol: string, 
+    targetCol: string,
     filters: Record<string, string> = {}
   ): Promise<string[]> => {
     try {
@@ -69,7 +69,7 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
       const { data, error: err } = await query;
       if (err) throw err;
       if (!data) return [];
-      
+
       const values = data.map((row: any) => row[targetCol]).filter(Boolean);
       return Array.from(new Set(values)) as string[];
     } catch (err) {
@@ -83,13 +83,13 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
     let mounted = true;
     const preload = async () => {
       setIsLoadingLevels(true);
-      
+
       const pMain = loadOptions('main');
       const pSub1 = selectedMain ? loadOptions('sub1', { main: selectedMain }) : Promise.resolve([]);
       const pSub2 = selectedMain && selectedSub1 ? loadOptions('sub2', { main: selectedMain, sub1: selectedSub1 }) : Promise.resolve([]);
 
       const [m, s1, s2] = await Promise.all([pMain, pSub1, pSub2]);
-      
+
       if (mounted) {
         setMainOptions(m);
         setSub1Options(s1);
@@ -114,9 +114,9 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ 
-      ...prev, 
-      [name]: name === 'amount' ? (value ? Number(value) : null) : value 
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'amount' ? (value ? Number(value) : null) : value
     }));
   };
 
@@ -158,7 +158,7 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
           toast.error('Credit updated, but rule creation failed (Database Error).');
         } else if (existingRules && existingRules.length > 0) {
           const existing = existingRules[0];
-          const isSameMapping = 
+          const isSameMapping =
             existing.main_category === selectedMain &&
             (existing.sub_category1 || '') === (selectedSub1 || '') &&
             (existing.sub_category2 || '') === (selectedSub2 || '') &&
@@ -182,7 +182,7 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
               priority: 50,
               is_active: true
             }]);
-            
+
           if (insertErr) {
             toast.error(`Credit updated, but rule creation failed: ${insertErr.message}`);
           } else {
@@ -192,7 +192,7 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
       } else {
         toast.success('Credit updated successfully.');
       }
-      
+
       onSuccess();
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -206,64 +206,64 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
   return (
     <>
       {error && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-lg text-xs font-medium">
+        <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-medium">
           {error}
         </div>
       )}
-      
+
       <form id={formId} onSubmit={handleSubmit} className="space-y-6">
-        
+
         {/* Section 1: Transaction Details */}
         <div className="space-y-4">
-          <h4 className="text-xs font-semibold text-primary uppercase tracking-wider">Transaction Details</h4>
+          <h4 className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Transaction Details</h4>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Amount *</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Amount *</label>
               <input
                 type="number"
                 name="amount"
                 required
                 value={formData.amount || ''}
                 onChange={handleChange}
-                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Source</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Source</label>
               <input
                 type="text"
                 name="source"
                 value={formData.source || ''}
                 onChange={handleChange}
                 placeholder="Where did this come from?"
-                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 placeholder-slate-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Payment Mode</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Payment Mode</label>
               <select
                 name="payment_mode"
                 value={formData.payment_mode || ''}
                 onChange={handleChange}
-                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
               >
-                <option value="">Select Mode</option>
-                <option value="Bank Transfer">Bank Transfer</option>
-                <option value="UPI">UPI</option>
-                <option value="Cheque">Cheque</option>
-                <option value="Cash">Cash</option>
-                <option value="Other">Other</option>
+                <option value="" className="bg-slate-900 text-slate-400">Select Mode</option>
+                <option value="Bank Transfer" className="bg-slate-900 text-slate-100">Bank Transfer</option>
+                <option value="UPI" className="bg-slate-900 text-slate-100">UPI</option>
+                <option value="Cheque" className="bg-slate-900 text-slate-100">Cheque</option>
+                <option value="Cash" className="bg-slate-900 text-slate-100">Cash</option>
+                <option value="Other" className="bg-slate-900 text-slate-100">Other</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Bank Account</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Bank Account</label>
               <input
                 type="text"
                 name="bank_account"
                 value={formData.bank_account || ''}
                 onChange={handleChange}
                 placeholder="E.g. HDFC 1234"
-                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 placeholder-slate-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
               />
             </div>
           </div>
@@ -271,43 +271,43 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
 
         {/* Section 2: Categories */}
         <div className="space-y-4">
-          <h4 className="text-xs font-semibold text-primary uppercase tracking-wider">Categories</h4>
+          <h4 className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Categories</h4>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Main Category</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Main Category</label>
               <select
                 value={selectedMain}
                 onChange={(e) => handleMainChange(e.target.value)}
                 disabled={isLoadingLevels && mainOptions.length === 0}
-                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all disabled:opacity-50"
               >
-                <option value="">{isLoadingLevels ? '...' : 'Select'}</option>
-                {mainOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                <option value="" className="bg-slate-900 text-slate-400">{isLoadingLevels ? '...' : 'Select'}</option>
+                {mainOptions.map(opt => <option key={opt} value={opt} className="bg-slate-900 text-slate-100">{opt}</option>)}
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Category 1</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sub Category 1</label>
               <select
                 value={selectedSub1}
                 onChange={(e) => handleSub1Change(e.target.value)}
                 disabled={!selectedMain}
-                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all disabled:opacity-50"
               >
-                <option value="">Select</option>
-                {sub1Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                <option value="" className="bg-slate-900 text-slate-400">Select</option>
+                {sub1Options.map(opt => <option key={opt} value={opt} className="bg-slate-900 text-slate-100">{opt}</option>)}
               </select>
             </div>
 
             {sub2Options.length > 0 && (
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Sub Category 2</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sub Category 2</label>
                 <select
                   value={selectedSub2}
                   onChange={(e) => setSelectedSub2(e.target.value)}
-                  className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary"
+                  className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
                 >
-                  <option value="">Select</option>
-                  {sub2Options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  <option value="" className="bg-slate-900 text-slate-400">Select</option>
+                  {sub2Options.map(opt => <option key={opt} value={opt} className="bg-slate-900 text-slate-100">{opt}</option>)}
                 </select>
               </div>
             )}
@@ -316,47 +316,47 @@ export const CreditCardEditor = ({ credit, formId, onClose, onSuccess }: CreditC
 
         {/* Section 3: Additional */}
         <div className="space-y-4">
-          <h4 className="text-xs font-semibold text-primary uppercase tracking-wider">Additional</h4>
+          <h4 className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Additional</h4>
           <div className="space-y-1">
-            <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Notes (Extracted Text)</label>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Notes (Extracted Text)</label>
             <textarea
               name="notes"
               value={formData.notes || ''}
               onChange={handleChange}
               placeholder="Any additional notes..."
               rows={3}
-              className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-primary resize-none font-mono"
+              className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 placeholder-slate-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 resize-none font-mono transition-all"
             />
           </div>
         </div>
 
         {/* Section 4: Automation */}
-        <div className="space-y-4 pt-4 border-t border-border/50">
-          <div className="flex items-center gap-2">
+        <div className="space-y-4 pt-4 border-t border-slate-700/60">
+          <div className="flex items-center gap-2.5">
             <input
               type="checkbox"
               id={`saveAsRule-${credit.id}`}
               checked={saveAsRule}
               onChange={(e) => setSaveAsRule(e.target.checked)}
-              className="w-4 h-4 rounded border-border text-primary focus:ring-primary focus:ring-offset-background bg-background cursor-pointer"
+              className="w-4 h-4 rounded border-slate-700 text-purple-600 focus:ring-purple-500 bg-slate-900 cursor-pointer"
             />
-            <label htmlFor={`saveAsRule-${credit.id}`} className="text-sm font-medium text-main cursor-pointer select-none">
+            <label htmlFor={`saveAsRule-${credit.id}`} className="text-xs sm:text-sm font-medium text-slate-200 cursor-pointer select-none">
               Save this correction as an automation rule for future transactions
             </label>
           </div>
-          
+
           {saveAsRule && (
             <div className="space-y-2 pl-6 fade-in">
-              <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Keyword Confirmation</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Keyword Confirmation</label>
               <input
                 type="text"
                 required
                 value={ruleKeyword}
                 onChange={(e) => setRuleKeyword(e.target.value)}
                 placeholder="Enter automation keyword (e.g., flipkart)"
-                className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-primary font-mono"
+                className="w-full bg-slate-900 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3 py-2 placeholder-slate-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 font-mono transition-all"
               />
-              <p className="text-[11px] text-muted leading-tight">
+              <p className="text-[11px] text-slate-400 leading-tight">
                 This exact keyword will be matched against future transactions to automatically categorize them. Ensure it is unique enough to avoid false positives.
               </p>
             </div>
