@@ -45,7 +45,7 @@ import { TrackingModal } from './TrackingModal';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
 import { parseAndFormatLogisticsDate } from '../../utils/logisticsDateUtils';
-import { normalizeState, resolveStateFromPincode } from '../../utils/logisticsOrderUtils';
+import { normalizeState, resolveStateFromPincode, isDispatchedOrder } from '../../utils/logisticsOrderUtils';
 
 // Status pills for Tracking stage
 const STATUS_PILLS: Array<{ id: string; label: string }> = [
@@ -125,7 +125,16 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Base shipments available in the current stage
   const stageShipments = useMemo(() => {
-    return unifiedOrders.filter(o => o.workflowStage === currentStage);
+    if (currentStage === 'dispatched' || currentStage === 'tracking') {
+      return unifiedOrders.filter(o => isDispatchedOrder(o));
+    }
+    if (currentStage === 'prepare_dispatch') {
+      return unifiedOrders.filter(o => o.workflowStage === 'prepare_dispatch');
+    }
+    if (currentStage === 'pending') {
+      return unifiedOrders.filter(o => o.workflowStage === 'pending');
+    }
+    return unifiedOrders.filter(o => o.workflowStage === 'active');
   }, [unifiedOrders, currentStage]);
 
   // Sanitize legacy serial dates, normalize states, and enrich missing details on mount
@@ -268,6 +277,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       const st = s.status || '';
       if (acc[st] !== undefined) {
         acc[st]++;
+      } else if (st === 'Awaiting Tracking Update') {
+        acc['Info Received'] = (acc['Info Received'] || 0) + 1;
       } else if (st.toLowerCase().includes('rto') || st.toLowerCase().includes('return')) {
         acc.Exception = (acc.Exception || 0) + 1;
       } else if (st === 'Unfulfilled') {
@@ -336,6 +347,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           if (selectedStatusTab === 'Exception') {
             const isEx = st === 'Exception' || (st && (st.toLowerCase().includes('rto') || st.toLowerCase().includes('return')));
             if (!isEx) return false;
+          } else if (selectedStatusTab === 'Info Received') {
+            if (st !== 'Info Received' && st !== 'Awaiting Tracking Update') return false;
           } else {
             if (st !== selectedStatusTab) {
               return false;
@@ -834,7 +847,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
             <PrepareDispatchGroupedView
               orders={stageShipments}
               onDispatchSuccess={() => {
-                setCurrentStage('tracking');
+                setCurrentStage('dispatched');
               }}
               onReturnToActive={async (rawIds) => {
                 const res = await returnToActiveStage(rawIds);
@@ -855,6 +868,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                   ? 'No Orders or Shipments in Logistics' 
                   : currentStage === 'active'
                   ? 'No Unfulfilled Orders in Active'
+                  : currentStage === 'dispatched'
+                  ? 'No Dispatched Orders Found'
                   : currentStage === 'tracking'
                   ? 'No Shipments Available to Track'
                   : `No shipments match ${selectedStatusTab} in ${currentStage}`}
@@ -864,6 +879,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                   ? 'Click Upload Orders above to import customer orders from Shopify or Excel/CSV spreadsheets.' 
                   : currentStage === 'active'
                   ? 'All active orders have been moved to dispatch preparation or dispatched. Import new files or check other tabs.'
+                  : currentStage === 'dispatched'
+                  ? 'Orders will appear here once dispatched from Prepare Dispatch with courier and AWB details.'
                   : currentStage === 'tracking'
                   ? 'Shipments will appear here once dispatched from Prepare Dispatch, or upload courier tracking reports.'
                   : 'Try adjusting your search query, status filters, or courier tabs above.'}

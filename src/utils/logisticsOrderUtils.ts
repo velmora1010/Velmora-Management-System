@@ -204,3 +204,177 @@ export const normalizeOrderPhone = (val?: any): string => {
   }
   return digits || str;
 };
+
+/**
+ * Validates courier selection and AWB/tracking number according to courier partner format.
+ */
+export const validateCourierAwb = (
+  courier?: string | null,
+  awb?: string | null
+): { valid: boolean; error?: string } => {
+  if (!courier || !courier.trim()) {
+    return { valid: false, error: 'Please select a courier partner' };
+  }
+  if (!awb || !awb.trim()) {
+    return { valid: false, error: 'AWB / Tracking number is required' };
+  }
+
+  const cleanAwb = awb.trim();
+  if (cleanAwb.length < 5) {
+    return { valid: false, error: 'AWB number is too short (minimum 5 characters)' };
+  }
+  if (/\s/.test(cleanAwb)) {
+    return { valid: false, error: 'AWB number must not contain spaces' };
+  }
+
+  const lowerCourier = courier.toLowerCase();
+
+  // India Post: usually 13 characters (e.g. EM123456789IN)
+  if (lowerCourier.includes('india post')) {
+    if (cleanAwb.length < 9) {
+      return { valid: false, error: 'India Post consignment numbers typically contain at least 9 characters' };
+    }
+  }
+
+  // ST Courier: numeric or ST-prefixed
+  if (lowerCourier.includes('st courier') || lowerCourier.includes('stcourier')) {
+    if (cleanAwb.length < 8) {
+      return { valid: false, error: 'ST Courier AWB should contain at least 8 digits' };
+    }
+  }
+
+  // Delhivery: numeric digits (usually 12-14 digits)
+  if (lowerCourier.includes('delhivery') && !lowerCourier.includes('ithink')) {
+    if (cleanAwb.length < 9) {
+      return { valid: false, error: 'Delhivery waybill numbers typically contain at least 9 digits' };
+    }
+  }
+
+  return { valid: true };
+};
+
+/**
+ * Identifies whether an order has entered the dispatch or tracking lifecycle.
+ */
+export const isDispatchedOrder = (order: any): boolean => {
+  if (!order) return false;
+  if (order.stage === 'trash') return false;
+  const stage = (order.stage || '').toLowerCase();
+  const workflowStage = (order.workflowStage || '').toLowerCase();
+  const status = (order.status || '').toLowerCase();
+  const hasAwb = !!(order.awbNumber && String(order.awbNumber).trim().length > 0);
+
+  if (stage === 'dispatched' || stage === 'tracking') return true;
+  if (workflowStage === 'dispatched' || workflowStage === 'tracking') return true;
+  if (status.includes('dispatched') || status.includes('in transit') || status.includes('delivered') || status.includes('out for delivery')) {
+    return true;
+  }
+  if (hasAwb && stage !== 'prepare_dispatch' && stage !== 'order_data') {
+    return true;
+  }
+  return false;
+};
+
+/**
+ * Detects importable field updates between an existing local order and an incoming parsed order.
+ * Strictly adheres to non-destructive rule: NEVER overwrites valid existing data with empty/blank values!
+ */
+export const detectOrderChanges = (
+  existing: any,
+  incoming: any
+): { hasChanges: boolean; patch: Record<string, any>; changedFields: string[] } => {
+  const patch: Record<string, any> = {};
+  const changedFields: string[] = [];
+
+  // 1. Customer Name
+  if (incoming.customerName && incoming.customerName.trim() !== '' && incoming.customerName !== 'Customer') {
+    if (incoming.customerName.trim() !== (existing.customerName || '').trim()) {
+      patch.customerName = incoming.customerName.trim();
+      changedFields.push('Customer Name');
+    }
+  }
+
+  // 2. Phone Number (validate length >= 10)
+  if (incoming.phoneNumber && incoming.phoneNumber.trim().length >= 10) {
+    const cleanIn = normalizeOrderPhone(incoming.phoneNumber);
+    const cleanEx = normalizeOrderPhone(existing.phoneNumber);
+    if (cleanIn && cleanIn !== cleanEx) {
+      patch.phoneNumber = cleanIn;
+      changedFields.push('Phone Number');
+    }
+  }
+
+  // 3. Address
+  if (incoming.address && incoming.address.trim() !== '') {
+    if (incoming.address.trim() !== (existing.address || '').trim()) {
+      patch.address = incoming.address.trim();
+      changedFields.push('Address');
+    }
+  }
+
+  // 4. City
+  if (incoming.city && incoming.city.trim() !== '') {
+    if (incoming.city.trim() !== (existing.city || '').trim()) {
+      patch.city = incoming.city.trim();
+      changedFields.push('City');
+    }
+  }
+
+  // 5. State
+  if (incoming.state && incoming.state.trim() !== '' && incoming.state.toLowerCase() !== 'india') {
+    const normIn = normalizeState(incoming.state) || incoming.state.trim();
+    const normEx = normalizeState(existing.state) || (existing.state || '').trim();
+    if (normIn !== normEx) {
+      patch.state = normIn;
+      changedFields.push('State');
+    }
+  }
+
+  // 6. Pincode
+  if (incoming.pincode && incoming.pincode.trim() !== '') {
+    if (incoming.pincode.trim() !== (existing.pincode || '').trim()) {
+      patch.pincode = incoming.pincode.trim();
+      changedFields.push('Pincode');
+    }
+  }
+
+  // 7. Products Summary
+  if (incoming.products && incoming.products.trim() !== '' && incoming.products !== 'Standard Products') {
+    if (incoming.products.trim() !== (existing.products || '').trim()) {
+      patch.products = incoming.products.trim();
+      changedFields.push('Products');
+    }
+  }
+
+  // 8. Amount
+  if (incoming.amount !== undefined && incoming.amount !== null && String(incoming.amount).trim() !== '' && String(incoming.amount) !== '0') {
+    const inAmt = parseOrderAmount(incoming.amount);
+    const exAmt = parseOrderAmount(existing.amount);
+    if (inAmt !== null && inAmt !== exAmt) {
+      patch.amount = String(inAmt);
+      changedFields.push('Amount');
+    }
+  }
+
+  // 9. Payment Mode
+  if (incoming.orderType && incoming.orderType.trim() !== '') {
+    if (incoming.orderType.trim().toLowerCase() !== (existing.orderType || '').trim().toLowerCase()) {
+      patch.orderType = incoming.orderType.trim();
+      changedFields.push('Payment Method');
+    }
+  }
+
+  // 10. Order Date (if missing on existing)
+  if (incoming.orderDate && (!existing.orderDate || existing.orderDate.trim() === '')) {
+    patch.orderDate = incoming.orderDate;
+    patch.orderDateDisplay = incoming.orderDateDisplay || incoming.orderDate;
+    changedFields.push('Order Date');
+  }
+
+  return {
+    hasChanges: changedFields.length > 0,
+    patch,
+    changedFields
+  };
+};
+

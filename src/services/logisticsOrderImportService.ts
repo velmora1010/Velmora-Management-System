@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import db from '../lib/db';
+import { supabase } from '../lib/supabase';
 import type { LogisticsOrder } from '../types/logistics';
 import { cleanOrderId } from './unifiedLogisticsService';
 import { normalizeCourier } from '../config/courierConfig';
@@ -8,7 +9,9 @@ import {
   normalizeState, 
   resolveStateFromPincode, 
   parseOrderAmount, 
-  normalizeOrderPhone 
+  normalizeOrderPhone,
+  isDispatchedOrder,
+  detectOrderChanges
 } from '../utils/logisticsOrderUtils';
 
 export interface ParsedCustomerOrder {
@@ -34,18 +37,60 @@ export interface ParsedCustomerOrder {
   isCancelled: boolean;
   hasRequiredInfo: boolean;
   reviewReason?: string;
+  isNew?: boolean;
+  hasConflict?: boolean;
+  conflictReason?: string;
+}
+
+export interface ExistingOrderUpdatePlan {
+  orderId: string;
+  existingId: number;
+  currentStage: string;
+  incoming: ParsedCustomerOrder;
+  existingOrder: LogisticsOrder;
+  patch: Record<string, any>;
+  changedFields: string[];
+  hasShipmentConflict?: boolean;
+  conflictDescription?: string;
 }
 
 export interface ImportValidationResult {
   totalRows: number;
   totalUniqueOrders: number;
+  
+  // Counts
+  newOrdersCount: number;
   eligibleActiveCount: number;
   pendingCount: number;
   alreadyFulfilledCount: number;
+  updateOrdersCount: number;
+  unchangedCount: number;
   cancelledCount: number;
   duplicateCount: number;
+  invalidCount: number;
+  conflictCount: number;
+
+  // Breakdown collections
+  newOrders: ParsedCustomerOrder[];
+  updatePlans: ExistingOrderUpdatePlan[];
+  unchangedOrders: ParsedCustomerOrder[];
+  conflictingOrders: Array<{ orderId: string; reason: string }>;
   orders: ParsedCustomerOrder[];
   isShopifyFormat: boolean;
+}
+
+export interface ImportCommitResult {
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  failed: number;
+  // Compatibility fields
+  insertedActive: number;
+  insertedPending: number;
+  insertedTracking: number;
+  skippedDuplicates: number;
+  skippedCancelled: number;
 }
 
 /**
@@ -84,8 +129,12 @@ const findHeaderValueFromRows = (rows: any[], candidates: string[]): any => {
 };
 
 /**
- * Parses raw JSON rows from XLSX / CSV into structured customer orders,
- * consolidating multiple line items per order and classifying fulfillment eligibility.
+ * Parses raw JSON rows from XLSX / CSV into structured customer orders.
+ * Implements an upsert/update-aware workflow:
+ * - Detects new orders vs existing orders in the system
+ * - Detects intra-file conflicts (different customers on same Order ID)
+ * - Detects non-destructive updates for existing orders without overwriting valid data with blanks
+ * - Preserves existing dispatch/tracking stages and AWBs
  */
 export const parseAndValidateCustomerOrders = async (
   rawRows: any[]
@@ -94,11 +143,20 @@ export const parseAndValidateCustomerOrders = async (
     return {
       totalRows: 0,
       totalUniqueOrders: 0,
+      newOrdersCount: 0,
       eligibleActiveCount: 0,
       pendingCount: 0,
       alreadyFulfilledCount: 0,
+      updateOrdersCount: 0,
+      unchangedCount: 0,
       cancelledCount: 0,
       duplicateCount: 0,
+      invalidCount: 0,
+      conflictCount: 0,
+      newOrders: [],
+      updatePlans: [],
+      unchangedOrders: [],
+      conflictingOrders: [],
       orders: [],
       isShopifyFormat: false
     };
@@ -117,13 +175,17 @@ export const parseAndValidateCustomerOrders = async (
 
   // Group multiple rows by Order ID (crucial for multi-line Shopify orders)
   const groupedRows = new Map<string, any[]>();
+  let invalidRowsCount = 0;
 
   for (const row of rawRows) {
     const rawId = findHeaderValue(row, [
       'Name', 'Order', 'Order ID', 'Order Number', 'order_id', 'Invoice No', 'order_number', 'order'
     ]);
     const cleanId = cleanOrderId(rawId);
-    if (!cleanId) continue;
+    if (!cleanId) {
+      invalidRowsCount++;
+      continue;
+    }
 
     const lowerId = cleanId.toLowerCase();
     if (!groupedRows.has(lowerId)) {
@@ -132,33 +194,56 @@ export const parseAndValidateCustomerOrders = async (
     groupedRows.get(lowerId)!.push(row);
   }
 
-  // Check existing orders in Dexie to detect duplicates
+  // Fetch existing orders in Dexie to classify new vs existing
   const existingOrders = await db.logistics_orders.toArray();
-  const existingIdSet = new Set(existingOrders.map(o => cleanOrderId(o.orderId).toLowerCase()));
+  const existingIdMap = new Map<string, LogisticsOrder>();
+  existingOrders.forEach(o => {
+    existingIdMap.set(cleanOrderId(o.orderId).toLowerCase(), o);
+  });
 
   const parsedOrders: ParsedCustomerOrder[] = [];
+  const newOrders: ParsedCustomerOrder[] = [];
+  const updatePlans: ExistingOrderUpdatePlan[] = [];
+  const unchangedOrders: ParsedCustomerOrder[] = [];
+  const conflictingOrders: Array<{ orderId: string; reason: string }> = [];
+
   let eligibleActiveCount = 0;
   let pendingCount = 0;
   let alreadyFulfilledCount = 0;
   let cancelledCount = 0;
-  let duplicateCount = 0;
 
   for (const [lowerId, rows] of groupedRows.entries()) {
-    const primaryRow = rows[0];
     const orderId = cleanOrderId(findHeaderValueFromRows(rows, [
       'Name', 'Order', 'Order ID', 'Order Number', 'order_id', 'Invoice No', 'order_number'
     ]));
 
-    if (existingIdSet.has(lowerId)) {
-      duplicateCount++;
+    // Check for intra-file conflicts (different names or phones for same Order ID in the file)
+    let hasFileConflict = false;
+    let fileConflictReason = '';
+    if (rows.length > 1) {
+      const distinctNames = new Set(
+        rows.map(r => String(findHeaderValue(r, ['Shipping Name', 'Customer Name', 'Billing Name', 'Customer']) || '').trim())
+            .filter(n => n && n !== 'Customer')
+      );
+      const distinctPhones = new Set(
+        rows.map(r => normalizeOrderPhone(findHeaderValue(r, ['Shipping Phone', 'Billing Phone', 'Phone', 'Mobile'])))
+            .filter(p => p && p.length >= 10)
+      );
+      if (distinctNames.size > 1) {
+        hasFileConflict = true;
+        fileConflictReason = `Conflicting customer names in file (${Array.from(distinctNames).join(' vs ')})`;
+      } else if (distinctPhones.size > 1) {
+        hasFileConflict = true;
+        fileConflictReason = `Conflicting phone numbers in file (${Array.from(distinctPhones).join(' vs ')})`;
+      }
     }
 
-    // Customer Name (search all rows for full customer name)
+    // Customer Name
     const customerName = String(findHeaderValueFromRows(rows, [
       'Shipping Name', 'Customer Name', 'Billing Name', 'Customer', 'Full Name', 'Name', 'Buyer Name'
     ]) || 'Customer').trim();
 
-    // Phone (search all rows, checking shipping, billing, and direct phone columns)
+    // Phone
     const rawPhoneVal = findHeaderValueFromRows(rows, [
       'Shipping Phone', 'Billing Phone', 'Phone', 'Phone Number', 'Customer Phone', 
       'Mobile', 'Contact', 'Telephone', 'Customer Mobile', 'Buyer Phone', 'Recipient Phone'
@@ -185,7 +270,6 @@ export const parseAndValidateCustomerOrders = async (
       'Shipping Zip', 'Pincode', 'Pin Code', 'Postal Code', 'Zip', 'Billing Zip'
     ]) || '').trim();
 
-    // If state is not found from header, resolve from 6-digit Indian pincode
     if (!state && pincode) {
       state = resolveStateFromPincode(pincode);
     }
@@ -222,7 +306,7 @@ export const parseAndValidateCustomerOrders = async (
     } else if (calculatedAmount > 0) {
       amount = String(calculatedAmount);
     } else {
-      amount = ''; // Unknown amount -> displays as '—'
+      amount = '';
     }
 
     // Payment Mode
@@ -258,9 +342,7 @@ export const parseAndValidateCustomerOrders = async (
     const orderDate = parsedDate.isoDate || (rawDate ? String(rawDate).trim() : new Date().toISOString().slice(0, 10));
     const orderDateDisplay = parsedDate.displayDate || orderDate;
 
-    // ==========================================
-    // CRITICAL: Fulfillment Eligibility Analysis
-    // ==========================================
+    // Fulfillment Eligibility Analysis
     let isCancelled = false;
     let isFulfilled = false;
     let isRefunded = false;
@@ -302,7 +384,7 @@ export const parseAndValidateCustomerOrders = async (
       eligibleActiveCount++;
     }
 
-    parsedOrders.push({
+    const parsedOrder: ParsedCustomerOrder = {
       orderId,
       customerName,
       phoneNumber: cleanPhone || rawPhone,
@@ -324,77 +406,171 @@ export const parseAndValidateCustomerOrders = async (
       isAlreadyFulfilled: isFulfilled,
       isCancelled: isCancelled || isRefunded,
       hasRequiredInfo,
-      reviewReason: reviewReason || undefined
-    });
+      reviewReason: reviewReason || undefined,
+      hasConflict: hasFileConflict,
+      conflictReason: fileConflictReason || undefined
+    };
+
+    parsedOrders.push(parsedOrder);
+
+    if (hasFileConflict) {
+      conflictingOrders.push({ orderId, reason: fileConflictReason });
+    }
+
+    // -------------------------------------------------------------
+    // UPSERT ANALYSIS: Compare with Existing Database Order
+    // -------------------------------------------------------------
+    const existing = existingIdMap.get(lowerId);
+    if (existing) {
+      parsedOrder.isNew = false;
+      const inDispatchOrTracking = isDispatchedOrder(existing) || existing.stage === 'prepare_dispatch';
+      let hasShipmentConflict = false;
+      let conflictDescription = '';
+
+      // Check shipment conflict: new file has different AWB/courier than existing dispatched order
+      if (inDispatchOrTracking && parsedOrder.awbNumber && existing.awbNumber && parsedOrder.awbNumber !== existing.awbNumber) {
+        hasShipmentConflict = true;
+        conflictDescription = `Incoming AWB (${parsedOrder.awbNumber}) conflicts with existing shipment AWB (${existing.awbNumber}). Existing shipment stage & tracking preserved.`;
+        conflictingOrders.push({ orderId, reason: conflictDescription });
+      }
+
+      // Detect safe changes without overwriting valid data with empty/blank
+      const { hasChanges, patch, changedFields } = detectOrderChanges(existing, parsedOrder);
+
+      // If existing is still unfulfilled in active/pending and newly has an AWB, update it
+      if (!inDispatchOrTracking && parsedOrder.awbNumber && !existing.awbNumber) {
+        patch.awbNumber = parsedOrder.awbNumber;
+        patch.courier = parsedOrder.courier || existing.courier;
+        patch.stage = 'dispatched';
+        patch.status = 'Awaiting Tracking Update';
+        changedFields.push('AWB Number');
+      }
+
+      if (hasChanges || changedFields.length > 0) {
+        updatePlans.push({
+          orderId,
+          existingId: existing.id!,
+          currentStage: existing.stage || 'order_data',
+          incoming: parsedOrder,
+          existingOrder: existing,
+          patch,
+          changedFields,
+          hasShipmentConflict,
+          conflictDescription: conflictDescription || undefined
+        });
+      } else {
+        unchangedOrders.push(parsedOrder);
+      }
+    } else {
+      parsedOrder.isNew = true;
+      newOrders.push(parsedOrder);
+    }
   }
 
   return {
     totalRows: rawRows.length,
     totalUniqueOrders: groupedRows.size,
+    newOrdersCount: newOrders.length,
     eligibleActiveCount,
     pendingCount,
     alreadyFulfilledCount,
+    updateOrdersCount: updatePlans.length,
+    unchangedCount: unchangedOrders.length,
     cancelledCount,
-    duplicateCount,
+    duplicateCount: updatePlans.length + unchangedOrders.length,
+    invalidCount: invalidRowsCount,
+    conflictCount: conflictingOrders.length,
+    newOrders,
+    updatePlans,
+    unchangedOrders,
+    conflictingOrders,
     orders: parsedOrders,
     isShopifyFormat
   };
 };
 
 /**
- * Commits parsed customer orders into Dexie database safely without overwriting or duplicating.
+ * Commits parsed customer orders into Dexie database safely using an upsert-aware workflow.
+ * - Inserts new eligible orders into Active (or Pending / Dispatched based on status)
+ * - Updates existing orders safely with valid incoming fields without wiping existing data
+ * - Preserves existing workflow stages (Prepare Dispatch, Dispatched, Tracking)
+ * - Synchronizes updated fields to Supabase sales_orders
  */
 export const commitCustomerOrdersImport = async (
-  orders: ParsedCustomerOrder[]
-): Promise<{
-  insertedActive: number;
-  insertedPending: number;
-  insertedTracking: number;
-  skippedDuplicates: number;
-  skippedCancelled: number;
-}> => {
-  const existingOrders = await db.logistics_orders.toArray();
-  const existingIdMap = new Map<string, typeof existingOrders[0]>();
-  existingOrders.forEach(o => {
-    existingIdMap.set(cleanOrderId(o.orderId).toLowerCase(), o);
-  });
+  orders: ParsedCustomerOrder[],
+  precomputedResult?: ImportValidationResult
+): Promise<ImportCommitResult> => {
+  // If precomputedResult is provided, use it directly; otherwise compute validation on the fly
+  const result = precomputedResult || await (async () => {
+    const existingOrders = await db.logistics_orders.toArray();
+    const existingIdMap = new Map<string, LogisticsOrder>();
+    existingOrders.forEach(o => existingIdMap.set(cleanOrderId(o.orderId).toLowerCase(), o));
+
+    const newOrdersList: ParsedCustomerOrder[] = [];
+    const updatePlansList: ExistingOrderUpdatePlan[] = [];
+    let unchanged = 0;
+
+    for (const ord of orders) {
+      const lower = cleanOrderId(ord.orderId).toLowerCase();
+      const existing = existingIdMap.get(lower);
+      if (existing) {
+        const { hasChanges, patch, changedFields } = detectOrderChanges(existing, ord);
+        if (hasChanges) {
+          updatePlansList.push({
+            orderId: ord.orderId,
+            existingId: existing.id!,
+            currentStage: existing.stage || 'order_data',
+            incoming: ord,
+            existingOrder: existing,
+            patch,
+            changedFields
+          });
+        } else {
+          unchanged++;
+        }
+      } else {
+        newOrdersList.push(ord);
+      }
+    }
+    return {
+      totalRows: orders.length,
+      totalUniqueOrders: orders.length,
+      newOrdersCount: newOrdersList.length,
+      eligibleActiveCount: newOrdersList.filter(o => o.isEligibleActive).length,
+      pendingCount: newOrdersList.filter(o => !o.isEligibleActive && !o.isAlreadyFulfilled && !o.isCancelled).length,
+      alreadyFulfilledCount: newOrdersList.filter(o => o.isAlreadyFulfilled).length,
+      updateOrdersCount: updatePlansList.length,
+      unchangedCount: unchanged,
+      cancelledCount: orders.filter(o => o.isCancelled).length,
+      duplicateCount: updatePlansList.length + unchanged,
+      invalidCount: 0,
+      conflictCount: 0,
+      newOrders: newOrdersList,
+      updatePlans: updatePlansList,
+      unchangedOrders: [],
+      conflictingOrders: [],
+      orders,
+      isShopifyFormat: false
+    } as ImportValidationResult;
+  })();
 
   let insertedActive = 0;
   let insertedPending = 0;
   let insertedTracking = 0;
-  let skippedDuplicates = 0;
+  let updatedExisting = 0;
   let skippedCancelled = 0;
 
+  // Execute database transaction on Dexie
   await db.transaction('rw', db.logistics_orders, async () => {
-    for (const order of orders) {
-      const lowerId = order.orderId.toLowerCase();
-      const existing = existingIdMap.get(lowerId);
-
-      // Skip cancelled or refunded orders completely
+    // 1. Process New Orders
+    for (const order of result.newOrders) {
       if (order.isCancelled) {
         skippedCancelled++;
         continue;
       }
 
-      if (existing) {
-        // If order already exists and newly has an AWB, update AWB without overwriting customer info
-        if (order.awbNumber && !existing.awbNumber) {
-          await db.logistics_orders.update(existing.id!, {
-            awbNumber: order.awbNumber,
-            courier: order.courier || existing.courier,
-            stage: 'tracking',
-            status: 'In Transit'
-          });
-          insertedTracking++;
-        } else {
-          skippedDuplicates++;
-        }
-        continue;
-      }
-
-      // New order routing:
       if (order.isAlreadyFulfilled) {
-        // Put already fulfilled / tracked orders into Tracking stage
+        // Place already fulfilled / tracked orders into Dispatched & Tracking
         await db.logistics_orders.add({
           orderId: order.orderId,
           customerName: order.customerName,
@@ -408,8 +584,8 @@ export const commitCustomerOrdersImport = async (
           orderType: order.orderType,
           awbNumber: order.awbNumber,
           courier: order.courier,
-          stage: 'tracking',
-          status: order.awbNumber ? 'In Transit' : 'Delivered',
+          stage: 'dispatched',
+          status: 'Awaiting Tracking Update',
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
           orderDateDisplay: order.orderDateDisplay,
@@ -418,7 +594,7 @@ export const commitCustomerOrdersImport = async (
         });
         insertedTracking++;
       } else if (!order.hasRequiredInfo) {
-        // Put orders missing phone or address into Pending stage for user review
+        // Missing phone, customer name, or address -> Pending review
         await db.logistics_orders.add({
           orderId: order.orderId,
           customerName: order.customerName,
@@ -440,7 +616,7 @@ export const commitCustomerOrdersImport = async (
         });
         insertedPending++;
       } else {
-        // Eligible unfulfilled orders go directly into Active
+        // Eligible unfulfilled order -> Active queue
         await db.logistics_orders.add({
           orderId: order.orderId,
           customerName: order.customerName,
@@ -452,7 +628,7 @@ export const commitCustomerOrdersImport = async (
           products: order.products,
           amount: order.amount,
           orderType: order.orderType,
-          stage: 'order_data', // mapped to 'active'
+          stage: 'order_data',
           status: 'Unfulfilled',
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
@@ -463,13 +639,55 @@ export const commitCustomerOrdersImport = async (
         insertedActive++;
       }
     }
+
+    // 2. Process Existing Orders that have safe updates
+    for (const plan of result.updatePlans) {
+      if (Object.keys(plan.patch).length > 0) {
+        await db.logistics_orders.update(plan.existingId, {
+          ...plan.patch,
+          uploadedAt: new Date().toLocaleString()
+        });
+        updatedExisting++;
+      }
+    }
   });
 
+  // 3. Asynchronously sync updated fields to Supabase sales_orders
+  for (const plan of result.updatePlans) {
+    try {
+      const cleanId = cleanOrderId(plan.orderId);
+      const sbPatch: Record<string, any> = {};
+      if (plan.patch.customerName) sbPatch.customer_name = plan.patch.customerName;
+      if (plan.patch.phoneNumber) sbPatch.phone = plan.patch.phoneNumber;
+      if (plan.patch.state) sbPatch.state = plan.patch.state;
+      if (plan.patch.city) sbPatch.city = plan.patch.city;
+      if (plan.patch.pincode) sbPatch.pincode = plan.patch.pincode;
+      if (plan.patch.amount) sbPatch.order_total = Number(plan.patch.amount) || undefined;
+      if (Object.keys(sbPatch).length > 0) {
+        sbPatch.updated_at = new Date().toISOString();
+        await supabase.from('sales_orders').update(sbPatch).eq('order_id', cleanId);
+      }
+    } catch (e) {
+      // Non-blocking sync warning
+    }
+  }
+
+  const inserted = insertedActive + insertedPending + insertedTracking;
+  const updated = updatedExisting;
+  const unchanged = result.unchangedCount;
+  const skipped = skippedCancelled + result.invalidCount;
+
   return {
+    inserted,
+    updated,
+    unchanged,
+    skipped,
+    failed: 0,
     insertedActive,
     insertedPending,
     insertedTracking,
-    skippedDuplicates,
+    skippedDuplicates: unchanged,
     skippedCancelled
   };
 };
+

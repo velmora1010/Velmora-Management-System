@@ -95,8 +95,8 @@ export const mapToUnifiedWorkflowStage = (
   if (currentStage === 'dispatched') {
     const trackingStatus = resolveTrackingStatus(s, hasAwb);
     return {
-      status: trackingStatus,
-      workflowStage: hasAwb ? 'tracking' : 'dispatched'
+      status: trackingStatus || 'Awaiting Tracking Update',
+      workflowStage: 'dispatched'
     };
   }
 
@@ -104,7 +104,7 @@ export const mapToUnifiedWorkflowStage = (
   if (currentStage === 'tracking' || fStatus === 'fulfilled' || fStatus === 'shipped') {
     const trackingStatus = resolveTrackingStatus(s, hasAwb);
     return {
-      status: trackingStatus,
+      status: trackingStatus || 'Awaiting Tracking Update',
       workflowStage: 'tracking'
     };
   }
@@ -190,18 +190,24 @@ export const resolveTrackingStatus = (s: string, hasAwb: boolean): UnifiedTracki
   if (s.includes('cancelled') || s.includes('canceled')) {
     return 'Cancelled';
   }
+  if (s.includes('awaiting') || s.includes('awaiting tracking update')) {
+    return 'Awaiting Tracking Update';
+  }
   if (s.includes('booked') || s.includes('info received') || s.includes('manifest')) {
     return 'Info Received';
   }
-  return hasAwb ? 'Pending' : 'Not Tracked';
+  return hasAwb ? 'Awaiting Tracking Update' : 'Not Tracked';
 };
 
 import { 
   normalizeState, 
   resolveStateFromPincode, 
   parseOrderAmount, 
-  normalizeOrderPhone 
+  normalizeOrderPhone,
+  validateCourierAwb,
+  isDispatchedOrder
 } from '../utils/logisticsOrderUtils';
+import { normalizeCourier } from '../config/courierConfig';
 
 /**
  * Transforms a Dexie LogisticsOrder into a Canonical UnifiedLogisticsOrder.
@@ -431,24 +437,20 @@ export const calculateWorkflowCounts = (
   let tracking = 0;
 
   for (const o of orders) {
-    switch (o.workflowStage) {
-      case 'active':
-        active++;
-        break;
-      case 'pending':
-        pending++;
-        break;
-      case 'prepare_dispatch':
-        prepareDispatch++;
-        break;
-      case 'dispatched':
-        dispatched++;
-        break;
-      case 'tracking':
-        tracking++;
-        break;
-      default:
-        active++;
+    if (o.stage === 'trash') continue;
+
+    if (o.workflowStage === 'active') {
+      active++;
+    } else if (o.workflowStage === 'pending') {
+      pending++;
+    } else if (o.workflowStage === 'prepare_dispatch') {
+      prepareDispatch++;
+    }
+
+    // Both Dispatched and Tracking views represent all canonical dispatched shipments
+    if (isDispatchedOrder(o)) {
+      dispatched++;
+      tracking++;
     }
   }
 
@@ -538,8 +540,132 @@ export const bulkMoveToPrepareDispatch = async (
   }
 };
 
+export interface DispatchOrderPayload {
+  rawId: number;
+  courier: string;
+  awbNumber: string;
+  dispatchDate?: string;
+  dispatchTime?: string;
+  estimatedDeliveryDate?: string;
+  batchId?: string;
+  batchName?: string;
+}
+
 /**
- * Bulk or single confirm dispatch for an order
+ * Executes dispatch for a single order idempotently.
+ * 1. Validates courier and AWB format
+ * 2. Updates local Dexie database (stage: 'dispatched', status: 'Awaiting Tracking Update')
+ * 3. Upserts canonical shipment record to Supabase customer_tracking_shipments
+ * 4. Updates Supabase sales_orders dispatch_status
+ */
+export const executeDispatchOrder = async (
+  payload: DispatchOrderPayload
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const ord = await db.logistics_orders.get(payload.rawId);
+    if (!ord) {
+      return { success: false, error: 'Order not found in database' };
+    }
+
+    // 1. Validate courier & AWB
+    const val = validateCourierAwb(payload.courier, payload.awbNumber);
+    if (!val.valid) {
+      return { success: false, error: val.error };
+    }
+
+    const cleanAwb = payload.awbNumber.trim();
+    const normalizedCourier = normalizeCourier(payload.courier);
+    const nowIso = new Date().toISOString();
+    const dDate = payload.dispatchDate || nowIso.slice(0, 10);
+
+    // 2. Update local Dexie record idempotently
+    await db.logistics_orders.update(payload.rawId, {
+      courier: normalizedCourier,
+      awbNumber: cleanAwb,
+      stage: 'dispatched' as any,
+      status: 'Awaiting Tracking Update',
+      dispatchDate: dDate,
+      estimatedDeliveryDate: payload.estimatedDeliveryDate || ord.estimatedDeliveryDate,
+      batchId: payload.batchId || ord.batchId,
+      batchName: payload.batchName || ord.batchName,
+      syncedAt: nowIso
+    });
+
+    // 3. Upsert canonical shipment record to Supabase customer_tracking_shipments
+    const cleanedId = cleanOrderId(ord.orderId);
+    try {
+      await supabase.from('customer_tracking_shipments').upsert({
+        order_id: cleanedId,
+        display_order_id: `#${cleanedId}`,
+        awb_number: cleanAwb,
+        courier: normalizedCourier,
+        status: 'Awaiting Tracking Update',
+        raw_status: 'DISPATCHED',
+        status_source: 'DISPATCH_WORKFLOW',
+        source_type: 'CUSTOMER_ORDER',
+        dispatch_date: dDate,
+        estimated_delivery_date: payload.estimatedDeliveryDate || ord.estimatedDeliveryDate || null,
+        customer_name: ord.customerName || 'Customer',
+        phone_number: ord.phoneNumber || '',
+        address: ord.address || '',
+        state: ord.state || '',
+        city: ord.city || '',
+        pincode: ord.pincode || '',
+        products: ord.products || '',
+        amount: parseOrderAmount(ord.amount) || 0,
+        order_type: ord.orderType || 'Prepaid',
+        batch_id: payload.batchId || ord.batchId || null,
+        batch_name: payload.batchName || ord.batchName || null,
+        updated_at: nowIso
+      }, { onConflict: 'courier,awb_number' });
+    } catch (sbErr) {
+      console.warn('Supabase customer_tracking_shipments upsert warning:', sbErr);
+    }
+
+    // 4. Update Supabase sales_orders dispatch_status if matching order exists
+    try {
+      await supabase.from('sales_orders').update({
+        dispatch_status: 'DISPATCHED',
+        dispatch_date: dDate,
+        updated_at: nowIso
+      }).eq('order_id', cleanedId);
+    } catch (soErr) {
+      console.warn('Supabase sales_orders update warning:', soErr);
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to complete dispatch' };
+  }
+};
+
+/**
+ * Bulk executes dispatch for multiple orders.
+ */
+export const executeBulkDispatchOrders = async (
+  items: Array<{ rawId: number; courier: string; awbNumber: string; batchId?: string; batchName?: string }>
+): Promise<{ success: boolean; dispatchedCount: number; errors: string[] }> => {
+  const errors: string[] = [];
+  let dispatchedCount = 0;
+
+  for (const item of items) {
+    const res = await executeDispatchOrder(item);
+    if (res.success) {
+      dispatchedCount++;
+    } else {
+      errors.push(`Order ID ${item.rawId}: ${res.error}`);
+    }
+  }
+
+  return {
+    success: dispatchedCount > 0,
+    dispatchedCount,
+    errors
+  };
+};
+
+/**
+ * Backward compatibility alias for single confirm dispatch.
  */
 export const confirmOrderDispatch = async (payload: {
   rawId: number;
@@ -547,28 +673,10 @@ export const confirmOrderDispatch = async (payload: {
   awbNumber: string;
   dispatchDate?: string;
   estimatedDeliveryDate?: string;
+  batchId?: string;
+  batchName?: string;
 }): Promise<{ success: boolean; error?: string }> => {
-  try {
-    const ord = await db.logistics_orders.get(payload.rawId);
-    if (!ord) {
-      return { success: false, error: 'Order not found in database' };
-    }
-
-    const dDate = payload.dispatchDate || new Date().toISOString().slice(0, 10);
-    await db.logistics_orders.update(payload.rawId, {
-      courier: payload.courier,
-      awbNumber: payload.awbNumber.trim(),
-      dispatchDate: dDate,
-      estimatedDeliveryDate: payload.estimatedDeliveryDate,
-      stage: 'dispatched' as any,
-      status: 'In Transit',
-      syncedAt: new Date().toLocaleString()
-    });
-
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to confirm dispatch' };
-  }
+  return executeDispatchOrder(payload);
 };
 
 /**
