@@ -15,7 +15,8 @@ import {
   Square,
   Download,
   SlidersHorizontal,
-  Clock
+  Clock,
+  BarChart3
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -47,6 +48,14 @@ import { trackingEngine } from '../../services/tracking/trackingEngine';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
 import { parseAndFormatLogisticsDate } from '../../utils/logisticsDateUtils';
 import { normalizeState, resolveStateFromPincode, isDispatchedOrder } from '../../utils/logisticsOrderUtils';
+import { LogisticsFilterDrawer } from './components/LogisticsFilterDrawer';
+import { LogisticsAnalyticsDashboard } from './components/LogisticsAnalyticsDashboard';
+import { 
+  LogisticsFilterState, 
+  INITIAL_LOGISTICS_FILTER_STATE, 
+  applyLogisticsFilters, 
+  countActiveLogisticsFilters 
+} from './types/logisticsFilters';
 
 // Status pills for Tracking stage
 const STATUS_PILLS: Array<{ id: string; label: string }> = [
@@ -79,8 +88,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   // Search & Filter Drawer State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourier, setSelectedCourier] = useState<string>('All');
-  const [selectedState, setSelectedState] = useState<string>('All');
-  const [selectedCity, setSelectedCity] = useState<string>('All');
+  const [logisticsFilters, setLogisticsFilters] = useState<LogisticsFilterState>(INITIAL_LOGISTICS_FILTER_STATE);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
   // Bulk Selection Mode
@@ -129,6 +137,9 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Base shipments available in the current stage
   const stageShipments = useMemo(() => {
+    if (currentStage === 'analytics') {
+      return unifiedOrders;
+    }
     if (currentStage === 'dispatched' || currentStage === 'tracking') {
       return unifiedOrders.filter(o => isDispatchedOrder(o));
     }
@@ -318,104 +329,62 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     return countsMap;
   }, [stageShipments]);
 
-  // Extract available states and cities from current stage for slide-over filter drawer
-  const availableStates = useMemo(() => {
-    const s = new Set<string>();
-    stageShipments.forEach(o => {
-      const st = o.state || o.shippingState;
-      if (st && st.toLowerCase() !== 'india' && st.trim() !== '') s.add(st);
-    });
-    return Array.from(s).sort();
-  }, [stageShipments]);
-
-  const availableCities = useMemo(() => {
-    const c = new Set<string>();
-    stageShipments.forEach(o => {
-      const ct = o.city || o.shippingCity;
-      if (ct && ct.trim() !== '') c.add(ct);
-    });
-    return Array.from(c).sort();
-  }, [stageShipments]);
-
   // Active filter badge count for the Filters button
   const activeFilterCount = useMemo(() => {
-    return (selectedCourier !== 'All' ? 1 : 0) + 
-      (selectedState !== 'All' ? 1 : 0) + 
-      (selectedCity !== 'All' ? 1 : 0);
-  }, [selectedCourier, selectedState, selectedCity]);
+    return countActiveLogisticsFilters(logisticsFilters) + (selectedCourier !== 'All' ? 1 : 0);
+  }, [logisticsFilters, selectedCourier]);
 
   // Filtered orders displayed in the view
   const filteredOrders = useMemo(() => {
-    return stageShipments.filter(order => {
-      // 1. Search Query
-      if (searchTerm.trim()) {
-        const q = searchTerm.toLowerCase().trim();
-        const matchesId = (order.displayOrderId || '').toLowerCase().includes(q);
+    // 1. Advanced Drawer Filters
+    let result = applyLogisticsFilters(stageShipments, logisticsFilters);
+
+    // 2. Search Query (Top toolbar search bar)
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase().trim();
+      result = result.filter(order => {
+        const matchesId = (order.displayOrderId || '').toLowerCase().includes(q) || (order.orderId || '').toLowerCase().includes(q);
         const matchesCust = (order.customerName || '').toLowerCase().includes(q);
         const matchesPhone = (order.phoneNumber || order.phone || '').includes(q);
         const matchesAwb = (order.awbNumber || '').toLowerCase().includes(q);
         const matchesCity = (order.city || order.shippingCity || '').toLowerCase().includes(q);
         const matchesState = (order.state || order.shippingState || '').toLowerCase().includes(q);
-        if (!matchesId && !matchesCust && !matchesPhone && !matchesAwb && !matchesCity && !matchesState) {
-          return false;
-        }
-      }
+        return matchesId || matchesCust || matchesPhone || matchesAwb || matchesCity || matchesState;
+      });
+    }
 
-      // 2. Courier Filter
-      if (selectedCourier !== 'All') {
+    // 3. Quick Courier Filter (Tracking toolbar pill)
+    if (selectedCourier !== 'All') {
+      result = result.filter(order => {
         const normalized = normalizeCourier(order.courier);
-        if (normalized !== selectedCourier) {
-          return false;
-        }
-      }
+        return normalized === selectedCourier;
+      });
+    }
 
-      // 3. State Filter
-      if (selectedState !== 'All') {
-        const normS = (order.state || order.shippingState || '').toLowerCase();
-        if (!normS.includes(selectedState.toLowerCase())) {
-          return false;
-        }
+    // 4. Stage-Specific Contextual Filter Tabs (Row 3)
+    if (currentStage === 'active') {
+      if (selectedStatusTab === 'Prepaid') {
+        result = result.filter(order => !(order.orderType || '').toLowerCase().includes('cod'));
+      } else if (selectedStatusTab === 'COD') {
+        result = result.filter(order => (order.orderType || '').toLowerCase().includes('cod'));
       }
-
-      // 4. City Filter
-      if (selectedCity !== 'All') {
-        const normC = (order.city || order.shippingCity || '').toLowerCase();
-        if (!normC.includes(selectedCity.toLowerCase())) {
-          return false;
-        }
-      }
-
-      // 5. Stage-Specific Filters
-      if (currentStage === 'active') {
-        if (selectedStatusTab === 'Prepaid') {
-          const type = (order.orderType || '').toLowerCase();
-          if (type.includes('cod')) return false;
-        } else if (selectedStatusTab === 'COD') {
-          const type = (order.orderType || '').toLowerCase();
-          if (!type.includes('cod')) return false;
-        } else if (selectedStatusTab === 'Pending') {
-          // Handled at stageShipments level
-        }
-      } else {
-        // Tracking filters
-        if (selectedStatusTab !== 'All') {
+    } else if (currentStage === 'tracking') {
+      if (selectedStatusTab !== 'All') {
+        result = result.filter(order => {
           const st = order.status;
           if (selectedStatusTab === 'Exception') {
-            const isEx = st === 'Exception' || (st && (st.toLowerCase().includes('rto') || st.toLowerCase().includes('return')));
-            if (!isEx) return false;
+            return st === 'Exception' || (st && (st.toLowerCase().includes('rto') || st.toLowerCase().includes('return')));
           } else if (selectedStatusTab === 'Info Received') {
-            if (st !== 'Info Received' && st !== 'Awaiting Tracking Update') return false;
+            return st === 'Info Received' || st === 'Awaiting Tracking Update';
           } else {
-            if (st !== selectedStatusTab) {
-              return false;
-            }
+            return st === selectedStatusTab;
           }
-        }
+        });
       }
+    }
 
-      return true;
-    });
-  }, [stageShipments, searchTerm, selectedCourier, selectedState, selectedCity, selectedStatusTab, currentStage]);
+    return result;
+  }, [stageShipments, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab, currentStage]);
 
   // Selected orders array for side panel review
   const selectedOrdersList = useMemo(() => {
@@ -756,6 +725,14 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 );
               })}
             </div>
+          ) : currentStage === 'analytics' ? (
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#0b1220] border border-purple-800/40 text-xs text-slate-300 shrink-0">
+              <BarChart3 size={14} className="text-purple-400" />
+              <span className="font-semibold text-slate-200">Logistics Analytics Dashboard</span>
+              <span className="text-slate-600">•</span>
+              <span className="font-mono text-purple-300 font-bold">{filteredOrders.length}</span>
+              <span className="text-slate-400 hidden sm:inline">records analyzed</span>
+            </div>
           ) : null}
         </div>
 
@@ -961,17 +938,190 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 <span>Export</span>
               </button>
             </>
+          ) : currentStage === 'analytics' ? (
+            <>
+              {activeFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLogisticsFilters(INITIAL_LOGISTICS_FILTER_STATE);
+                    setSelectedCourier('All');
+                    toast.success('Filters cleared');
+                  }}
+                  className="h-9 px-3 rounded-xl text-xs font-semibold bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-800/60 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Reset all active filters"
+                >
+                  <RotateCcw size={13} className="text-rose-400" />
+                  <span>Reset Filters ({activeFilterCount})</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleExportOrders}
+                className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Export analyzed data to Excel"
+              >
+                <Download size={13} className="text-slate-400" />
+                <span>Export Data</span>
+              </button>
+            </>
           ) : null}
         </div>
 
       </div>
 
+      {/* ACTIVE FILTER CHIPS ROW (shown whenever filters are active in any stage) */}
+      {activeFilterCount > 0 && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0b1220] border border-purple-900/40 rounded-xl overflow-x-auto custom-scrollbar shrink-0 text-xs text-slate-300">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-purple-400 shrink-0 flex items-center gap-1">
+            <SlidersHorizontal size={12} /> Filters:
+          </span>
+
+          {logisticsFilters.datePreset !== 'all' && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/60 border border-purple-700/50 text-purple-200 text-xs shrink-0">
+              <Calendar size={11} className="text-purple-400" />
+              <span>Date: {logisticsFilters.datePreset === 'custom' ? `${logisticsFilters.startDate} to ${logisticsFilters.endDate}` : logisticsFilters.datePreset}</span>
+              <button 
+                type="button"
+                onClick={() => setLogisticsFilters(prev => ({ ...prev, datePreset: 'all', startDate: '', endDate: '' }))}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Clear date filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+
+          {logisticsFilters.couriers.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-950/60 border border-blue-700/50 text-blue-200 text-xs shrink-0">
+              <Truck size={11} className="text-blue-400" />
+              <span>Couriers: {logisticsFilters.couriers.join(', ')}</span>
+              <button 
+                type="button"
+                onClick={() => setLogisticsFilters(prev => ({ ...prev, couriers: [] }))}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Clear courier filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+
+          {logisticsFilters.states.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-950/60 border border-indigo-700/50 text-indigo-200 text-xs shrink-0">
+              <span>States: {logisticsFilters.states.join(', ')}</span>
+              <button 
+                type="button"
+                onClick={() => setLogisticsFilters(prev => ({ ...prev, states: [], cities: [] }))}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Clear state filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+
+          {logisticsFilters.cities.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-950/60 border border-cyan-700/50 text-cyan-200 text-xs shrink-0">
+              <span>Cities: {logisticsFilters.cities.join(', ')}</span>
+              <button 
+                type="button"
+                onClick={() => setLogisticsFilters(prev => ({ ...prev, cities: [] }))}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Clear city filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+
+          {logisticsFilters.trackingStatuses.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/60 border border-amber-700/50 text-amber-200 text-xs shrink-0">
+              <span>Status: {logisticsFilters.trackingStatuses.join(', ')}</span>
+              <button 
+                type="button"
+                onClick={() => setLogisticsFilters(prev => ({ ...prev, trackingStatuses: [] }))}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Clear status filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+
+          {logisticsFilters.paymentModes.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-700/50 text-emerald-200 text-xs shrink-0">
+              <span>Payment: {logisticsFilters.paymentModes.join(', ')}</span>
+              <button 
+                type="button"
+                onClick={() => setLogisticsFilters(prev => ({ ...prev, paymentModes: [] }))}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Clear payment filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+
+          {logisticsFilters.missingAwbOnly && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-950/60 border border-rose-700/50 text-rose-200 text-xs shrink-0">
+              <span>Missing AWB Only</span>
+              <button 
+                type="button"
+                onClick={() => setLogisticsFilters(prev => ({ ...prev, missingAwbOnly: false }))}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Clear missing AWB filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+
+          {selectedCourier !== 'All' && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/60 border border-purple-700/50 text-purple-200 text-xs shrink-0">
+              <span>Courier: {selectedCourier}</span>
+              <button 
+                type="button"
+                onClick={() => setSelectedCourier('All')}
+                className="hover:text-white cursor-pointer ml-0.5"
+                title="Clear quick courier filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setLogisticsFilters(INITIAL_LOGISTICS_FILTER_STATE);
+              setSelectedCourier('All');
+              toast.success('All filters cleared');
+            }}
+            className="text-[11px] text-rose-400 hover:text-rose-300 underline cursor-pointer ml-auto shrink-0 pl-2 font-medium"
+          >
+            Clear All
+          </button>
+        </div>
+      )}
+
       {/* 3. MAIN WORKSPACE CONTENT: Full-Width Table + Side Review Panel (Side-by-Side on Desktop) */}
       <div className="flex-1 flex gap-4 min-h-0 overflow-hidden pb-1">
         
-        {/* Left Column: Table View (or Prepare Dispatch Grouped View) */}
+        {/* Left Column: Table View (or Analytics Dashboard or Prepare Dispatch Grouped View) */}
         <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-          {currentStage === 'prepare_dispatch' ? (
+          {currentStage === 'analytics' ? (
+            <LogisticsAnalyticsDashboard
+              orders={filteredOrders}
+              allOrders={unifiedOrders}
+              filters={logisticsFilters}
+              onResetFilters={() => {
+                setLogisticsFilters(INITIAL_LOGISTICS_FILTER_STATE);
+                setSelectedCourier('All');
+              }}
+              onNavigateStage={(st) => setCurrentStage(st)}
+            />
+          ) : currentStage === 'prepare_dispatch' ? (
             <PrepareDispatchGroupedView
               orders={stageShipments}
               onDispatchSuccess={() => {
@@ -1077,118 +1227,23 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
       </div>
 
-      {/* Slide-over Filter Drawer */}
-      {isFilterDrawerOpen && (
-        <div 
-          onClick={() => setIsFilterDrawerOpen(false)}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity animate-fade-in" 
-        />
-      )}
-
-      <aside 
-        className={`fixed inset-y-0 right-0 z-50 w-full max-w-sm sm:max-w-md bg-[#0b1220] text-slate-200 shadow-2xl border-l border-slate-800 flex flex-col transform transition-transform duration-300 ease-in-out ${
-          isFilterDrawerOpen ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
-        {/* Drawer Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-[#0e1626]">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-purple-600/20 rounded-xl text-purple-400 border border-purple-500/30">
-              <SlidersHorizontal size={18} />
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-100">Filter Orders</h2>
-              <p className="text-xs text-slate-400">Refine orders by courier, state, and city</p>
-            </div>
-          </div>
-          <button 
-            type="button"
-            onClick={() => setIsFilterDrawerOpen(false)}
-            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Drawer Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
-          {/* Courier Filter */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-purple-400 mb-2">
-              Courier Partner
-            </label>
-            <select
-              value={selectedCourier}
-              onChange={(e) => setSelectedCourier(e.target.value)}
-              className="w-full p-2.5 bg-[#0e1626] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-            >
-              <option value="All">All Couriers</option>
-              {CONFIGURED_COURIERS.map(c => (
-                <option key={c.id} value={c.name}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* State Filter */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-purple-400 mb-2">
-              Destination State
-            </label>
-            <select
-              value={selectedState}
-              onChange={(e) => {
-                setSelectedState(e.target.value);
-                setSelectedCity('All');
-              }}
-              className="w-full p-2.5 bg-[#0e1626] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-            >
-              <option value="All">All States</option>
-              {availableStates.map(st => (
-                <option key={st} value={st}>{st}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* City Filter */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-purple-400 mb-2">
-              Destination City
-            </label>
-            <select
-              value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
-              className="w-full p-2.5 bg-[#0e1626] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
-            >
-              <option value="All">All Cities</option>
-              {availableCities.map(ct => (
-                <option key={ct} value={ct}>{ct}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Drawer Footer */}
-        <div className="p-4 border-t border-slate-800 bg-[#0e1626] flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedCourier('All');
-              setSelectedState('All');
-              setSelectedCity('All');
-            }}
-            className="px-4 py-2 rounded-xl text-xs font-medium bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 cursor-pointer transition-colors"
-          >
-            Reset Filters
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsFilterDrawerOpen(false)}
-            className="px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white cursor-pointer shadow-md shadow-purple-600/30 transition-all"
-          >
-            Apply Filters
-          </button>
-        </div>
-      </aside>
+      {/* Slide-over Filter Drawer (Advanced Drawer matching Image 2 design) */}
+      <LogisticsFilterDrawer
+        isOpen={isFilterDrawerOpen}
+        onClose={() => setIsFilterDrawerOpen(false)}
+        orders={unifiedOrders}
+        filters={logisticsFilters}
+        onApply={(nextFilters) => {
+          setLogisticsFilters(nextFilters);
+          setIsFilterDrawerOpen(false);
+          toast.success('Filters applied');
+        }}
+        onResetAll={() => {
+          setLogisticsFilters(INITIAL_LOGISTICS_FILTER_STATE);
+          setSelectedCourier('All');
+          toast.success('All filters reset');
+        }}
+      />
 
       {/* Customer Detail Drawer Modal */}
       <CustomerDetailModal

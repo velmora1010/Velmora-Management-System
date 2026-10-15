@@ -1,11 +1,19 @@
 export type OrderSource = 'shopify' | 'upload' | 'dexie';
 
+export type LogisticsViewSection =
+  | 'active'
+  | 'prepare_dispatch'
+  | 'dispatched'
+  | 'tracking'
+  | 'analytics';
+
 export type UnifiedWorkflowStage =
   | 'active'
   | 'pending'
   | 'prepare_dispatch'
   | 'dispatched'
-  | 'tracking';
+  | 'tracking'
+  | 'analytics';
 
 export type UnifiedTrackingStatus =
   | 'Unfulfilled'
@@ -126,6 +134,7 @@ export interface WorkflowStageCounts {
   tracking: number;
   totalOrders: number;
   totalCustomers: number;
+  analytics?: number;
 }
 
 export type LogisticsMainView = 'customers' | 'orders';

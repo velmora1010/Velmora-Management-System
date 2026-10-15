@@ -8,7 +8,8 @@ import {
   SlidersHorizontal, 
   RotateCcw,
   UploadCloud,
-  X
+  X,
+  BarChart3
 } from 'lucide-react';
 import type { UnifiedWorkflowStage, WorkflowStageCounts } from '../../../types/unifiedLogistics';
 
@@ -42,7 +43,7 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
   isRefreshing = false,
   onOpenImportModal
 }) => {
-  // The 4 canonical workflow stages in single evenly spaced navigation group
+  // Canonical workflow stages + Analytics in single evenly spaced navigation group
   const workflowStages: Array<{
     id: UnifiedWorkflowStage;
     label: string;
@@ -77,15 +78,22 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
       icon: <Truck size={16} />,
       count: counts.tracking,
       title: 'Shipments tracking and delivery updates'
+    },
+    {
+      id: 'analytics',
+      label: 'Analytics',
+      icon: <BarChart3 size={16} />,
+      count: counts.analytics ?? counts.totalOrders,
+      title: 'Logistics KPI analytics and carrier performance dashboard'
     }
   ];
 
   return (
     <div className="flex flex-col gap-2.5 w-full shrink-0 select-none">
       
-      {/* ROW 1: MAIN WORKFLOW NAVIGATION (Active, Prepare Dispatch, Dispatched, Tracking) */}
+      {/* ROW 1: MAIN WORKFLOW NAVIGATION (Active, Prepare Dispatch, Dispatched, Tracking, Analytics) */}
       <div className="bg-[#0b1220] border border-slate-800/90 p-1.5 sm:p-2 rounded-2xl shadow-xl w-full">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-2.5 w-full">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-2.5 w-full">
           {workflowStages.map((stage) => {
             const isSelected = currentStage === stage.id;
 

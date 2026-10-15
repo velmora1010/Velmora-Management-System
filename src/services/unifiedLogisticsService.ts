@@ -461,7 +461,8 @@ export const calculateWorkflowCounts = (
     dispatched,
     tracking,
     totalOrders: orders.length,
-    totalCustomers: customers.length
+    totalCustomers: customers.length,
+    analytics: orders.length
   };
 };
 
