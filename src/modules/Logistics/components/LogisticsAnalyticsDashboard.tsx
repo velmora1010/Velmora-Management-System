@@ -76,7 +76,8 @@ export const LogisticsAnalyticsDashboard: React.FC<LogisticsAnalyticsDashboardPr
   allOrders,
   filters,
   onResetFilters,
-  onNavigateStage
+  onNavigateStage,
+  onOpenDateCalendar
 }) => {
   // 1. CALCULATE OVERVIEW KPIS
   const kpiData = useMemo(() => {
