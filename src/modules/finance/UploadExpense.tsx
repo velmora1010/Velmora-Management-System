@@ -1,9 +1,11 @@
 import { useState, useRef } from 'react';
 import { Upload, FileSpreadsheet, FileText, X, Trash2, RefreshCw, AlertCircle } from 'lucide-react';
-import { useExpenses, FinanceExpense } from '../../hooks/finance/useExpenses';
+import { useExpenses, type FinanceExpense, type ExpenseImport } from '../../hooks/finance/useExpenses';
 import { PipelineEngine } from '../../utils/documentPipeline/PipelineEngine';
 import { DocumentType } from '../../utils/documentPipeline/types';
 import { ExpenseRuleEngine } from '../../utils/rules/ExpenseRuleEngine';
+import { ConfirmModal } from '../../components/ui/ConfirmModal';
+import toast from 'react-hot-toast';
 
 interface UploadExpenseProps {
   onClose: () => void;
@@ -15,6 +17,8 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
   const [isParsing, setIsParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [fileToReplace, setFileToReplace] = useState<string | null>(null);
+  const [fileToDelete, setFileToDelete] = useState<ExpenseImport | null>(null);
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
@@ -208,17 +212,31 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
     }
   };
 
-  const removeFile = async (batchId: string) => {
+  const handleDeleteClick = (file: ExpenseImport) => {
+    setFileToDelete(file);
+    setIsConfirmDeleteOpen(true);
+  };
+
+  const executeDelete = async () => {
+    if (!fileToDelete) return;
     try {
       setIsParsing(true);
-      await deleteBatch(batchId);
-      if (activeBatchId === batchId) {
-        setActiveBatchId(null);
+      const res = await deleteBatch(fileToDelete.batch_id);
+      if (res.success) {
+        toast.success(`"${fileToDelete.file_name}" moved to Recycle Bin.`);
+        if (activeBatchId === fileToDelete.batch_id) {
+          setActiveBatchId(null);
+        }
+      } else {
+        toast.error(res.error || 'Failed to delete file.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to delete", err);
+      toast.error(err?.message || 'Failed to delete file.');
     } finally {
       setIsParsing(false);
+      setFileToDelete(null);
+      setIsConfirmDeleteOpen(false);
     }
   };
 
@@ -386,7 +404,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); removeFile(file.batch_id); }}
+                        onClick={(e) => { e.stopPropagation(); handleDeleteClick(file); }}
                         title="Delete File"
                         className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 flex items-center justify-center transition-colors"
                       >
@@ -492,6 +510,21 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        isOpen={isConfirmDeleteOpen}
+        title="Move to Recycle Bin"
+        message={`Are you sure you want to delete "${fileToDelete?.file_name}"? The statement and its ${fileToDelete?.total_rows || 0} parsed transactions will be moved to the Finance Recycle Bin.`}
+        confirmText="Move to Recycle Bin"
+        cancelText="Cancel"
+        isDestructive={true}
+        onConfirm={executeDelete}
+        onClose={() => {
+          setIsConfirmDeleteOpen(false);
+          setFileToDelete(null);
+        }}
+      />
     </div>
   );
 };

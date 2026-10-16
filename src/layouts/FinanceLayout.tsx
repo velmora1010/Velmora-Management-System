@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { ListTree, Receipt, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ListTree, Receipt, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
 
 export const FinanceLayout = () => {
@@ -20,7 +20,7 @@ export const FinanceLayout = () => {
   return (
     <div className="flex h-full w-full bg-background overflow-hidden">
       {/* Sub-sidebar for Finance */}
-      <aside 
+      <aside
         className={`border-r border-border bg-card hidden md:flex flex-col shrink-0 transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] relative
           ${isCollapsed ? 'w-[68px]' : 'w-56'}
         `}
@@ -29,7 +29,7 @@ export const FinanceLayout = () => {
           <h2 className={`text-sm font-semibold text-muted tracking-wider uppercase transition-opacity duration-300 whitespace-nowrap ${isCollapsed ? 'opacity-0 w-0' : 'opacity-100'}`}>
             Finance
           </h2>
-          <button 
+          <button
             onClick={toggleCollapse}
             className={`p-1.5 text-muted hover:text-main bg-background rounded-lg border border-border/50 hover:border-border transition-colors z-10 flex shrink-0 ${isCollapsed ? 'mx-auto' : ''}`}
             title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
@@ -43,7 +43,7 @@ export const FinanceLayout = () => {
             title={isCollapsed ? "Finance Management" : undefined}
             className={`flex items-center px-3 py-2.5 rounded-xl transition-all text-[15px] ${
               location.pathname.startsWith('/finance/management')
-                ? 'bg-primary/10 text-primary font-medium shadow-sm' 
+                ? 'bg-primary/10 text-primary font-medium shadow-sm'
                 : 'text-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-main'
             } ${isCollapsed ? 'justify-center w-11 h-11 mx-auto px-0' : 'gap-3 w-full'}`}
           >
@@ -57,13 +57,27 @@ export const FinanceLayout = () => {
             title={isCollapsed ? "Finance Category" : undefined}
             className={`flex items-center px-3 py-2.5 rounded-xl transition-all text-[15px] ${
               location.pathname.startsWith('/finance/categories')
-                ? 'bg-primary/10 text-primary font-medium shadow-sm' 
+                ? 'bg-primary/10 text-primary font-medium shadow-sm'
                 : 'text-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-main'
             } ${isCollapsed ? 'justify-center w-11 h-11 mx-auto px-0' : 'gap-3 w-full'}`}
           >
             <ListTree size={20} className={`shrink-0 ${location.pathname.startsWith('/finance/categories') ? 'text-primary' : 'text-muted'}`} />
             <span className={`whitespace-nowrap transition-opacity duration-300 ${isCollapsed ? 'opacity-0 hidden' : 'opacity-100 block'}`}>
               Finance Category
+            </span>
+          </Link>
+          <Link
+            to="/finance/recycle-bin"
+            title={isCollapsed ? "Recycle Bin" : undefined}
+            className={`flex items-center px-3 py-2.5 rounded-xl transition-all text-[15px] ${
+              location.pathname.startsWith('/finance/recycle-bin')
+                ? 'bg-primary/10 text-primary font-medium shadow-sm'
+                : 'text-muted hover:bg-black/5 dark:hover:bg-white/5 hover:text-main'
+            } ${isCollapsed ? 'justify-center w-11 h-11 mx-auto px-0' : 'gap-3 w-full'}`}
+          >
+            <Trash2 size={20} className={`shrink-0 ${location.pathname.startsWith('/finance/recycle-bin') ? 'text-primary' : 'text-muted'}`} />
+            <span className={`whitespace-nowrap transition-opacity duration-300 ${isCollapsed ? 'opacity-0 hidden' : 'opacity-100 block'}`}>
+              Recycle Bin
             </span>
           </Link>
         </nav>
@@ -94,6 +108,17 @@ export const FinanceLayout = () => {
             >
               <ListTree size={16} />
               <span className="truncate">Categories</span>
+            </Link>
+            <Link
+              to="/finance/recycle-bin"
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px] font-semibold transition-all duration-200 min-h-[44px] ${
+                location.pathname.startsWith('/finance/recycle-bin')
+                  ? 'bg-background shadow-sm text-primary border border-border/30'
+                  : 'text-muted hover:text-main border border-transparent'
+              }`}
+            >
+              <Trash2 size={16} />
+              <span className="truncate">Recycle Bin</span>
             </Link>
           </div>
         </div>

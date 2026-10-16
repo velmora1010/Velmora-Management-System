@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, X, Plus, RefreshCw } from 'lucide-react';
+import { Search, X, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useBills, type FinanceBill } from '../../hooks/finance/useBills';
 import { BillAnalytics } from './BillAnalytics';
 import { BillForm } from './BillForm';
@@ -13,7 +13,7 @@ import toast from 'react-hot-toast';
 
 export const FinanceBills = () => {
   const { bills, isLoading, archiveBill, refreshBills } = useBills();
-  const [activeTab, setActiveTab] = useState<'list' | 'add' | 'analytics'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'add' | 'analytics' | 'recycle-bin'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -212,6 +212,18 @@ export const FinanceBills = () => {
 
         {activeTab === 'analytics' && (
           <BillAnalytics bills={bills} />
+        )}
+
+        {activeTab === 'recycle-bin' && (
+          <div className="flex flex-col items-center justify-center p-12 text-center bg-slate-800/40 rounded-2xl border border-slate-700/60 shadow-sm mt-4 fade-in">
+            <div className="w-16 h-16 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-2xl flex items-center justify-center text-2xl mb-4">
+              <Trash2 size={26} />
+            </div>
+            <h3 className="text-lg font-semibold text-slate-100 mb-1.5">Recycle Bin</h3>
+            <p className="text-slate-400 text-sm max-w-md">
+              Deleted bills will appear here.
+            </p>
+          </div>
         )}
 
         {activeTab === 'list' && (

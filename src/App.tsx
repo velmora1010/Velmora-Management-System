@@ -30,6 +30,7 @@ const FinanceExpense = lazy(() => import('./modules/finance/FinanceExpense').the
 const FinanceCredit = lazy(() => import('./modules/finance/FinanceCredit').then(module => ({ default: module.FinanceCredit })));
 const FinanceOverview = lazy(() => import('./modules/finance/FinanceOverview').then(module => ({ default: module.FinanceOverview })));
 const FinanceCategoryManagement = lazy(() => import('./modules/finance/FinanceCategoryManagement').then(module => ({ default: module.FinanceCategoryManagement })));
+const BillsRecycleBin = lazy(() => import('./modules/finance/BillsRecycleBin').then(module => ({ default: module.BillsRecycleBin })));
 const FinanceManagementLayout = lazy(() => import('./modules/finance/FinanceManagementLayout').then(module => ({ default: module.FinanceManagementLayout })));
 const TaskManager = lazy(() => import('./modules/tasks/TaskManager').then(module => ({ default: module.TaskManager })));
 const MarketingHome = lazy(() => import('./modules/marketing/MarketingHome').then(module => ({ default: module.MarketingHome })));
@@ -119,6 +120,7 @@ function App() {
                       <Route path="analytics" element={<AnalyticsPage />} />
                     </Route>
 
+                    <Route path="recycle-bin" element={<BillsRecycleBin />} />
                     <Route path="categories" element={<FinanceCategoryManagement />} />
                   </Route>
 
