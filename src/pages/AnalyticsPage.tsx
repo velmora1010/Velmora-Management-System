@@ -3,24 +3,35 @@ import { analyticsService } from '../services/analyticsService';
 import type { KpiMetrics, GlobalAnalyticsFilters, DashboardViewTab, TrendDataPoint, CategoryBreakdown } from '../types/analytics';
 import { AnalyticsKpiCard } from '../components/analytics/AnalyticsKpiCard';
 import { AnalyticsTrendChart, AnalyticsBreakdownChart } from '../components/analytics/AnalyticsCharts';
-import { 
-  BarChart3, DollarSign, Megaphone, Package, Factory, CheckSquare, 
-  Users, RefreshCw, Calendar, ShieldCheck, AlertCircle, ShoppingBag, CheckCircle2 
+import {
+  BarChart3,
+  DollarSign,
+  Megaphone,
+  Package,
+  Factory,
+  CheckSquare,
+  Users,
+  RefreshCw,
+  Calendar,
+  AlertCircle,
+  ShoppingBag,
+  CheckCircle2,
+  LayoutDashboard
 } from 'lucide-react';
 
 export const AnalyticsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardViewTab>('overview');
-  
+
   // Global Filters
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  
+
   // KPI Metrics & Chart States (Loaded incrementally)
   const [kpiMetrics, setKpiMetrics] = useState<KpiMetrics | null>(null);
   const [expenseTrends, setExpenseTrends] = useState<TrendDataPoint[]>([]);
   const [taskBreakdown, setTaskBreakdown] = useState<CategoryBreakdown[]>([]);
   const [qcBreakdown, setQcBreakdown] = useState<CategoryBreakdown[]>([]);
-  
+
   const [isKpiLoading, setIsKpiLoading] = useState(true);
   const [isChartsLoading, setIsChartsLoading] = useState(true);
 
@@ -70,122 +81,104 @@ export const AnalyticsPage: React.FC = () => {
     setEndDate('');
   };
 
+  const tabs: { id: DashboardViewTab; label: string; icon: React.FC<{ size?: number; className?: string }> }[] = [
+    { id: 'overview', label: 'Executive Overview', icon: LayoutDashboard },
+    { id: 'finance', label: 'Financial Analytics', icon: DollarSign },
+    { id: 'marketing', label: 'Marketing Analytics', icon: Megaphone },
+    { id: 'inventory', label: 'Inventory Analytics', icon: Package },
+    { id: 'production', label: 'Production & QC', icon: Factory },
+    { id: 'tasks', label: 'Task Performance', icon: CheckSquare },
+    { id: 'vendors', label: 'Vendor Performance', icon: Users },
+  ];
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      
+    <div className="space-y-6 animate-in fade-in duration-300 pb-12">
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-border/40">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="text-primary" size={24} />
-            <h1 className="text-2xl font-bold text-main tracking-tight">BI & Analytics Center</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-slate-900/60 border border-slate-700/70 shadow-sm backdrop-blur-sm">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-purple-500/15 text-purple-400 border border-purple-500/30 flex items-center justify-center shrink-0 shadow-sm shadow-purple-500/10">
+            <BarChart3 size={22} />
           </div>
-          <p className="text-muted text-sm">Real-time aggregated trend analytics and operational metrics across all modules.</p>
+          <div>
+            <h1 className="text-lg sm:text-xl font-bold text-slate-100 tracking-tight">
+              BI & Analytics Center
+            </h1>
+            <p className="text-xs text-slate-400 font-medium mt-0.5">
+              Real-time aggregated trend analytics and operational metrics across all modules.
+            </p>
+          </div>
         </div>
 
         <button
+          type="button"
           onClick={() => { loadKpis(); loadCharts(); }}
-          className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-colors"
+          disabled={isKpiLoading || isChartsLoading}
+          className="flex items-center gap-2 px-3.5 py-2 bg-purple-600/15 border border-purple-500/30 rounded-xl text-xs font-semibold text-purple-300 hover:text-white hover:bg-purple-600/25 transition-all shadow-sm disabled:opacity-50 self-start sm:self-auto"
         >
-          <RefreshCw size={14} className={isKpiLoading ? 'animate-spin' : ''} />
-          Refresh Analytics
+          <RefreshCw size={14} className={isKpiLoading || isChartsLoading ? 'animate-spin' : ''} />
+          <span>{isKpiLoading || isChartsLoading ? 'Refreshing...' : 'Refresh Analytics'}</span>
         </button>
       </div>
 
       {/* Global Filter Bar */}
-      <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+      <div className="p-3.5 sm:p-4 bg-slate-900/60 border border-slate-700/80 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-sm backdrop-blur-sm">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 text-xs text-slate-400">
           <span className="flex items-center gap-1.5 font-medium text-slate-300">
-            <Calendar size={14} /> Filter Date Range:
+            <Calendar size={14} className="text-purple-400" />
+            <span>Filter Date Range:</span>
           </span>
           <input
             type="date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-main rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-primary"
+            className="h-[38px] bg-slate-950/80 border border-slate-700/80 text-slate-100 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500/80 outline-none transition-all [color-scheme:dark]"
           />
-          <span>to</span>
+          <span className="text-slate-500 font-medium">to</span>
           <input
             type="date"
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-main rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-primary"
+            className="h-[38px] bg-slate-950/80 border border-slate-700/80 text-slate-100 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500/80 outline-none transition-all [color-scheme:dark]"
           />
         </div>
 
         <button
+          type="button"
           onClick={handleResetFilters}
-          className="px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 rounded-lg border border-slate-700 transition-colors"
+          className="h-[38px] px-3.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 rounded-xl border border-slate-700/80 transition-all flex items-center gap-1.5 shadow-sm"
         >
           Clear Filters
         </button>
       </div>
 
       {/* Dashboard Sub-View Tabs */}
-      <div className="flex gap-2 p-1.5 bg-slate-900/60 border border-slate-800 rounded-xl overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('overview')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-            activeTab === 'overview' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Executive Overview
-        </button>
-        <button
-          onClick={() => setActiveTab('finance')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-            activeTab === 'finance' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <DollarSign size={14} /> Financial Analytics
-        </button>
-        <button
-          onClick={() => setActiveTab('marketing')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-            activeTab === 'marketing' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Megaphone size={14} /> Marketing Analytics
-        </button>
-        <button
-          onClick={() => setActiveTab('inventory')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-            activeTab === 'inventory' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Package size={14} /> Inventory Analytics
-        </button>
-        <button
-          onClick={() => setActiveTab('production')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-            activeTab === 'production' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Factory size={14} /> Production & QC
-        </button>
-        <button
-          onClick={() => setActiveTab('tasks')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-            activeTab === 'tasks' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <CheckSquare size={14} /> Task Performance
-        </button>
-        <button
-          onClick={() => setActiveTab('vendors')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-            activeTab === 'vendors' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Users size={14} /> Vendor Performance
-        </button>
+      <div className="p-1.5 bg-slate-900/60 border border-slate-700/80 rounded-2xl flex items-center gap-1.5 overflow-x-auto shadow-sm backdrop-blur-sm">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                isActive
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-bold'
+                  : 'bg-slate-900/40 border border-transparent text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <Icon size={14} className={isActive ? 'text-white' : 'text-slate-400'} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* KPI Cards Grid (Loaded Incrementally First) */}
       {isKpiLoading || !kpiMetrics ? (
-        <div className="flex justify-center items-center py-12 text-muted gap-2">
-          <RefreshCw className="animate-spin" size={18} />
-          <span>Loading KPI Cards...</span>
+        <div className="flex flex-col justify-center items-center py-16 gap-3 rounded-2xl bg-slate-900/40 border border-slate-800/60">
+          <div className="w-8 h-8 rounded-full border-2 border-purple-500/20 border-t-purple-500 animate-spin" />
+          <span className="text-xs text-slate-400 font-medium">Loading KPI Cards...</span>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -304,9 +297,9 @@ export const AnalyticsPage: React.FC = () => {
 
       {/* Visual Chart Widgets (Loaded Asynchronously) */}
       {isChartsLoading ? (
-        <div className="flex justify-center items-center py-16 text-muted gap-2">
-          <RefreshCw className="animate-spin" size={20} />
-          <span>Loading analytics visualizations...</span>
+        <div className="flex flex-col justify-center items-center py-16 gap-3 rounded-2xl bg-slate-900/40 border border-slate-800/60">
+          <div className="w-8 h-8 rounded-full border-2 border-purple-500/20 border-t-purple-500 animate-spin" />
+          <span className="text-xs text-slate-400 font-medium">Loading analytics visualizations...</span>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

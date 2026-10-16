@@ -1,43 +1,57 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  Receipt,
+  CreditCard,
+  ArrowDownLeft,
+  ShoppingCart,
+  History,
+  BarChart3
+} from 'lucide-react';
 
 export const FinanceManagementLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
   const primaryNav = [
-    { name: 'Bills', path: '/finance/management/bills' },
-    { name: 'Expense', path: '/finance/management/expense' },
-    { name: 'Credit', path: '/finance/management/credit' },
-    { name: 'Purchase Order', path: '/finance/management/purchase-order' },
-    { name: 'PO History', path: '/finance/management/po-history' },
-    { name: 'Analytics', path: '/finance/management/analytics' },
+    { name: 'Overview', path: '/finance/management/overview', icon: LayoutDashboard },
+    { name: 'Bills', path: '/finance/management/bills', icon: Receipt },
+    { name: 'Expense', path: '/finance/management/expense', icon: CreditCard },
+    { name: 'Credit', path: '/finance/management/credit', icon: ArrowDownLeft },
+    { name: 'Purchase Order', path: '/finance/management/purchase-order', icon: ShoppingCart },
+    { name: 'PO History', path: '/finance/management/po-history', icon: History },
+    { name: 'Analytics', path: '/finance/management/analytics', icon: BarChart3 },
   ];
 
   return (
     <div className="flex flex-col h-full w-full max-w-7xl mx-auto fade-in">
-      {/* Top Bar matching Vanilla UI */}
+      {/* Top Bar matching Campaign Management UI */}
       <div className="flex flex-col items-start gap-4 mb-6">
-        <h2 className="text-2xl font-bold text-main tracking-tight">Finance Management</h2>
-        
+        <h2 className="text-2xl font-bold text-slate-100 tracking-tight">Finance Management</h2>
+
         {/* Primary Nav (Horizontal Tabs) */}
-        <div className="flex flex-wrap gap-2.5">
+        <div className="flex flex-wrap gap-2">
           {primaryNav.map((item) => {
-            const isActive = location.pathname.startsWith(item.path);
-            
-            // In Vanilla, active tabs use btn-primary and inactive use btn-secondary.
-            // btn-primary: primary background, white text.
-            // btn-secondary: background border, main text.
+            const Icon = item.icon;
+            const isOverview = item.name === 'Overview' && (
+              location.pathname === '/finance/management' ||
+              location.pathname === '/finance/management/' ||
+              location.pathname.startsWith('/finance/management/overview')
+            );
+            const isActive = isOverview || (item.name !== 'Overview' && location.pathname.startsWith(item.path));
+
             return (
               <button
                 key={item.name}
                 onClick={() => navigate(item.path)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  isActive 
-                    ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110' 
-                    : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+                className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                  isActive
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+                    : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
                 }`}
               >
-                {item.name}
+                <Icon size={15} className={isActive ? 'text-white' : 'text-slate-400'} />
+                <span>{item.name}</span>
               </button>
             );
           })}

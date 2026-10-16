@@ -129,3 +129,35 @@ export async function deleteDraftVideoAssetsForAttempt(
     return false;
   }
 }
+
+/**
+ * Delete a specific draft video asset (original or tamil_translation) for an attempt
+ */
+export async function deleteSingleDraftVideoAsset(
+  campaignId: string | number,
+  influencerId: string | number,
+  videoNumber: number,
+  draftAttemptId: number,
+  assetType: DraftAssetType
+): Promise<boolean> {
+  try {
+    const { error } = await supabaseAdmin
+      .from(SUPABASE_TABLES.draftVideoAssets)
+      .delete()
+      .eq('campaign_id', String(campaignId).trim())
+      .eq('influencer_id', Number(influencerId))
+      .eq('video_number', Number(videoNumber))
+      .eq('draft_attempt_id', Number(draftAttemptId))
+      .eq('asset_type', assetType);
+
+    if (error) {
+      console.warn(`Error deleting draft_video_asset (${assetType}) (non-fatal):`, error.message);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.warn(`Exception in deleteSingleDraftVideoAsset (${assetType}) (non-fatal):`, err?.message);
+    return false;
+  }
+}
+

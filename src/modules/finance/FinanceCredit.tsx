@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Search, RefreshCw } from 'lucide-react';
+import { Search, RefreshCw, X } from 'lucide-react';
 import { UploadCredit } from './UploadCredit';
 import { useCredits, type FinanceCredit as FinanceCreditType } from '../../hooks/finance/useCredits';
-import { FinanceInfoCard } from '../../components/ui/FinanceInfoCard';
+import { CreditCard } from './CreditCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { CreditCardEditor } from './CreditCardEditor';
 import { CreditAnalytics } from './CreditAnalytics';
@@ -10,11 +10,11 @@ import toast from 'react-hot-toast';
 
 export const FinanceCredit = () => {
   const { credits, isLoading, archiveCredit, refreshCredits } = useCredits();
-  
+
   // Tab state
   const [activeTab, setActiveTab] = useState<'view' | 'upload' | 'rules' | 'analytics'>('view');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
+
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
@@ -77,7 +77,7 @@ export const FinanceCredit = () => {
       if (selectedSectionFilter !== 'all' && credit.sub_category1 !== selectedSectionFilter) return false;
       // Sub 2 filter
       if (selectedSub2Filter !== 'all' && credit.sub_category2 !== selectedSub2Filter) return false;
-      
+
       // Categorization filter
       if (categorizationFilter === 'categorized' && credit.main_category === 'Uncategorized') return false;
       if (categorizationFilter === 'uncategorized' && credit.main_category !== 'Uncategorized') return false;
@@ -87,7 +87,7 @@ export const FinanceCredit = () => {
       const q = searchQuery.toLowerCase();
       const resolvedDept = (credit.main_category || '-').toLowerCase();
       const resolvedSection = (credit.sub_category1 || '-').toLowerCase();
-      
+
       return (
         resolvedDept.includes(q) ||
         resolvedSection.includes(q) ||
@@ -101,10 +101,10 @@ export const FinanceCredit = () => {
     return filtered.sort((a, b) => {
       const dateA = a.transaction_date ? new Date(a.transaction_date).getTime() : 0;
       const dateB = b.transaction_date ? new Date(b.transaction_date).getTime() : 0;
-      
+
       const isValidA = !isNaN(dateA) && dateA > 0;
       const isValidB = !isNaN(dateB) && dateB > 0;
-      
+
       if (isValidA && isValidB) return dateB - dateA;
       if (isValidA && !isValidB) return -1;
       if (!isValidA && isValidB) return 1;
@@ -128,13 +128,13 @@ export const FinanceCredit = () => {
       }
       groups[validKey].push(credit);
     });
-    
+
     // Maintain sorted keys
     const orderedKeys = Array.from(new Set(filteredCredits.map(credit => {
        const dateKey = formatDate(credit.transaction_date);
        return dateKey === '-' || dateKey === 'Invalid Date' ? 'Date Not Available' : dateKey;
     })));
-    
+
     return orderedKeys.map(key => ({
       date: key,
       items: groups[key]
@@ -157,6 +157,14 @@ export const FinanceCredit = () => {
     }
   };
 
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setSelectedDeptFilter('all');
+    setSelectedSectionFilter('all');
+    setSelectedSub2Filter('all');
+    setCategorizationFilter('all');
+  };
+
   return (
     <div className="flex flex-col lg:h-full fade-in text-slate-200">
       {/* Finance Sub Navigation */}
@@ -164,10 +172,10 @@ export const FinanceCredit = () => {
         <button
           type="button"
           onClick={() => setActiveTab('upload')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
             activeTab === 'upload'
-              ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110'
-              : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+              : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
           }`}
         >
           Upload Credit
@@ -175,10 +183,10 @@ export const FinanceCredit = () => {
         <button
           type="button"
           onClick={() => setActiveTab('view')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
             activeTab === 'view'
-              ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110'
-              : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+              : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
           }`}
         >
           View Credit
@@ -186,10 +194,10 @@ export const FinanceCredit = () => {
         <button
           type="button"
           onClick={() => setActiveTab('analytics')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
             activeTab === 'analytics'
-              ? 'bg-primary text-white shadow-md shadow-primary/20 hover:brightness-110'
-              : 'bg-card border border-border text-main hover:bg-black/5 dark:hover:bg-white/5'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+              : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
           }`}
         >
           Credit Analytics
@@ -197,91 +205,122 @@ export const FinanceCredit = () => {
       </div>
 
       {activeTab === 'view' && (
-        <div className="flex flex-col sm:flex-row gap-3 mb-6 items-center flex-wrap">
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
-            <input
-              type="text"
-              placeholder="Search credits..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-card border border-border/50 text-main text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-primary transition-colors"
-            />
+        <div className="flex flex-col gap-3.5 mb-6">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Search Input */}
+            <div className="relative flex-1 min-w-[220px] max-w-sm">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+              <input
+                type="text"
+                placeholder="Search credits..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full h-[42px] bg-slate-800/80 border border-slate-700/80 text-slate-100 text-sm rounded-xl pl-10 pr-9 py-2 placeholder-slate-400 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors p-0.5"
+                  title="Clear search"
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+
+            {/* Department / Main Category Filter */}
+            <select
+              value={selectedDeptFilter}
+              onChange={(e) => setSelectedDeptFilter(e.target.value)}
+              className="h-[42px] bg-slate-800/80 border border-slate-700/80 text-slate-200 text-sm rounded-xl px-3.5 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
+            >
+              <option value="all" className="bg-slate-900 text-slate-100">All Main Categories</option>
+              {dynamicDepartments.map((dept) => (
+                <option key={dept} value={dept} className="bg-slate-900 text-slate-100">{dept}</option>
+              ))}
+            </select>
+
+            {/* Section / Sub Category 1 Filter */}
+            <select
+              value={selectedSectionFilter}
+              onChange={(e) => setSelectedSectionFilter(e.target.value)}
+              disabled={selectedDeptFilter === 'all'}
+              className="h-[42px] bg-slate-800/80 border border-slate-700/80 text-slate-200 text-sm rounded-xl px-3.5 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <option value="all" className="bg-slate-900 text-slate-100">All Sub Categories 1</option>
+              {dynamicSections.map((sec) => (
+                <option key={sec} value={sec} className="bg-slate-900 text-slate-100">{sec}</option>
+              ))}
+            </select>
+
+            {/* Sub Category 2 Filter */}
+            <select
+              value={selectedSub2Filter}
+              onChange={(e) => setSelectedSub2Filter(e.target.value)}
+              disabled={selectedSectionFilter === 'all'}
+              className="h-[42px] bg-slate-800/80 border border-slate-700/80 text-slate-200 text-sm rounded-xl px-3.5 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <option value="all" className="bg-slate-900 text-slate-100">All Sub Categories 2</option>
+              {dynamicSub2.map((sec) => (
+                <option key={sec} value={sec} className="bg-slate-900 text-slate-100">{sec}</option>
+              ))}
+            </select>
+
+            {/* Categorization Filter */}
+            <select
+              value={categorizationFilter}
+              onChange={(e) => setCategorizationFilter(e.target.value as any)}
+              className="h-[42px] bg-slate-800/80 border border-slate-700/80 text-slate-200 text-sm rounded-xl px-3.5 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all"
+            >
+              <option value="all" className="bg-slate-900 text-slate-100">All</option>
+              <option value="categorized" className="bg-slate-900 text-slate-100">Categorized</option>
+              <option value="uncategorized" className="bg-slate-900 text-slate-100">Uncategorized</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={async () => {
+                setIsRefreshing(true);
+                try {
+                  await refreshCredits();
+                  toast.success('Credits refreshed successfully.');
+                } catch (err) {
+                  toast.error('Failed to refresh credits.');
+                }
+                setIsRefreshing(false);
+              }}
+              disabled={isRefreshing}
+              className="h-[42px] px-4 rounded-xl text-xs font-semibold bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/30 text-purple-300 hover:text-white flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              title="Refresh credits"
+            >
+              <RefreshCw size={15} className={isRefreshing ? "animate-spin" : ""} />
+              {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+
+            {/* Count & Reset */}
+            <div className="ml-auto flex items-center gap-2">
+              <span className="h-[42px] flex items-center px-3.5 rounded-xl text-xs font-medium bg-slate-800/80 border border-slate-700/80 text-slate-400">
+                {filteredCredits.length} {filteredCredits.length === 1 ? 'credit' : 'credits'}
+                {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || categorizationFilter !== 'all') && ` of ${credits.length}`}
+              </span>
+              {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || categorizationFilter !== 'all') && (
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="h-[42px] px-3 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition-colors"
+                  title="Clear all filters"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
-          
-          {/* Department Filter */}
-          <select
-            value={selectedDeptFilter}
-            onChange={(e) => setSelectedDeptFilter(e.target.value)}
-            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
-          >
-            <option value="all">All Main Categories</option>
-            {dynamicDepartments.map((dept) => (
-              <option key={dept} value={dept}>{dept}</option>
-            ))}
-          </select>
-
-          {/* Section Filter */}
-          <select
-            value={selectedSectionFilter}
-            onChange={(e) => setSelectedSectionFilter(e.target.value)}
-            disabled={selectedDeptFilter === 'all'}
-            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
-          >
-            <option value="all">All Sub Categories 1</option>
-            {dynamicSections.map((sec) => (
-              <option key={sec} value={sec}>{sec}</option>
-            ))}
-          </select>
-
-          {/* Sub Category 2 Filter */}
-          <select
-            value={selectedSub2Filter}
-            onChange={(e) => setSelectedSub2Filter(e.target.value)}
-            disabled={selectedSectionFilter === 'all'}
-            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
-          >
-            <option value="all">All Sub Categories 2</option>
-            {dynamicSub2.map((sec) => (
-              <option key={sec} value={sec}>{sec}</option>
-            ))}
-          </select>
-
-          {/* Categorization Filter */}
-          <select
-            value={categorizationFilter}
-            onChange={(e) => setCategorizationFilter(e.target.value as any)}
-            className="w-full sm:w-auto min-w-[140px] bg-card border border-border/50 text-main text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-primary transition-colors"
-          >
-            <option value="all">All</option>
-            <option value="categorized">Categorized</option>
-            <option value="uncategorized">Uncategorized</option>
-          </select>
-
-          <button
-            type="button"
-            onClick={async () => {
-              setIsRefreshing(true);
-              try {
-                await refreshCredits();
-                toast.success('Credits refreshed successfully.');
-              } catch (err) {
-                toast.error('Failed to refresh credits.');
-              }
-              setIsRefreshing(false);
-            }}
-            disabled={isRefreshing}
-            className="ml-auto w-full sm:w-auto flex items-center justify-center gap-2 bg-primary/10 text-primary border border-primary/20 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm hover:bg-primary/20 transition-all disabled:opacity-50"
-          >
-            <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} />
-            {isRefreshing ? 'Refreshing...' : 'Refresh'}
-          </button>
         </div>
       )}
 
       {/* Main Content Area Placeholder */}
-      <div className="flex-1 lg:overflow-y-auto custom-scrollbar pr-2">
-        
+      <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
         {activeTab === 'upload' && (
           <UploadCredit onClose={() => setActiveTab('view')} />
         )}
@@ -289,42 +328,63 @@ export const FinanceCredit = () => {
         {activeTab === 'view' && (
           <>
             {isLoading && credits.length === 0 ? (
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <div className="flex flex-col items-center justify-center h-64 gap-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500/20 border-t-purple-500"></div>
+                <span className="text-xs text-slate-400">Loading credits...</span>
               </div>
-            ) : filteredCredits.length === 0 ? (
-              <div className="flex flex-col items-center justify-center p-12 text-center bg-card rounded-2xl border border-border/50 shadow-sm mt-4">
-                <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center text-3xl mb-4">
+            ) : credits.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-12 text-center bg-slate-800/40 rounded-2xl border border-slate-700/60 shadow-sm mt-4 fade-in">
+                <div className="w-16 h-16 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-2xl flex items-center justify-center text-3xl mb-4">
                   💳
                 </div>
-                <h3 className="text-xl font-semibold text-main mb-2">No credits found</h3>
-                <p className="text-muted max-w-md">
-                  {searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' 
-                    ? "Try adjusting your search or filters." 
-                    : "Click 'Upload Credit' to import your first credit statement."}
+                <h3 className="text-lg font-semibold text-slate-100 mb-1.5">No credits recorded yet</h3>
+                <p className="text-slate-400 text-sm max-w-md mb-5">
+                  Click &apos;Upload Credit&apos; to import your first credit statement.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('upload')}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/25 transition-all"
+                >
+                  Upload First Statement
+                </button>
+              </div>
+            ) : filteredCredits.length === 0 ? (
+              <div className="flex flex-col items-center justify-center p-12 text-center bg-slate-800/40 rounded-2xl border border-slate-700/60 shadow-sm mt-4 fade-in">
+                <div className="w-16 h-16 bg-slate-800 text-slate-400 border border-slate-700 rounded-2xl flex items-center justify-center text-2xl mb-4">
+                  🔍
+                </div>
+                <h3 className="text-lg font-semibold text-slate-100 mb-1.5">No matching credits found</h3>
+                <p className="text-slate-400 text-sm max-w-md mb-5">
+                  Try adjusting your search query or reset your filters to view more records.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition-colors"
+                >
+                  Clear Filters
+                </button>
               </div>
             ) : (
-              <div className="flex flex-col gap-8 pb-8">
+              <div className="flex flex-col gap-8 pb-12">
                 {groupedCredits.map(group => (
-                  <div key={group.date} className="flex flex-col gap-5">
+                  <div key={group.date} className="flex flex-col gap-4">
                     <div className="flex items-center gap-4">
-                      <div className="h-px bg-border/50 flex-1"></div>
-                      <h4 className="text-sm font-medium text-muted uppercase tracking-wider">{group.date}</h4>
-                      <div className="h-px bg-border/50 flex-1"></div>
+                      <div className="h-px bg-slate-700/60 flex-1"></div>
+                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-3.5 py-1 rounded-full bg-slate-800/90 border border-slate-700/70 shadow-sm">
+                        {group.date}
+                      </span>
+                      <div className="h-px bg-slate-700/60 flex-1"></div>
                     </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 lg:gap-6 items-start">
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
                       {group.items.map(credit => (
-                        <FinanceInfoCard
+                        <CreditCard
                           key={credit.id}
-                          title={credit.main_category || '-'}
-                          subtitle={`${credit.sub_category1 || '-'}${credit.sub_category2 ? ` › ${credit.sub_category2}` : ''}`}
-                          badges={[credit.source || 'No Source']}
+                          credit={credit}
                           onEdit={() => handleEdit(credit)}
                           onDelete={() => credit.id && handleDelete(credit.id)}
-                          editTooltip="Edit Credit"
-                          deleteTooltip="Archive Credit"
                           isEditing={editingId === credit.id}
                           formId={`edit-credit-${credit.id}`}
                           onCancelEdit={() => setEditingId(null)}
@@ -336,19 +396,6 @@ export const FinanceCredit = () => {
                               onSuccess={() => setEditingId(null)}
                             />
                           )}
-                          fields={[
-                            { label: "Amount", value: `₹${credit.amount ?? '-'}` },
-                            { label: "Payment Mode", value: credit.payment_mode || '-' },
-                            { label: "Bank Account", value: credit.bank_account || '-' },
-                            { 
-                              label: "Notes", 
-                              value: credit.notes ? (
-                                <div className="line-clamp-3 relative group/notes cursor-help" title={credit.notes}>
-                                  {credit.notes}
-                                </div>
-                              ) : '-' 
-                            },
-                          ]}
                         />
                       ))}
                     </div>
@@ -360,8 +407,8 @@ export const FinanceCredit = () => {
         )}
 
         {activeTab === 'analytics' && (
-          <CreditAnalytics 
-            credits={credits} 
+          <CreditAnalytics
+            credits={credits}
             onRefresh={async () => {
               setIsRefreshing(true);
               try {
