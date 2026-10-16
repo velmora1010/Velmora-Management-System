@@ -35,8 +35,10 @@ import {
   bulkMoveToPrepareDispatch,
   returnToActiveStage,
   cleanOrderId,
-  syncSalesOrdersFromSupabase
+  syncSalesOrdersFromSupabase,
+  deleteLogisticsOrderByOrderId
 } from '../../services/unifiedLogisticsService';
+import { websiteSalesService } from '../sales/website/websiteSalesService';
 import { LogisticsWorkflowToolbar } from './components/LogisticsWorkflowToolbar';
 import { OrderTableView } from './components/OrderTableView';
 import { CustomerDetailModal } from './components/CustomerDetailModal';
@@ -285,13 +287,34 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     };
     sanitizeDexieRecords();
 
-    // Listen for real-time sales order sync events from Sales department uploads
+    // Listen for real-time sales order sync and deletion events from Sales department
     const handleSalesSynced = () => {
       syncSalesOrdersFromSupabase().catch(err => console.warn('Background sync on sales upload error:', err));
     };
+
+    const handleSalesOrderDeleted = (e: any) => {
+      const orderId = e.detail?.orderId;
+      if (orderId) {
+        setSelectedOrderIds(prev => prev.filter(id => id !== orderId && !id.endsWith(`-${orderId}`)));
+      }
+    };
+
+    const handleSalesBatchDeleted = (e: any) => {
+      const orderIds: string[] = e.detail?.orderIds || [];
+      if (orderIds.length > 0) {
+        const idSet = new Set(orderIds.map(cleanOrderId));
+        setSelectedOrderIds(prev => prev.filter(id => !idSet.has(cleanOrderId(id))));
+      }
+    };
+
     window.addEventListener('velmora:sales_orders_synced', handleSalesSynced);
+    window.addEventListener('velmora:sales_order_deleted', handleSalesOrderDeleted);
+    window.addEventListener('velmora:sales_batch_deleted', handleSalesBatchDeleted);
+
     return () => {
       window.removeEventListener('velmora:sales_orders_synced', handleSalesSynced);
+      window.removeEventListener('velmora:sales_order_deleted', handleSalesOrderDeleted);
+      window.removeEventListener('velmora:sales_batch_deleted', handleSalesBatchDeleted);
     };
   }, []);
 
@@ -632,10 +655,45 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   };
 
   const handleDeleteOrder = async (order: UnifiedLogisticsOrder) => {
-    if (!order.rawId) return;
-    if (window.confirm(`Are you sure you want to delete order #${order.displayOrderId}?`)) {
-      await db.logistics_orders.delete(order.rawId);
-      toast.success(`Order #${order.displayOrderId} deleted`);
+    const rawId = order.rawId;
+    const orderId = order.displayOrderId;
+    if (!rawId && !orderId) return;
+
+    const hasAwb = !!order.awbNumber;
+    const isDispatchedOrDelivered = 
+      hasAwb || 
+      order.workflowStage === 'dispatched' || 
+      order.workflowStage === 'fulfilled' || 
+      (order.stage && ['dispatched', 'delivered', 'fulfilled'].includes(order.stage.toLowerCase())) ||
+      (order.status && ['dispatched', 'delivered', 'fulfilled'].includes(order.status.toLowerCase()));
+
+    let confirmMsg = `Are you sure you want to permanently delete order #${orderId}? This will automatically remove it from Sales and Logistics.`;
+
+    if (isDispatchedOrDelivered) {
+      confirmMsg = `⚠️ WARNING: Order #${orderId} has already been dispatched/fulfilled${hasAwb ? ` with AWB ${order.awbNumber}` : ''}.\n\nDeleting this order will permanently remove it from all operational Logistics views, counts, and Analytics while retaining shipment audit records.\n\nAre you sure you want to permanently delete this order?`;
+    }
+
+    if (!window.confirm(confirmMsg)) return;
+
+    const toastId = toast.loading(`Deleting order #${orderId}...`);
+    try {
+      // 1. Delete from Sales (which updates Supabase sales_orders status to DELETED and cleans sales_raw_data)
+      await websiteSalesService.deleteSalesOrder(orderId);
+
+      // 2. Remove from selected IDs
+      setSelectedOrderIds(prev => prev.filter(id => id !== order.id && id !== orderId));
+
+      toast.success(`Order #${orderId} deleted successfully`, { id: toastId });
+    } catch (err: any) {
+      console.error('Failed to delete order:', err);
+      // Fallback: Ensure it is marked as trash in Dexie logistics orders
+      try {
+        await deleteLogisticsOrderByOrderId(orderId, 'Deleted from Logistics');
+        setSelectedOrderIds(prev => prev.filter(id => id !== order.id && id !== orderId));
+        toast.success(`Order #${orderId} removed from Logistics`, { id: toastId });
+      } catch (innerErr: any) {
+        toast.error(`Failed to delete order: ${err.message}`, { id: toastId });
+      }
     }
   };
 

@@ -8,7 +8,12 @@ import type {
   PriceInterpretationMode,
   ColumnMapping
 } from './types';
-import { syncSalesUploadToLogistics } from '../../../services/unifiedLogisticsService';
+import { 
+  syncSalesUploadToLogistics,
+  deleteLogisticsOrderByOrderId,
+  deleteLogisticsOrdersByBatchId,
+  cleanOrderId
+} from '../../../services/unifiedLogisticsService';
 import { 
   parseFileToRawRows, 
   detectColumnMapping, 
@@ -230,13 +235,13 @@ export class WebsiteSalesService {
 
       if (consolidatedOrders && consolidatedOrders.length > 0) {
         const orderIdsInUpload = consolidatedOrders.map(o => o.order_id);
-        const existingOrdersMap = new Map<string, { id: string }>();
+        const existingOrdersMap = new Map<string, { id: string; order_id: string; order_status?: string; extra_data?: any }>();
 
         for (let i = 0; i < orderIdsInUpload.length; i += 500) {
           const chunkOrderIds = orderIdsInUpload.slice(i, i + 500);
           const { data: existingRows, error: fetchErr } = await supabase
             .from('sales_orders')
-            .select('id, order_id')
+            .select('id, order_id, order_status, extra_data')
             .eq('channel', 'WEBSITE')
             .in('order_id', chunkOrderIds);
 
@@ -248,9 +253,15 @@ export class WebsiteSalesService {
         }
 
         const orderIdToUuid = new Map<string, string>();
+        const orderPayloads: any[] = [];
 
-        const orderPayloads = consolidatedOrders.map(o => {
+        consolidatedOrders.forEach(o => {
           const existingRecord = existingOrdersMap.get(o.order_id);
+          if (existingRecord && (existingRecord.order_status === 'DELETED' || existingRecord.extra_data?.is_deleted)) {
+            // STRICT TOMBSTONE: Do not resurrect deleted orders from stale CSV uploads!
+            return;
+          }
+
           let orderUuid: string;
 
           if (existingRecord) {
@@ -268,7 +279,7 @@ export class WebsiteSalesService {
           const fStatus = (o.fulfillment_status || '').toLowerCase().trim();
           const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
 
-          return {
+          orderPayloads.push({
             id: orderUuid,
             upload_id: uploadId,
             channel: 'WEBSITE',
@@ -304,7 +315,7 @@ export class WebsiteSalesService {
               courier: o.courier || '',
               fulfilled_date: o.fulfilled_date || (isFulfilled ? o.order_date : '')
             }
-          };
+          });
         });
 
         // STEP 4: Upsert parent sales_orders without changing sales_orders.id
@@ -323,6 +334,10 @@ export class WebsiteSalesService {
         // STEP 5: Prepare child line item payloads
         const itemPayloads: any[] = [];
         consolidatedOrders.forEach(o => {
+          if (!orderIdToUuid.has(o.order_id)) {
+            // Skipped deleted order
+            return;
+          }
           const salesOrderId = orderIdToUuid.get(o.order_id) || o.id;
           if (o.items && o.items.length > 0) {
             o.items.forEach(it => {
@@ -510,6 +525,7 @@ export class WebsiteSalesService {
         .from('sales_orders')
         .select('*')
         .eq('channel', 'WEBSITE')
+        .neq('order_status', 'DELETED')
         .order('order_date', { ascending: false })
         .order('id', { ascending: true });
 
@@ -770,21 +786,23 @@ export class WebsiteSalesService {
     return consolidatedOrders;
   }
 
-  // Delete an upload batch and all associated records from Supabase
+  // Delete an upload batch and all associated records from Supabase and Logistics
   async deleteUploadBatch(batchId: string): Promise<boolean> {
     try {
-      const orders = await this.fetchAllPages<{ id: string }>((start, end) =>
+      const orders = await this.fetchAllPages<{ id: string; order_id: string }>((start, end) =>
         supabase
           .from('sales_orders')
-          .select('id')
+          .select('id, order_id')
           .eq('upload_id', batchId)
           .eq('channel', 'WEBSITE')
           .order('id', { ascending: true })
           .range(start, end)
       );
 
-      if (orders && orders.length > 0) {
-        const salesOrderIds = orders.map(o => o.id);
+      const salesOrderIds = (orders || []).map(o => o.id);
+      const rawOrderIds = (orders || []).map(o => cleanOrderId(o.order_id));
+
+      if (salesOrderIds.length > 0) {
         for (let i = 0; i < salesOrderIds.length; i += 300) {
           await supabase.from('sales_order_items').delete().in('sales_order_id', salesOrderIds.slice(i, i + 300));
         }
@@ -793,12 +811,103 @@ export class WebsiteSalesService {
       await supabase.from('sales_orders').delete().eq('upload_id', batchId).eq('channel', 'WEBSITE');
       await supabase.from('sales_raw_data').delete().eq('upload_id', batchId);
       await supabase.from('sales_uploads').delete().eq('id', batchId);
+
+      // Propagate batch deletion to Logistics Dexie
+      await deleteLogisticsOrdersByBatchId(batchId, rawOrderIds);
     } catch (e: any) {
       console.error('[Supabase Error] Table: sales_uploads/orders, Op: DELETE, Message:', e.message);
       throw new Error(`Failed to delete upload batch: ${e.message}`);
     }
 
     return true;
+  }
+
+  // Permanently delete a single order from Sales and propagate deletion to Logistics
+  async deleteSalesOrder(orderId: string): Promise<{
+    success: boolean;
+    orderId: string;
+    wasDispatched: boolean;
+    message?: string;
+  }> {
+    const cleanId = cleanOrderId(orderId);
+    if (!cleanId) throw new Error('Invalid order ID provided for deletion');
+
+    try {
+      // 1. Fetch matching sales_orders row from Supabase
+      const { data: orderRows, error: fetchErr } = await supabase
+        .from('sales_orders')
+        .select('id, order_id, dispatch_status, extra_data')
+        .eq('channel', 'WEBSITE')
+        .eq('order_id', cleanId);
+
+      if (fetchErr) {
+        console.error('[Supabase Error] Table: sales_orders, Op: SELECT, Message:', fetchErr.message);
+        throw new Error(`Failed to locate order in database: ${fetchErr.message}`);
+      }
+
+      const existingOrder = orderRows && orderRows[0];
+      let wasDispatched = false;
+
+      if (existingOrder) {
+        if (existingOrder.dispatch_status === 'DISPATCHED' || existingOrder.dispatch_status === 'DELIVERED') {
+          wasDispatched = true;
+        }
+
+        // A. Delete child line items
+        const { error: itemErr } = await supabase
+          .from('sales_order_items')
+          .delete()
+          .eq('sales_order_id', existingOrder.id);
+
+        if (itemErr) {
+          console.error('[Supabase Error] Table: sales_order_items, Op: DELETE, Message:', itemErr.message);
+          throw new Error(`Failed to delete order items: ${itemErr.message}`);
+        }
+
+        // B. Mark sales_orders as DELETED (tombstone)
+        const currentExtra = existingOrder.extra_data || {};
+        const { error: updateErr } = await supabase
+          .from('sales_orders')
+          .update({
+            order_status: 'DELETED',
+            dispatch_status: 'CANCELLED',
+            extra_data: {
+              ...currentExtra,
+              is_deleted: true,
+              deleted_at: new Date().toISOString(),
+              tombstone: true
+            }
+          })
+          .eq('id', existingOrder.id);
+
+        if (updateErr) {
+          console.error('[Supabase Error] Table: sales_orders, Op: UPDATE, Message:', updateErr.message);
+          throw new Error(`Failed to update order status: ${updateErr.message}`);
+        }
+
+        // C. Clean up raw spreadsheet data
+        await supabase
+          .from('sales_raw_data')
+          .delete()
+          .eq('order_id', cleanId);
+      }
+
+      // 2. Propagate deletion to Logistics
+      const logRes = await deleteLogisticsOrderByOrderId(cleanId, 'Deleted from Sales');
+      if (logRes.wasDispatched) {
+        wasDispatched = true;
+      }
+
+      return {
+        success: true,
+        orderId: cleanId,
+        wasDispatched,
+        message: `Order #${cleanId} deleted from Sales and Logistics.`
+      };
+    } catch (err: any) {
+      console.error('[Delete Sales Order Failed]', err);
+      throw err;
+    }
   }
 }
 

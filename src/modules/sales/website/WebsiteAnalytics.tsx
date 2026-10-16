@@ -1344,7 +1344,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No payment data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={paymentMatchingOrders} />
+              <CardMatchingOrdersList orders={paymentMatchingOrders} onOrderDeleted={loadData} />
             </div>
 
             {/* REVENUE MIX DONUT CHART */}
@@ -1379,7 +1379,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No revenue data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={revenueMixMatchingOrders} />
+              <CardMatchingOrdersList orders={revenueMixMatchingOrders} onOrderDeleted={loadData} />
             </div>
           </div>
 
@@ -1422,7 +1422,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No state data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={stateMatchingOrders} />
+              <CardMatchingOrdersList orders={stateMatchingOrders} onOrderDeleted={loadData} />
 
               {/* State Table Toggle */}
               <div className="pt-1">
@@ -1497,7 +1497,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No city data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={cityMatchingOrders} />
+              <CardMatchingOrdersList orders={cityMatchingOrders} onOrderDeleted={loadData} />
             </div>
           </div>
 
@@ -1535,7 +1535,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No pincode data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={pincodeMatchingOrders} />
+              <CardMatchingOrdersList orders={pincodeMatchingOrders} onOrderDeleted={loadData} />
             </div>
 
             {/* PRODUCT PERFORMANCE DONUT CHART */}
@@ -1570,7 +1570,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No product data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={productMatchingOrders} />
+              <CardMatchingOrdersList orders={productMatchingOrders} onOrderDeleted={loadData} />
             </div>
           </div>
 
@@ -1608,7 +1608,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No offer data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={offerMatchingOrders} />
+              <CardMatchingOrdersList orders={offerMatchingOrders} onOrderDeleted={loadData} />
             </div>
 
             {/* ORDER VALUE DISTRIBUTION DONUT CHART */}
@@ -1643,7 +1643,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No order value data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={orderValueMatchingOrders} />
+              <CardMatchingOrdersList orders={orderValueMatchingOrders} onOrderDeleted={loadData} />
             </div>
           </div>
 
@@ -1679,7 +1679,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   emptyMessage="No product composition data available"
                 />
 
-                <CardMatchingOrdersList title="Product Composition Orders" orders={prodCompMatchingOrders} />
+                <CardMatchingOrdersList title="Product Composition Orders" orders={prodCompMatchingOrders} onOrderDeleted={loadData} />
               </div>
 
               {/* DONUT 2: QUANTITY COMPOSITION */}
@@ -1698,7 +1698,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   emptyMessage="No quantity composition data available"
                 />
 
-                <CardMatchingOrdersList title="Quantity Composition Orders" orders={qtyCompMatchingOrders} />
+                <CardMatchingOrdersList title="Quantity Composition Orders" orders={qtyCompMatchingOrders} onOrderDeleted={loadData} />
               </div>
             </div>
           </div>
@@ -1728,7 +1728,7 @@ export const WebsiteAnalytics: React.FC = () => {
               emptyMessage="No COD data available for the selected filters"
             />
 
-            <CardMatchingOrdersList orders={codMatchingOrders} />
+            <CardMatchingOrdersList orders={codMatchingOrders} onOrderDeleted={loadData} />
           </div>
         </>
       )}
@@ -1762,6 +1762,10 @@ export const WebsiteAnalytics: React.FC = () => {
       <OrderDetailsModal
         order={selectedOrderForModal}
         onClose={() => setSelectedOrderForModal(null)}
+        onOrderDeleted={() => {
+          setSelectedOrderForModal(null);
+          loadData();
+        }}
       />
     </div>
   );

@@ -785,6 +785,7 @@ export const WebsiteDashboard: React.FC = () => {
               <CardMatchingOrdersList
                 orders={dashboardPaymentMatchingOrders}
                 title="Matching Orders"
+                onOrderDeleted={loadData}
               />
             </div>
 
@@ -825,6 +826,7 @@ export const WebsiteDashboard: React.FC = () => {
               <CardMatchingOrdersList
                 orders={dashboardProductMatchingOrders}
                 title="Matching Orders"
+                onOrderDeleted={loadData}
               />
             </div>
 
@@ -865,6 +867,7 @@ export const WebsiteDashboard: React.FC = () => {
               <CardMatchingOrdersList
                 orders={dashboardOfferMatchingOrders}
                 title="Matching Orders"
+                onOrderDeleted={loadData}
               />
             </div>
 
@@ -905,6 +908,7 @@ export const WebsiteDashboard: React.FC = () => {
               <CardMatchingOrdersList
                 orders={dashboardStateMatchingOrders}
                 title="Matching Orders"
+                onOrderDeleted={loadData}
               />
             </div>
           </div>

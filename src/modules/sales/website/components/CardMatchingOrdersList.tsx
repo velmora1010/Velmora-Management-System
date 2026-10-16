@@ -1,31 +1,39 @@
 import React, { useState, useMemo } from 'react';
-import { ShoppingBag, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
+import { ShoppingBag, ChevronDown, ChevronUp, Search, X, Eye, Trash2 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder } from '../types';
 import { filterOrdersBySearch, resolveCanonicalLocation } from '../websiteSalesUtils';
+import { websiteSalesService } from '../websiteSalesService';
+import { OrderDetailsModal } from './OrderDetailsModal';
+import toast from 'react-hot-toast';
 
 interface CardMatchingOrdersListProps {
   orders: WebsiteConsolidatedOrder[];
   title?: string;
   emptyText?: string;
+  onOrderDeleted?: (orderId: string) => void;
 }
 
 export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
   orders,
   title = 'Matching Orders',
-  emptyText = 'No matching orders.'
+  emptyText = 'No matching orders.',
+  onOrderDeleted
 }) => {
   const [showAll, setShowAll] = useState<boolean>(false);
   const [localSearch, setLocalSearch] = useState<string>('');
+  const [selectedOrderForModal, setSelectedOrderForModal] = useState<WebsiteConsolidatedOrder | null>(null);
+  const [locallyDeletedIds, setLocallyDeletedIds] = useState<Set<string>>(new Set());
 
-  // Ensure unique Order IDs only
+  // Ensure unique Order IDs only and exclude locally deleted orders
   const uniqueOrders = useMemo(() => {
     const seen = new Set<string>();
     return orders.filter(o => {
+      if (locallyDeletedIds.has(o.order_id)) return false;
       if (seen.has(o.order_id)) return false;
       seen.add(o.order_id);
       return true;
     });
-  }, [orders]);
+  }, [orders, locallyDeletedIds]);
 
   // Apply local card search across the FULL dataset
   const searchedOrders = useMemo(() => {
@@ -34,6 +42,31 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
   }, [uniqueOrders, localSearch]);
 
   const visibleOrders = (showAll || localSearch.trim()) ? searchedOrders : searchedOrders.slice(0, 5);
+
+  const handleDeleteSingleOrder = async (order: WebsiteConsolidatedOrder) => {
+    const hasAwb = !!order.awb_number;
+    const isDispatchedOrDelivered = 
+      hasAwb || 
+      (order.fulfillment_status && ['fulfilled', 'shipped', 'delivered'].includes(order.fulfillment_status.toLowerCase()));
+
+    let confirmMsg = `Are you sure you want to permanently delete order #${order.order_id}? This will automatically remove it from Sales and Logistics.`;
+
+    if (isDispatchedOrDelivered) {
+      confirmMsg = `⚠️ WARNING: Order #${order.order_id} has already been dispatched/fulfilled${hasAwb ? ` with AWB ${order.awb_number}` : ''}.\n\nDeleting this order will permanently remove it from all operational Logistics views, counts, and Analytics while retaining shipment audit records.\n\nAre you sure you want to permanently delete this order?`;
+    }
+
+    if (!window.confirm(confirmMsg)) return;
+
+    const toastId = toast.loading(`Deleting order #${order.order_id}...`);
+    try {
+      await websiteSalesService.deleteSalesOrder(order.order_id);
+      toast.success(`Order #${order.order_id} deleted from Sales and Logistics!`, { id: toastId });
+      setLocallyDeletedIds(prev => new Set(prev).add(order.order_id));
+      onOrderDeleted?.(order.order_id);
+    } catch (err: any) {
+      toast.error(`Failed to delete order: ${err.message}`, { id: toastId });
+    }
+  };
 
   return (
     <div className="border-t border-slate-800/80 pt-4 mt-2 space-y-3">
@@ -92,6 +125,7 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
                   <th className="py-2.5 px-3">Product / Items</th>
                   <th className="py-2.5 px-3 text-center">Quantity</th>
                   <th className="py-2.5 px-3 text-right">Remaining COD</th>
+                  <th className="py-2.5 px-3 text-center w-[85px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -183,6 +217,26 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
                           <span className="text-slate-500">₹0</span>
                         )}
                       </td>
+
+                      {/* 12. ACTIONS */}
+                      <td className="py-2.5 px-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => setSelectedOrderForModal(o)}
+                            className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-md transition-colors cursor-pointer"
+                            title="View Full Details"
+                          >
+                            <Eye size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSingleOrder(o)}
+                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors cursor-pointer"
+                            title="Delete Order"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -206,6 +260,17 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
           )}
         </div>
       )}
+
+      {/* ORDER DETAILS MODAL */}
+      <OrderDetailsModal
+        order={selectedOrderForModal}
+        onClose={() => setSelectedOrderForModal(null)}
+        onOrderDeleted={(deletedId) => {
+          setLocallyDeletedIds(prev => new Set(prev).add(deletedId));
+          setSelectedOrderForModal(null);
+          onOrderDeleted?.(deletedId);
+        }}
+      />
     </div>
   );
 };

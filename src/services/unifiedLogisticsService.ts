@@ -727,6 +727,7 @@ export interface SalesLogisticsSyncResult {
   fulfilledCount: number;
   pendingCount: number;
   preservedWorkflowCount: number;
+  skippedDeletedCount?: number;
 }
 
 /**
@@ -765,6 +766,7 @@ export const syncSalesUploadToLogistics = async (
   let fulfilledCount = 0;
   let pendingCount = 0;
   let preservedWorkflowCount = 0;
+  let skippedDeletedCount = 0;
 
   await db.transaction('rw', db.logistics_orders, async () => {
     for (const order of consolidatedOrders) {
@@ -839,6 +841,13 @@ export const syncSalesUploadToLogistics = async (
         insertedCount++;
       } else {
         // CASE 2: Re-import / existing order in Logistics
+        if (existing.stage === 'trash' || existing.status === 'Deleted') {
+          // STRICT TOMBSTONE POLICY:
+          // Order was deleted from Sales/Logistics. Do NOT silently recreate or resurrect it from a stale CSV upload!
+          skippedDeletedCount++;
+          continue;
+        }
+
         const patch: Partial<LogisticsOrder> = {};
         const inWorkflow = existing.stage === 'prepare_dispatch' || 
                            existing.stage === 'dispatched' || 
@@ -916,7 +925,7 @@ export const syncSalesUploadToLogistics = async (
   // Dispatch custom window event so any mounted Logistics views re-check or update
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('velmora:sales_orders_synced', {
-      detail: { insertedCount, updatedCount, activeCount, fulfilledCount, preservedWorkflowCount, timestamp: Date.now() }
+      detail: { insertedCount, updatedCount, activeCount, fulfilledCount, preservedWorkflowCount, skippedDeletedCount, timestamp: Date.now() }
     }));
   }
 
@@ -926,7 +935,8 @@ export const syncSalesUploadToLogistics = async (
     activeCount,
     fulfilledCount,
     pendingCount,
-    preservedWorkflowCount
+    preservedWorkflowCount,
+    skippedDeletedCount
   };
 };
 
@@ -935,6 +945,7 @@ export const syncSalesUploadToLogistics = async (
  * into the local Dexie db.logistics_orders table.
  * Guarantees that any order imported in Sales is reflected in Logistics, even after
  * browser refresh, sign-in, or multi-device access.
+ * Safely excludes deleted orders and synchronizes deletions to Dexie.
  */
 export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncResult> => {
   try {
@@ -963,11 +974,36 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
         activeCount: 0,
         fulfilledCount: 0,
         pendingCount: 0,
-        preservedWorkflowCount: 0
+        preservedWorkflowCount: 0,
+        skippedDeletedCount: 0
       };
     }
 
-    const transformed = allSalesOrders.map(so => {
+    // Separate active canonical orders from deleted/tombstoned orders
+    const activeSalesOrders = allSalesOrders.filter(so => 
+      so.order_status !== 'DELETED' && !so.extra_data?.is_deleted
+    );
+    const deletedSalesOrders = allSalesOrders.filter(so => 
+      so.order_status === 'DELETED' || so.extra_data?.is_deleted
+    );
+
+    // If any order in Dexie was deleted in Supabase, mark its stage as 'trash'
+    if (deletedSalesOrders.length > 0) {
+      const deletedSet = new Set(deletedSalesOrders.map(so => cleanOrderId(so.order_id).toLowerCase()));
+      const dexieAll = await db.logistics_orders.toArray();
+      for (const rec of dexieAll) {
+        if (rec.id && rec.stage !== 'trash' && deletedSet.has(cleanOrderId(rec.orderId).toLowerCase())) {
+          await db.logistics_orders.update(rec.id, {
+            stage: 'trash',
+            status: 'Deleted',
+            deletedAt: new Date().toISOString(),
+            trashReason: 'Deleted from Sales'
+          });
+        }
+      }
+    }
+
+    const transformed = activeSalesOrders.map(so => {
       const extra = so.extra_data || {};
       const fStatus = extra.fulfillment_status || (so.order_status === 'FULFILLED' || so.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled');
       return {
@@ -1000,9 +1036,110 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       activeCount: 0,
       fulfilledCount: 0,
       pendingCount: 0,
-      preservedWorkflowCount: 0
+      preservedWorkflowCount: 0,
+      skippedDeletedCount: 0
     };
   }
+};
+
+/**
+ * Deletes or marks as tombstone an order in the Logistics Dexie database by canonical order ID.
+ * Excludes it from all operational views (Active, Fulfilled, Pending, Prepare Dispatch, Dispatched, Tracking, Analytics).
+ * If the order was already dispatched, retains shipment audit history while removing it from operational lists.
+ */
+export const deleteLogisticsOrderByOrderId = async (
+  orderId: string,
+  reason = 'Deleted from Sales'
+): Promise<{ success: boolean; count: number; wasDispatched: boolean }> => {
+  const cleanId = cleanOrderId(orderId);
+  const lowerClean = cleanId.toLowerCase();
+  let wasDispatched = false;
+  let count = 0;
+
+  await db.transaction('rw', db.logistics_orders, async () => {
+    const all = await db.logistics_orders.toArray();
+    const matches = all.filter(o => {
+      const c = cleanOrderId(o.orderId).toLowerCase();
+      return c === lowerClean || o.orderId === orderId || o.orderId === `#${cleanId}`;
+    });
+
+    for (const m of matches) {
+      if (!m.id) continue;
+      count++;
+      if (m.stage === 'dispatched' || m.stage === 'tracking' || !!m.awbNumber) {
+        wasDispatched = true;
+      }
+
+      // Transition to stage: 'trash' (tombstone) so it immediately leaves operational views and Analytics
+      await db.logistics_orders.update(m.id, {
+        stage: 'trash',
+        status: 'Deleted',
+        deletedAt: new Date().toISOString(),
+        trashReason: reason,
+        remarks: `Order deleted from Sales (${new Date().toLocaleDateString('en-IN')})`
+      });
+    }
+  });
+
+  // Update Supabase customer_tracking_shipments if present
+  try {
+    await supabase
+      .from('customer_tracking_shipments')
+      .update({
+        status: 'Order Deleted',
+        raw_status: 'DELETED',
+        updated_at: new Date().toISOString()
+      })
+      .eq('order_id', cleanId);
+  } catch (e) {
+    console.warn('customer_tracking_shipments update note:', e);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('velmora:sales_order_deleted', {
+      detail: { orderId: cleanId, wasDispatched, timestamp: Date.now() }
+    }));
+  }
+
+  return { success: true, count, wasDispatched };
+};
+
+/**
+ * Deletes or trashes all orders in Logistics associated with an upload batch ID.
+ */
+export const deleteLogisticsOrdersByBatchId = async (
+  batchId: string,
+  orderIds: string[] = []
+): Promise<{ success: boolean; count: number }> => {
+  let count = 0;
+  const cleanIds = new Set(orderIds.map(id => cleanOrderId(id).toLowerCase()));
+
+  await db.transaction('rw', db.logistics_orders, async () => {
+    const all = await db.logistics_orders.toArray();
+    const matches = all.filter(o => 
+      o.batchId === batchId || 
+      (cleanIds.size > 0 && cleanIds.has(cleanOrderId(o.orderId).toLowerCase()))
+    );
+
+    for (const m of matches) {
+      if (!m.id) continue;
+      count++;
+      await db.logistics_orders.update(m.id, {
+        stage: 'trash',
+        status: 'Deleted',
+        deletedAt: new Date().toISOString(),
+        trashReason: `Upload batch ${batchId} deleted from Sales`
+      });
+    }
+  });
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('velmora:sales_batch_deleted', {
+      detail: { batchId, timestamp: Date.now() }
+    }));
+  }
+
+  return { success: true, count };
 };
 
 /**
