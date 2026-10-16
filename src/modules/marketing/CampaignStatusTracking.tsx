@@ -40,6 +40,7 @@ import {
   upsertDraftVideoAsset, 
   fetchDraftVideoAssets, 
   deleteDraftVideoAssetsForAttempt,
+  deleteSingleDraftVideoAsset,
   type DraftVideoAsset
 } from '../../services/draftVideoAssetService';
 import { 
@@ -6325,8 +6326,8 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
     const updates: Partial<StatusTrackingRecord> = {};
 
     if (stepId === 'draft') {
-      const hasVid = Boolean(stepData.vid || (Array.isArray(stepData.attempts) && stepData.attempts.length > 0 && stepData.attempts[stepData.attempts.length - 1]?.video_url));
-      if (!hasVid) {
+      const isEntireDraftDeleted = Boolean(stepData.is_deleted || (!stepData.vid && (!stepData.attempts || stepData.attempts.length === 0)));
+      if (isEntireDraftDeleted) {
         videoObj.is_re_draft_required = false;
         videoObj.steps['draft'] = {
           completed: false,
@@ -12714,6 +12715,11 @@ const DraftForm: React.FC<DraftFormProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [attemptToDelete, setAttemptToDelete] = useState<DraftAttempt | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [videoAssetToDelete, setVideoAssetToDelete] = useState<{
+    assetType: 'original' | 'tamil_translation';
+    attempt: DraftAttempt;
+  } | null>(null);
+  const [isDeletingVideo, setIsDeletingVideo] = useState(false);
 
   const [calculatedTiming, setCalculatedTiming] = useState(
     activeAttempt?.timing_status || existingData.timing || 'Not Submit'
@@ -13091,6 +13097,99 @@ const DraftForm: React.FC<DraftFormProps> = ({
       toast.error('Failed to update video: ' + (err?.message || 'Storage error'));
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  // Delete a specific video asset (Original Video or Tamil Translated Video) from an attempt
+  const handleDeleteVideoAsset = async (
+    assetType: 'original' | 'tamil_translation',
+    targetAttempt: DraftAttempt
+  ) => {
+    setIsDeletingVideo(true);
+    try {
+      const isOriginal = assetType === 'original';
+      const fileUrlToDelete = isOriginal ? targetAttempt.video_url : targetAttempt.tamil_video_url;
+
+      // 1. Remove file from storage if in Supabase Storage
+      if (fileUrlToDelete && fileUrlToDelete.includes('/influencer-profiles/')) {
+        const parts = fileUrlToDelete.split('/influencer-profiles/');
+        if (parts[1]) {
+          const path = decodeURIComponent(parts[1].split('?')[0]);
+          try {
+            await supabaseAdmin.storage.from('influencer-profiles').remove([path]);
+          } catch (sErr) {
+            console.warn(`Storage video deletion error (${assetType}) (non-fatal):`, sErr);
+          }
+        }
+      }
+
+      // 2. Delete from draft_video_assets table
+      if (record.campaign_id && record.influencer_id) {
+        await deleteSingleDraftVideoAsset(
+          record.campaign_id,
+          record.influencer_id,
+          videoNumber,
+          targetAttempt.attempt_number,
+          assetType
+        );
+      }
+
+      // 3. Update the specific attempt in the attempts list
+      const updatedAttempts = attempts.map(att => {
+        if (att.attempt_number === targetAttempt.attempt_number) {
+          return {
+            ...att,
+            ...(isOriginal 
+              ? { video_url: '', original_file_name: '' } 
+              : { tamil_video_url: '', tamil_file_name: '' })
+          };
+        }
+        return att;
+      });
+
+      setAttempts(updatedAttempts);
+
+      // 4. Update the active attempt metadata if target is the active attempt
+      const currentActive = updatedAttempts.find(a => a.attempt_number === (activeAttempt?.attempt_number || 1));
+      
+      const newVid = currentActive?.video_url || '';
+      const newOrigName = currentActive?.original_file_name || '';
+      const newTamilVid = currentActive?.tamil_video_url || '';
+      const newTamilName = currentActive?.tamil_file_name || '';
+
+      await onSave({
+        attempts: updatedAttempts,
+        active_attempt_number: activeAttempt?.attempt_number || targetAttempt.attempt_number || 1,
+        approval_status: activeAttempt?.approval_status || 'Pending Approval',
+        vid: newVid,
+        original_file_name: newOrigName,
+        tamil_video_url: newTamilVid,
+        tamil_file_name: newTamilName,
+        draft_submission_date: activeAttempt?.draft_submission_date || activeAttempt?.draft_submit_date,
+        draft_submit_date: activeAttempt?.draft_submit_date || activeAttempt?.draft_submission_date,
+        draft_submit_time: activeAttempt?.draft_submit_time || activeAttempt?.submission_time,
+        draft_submission_time: activeAttempt?.draft_submission_time || activeAttempt?.submission_time,
+        submission_time: activeAttempt?.submission_time || activeAttempt?.draft_submit_time,
+        re_draft_submit_date: activeAttempt?.re_draft_submit_date,
+        re_draft_submit_time: activeAttempt?.re_draft_submit_time,
+        timing: activeAttempt?.timing_status || calculatedTiming,
+        corr: activeAttempt?.corrections || corr
+      }, false);
+
+      // If preview modal was showing this video, close it
+      if (previewModalAsset && previewModalAsset.attemptNumber === targetAttempt.attempt_number && 
+          ((isOriginal && previewModalAsset.assetType === 'Original Video') || 
+           (!isOriginal && previewModalAsset.assetType === 'Tamil Translated Video'))) {
+        setPreviewModalAsset(null);
+      }
+
+      setVideoAssetToDelete(null);
+      toast.success(`${isOriginal ? 'Original Video' : 'Tamil Translated Video'} deleted successfully.`);
+    } catch (err: any) {
+      console.error('Error deleting draft video asset:', err);
+      toast.error('Failed to delete video: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setIsDeletingVideo(false);
     }
   };
 
@@ -13880,11 +13979,28 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     <button
                       type="button"
                       onClick={() => activeOriginalReplaceInputRef.current?.click()}
-                      disabled={isUploading}
+                      disabled={isUploading || isDeletingVideo}
                       className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
                     >
                       <RotateCcw size={12} /> Replace
                     </button>
+                    {activeAttempt.video_url && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setVideoAssetToDelete({
+                            assetType: 'original',
+                            attempt: activeAttempt
+                          });
+                        }}
+                        disabled={isUploading || isDeletingVideo}
+                        className="px-2 py-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-300 text-xs font-semibold rounded-lg border border-rose-800/60 hover:border-rose-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="Delete video"
+                      >
+                        <Trash2 size={12} className="text-rose-400" />
+                      </button>
+                    )}
                     <input 
                       ref={activeOriginalReplaceInputRef}
                       type="file"
@@ -13974,10 +14090,25 @@ const DraftForm: React.FC<DraftFormProps> = ({
                           <button
                             type="button"
                             onClick={() => activeTamilReplaceInputRef.current?.click()}
-                            disabled={isUploading}
+                            disabled={isUploading || isDeletingVideo}
                             className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
                           >
                             <RotateCcw size={12} /> Replace
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setVideoAssetToDelete({
+                                assetType: 'tamil_translation',
+                                attempt: activeAttempt
+                              });
+                            }}
+                            disabled={isUploading || isDeletingVideo}
+                            className="px-2 py-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-300 text-xs font-semibold rounded-lg border border-rose-800/60 hover:border-rose-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            title="Delete video"
+                          >
+                            <Trash2 size={12} className="text-rose-400" />
                           </button>
                         </>
                       ) : (
@@ -14139,39 +14270,72 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     </div>
                   </>
                 ) : (
-                  <span className="text-xs text-slate-500">No original video uploaded</span>
+                  <div 
+                    onClick={() => activeOriginalReplaceInputRef.current?.click()}
+                    className="w-full h-full border-2 border-dashed border-blue-500/40 hover:border-blue-400 rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors p-3 text-center"
+                  >
+                    <UploadCloud className="text-blue-400 mb-1" size={24} />
+                    <span className="text-xs text-blue-300 font-semibold">Upload Original Video</span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">MP4 / MOV / supported video</span>
+                  </div>
                 )}
               </div>
 
               {/* File Info & Action Buttons */}
               <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
-                <span className="text-[11px] text-slate-400 truncate font-mono max-w-[170px]" title={activeAttempt.original_file_name || activeAttempt.video_url}>
-                  {activeAttempt.original_file_name || activeAttempt.video_url?.split('/').pop()?.split('?')[0] || 'original_video.mp4'}
+                <span className="text-[11px] text-slate-400 truncate font-mono max-w-[170px]" title={activeAttempt.original_file_name || activeAttempt.video_url || 'No file uploaded'}>
+                  {activeAttempt.original_file_name || activeAttempt.video_url?.split('/').pop()?.split('?')[0] || (activeAttempt.video_url ? 'original_video.mp4' : 'No file uploaded')}
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {activeAttempt.video_url && (
+                  {activeAttempt.video_url ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewModalAsset({
+                          url: activeAttempt.video_url,
+                          title: `Draft Attempt ${activeAttempt.attempt_number} — Original Video`,
+                          attemptNumber: activeAttempt.attempt_number,
+                          assetType: 'Original Video',
+                          uploadedAt: activeAttempt.uploaded_at
+                        })}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer"
+                      >
+                        <Eye size={12} /> View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => activeOriginalReplaceInputRef.current?.click()}
+                        disabled={isUploading || isDeletingVideo}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        <RotateCcw size={12} /> Replace
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setVideoAssetToDelete({
+                            assetType: 'original',
+                            attempt: activeAttempt
+                          });
+                        }}
+                        disabled={isUploading || isDeletingVideo}
+                        className="px-2 py-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-300 text-xs font-semibold rounded-lg border border-rose-800/60 hover:border-rose-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="Delete video"
+                      >
+                        <Trash2 size={12} className="text-rose-400" />
+                      </button>
+                    </>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => setPreviewModalAsset({
-                        url: activeAttempt.video_url,
-                        title: `Draft Attempt ${activeAttempt.attempt_number} — Original Video`,
-                        attemptNumber: activeAttempt.attempt_number,
-                        assetType: 'Original Video',
-                        uploadedAt: activeAttempt.uploaded_at
-                      })}
-                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer"
+                      onClick={() => activeOriginalReplaceInputRef.current?.click()}
+                      disabled={isUploading || isDeletingVideo}
+                      className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
                     >
-                      <Eye size={12} /> View
+                      <UploadCloud size={12} /> Upload
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => activeOriginalReplaceInputRef.current?.click()}
-                    disabled={isUploading}
-                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                  >
-                    <RotateCcw size={12} /> Replace
-                  </button>
                   <input 
                     ref={activeOriginalReplaceInputRef}
                     type="file"
@@ -14268,17 +14432,32 @@ const DraftForm: React.FC<DraftFormProps> = ({
                         <button
                           type="button"
                           onClick={() => activeTamilReplaceInputRef.current?.click()}
-                          disabled={isUploading}
+                          disabled={isUploading || isDeletingVideo}
                           className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
                         >
                           <RotateCcw size={12} /> Replace
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setVideoAssetToDelete({
+                              assetType: 'tamil_translation',
+                              attempt: activeAttempt
+                            });
+                          }}
+                          disabled={isUploading || isDeletingVideo}
+                          className="px-2 py-1 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-300 text-xs font-semibold rounded-lg border border-rose-800/60 hover:border-rose-700 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          title="Delete video"
+                        >
+                          <Trash2 size={12} className="text-rose-400" />
                         </button>
                       </>
                     ) : (
                       <button
                         type="button"
                         onClick={() => activeTamilReplaceInputRef.current?.click()}
-                        disabled={isUploading}
+                        disabled={isUploading || isDeletingVideo}
                         className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
                       >
                         <UploadCloud size={12} /> Upload
@@ -14353,7 +14532,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
                       <video src={initialOriginalUrl} className="w-full h-full object-cover" />
                     </div>
                     <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialOriginalFile?.name || 'Original Video'}</span>
-                    <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setInitialOriginalFile(null);
+                          setInitialOriginalUrl('');
+                        }}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 underline font-medium"
+                        title="Remove selected video"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -14404,7 +14597,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
                         <video src={initialTamilUrl} className="w-full h-full object-cover" />
                       </div>
                       <span className="text-[11px] text-purple-300 font-medium truncate max-w-xs">{initialTamilFile?.name || 'Tamil Translated Video'}</span>
-                      <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInitialTamilFile(null);
+                            setInitialTamilUrl('');
+                          }}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 underline font-medium"
+                          title="Remove selected video"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <>
@@ -14646,19 +14853,36 @@ const DraftForm: React.FC<DraftFormProps> = ({
                             </span>
                           )}
                           {att.video_url && (
-                            <button
-                              type="button"
-                              onClick={() => setPreviewModalAsset({
-                                url: att.video_url,
-                                title: `Draft Attempt ${att.attempt_number} — Original Video`,
-                                attemptNumber: att.attempt_number,
-                                assetType: 'Original Video',
-                                uploadedAt: att.uploaded_at
-                              })}
-                              className="text-[10px] text-blue-400 hover:text-blue-300 underline font-medium cursor-pointer"
-                            >
-                              Play
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewModalAsset({
+                                  url: att.video_url,
+                                  title: `Draft Attempt ${att.attempt_number} — Original Video`,
+                                  attemptNumber: att.attempt_number,
+                                  assetType: 'Original Video',
+                                  uploadedAt: att.uploaded_at
+                                })}
+                                className="text-[10px] text-blue-400 hover:text-blue-300 underline font-medium cursor-pointer"
+                              >
+                                Play
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setVideoAssetToDelete({
+                                    assetType: 'original',
+                                    attempt: att
+                                  });
+                                }}
+                                disabled={isDeletingVideo}
+                                className="p-0.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
+                                title="Delete Original Video"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </>
                           )}
                         </div>
 
@@ -14681,6 +14905,21 @@ const DraftForm: React.FC<DraftFormProps> = ({
                                 className="text-[10px] text-purple-400 hover:text-purple-300 underline font-medium cursor-pointer"
                               >
                                 Play
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setVideoAssetToDelete({
+                                    assetType: 'tamil_translation',
+                                    attempt: att
+                                  });
+                                }}
+                                disabled={isDeletingVideo}
+                                className="p-0.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
+                                title="Delete Tamil Translated Video"
+                              >
+                                <Trash2 size={11} />
                               </button>
                             </>
                           ) : (
@@ -14988,6 +15227,64 @@ const DraftForm: React.FC<DraftFormProps> = ({
                 </>
               )}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 5B. DELETE INDIVIDUAL VIDEO CONFIRMATION MODAL */}
+      {videoAssetToDelete && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => !isDeletingVideo && setVideoAssetToDelete(null)}
+        >
+          <div 
+            className="bg-[#0b1329] border border-rose-800/80 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl relative"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 text-rose-400">
+              <div className="w-10 h-10 rounded-xl bg-rose-950/70 border border-rose-700/60 flex items-center justify-center shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white">Delete this video?</h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {videoAssetToDelete.assetType === 'original' ? 'Original Video' : 'Tamil Translated Video'} (Draft Attempt {videoAssetToDelete.attempt.attempt_number})
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-rose-950/20 border border-rose-800/40 rounded-xl text-xs text-rose-300/90 leading-relaxed">
+              <span>Are you sure you want to delete this uploaded video? This action cannot be undone.</span>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isDeletingVideo}
+                onClick={() => setVideoAssetToDelete(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingVideo}
+                onClick={() => handleDeleteVideoAsset(videoAssetToDelete.assetType, videoAssetToDelete.attempt)}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-lg shadow-rose-600/30 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingVideo ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={13} />
+                    <span>Delete Video</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
