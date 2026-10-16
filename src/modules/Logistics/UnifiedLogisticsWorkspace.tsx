@@ -34,7 +34,8 @@ import {
   calculateWorkflowCounts,
   bulkMoveToPrepareDispatch,
   returnToActiveStage,
-  cleanOrderId
+  cleanOrderId,
+  syncSalesOrdersFromSupabase
 } from '../../services/unifiedLogisticsService';
 import { LogisticsWorkflowToolbar } from './components/LogisticsWorkflowToolbar';
 import { OrderTableView } from './components/OrderTableView';
@@ -183,6 +184,9 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   useEffect(() => {
     const sanitizeDexieRecords = async () => {
       try {
+        // Automatically sync canonical Sales orders from Supabase into Dexie
+        await syncSalesOrdersFromSupabase();
+
         const records = await db.logistics_orders.toArray();
         if (records.length === 0) return;
 
@@ -280,6 +284,15 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       }
     };
     sanitizeDexieRecords();
+
+    // Listen for real-time sales order sync events from Sales department uploads
+    const handleSalesSynced = () => {
+      syncSalesOrdersFromSupabase().catch(err => console.warn('Background sync on sales upload error:', err));
+    };
+    window.addEventListener('velmora:sales_orders_synced', handleSalesSynced);
+    return () => {
+      window.removeEventListener('velmora:sales_orders_synced', handleSalesSynced);
+    };
   }, []);
 
   // Filter counts for Active unfulfilled orders (and pending info queue)
@@ -607,10 +620,15 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
+    try {
+      await syncSalesOrdersFromSupabase();
       toast.success('Logistics records refreshed');
-    }, 400);
+    } catch (e: any) {
+      console.warn('Refresh error:', e);
+      toast.error('Failed to sync orders from cloud');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const handleDeleteOrder = async (order: UnifiedLogisticsOrder) => {

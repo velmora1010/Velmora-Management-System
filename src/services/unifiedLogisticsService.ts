@@ -440,7 +440,7 @@ export const groupOrdersIntoCustomers = (orders: UnifiedLogisticsOrder[]): Unifi
  */
 export const calculateWorkflowCounts = (
   orders: UnifiedLogisticsOrder[],
-  customers: UnifiedCustomer[]
+  customers: UnifiedCustomer[] = []
 ): WorkflowStageCounts => {
   let active = 0;
   let fulfilled = 0;
@@ -718,7 +718,295 @@ export const returnToActiveStage = async (rawIds: number[] | number): Promise<bo
 };
 
 /**
- * Fetches Shopify website orders from Supabase
+ * Result of Sales-to-Logistics order synchronization
+ */
+export interface SalesLogisticsSyncResult {
+  insertedCount: number;
+  updatedCount: number;
+  activeCount: number;
+  fulfilledCount: number;
+  pendingCount: number;
+  preservedWorkflowCount: number;
+}
+
+/**
+ * Synchronizes orders uploaded via the Sales Department into Dexie Logistics DB.
+ * Implements strict, idempotent workflow stage routing:
+ * - Genuinely unfulfilled eligible orders -> Active
+ * - Source fulfilled orders (e.g. fulfilled outside Logistics or in Shopify) -> Fulfilled
+ * - Orders lacking required info -> Pending
+ * - Existing orders in prepare_dispatch, dispatched, or tracking are PRESERVED and never reset to Active
+ * - Couriers, AWBs, and tracking data are safely preserved
+ */
+export const syncSalesUploadToLogistics = async (
+  consolidatedOrders: any[]
+): Promise<SalesLogisticsSyncResult> => {
+  if (!consolidatedOrders || consolidatedOrders.length === 0) {
+    return {
+      insertedCount: 0,
+      updatedCount: 0,
+      activeCount: 0,
+      fulfilledCount: 0,
+      pendingCount: 0,
+      preservedWorkflowCount: 0
+    };
+  }
+
+  const existingRecords = await db.logistics_orders.toArray();
+  const existingMap = new Map<string, LogisticsOrder>();
+  existingRecords.forEach(rec => {
+    const cid = cleanOrderId(rec.orderId);
+    if (cid) existingMap.set(cid.toLowerCase(), rec);
+  });
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let activeCount = 0;
+  let fulfilledCount = 0;
+  let pendingCount = 0;
+  let preservedWorkflowCount = 0;
+
+  await db.transaction('rw', db.logistics_orders, async () => {
+    for (const order of consolidatedOrders) {
+      const cleanId = cleanOrderId(order.order_id);
+      if (!cleanId) continue;
+      const lowerId = cleanId.toLowerCase();
+      const existing = existingMap.get(lowerId);
+
+      const fStatus = (order.fulfillment_status || '').toLowerCase().trim();
+      const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
+      const cleanPhone = normalizePhoneNumber(order.phone);
+
+      const hasRequiredInfo = !!(
+        order.customer_name &&
+        order.customer_name.trim().length > 0 &&
+        order.customer_name !== '-' &&
+        order.customer_name !== 'Customer' &&
+        cleanPhone.length >= 10 &&
+        (order.pincode || order.city || order.address)
+      );
+
+      const parsedOrderDate = parseAndFormatLogisticsDate(order.order_date || order.original_order_date);
+      const orderDate = parsedOrderDate.isoDate || order.order_date || new Date().toISOString().slice(0, 10);
+      const orderDateDisplay = parsedOrderDate.displayDate || orderDate;
+      const fulfilledDate = order.fulfilled_date || (isFulfilled ? orderDateDisplay : undefined);
+
+      if (!existing) {
+        // CASE 1: Brand new order from Sales
+        let stage: 'active' | 'fulfilled' | 'pending' = 'active';
+        let status = 'Unfulfilled';
+
+        if (isFulfilled) {
+          stage = 'fulfilled';
+          status = 'Fulfilled';
+          fulfilledCount++;
+        } else if (!hasRequiredInfo) {
+          stage = 'pending';
+          status = 'Pending';
+          pendingCount++;
+        } else {
+          stage = 'active';
+          status = 'Unfulfilled';
+          activeCount++;
+        }
+
+        const newRec: Partial<LogisticsOrder> = {
+          orderId: cleanId,
+          customerName: order.customer_name && order.customer_name !== '-' ? order.customer_name : 'Customer',
+          phoneNumber: cleanPhone || order.phone || '',
+          address: order.address && order.address !== '-' ? order.address : '',
+          city: order.city && order.city !== '-' ? order.city : '',
+          state: order.state && order.state !== '-' ? normalizeState(order.state) : '',
+          pincode: order.pincode && order.pincode !== '-' ? order.pincode : '',
+          products: order.order_formatted || order.product_name || 'Standard Products',
+          amount: String(order.price || '0'),
+          orderType: order.payment_mode || 'Prepaid',
+          awbNumber: order.awb_number || undefined,
+          courier: order.courier ? normalizeCourier(order.courier) : undefined,
+          stage,
+          status,
+          uploadedAt: new Date().toISOString(),
+          orderDate,
+          orderDateDisplay,
+          fulfilledDate,
+          fulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
+          sourceFulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
+          financialStatus: order.financial_status
+        };
+
+        const addedId = await db.logistics_orders.add(newRec as LogisticsOrder);
+        existingMap.set(lowerId, { ...newRec, id: addedId } as LogisticsOrder);
+        insertedCount++;
+      } else {
+        // CASE 2: Re-import / existing order in Logistics
+        const patch: Partial<LogisticsOrder> = {};
+        const inWorkflow = existing.stage === 'prepare_dispatch' || 
+                           existing.stage === 'dispatched' || 
+                           existing.stage === 'tracking';
+
+        if (inWorkflow) {
+          // STRICT RULE: Preserve dispatch preparation and tracking stages!
+          // NEVER reset an order to active if it has already entered dispatch or tracking!
+          preservedWorkflowCount++;
+        } else if (existing.stage === 'fulfilled') {
+          // Already in Fulfilled: preserve fulfilled stage
+          patch.stage = 'fulfilled';
+          patch.status = 'Fulfilled';
+        } else if (isFulfilled) {
+          // Authoritative status updated to fulfilled -> move from active/pending to Fulfilled!
+          patch.stage = 'fulfilled';
+          patch.status = 'Fulfilled';
+          patch.fulfillmentStatus = 'fulfilled';
+          patch.sourceFulfillmentStatus = 'fulfilled';
+          if (!existing.fulfilledDate) patch.fulfilledDate = fulfilledDate;
+          fulfilledCount++;
+        } else if (existing.stage === 'pending' && hasRequiredInfo) {
+          // Completed missing info -> promote to Active
+          patch.stage = 'active';
+          patch.status = 'Unfulfilled';
+          activeCount++;
+        }
+
+        // Safe field updates: never overwrite valid existing values with blanks/empty
+        if (order.customer_name && order.customer_name !== '-' && order.customer_name !== 'Customer') {
+          patch.customerName = order.customer_name;
+        }
+        if (cleanPhone && cleanPhone.length >= 10) {
+          patch.phoneNumber = cleanPhone;
+        }
+        if (order.address && order.address !== '-') {
+          patch.address = order.address;
+        }
+        if (order.city && order.city !== '-') {
+          patch.city = order.city;
+        }
+        if (order.state && order.state !== '-') {
+          patch.state = normalizeState(order.state);
+        }
+        if (order.pincode && order.pincode !== '-') {
+          patch.pincode = order.pincode;
+        }
+        if (order.order_formatted || order.product_name) {
+          patch.products = order.order_formatted || order.product_name;
+        }
+        if (order.price && Number(order.price) > 0) {
+          patch.amount = String(order.price);
+        }
+        if (order.payment_mode) {
+          patch.orderType = order.payment_mode;
+        }
+        if (order.financial_status) {
+          patch.financialStatus = order.financial_status;
+        }
+
+        // Preserve courier/AWB if already set in Logistics; only attach incoming AWB if existing had none
+        if (!existing.awbNumber && order.awb_number) {
+          patch.awbNumber = order.awb_number;
+          if (order.courier) patch.courier = normalizeCourier(order.courier);
+        }
+
+        if (Object.keys(patch).length > 0 && existing.id) {
+          await db.logistics_orders.update(existing.id, patch);
+          updatedCount++;
+        }
+      }
+    }
+  });
+
+  // Dispatch custom window event so any mounted Logistics views re-check or update
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('velmora:sales_orders_synced', {
+      detail: { insertedCount, updatedCount, activeCount, fulfilledCount, preservedWorkflowCount, timestamp: Date.now() }
+    }));
+  }
+
+  return {
+    insertedCount,
+    updatedCount,
+    activeCount,
+    fulfilledCount,
+    pendingCount,
+    preservedWorkflowCount
+  };
+};
+
+/**
+ * Automatically synchronizes all canonical website orders from Supabase sales_orders
+ * into the local Dexie db.logistics_orders table.
+ * Guarantees that any order imported in Sales is reflected in Logistics, even after
+ * browser refresh, sign-in, or multi-device access.
+ */
+export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncResult> => {
+  try {
+    let allSalesOrders: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('sales_orders')
+        .select('id, order_id, order_date, customer_name, phone, state, city, pincode, order_total, payment_mode, order_status, dispatch_status, dispatch_date, extra_data')
+        .eq('channel', 'WEBSITE')
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      if (error || !data || data.length === 0) break;
+      allSalesOrders = allSalesOrders.concat(data);
+      if (data.length < pageSize) hasMore = false;
+      else page++;
+    }
+
+    if (allSalesOrders.length === 0) {
+      return {
+        insertedCount: 0,
+        updatedCount: 0,
+        activeCount: 0,
+        fulfilledCount: 0,
+        pendingCount: 0,
+        preservedWorkflowCount: 0
+      };
+    }
+
+    const transformed = allSalesOrders.map(so => {
+      const extra = so.extra_data || {};
+      const fStatus = extra.fulfillment_status || (so.order_status === 'FULFILLED' || so.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled');
+      return {
+        order_id: so.order_id,
+        customer_name: so.customer_name,
+        phone: so.phone,
+        address: extra.address || '',
+        city: so.city,
+        state: so.state,
+        pincode: so.pincode,
+        order_formatted: extra.order_formatted,
+        product_name: extra.product_name,
+        price: Number(so.order_total) || 0,
+        payment_mode: so.payment_mode,
+        order_date: so.order_date,
+        fulfillment_status: fStatus,
+        financial_status: extra.financial_status,
+        awb_number: extra.awb_number,
+        courier: extra.courier,
+        fulfilled_date: extra.fulfilled_date
+      };
+    });
+
+    return await syncSalesUploadToLogistics(transformed);
+  } catch (err) {
+    console.warn('syncSalesOrdersFromSupabase warning:', err);
+    return {
+      insertedCount: 0,
+      updatedCount: 0,
+      activeCount: 0,
+      fulfilledCount: 0,
+      pendingCount: 0,
+      preservedWorkflowCount: 0
+    };
+  }
+};
+
+/**
+ * Fetches Shopify website orders from Supabase (read-only query)
  */
 export const fetchShopifyOrders = async (limit = 150): Promise<UnifiedLogisticsOrder[]> => {
   try {

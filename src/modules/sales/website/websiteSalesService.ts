@@ -5,8 +5,10 @@ import type {
   WebsiteConsolidatedOrder, 
   WebsiteOrderItem,
   WebsiteSalesFilterState,
-  PriceInterpretationMode
+  PriceInterpretationMode,
+  ColumnMapping
 } from './types';
+import { syncSalesUploadToLogistics } from '../../../services/unifiedLogisticsService';
 import { 
   parseFileToRawRows, 
   detectColumnMapping, 
@@ -89,7 +91,8 @@ export class WebsiteSalesService {
   async processAndUploadFile(
     file: File,
     uploadedBy: string = 'Current User',
-    priceMode: PriceInterpretationMode = 'Order Total'
+    priceMode: PriceInterpretationMode = 'Order Total',
+    customMapping?: ColumnMapping
   ): Promise<{ 
     batch: WebsiteUploadBatch; 
     consolidatedOrders: WebsiteConsolidatedOrder[];
@@ -99,10 +102,14 @@ export class WebsiteSalesService {
       newOrdersCount: number;
       updatedOrdersCount: number;
       itemsCount: number;
+      logisticsActiveCount: number;
+      logisticsFulfilledCount: number;
+      logisticsPendingCount: number;
+      logisticsPreservedCount: number;
     };
   }> {
     const { headers, rows: rawJsonRows } = await parseFileToRawRows(file);
-    const mapping = detectColumnMapping(headers);
+    const mapping = customMapping || detectColumnMapping(headers);
 
     const batchId = crypto.randomUUID();
     const {
@@ -139,6 +146,9 @@ export class WebsiteSalesService {
     // Save transactional records into public.sales_uploads, public.sales_raw_data, public.sales_orders, public.sales_order_items
     const metrics = await this.saveUploadRecords(batch, rawRowsProcessed, consolidatedOrders);
 
+    // Automatically synchronize orders into Logistics Department (Dexie)
+    const logisticsSync = await syncSalesUploadToLogistics(consolidatedOrders);
+
     batch.status = 'COMPLETED';
     return { 
       batch, 
@@ -148,7 +158,11 @@ export class WebsiteSalesService {
         totalUniqueOrders: consolidatedOrders.length,
         newOrdersCount: metrics.newOrdersCount,
         updatedOrdersCount: metrics.updatedOrdersCount,
-        itemsCount: metrics.itemsCount
+        itemsCount: metrics.itemsCount,
+        logisticsActiveCount: logisticsSync.activeCount,
+        logisticsFulfilledCount: logisticsSync.fulfilledCount,
+        logisticsPendingCount: logisticsSync.pendingCount,
+        logisticsPreservedCount: logisticsSync.preservedWorkflowCount
       }
     };
   }
@@ -251,6 +265,9 @@ export class WebsiteSalesService {
 
           orderIdToUuid.set(o.order_id, orderUuid);
 
+          const fStatus = (o.fulfillment_status || '').toLowerCase().trim();
+          const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
+
           return {
             id: orderUuid,
             upload_id: uploadId,
@@ -270,9 +287,9 @@ export class WebsiteSalesService {
             source_payment_method: o.source_payment_method || o.source_payment_mode || 'Unknown',
             advance_paid: Number(o.advance_paid) || 0,
             remaining_cod: o.payment_mode === 'PREPAID' ? 0 : Number(o.remaining_payable ?? o.price),
-            order_status: 'CONFIRMED',
-            dispatch_status: 'DISPATCHED',
-            dispatch_date: o.order_date || getTodayInBusinessTimezone(),
+            order_status: isFulfilled ? 'FULFILLED' : 'CONFIRMED',
+            dispatch_status: isFulfilled ? 'DELIVERED' : 'UNFULFILLED',
+            dispatch_date: isFulfilled ? (o.order_date || getTodayInBusinessTimezone()) : null,
             extra_data: {
               address: o.address || '',
               order_formatted: o.order_formatted || '',
@@ -280,7 +297,12 @@ export class WebsiteSalesService {
               original_order_date: o.original_order_date || '',
               payment_classification_reason: o.payment_classification_reason || '',
               data_conflict: o.data_conflict || false,
-              conflict_details: o.conflict_details || ''
+              conflict_details: o.conflict_details || '',
+              fulfillment_status: o.fulfillment_status || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
+              financial_status: o.financial_status || '',
+              awb_number: o.awb_number || '',
+              courier: o.courier || '',
+              fulfilled_date: o.fulfilled_date || (isFulfilled ? o.order_date : '')
             }
           };
         });
