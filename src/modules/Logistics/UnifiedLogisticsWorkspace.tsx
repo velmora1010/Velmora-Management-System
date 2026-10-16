@@ -16,7 +16,8 @@ import {
   Download,
   SlidersHorizontal,
   Clock,
-  BarChart3
+  BarChart3,
+  PackageCheck
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -43,6 +44,7 @@ import { CourierTrackingImportModal } from './components/CourierTrackingImportMo
 import { PrepareDispatchGroupedView } from './components/PrepareDispatchGroupedView';
 import { DispatchOrderModal } from './components/DispatchOrderModal';
 import { MoveToPrepareSidePanel } from './components/MoveToPrepareSidePanel';
+import { LogisticsReconciliationModal } from './components/LogisticsReconciliationModal';
 import { TrackingModal } from './TrackingModal';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
@@ -102,6 +104,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Modals & Panels
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isReconcileModalOpen, setIsReconcileModalOpen] = useState(false);
   const [isCourierTrackingModalOpen, setIsCourierTrackingModalOpen] = useState(false);
   const [orderToDispatch, setOrderToDispatch] = useState<UnifiedLogisticsOrder | null>(null);
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
@@ -143,6 +146,13 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     if (currentStage === 'analytics') {
       return unifiedOrders;
     }
+    if (currentStage === 'fulfilled') {
+      return unifiedOrders.filter(o => 
+        o.workflowStage === 'fulfilled' || 
+        o.sourceFulfillmentStatus === 'fulfilled' || 
+        o.stage === 'fulfilled'
+      );
+    }
     if (currentStage === 'dispatched' || currentStage === 'tracking') {
       return unifiedOrders.filter(o => isDispatchedOrder(o));
     }
@@ -156,9 +166,17 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       if (selectedStatusTab === 'Pending') {
         return unifiedOrders.filter(o => o.workflowStage === 'pending');
       }
-      return unifiedOrders.filter(o => o.workflowStage === 'active');
+      return unifiedOrders.filter(o => 
+        o.workflowStage === 'active' && 
+        o.stage !== 'fulfilled' && 
+        o.sourceFulfillmentStatus !== 'fulfilled'
+      );
     }
-    return unifiedOrders.filter(o => o.workflowStage === 'active');
+    return unifiedOrders.filter(o => 
+      o.workflowStage === 'active' && 
+      o.stage !== 'fulfilled' && 
+      o.sourceFulfillmentStatus !== 'fulfilled'
+    );
   }, [unifiedOrders, currentStage, selectedStatusTab]);
 
   // Sanitize legacy serial dates, normalize states, and enrich missing details on mount
@@ -268,7 +286,11 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const activeFilterCounts = useMemo(() => {
     let prepaid = 0;
     let cod = 0;
-    const activeList = unifiedOrders.filter(o => o.workflowStage === 'active');
+    const activeList = unifiedOrders.filter(o => 
+      o.workflowStage === 'active' && 
+      o.stage !== 'fulfilled' && 
+      o.sourceFulfillmentStatus !== 'fulfilled'
+    );
     activeList.forEach(s => {
       const type = (s.orderType || '').toLowerCase();
       if (type.includes('cod')) {
@@ -284,6 +306,30 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       Pending: counts.pending
     };
   }, [unifiedOrders, counts.pending]);
+
+  // Filter counts for Fulfilled orders
+  const fulfilledFilterCounts = useMemo(() => {
+    let prepaid = 0;
+    let cod = 0;
+    const fulfilledList = unifiedOrders.filter(o => 
+      o.workflowStage === 'fulfilled' || 
+      o.sourceFulfillmentStatus === 'fulfilled' || 
+      o.stage === 'fulfilled'
+    );
+    fulfilledList.forEach(s => {
+      const type = (s.orderType || '').toLowerCase();
+      if (type.includes('cod')) {
+        cod++;
+      } else {
+        prepaid++;
+      }
+    });
+    return {
+      All: fulfilledList.length,
+      Prepaid: prepaid,
+      COD: cod
+    };
+  }, [unifiedOrders]);
 
   // Secondary Status Pill Counts for Tracking
   const statusTabCounts = useMemo(() => {
@@ -365,7 +411,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     }
 
     // 4. Stage-Specific Contextual Filter Tabs (Row 3)
-    if (currentStage === 'active') {
+    if (currentStage === 'active' || currentStage === 'fulfilled') {
       if (selectedStatusTab === 'Prepaid') {
         result = result.filter(order => !(order.orderType || '').toLowerCase().includes('cod'));
       } else if (selectedStatusTab === 'COD') {
@@ -470,8 +516,9 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       'Products': o.products || o.productSummary || '',
       'Quantity': o.totalQuantity || 1,
       'Total Amount': o.amount ?? o.totalAmount ?? 0,
-      'Payment Method': o.orderType,
-      'Status': o.workflowStage === 'active' ? 'Unfulfilled' : o.status,
+      'Payment Method': o.orderType || (o.paymentMode || 'Prepaid'),
+      'Status': o.workflowStage === 'active' ? 'Unfulfilled' : (o.workflowStage === 'fulfilled' ? 'Fulfilled' : o.status),
+      'Fulfilled Date': o.fulfilledDate || '',
       'Courier': o.courier || 'Unassigned',
       'AWB Number': o.awbNumber || 'Unassigned',
       'Dispatched Date': o.dispatchDate || '',
@@ -616,6 +663,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         isRefreshing={isRefreshing}
         onOpenImportModal={() => setIsImportModalOpen(true)}
         onOpenDateCalendar={() => setIsDateCalendarOpen(true)}
+        onOpenReconcileModal={() => setIsReconcileModalOpen(true)}
         activeDateRangeText={
           logisticsFilters.datePreset !== 'all' && logisticsFilters.datePreset !== 'custom'
             ? (logisticsFilters.datePreset === '7d' ? 'Last 7 Days' : logisticsFilters.datePreset === '30d' ? 'Last 30 Days' : logisticsFilters.datePreset === 'this_month' ? 'This Month' : logisticsFilters.datePreset === 'prev_month' ? 'Prev Month' : logisticsFilters.datePreset === 'today' ? 'Today' : logisticsFilters.datePreset === 'yesterday' ? 'Yesterday' : logisticsFilters.datePreset === 'this_week' ? 'This Week' : 'This Year')
@@ -651,6 +699,42 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                     {pill.id === 'Pending' && <Clock size={13} className={isActive ? 'text-white' : 'text-amber-400'} />}
                     <span>{pill.label}</span>
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-black ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : currentStage === 'fulfilled' ? (
+            <div className="flex items-center gap-1.5 shrink-0 select-none">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#0b1220] border border-emerald-800/40 text-xs text-slate-300 shrink-0 mr-1">
+                <PackageCheck size={14} className="text-emerald-400" />
+                <span className="font-semibold text-slate-200">Fulfilled Orders</span>
+                <span className="text-slate-600">•</span>
+                <span className="font-mono text-emerald-300 font-bold">{filteredOrders.length}</span>
+              </div>
+              {[
+                { id: 'All', label: 'All Fulfilled' },
+                { id: 'Prepaid', label: 'Prepaid' },
+                { id: 'COD', label: 'COD' }
+              ].map(pill => {
+                const count = fulfilledFilterCounts[pill.id as keyof typeof fulfilledFilterCounts] || 0;
+                const isActive = selectedStatusTab === pill.id;
+                return (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    onClick={() => setSelectedStatusTab(pill.id)}
+                    className={`h-9 px-3 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border ${
+                      isActive
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30'
+                        : 'bg-[#0b1220] border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
+                    }`}
+                  >
+                    <span>{pill.label}</span>
+                    <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
                       isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
                     }`}>
                       {count}
@@ -854,6 +938,27 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                   </button>
                 </div>
               )}
+            </>
+          ) : currentStage === 'fulfilled' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => toast('All columns visible', { icon: '📊' })}
+                className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Manage Columns"
+              >
+                <SlidersHorizontal size={13} className="text-slate-400" />
+                <span>Columns</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportOrders}
+                className="h-9 px-3 rounded-xl text-xs font-medium bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Export Fulfilled to Excel"
+              >
+                <Download size={13} className="text-slate-400" />
+                <span>Export</span>
+              </button>
             </>
           ) : currentStage === 'prepare_dispatch' ? (
             <button
@@ -1169,6 +1274,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                   ? 'No Orders or Shipments in Logistics' 
                   : currentStage === 'active'
                   ? 'No Unfulfilled Orders in Active'
+                  : currentStage === 'fulfilled'
+                  ? 'No Fulfilled Orders Found'
                   : currentStage === 'dispatched'
                   ? 'No Dispatched Orders Found'
                   : currentStage === 'tracking'
@@ -1180,13 +1287,15 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                   ? 'Click Upload Orders above to import customer orders from Shopify or Excel/CSV spreadsheets.' 
                   : currentStage === 'active'
                   ? 'All active orders have been moved to dispatch preparation or dispatched. Import new files or check other tabs.'
+                  : currentStage === 'fulfilled'
+                  ? 'Fulfilled orders imported from Shopify or marked fulfilled will appear here.'
                   : currentStage === 'dispatched'
                   ? 'Orders will appear here once dispatched from Prepare Dispatch with courier and AWB details.'
                   : currentStage === 'tracking'
                   ? 'Shipments will appear here once dispatched from Prepare Dispatch, or upload courier tracking reports.'
                   : 'Try adjusting your search query, status filters, or courier tabs above.'}
               </p>
-              {currentStage === 'active' || unifiedOrders.length === 0 ? (
+              {currentStage === 'active' || currentStage === 'fulfilled' || unifiedOrders.length === 0 ? (
                 <button
                   type="button"
                   onClick={() => setIsImportModalOpen(true)}
@@ -1328,6 +1437,12 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           }}
         />
       )}
+
+      {/* Logistics & Sales Data Reconciliation Diagnostics Modal */}
+      <LogisticsReconciliationModal
+        isOpen={isReconcileModalOpen}
+        onClose={() => setIsReconcileModalOpen(false)}
+      />
 
     </div>
   );

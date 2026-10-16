@@ -236,6 +236,7 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
 
   const isDispatchedView = stage === 'dispatched';
   const isTrackingView = stage === 'tracking';
+  const isFulfilledView = stage === 'fulfilled';
 
   return (
     <div className="flex flex-col bg-[#0b1220] border border-slate-800/90 rounded-2xl overflow-hidden shadow-xl w-full max-w-full min-w-0">
@@ -247,8 +248,8 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
           {/* THEAD */}
           <thead className="bg-[#0e1626] text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10 select-none">
             <tr>
-              {/* Checkbox (Only when isSelectable is true) */}
-              {isSelectable && (
+              {/* Checkbox (Only when isSelectable is true and not fulfilled) */}
+              {isSelectable && !isFulfilledView && (
                 <th className="px-3.5 py-3.5 bg-[#0e1626] w-10 text-center">
                   <button
                     type="button"
@@ -388,6 +389,79 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
 
                   <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300 whitespace-nowrap">
                     <span>LAST SYNCED</span>
+                  </th>
+                </>
+              ) : isFulfilledView ? (
+                /* FULFILLED VIEW HEADERS */
+                <>
+                  <th 
+                    className="px-3.5 py-3.5 bg-[#0e1626] cursor-pointer group"
+                    onClick={() => handleSort('date')}
+                  >
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
+                      <span>ORDER DATE</span>
+                      {renderSortArrow('date')}
+                    </div>
+                  </th>
+
+                  <th 
+                    className="px-3.5 py-3.5 bg-[#0e1626] cursor-pointer group"
+                    onClick={() => handleSort('customer')}
+                  >
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
+                      <span>CUSTOMER</span>
+                      {renderSortArrow('customer')}
+                    </div>
+                  </th>
+
+                  <th 
+                    className="px-3.5 py-3.5 bg-[#0e1626] cursor-pointer group"
+                    onClick={() => handleSort('phone')}
+                  >
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
+                      <span>PHONE</span>
+                      {renderSortArrow('phone')}
+                    </div>
+                  </th>
+
+                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300">
+                    <span>LOCATION</span>
+                  </th>
+
+                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300">
+                    <span>PRODUCTS (QTY)</span>
+                  </th>
+
+                  <th 
+                    className="px-3.5 py-3.5 bg-[#0e1626] cursor-pointer group"
+                    onClick={() => handleSort('amount')}
+                  >
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
+                      <span>AMOUNT</span>
+                      {renderSortArrow('amount')}
+                    </div>
+                  </th>
+
+                  <th 
+                    className="px-3.5 py-3.5 bg-[#0e1626] cursor-pointer group"
+                    onClick={() => handleSort('payment')}
+                  >
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
+                      <span>PAYMENT</span>
+                      {renderSortArrow('payment')}
+                    </div>
+                  </th>
+
+                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300 whitespace-nowrap">
+                    <span>FULFILMENT STATUS</span>
+                  </th>
+
+                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300 whitespace-nowrap">
+                    <span>FULFILLED DATE</span>
+                  </th>
+
+                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300 whitespace-nowrap">
+                    <span>SHIPMENT / COURIER</span>
                   </th>
                 </>
               ) : (
@@ -702,6 +776,119 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                         )}
                       </td>
                     </>
+                  ) : isFulfilledView ? (
+                    /* FULFILLED VIEW ROW COLUMNS */
+                    <>
+                      {/* 2. ORDER DATE */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <span className="text-slate-200 font-medium text-xs">
+                            {dateInfo.displayDate || '14 Oct 2026'}
+                          </span>
+                          <span className="text-[11px] text-slate-400 font-mono mt-0.5">
+                            {dateInfo.timeStr || '10:00 AM'}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* 3. CUSTOMER */}
+                      <td className="px-3.5 py-3.5">
+                        <div className="flex flex-col max-w-[170px]">
+                          <span 
+                            onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
+                            className="font-semibold text-slate-200 hover:text-purple-300 transition-colors cursor-pointer truncate"
+                            title={order.customerName}
+                          >
+                            {order.customerName}
+                          </span>
+                          <span 
+                            className="text-[11px] text-slate-400 truncate mt-0.5" 
+                            title={resolveCustomerLocationDisplay(order.state || order.shippingState, order.city || order.shippingCity, order.pincode)}
+                          >
+                            {resolveCustomerLocationDisplay(order.state || order.shippingState, order.city || order.shippingCity, order.pincode)}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* 4. PHONE */}
+                      <td className="px-3.5 py-3.5 font-mono text-slate-300 text-xs whitespace-nowrap">
+                        {order.phoneNumber || order.phone || order.rawPhoneNumber || '—'}
+                      </td>
+
+                      {/* 5. LOCATION */}
+                      <td className="px-3.5 py-3.5 text-slate-300 text-xs whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-slate-200">
+                            {order.shippingState || order.state || '—'}
+                          </span>
+                          {(order.shippingCity || order.city) && (
+                            <span className="text-[11px] text-slate-400">
+                              {order.shippingCity || order.city}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 6. PRODUCTS (QTY) */}
+                      <td className="px-3.5 py-3.5 text-slate-300 max-w-[240px]">
+                        <span className="truncate block font-medium text-xs" title={order.products || order.productSummary}>
+                          {order.products || order.productSummary || '—'}
+                        </span>
+                      </td>
+
+                      {/* 7. AMOUNT */}
+                      <td className="px-3.5 py-3.5 font-mono font-bold text-slate-100 whitespace-nowrap text-xs">
+                        {formatOrderAmountDisplay(order.amount ?? order.totalAmount)}
+                      </td>
+
+                      {/* 8. PAYMENT */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                          isCod 
+                            ? 'bg-amber-950/60 text-amber-300 border border-amber-700/60' 
+                            : 'bg-blue-950/60 text-blue-300 border border-blue-700/60'
+                        }`}>
+                          {isCod ? 'COD' : 'Prepaid'}
+                        </span>
+                      </td>
+
+                      {/* 9. FULFILMENT STATUS */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                          <span>Fulfilled</span>
+                        </span>
+                      </td>
+
+                      {/* 10. FULFILLED DATE */}
+                      <td className="px-3.5 py-3.5 font-medium text-slate-200 whitespace-nowrap text-[11px]">
+                        {order.fulfilledDate ? (
+                          <span className="text-slate-200 font-mono">
+                            {parseAndFormatLogisticsDate(order.fulfilledDate).displayDate || order.fulfilledDate}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 italic text-[11px]">—</span>
+                        )}
+                      </td>
+
+                      {/* 11. SHIPMENT / COURIER */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap text-xs">
+                        {order.awbNumber || order.courier ? (
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-slate-200">
+                              {order.courier || 'Standard Courier'}
+                            </span>
+                            {order.awbNumber && (
+                              <span className="text-[11px] font-mono text-cyan-400">
+                                AWB: {order.awbNumber}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500 italic text-[11px]">Direct / External</span>
+                        )}
+                      </td>
+                    </>
                   ) : (
                     /* ACTIVE VIEW ROW COLUMNS (Matching Image 1) */
                     <>
@@ -790,8 +977,8 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                       </button>
 
 
-                      {/* Official Courier Tracking Page Link if tracking */}
-                      {isTrackingView && order.awbNumber && getCourierTrackingUrl(order.courier, order.awbNumber) && (
+                      {/* Official Courier Tracking Page Link if tracking or fulfilled with AWB */}
+                      {(isTrackingView || isFulfilledView) && order.awbNumber && getCourierTrackingUrl(order.courier, order.awbNumber) && (
                         <a
                           href={getCourierTrackingUrl(order.courier, order.awbNumber)!}
                           target="_blank"

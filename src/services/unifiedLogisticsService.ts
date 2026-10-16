@@ -84,7 +84,16 @@ export const mapToUnifiedWorkflowStage = (
     };
   }
 
-  // 1. Explicit stage overrides saved on the record
+  // 1. Fulfilled orders (source fulfillment status = 'fulfilled' or stage = 'fulfilled')
+  if (currentStage === 'fulfilled' || fStatus === 'fulfilled') {
+    const trackingStatus = hasAwb ? resolveTrackingStatus(s, hasAwb) : 'Delivered';
+    return {
+      status: trackingStatus || 'Delivered',
+      workflowStage: 'fulfilled'
+    };
+  }
+
+  // 2. Explicit stage overrides saved on the record
   if (currentStage === 'prepare_dispatch') {
     return {
       status: 'Pending',
@@ -100,8 +109,8 @@ export const mapToUnifiedWorkflowStage = (
     };
   }
 
-  // 2. Stage 'tracking' or already fulfilled from Shopify
-  if (currentStage === 'tracking' || fStatus === 'fulfilled' || fStatus === 'shipped') {
+  // 3. Stage 'tracking'
+  if (currentStage === 'tracking') {
     const trackingStatus = resolveTrackingStatus(s, hasAwb);
     return {
       status: trackingStatus || 'Awaiting Tracking Update',
@@ -109,7 +118,7 @@ export const mapToUnifiedWorkflowStage = (
     };
   }
 
-  // 3. Status string analysis for dispatched / tracking states
+  // 4. Status string analysis for dispatched / tracking states
   if (
     s.includes('delivered') ||
     s.includes('in transit') ||
@@ -133,8 +142,8 @@ export const mapToUnifiedWorkflowStage = (
     };
   }
 
-  // If order has an AWB number, it is already assigned to a shipment/tracking
-  if (hasAwb) {
+  // If order has an AWB number, keep courier tracking attached
+  if (hasAwb && (currentStage === 'dispatched' || currentStage === 'tracking')) {
     return {
       status: resolveTrackingStatus(s, true),
       workflowStage: 'tracking'
@@ -287,6 +296,9 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     batchId: order.batchId,
     batchName: order.batchName,
     fulfillmentStatus: order.fulfillmentStatus,
+    sourceFulfillmentStatus: order.fulfillmentStatus || order.sourceFulfillmentStatus,
+    fulfilledDate: order.fulfilledDate || (order.fulfillmentStatus === 'fulfilled' ? (parsedDispatchDate.displayDate || parsedOrderDate.displayDate) : undefined),
+    isSourceFulfilled: (order.fulfillmentStatus || '').toLowerCase() === 'fulfilled' || order.stage === 'fulfilled',
     financialStatus: order.financialStatus,
     stage: order.stage || 'order_data',
     workflowStage,
@@ -431,6 +443,7 @@ export const calculateWorkflowCounts = (
   customers: UnifiedCustomer[]
 ): WorkflowStageCounts => {
   let active = 0;
+  let fulfilled = 0;
   let pending = 0;
   let prepareDispatch = 0;
   let dispatched = 0;
@@ -439,7 +452,9 @@ export const calculateWorkflowCounts = (
   for (const o of orders) {
     if (o.stage === 'trash') continue;
 
-    if (o.workflowStage === 'active') {
+    if (o.workflowStage === 'fulfilled' || o.sourceFulfillmentStatus === 'fulfilled' || o.stage === 'fulfilled') {
+      fulfilled++;
+    } else if (o.workflowStage === 'active') {
       active++;
     } else if (o.workflowStage === 'pending') {
       pending++;
@@ -456,6 +471,7 @@ export const calculateWorkflowCounts = (
 
   return {
     active,
+    fulfilled,
     pending,
     prepareDispatch,
     dispatched,

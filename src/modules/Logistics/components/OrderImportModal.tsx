@@ -39,7 +39,7 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [validationResult, setValidationResult] = useState<ImportValidationResult | null>(null);
 
-  const [previewTab, setPreviewTab] = useState<'all' | 'new' | 'update' | 'unchanged' | 'conflicts'>('all');
+  const [previewTab, setPreviewTab] = useState<'all' | 'active' | 'fulfilled' | 'new' | 'update' | 'unchanged' | 'conflicts'>('all');
   const [importSummary, setImportSummary] = useState<any | null>(null);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,7 +82,7 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
       const res = await commitCustomerOrdersImport(validationResult.orders, validationResult);
       setImportSummary(res);
       toast.success(
-        `Import complete: ${res.inserted} inserted, ${res.updated} updated, ${res.unchanged} unchanged.`
+        `Import complete: ${res.insertedActive} Active, ${res.insertedFulfilled} Fulfilled, ${res.updated} updated, synced with Sales.`
       );
       onImportSuccess();
     } catch (err: any) {
@@ -114,7 +114,7 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-400">
-                Upsert-aware: Safely updates existing orders without duplicates or stage resets
+                Separates Unfulfilled & Fulfilled orders • Synchronizes with Sales Department
               </p>
             </div>
           </div>
@@ -140,16 +140,22 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
                 </div>
                 <h3 className="text-base font-bold text-white mb-1">Import Completed Successfully</h3>
                 <p className="text-xs text-slate-400">
-                  Customer records in Logistics have been safely updated and synchronized.
+                  Customer records in Logistics have been classified and synchronized with Sales.
                 </p>
               </div>
 
               {/* Results Breakdown Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
                 <div className="bg-purple-950/30 border border-purple-800/50 rounded-2xl p-3 flex flex-col text-center">
-                  <span className="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Inserted</span>
-                  <span className="text-xl font-bold text-white font-mono mt-1">{importSummary.inserted}</span>
-                  <span className="text-[10px] text-purple-400/80">New orders</span>
+                  <span className="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Active</span>
+                  <span className="text-xl font-bold text-white font-mono mt-1">{importSummary.insertedActive}</span>
+                  <span className="text-[10px] text-purple-400/80">Unfulfilled queue</span>
+                </div>
+
+                <div className="bg-emerald-950/30 border border-emerald-800/50 rounded-2xl p-3 flex flex-col text-center">
+                  <span className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider">Fulfilled</span>
+                  <span className="text-xl font-bold text-emerald-300 font-mono mt-1">{importSummary.insertedFulfilled}</span>
+                  <span className="text-[10px] text-emerald-400/80">Fulfilled section</span>
                 </div>
 
                 <div className="bg-blue-950/30 border border-blue-800/50 rounded-2xl p-3 flex flex-col text-center">
@@ -169,12 +175,6 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
                   <span className="text-xl font-bold text-amber-300 font-mono mt-1">{importSummary.skipped}</span>
                   <span className="text-[10px] text-amber-400/80">Cancelled/Invalid</span>
                 </div>
-
-                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-3 flex flex-col text-center">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Failed</span>
-                  <span className="text-xl font-bold text-emerald-400 font-mono mt-1">{importSummary.failed}</span>
-                  <span className="text-[10px] text-slate-500">Errors encountered</span>
-                </div>
               </div>
 
               {/* Detailed Breakdown */}
@@ -183,7 +183,11 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-400">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-purple-400" />
-                    <span>Added to Active queue: <strong className="text-white">{importSummary.insertedActive}</strong></span>
+                    <span>Added to Active queue (Unfulfilled): <strong className="text-white">{importSummary.insertedActive}</strong></span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span>Routed to Fulfilled section: <strong className="text-white">{importSummary.insertedFulfilled}</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-blue-400" />
@@ -191,7 +195,7 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                    <span>Routed to Tracking: <strong className="text-white">{importSummary.insertedTracking}</strong></span>
+                    <span>Synchronized with Sales: <strong className="text-white">{importSummary.syncedSalesOrders ?? (importSummary.insertedActive + importSummary.insertedFulfilled + importSummary.updated)}</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-amber-400" />
@@ -241,45 +245,61 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
               {validationResult && !isParsing && (
                 <div className="space-y-4">
                   {/* Summary Metric Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                    <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 flex flex-col">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                    <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col">
                       <span className="text-[10px] text-slate-400 font-medium">TOTAL ROWS</span>
                       <span className="text-base font-bold text-white mt-1 font-mono">
                         {validationResult.totalRows}
                       </span>
-                      <span className="text-[10px] text-slate-500">{validationResult.totalUniqueOrders} unique IDs</span>
+                      <span className="text-[9px] text-slate-500">{validationResult.totalUniqueOrders} unique IDs</span>
                     </div>
 
-                    <div className="bg-purple-950/30 border border-purple-800/50 rounded-2xl p-3 flex flex-col">
-                      <span className="text-[10px] text-purple-300 font-medium">NEW ORDERS</span>
+                    <div className="bg-purple-950/30 border border-purple-800/50 rounded-2xl p-2.5 flex flex-col">
+                      <span className="text-[10px] text-purple-300 font-medium">ACTIVE (UNFULFILLED)</span>
                       <span className="text-base font-bold text-purple-300 mt-1 font-mono">
+                        {validationResult.eligibleActiveCount}
+                      </span>
+                      <span className="text-[9px] text-purple-400/70">Awaiting dispatch</span>
+                    </div>
+
+                    <div className="bg-emerald-950/30 border border-emerald-800/50 rounded-2xl p-2.5 flex flex-col">
+                      <span className="text-[10px] text-emerald-300 font-medium">FULFILLED</span>
+                      <span className="text-base font-bold text-emerald-300 mt-1 font-mono">
+                        {validationResult.fulfilledCount}
+                      </span>
+                      <span className="text-[9px] text-emerald-400/70">Source fulfilled</span>
+                    </div>
+
+                    <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-2.5 flex flex-col">
+                      <span className="text-[10px] text-slate-300 font-medium">NEW ORDERS</span>
+                      <span className="text-base font-bold text-white mt-1 font-mono">
                         {validationResult.newOrdersCount}
                       </span>
-                      <span className="text-[10px] text-purple-400/70">Will be inserted</span>
+                      <span className="text-[9px] text-slate-500">Will be created</span>
                     </div>
 
-                    <div className="bg-blue-950/30 border border-blue-800/50 rounded-2xl p-3 flex flex-col">
-                      <span className="text-[10px] text-blue-300 font-medium">EXISTING TO UPDATE</span>
+                    <div className="bg-blue-950/30 border border-blue-800/50 rounded-2xl p-2.5 flex flex-col">
+                      <span className="text-[10px] text-blue-300 font-medium">TO UPDATE</span>
                       <span className="text-base font-bold text-blue-300 mt-1 font-mono">
                         {validationResult.updateOrdersCount}
                       </span>
-                      <span className="text-[10px] text-blue-400/70">Fields enriched</span>
+                      <span className="text-[9px] text-blue-400/70">Fields enriched</span>
                     </div>
 
-                    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 flex flex-col">
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-2.5 flex flex-col">
                       <span className="text-[10px] text-slate-400 font-medium">UNCHANGED</span>
                       <span className="text-base font-bold text-slate-300 mt-1 font-mono">
                         {validationResult.unchangedCount}
                       </span>
-                      <span className="text-[10px] text-slate-500">Already identical</span>
+                      <span className="text-[9px] text-slate-500">Already in sync</span>
                     </div>
 
-                    <div className="bg-amber-950/30 border border-amber-800/50 rounded-2xl p-3 flex flex-col">
-                      <span className="text-[10px] text-amber-300 font-medium">SKIPPED / INVALID</span>
+                    <div className="bg-amber-950/30 border border-amber-800/50 rounded-2xl p-2.5 flex flex-col">
+                      <span className="text-[10px] text-amber-300 font-medium">SKIPPED</span>
                       <span className="text-base font-bold text-amber-300 mt-1 font-mono">
                         {validationResult.cancelledCount + validationResult.invalidCount}
                       </span>
-                      <span className="text-[10px] text-amber-400/70">Cancelled/Empty</span>
+                      <span className="text-[9px] text-amber-400/70">Cancelled/Empty</span>
                     </div>
                   </div>
 
@@ -300,7 +320,7 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
 
                   {/* Preview Tabs */}
                   <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
-                    <div className="px-3 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between text-xs gap-2 overflow-x-auto">
+                    <div className="px-3 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between text-xs gap-2 overflow-x-auto custom-scrollbar">
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
@@ -314,9 +334,29 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
 
                         <button
                           type="button"
+                          onClick={() => setPreviewTab('active')}
+                          className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-colors cursor-pointer ${
+                            previewTab === 'active' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Active ({validationResult.eligibleActiveCount})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setPreviewTab('fulfilled')}
+                          className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-colors cursor-pointer ${
+                            previewTab === 'fulfilled' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Fulfilled ({validationResult.fulfilledCount})
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={() => setPreviewTab('new')}
                           className={`px-2.5 py-1 rounded-lg font-semibold text-[11px] transition-colors cursor-pointer ${
-                            previewTab === 'new' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                            previewTab === 'new' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
                           }`}
                         >
                           New ({validationResult.newOrdersCount})
@@ -394,29 +434,44 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
                           </div>
                         ))
                       ) : (
-                        (previewTab === 'new' 
+                        (previewTab === 'active'
+                          ? validationResult.activeOrders
+                          : previewTab === 'fulfilled'
+                          ? validationResult.fulfilledOrders
+                          : previewTab === 'new' 
                           ? validationResult.newOrders 
                           : previewTab === 'unchanged' 
                           ? validationResult.unchangedOrders 
                           : validationResult.orders
-                        ).slice(0, 15).map(ord => (
+                        ).slice(0, 25).map(ord => (
                           <div key={ord.orderId} className="px-4 py-2.5 flex items-center justify-between text-xs hover:bg-slate-900/40">
                             <div className="flex flex-col max-w-[70%]">
-                              <span className="font-mono font-bold text-slate-200">#{ord.orderId}</span>
-                              <span className="text-[11px] text-slate-400 truncate">
-                                {ord.customerName} • {ord.products}
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold text-slate-200">#{ord.orderId}</span>
+                                {ord.fulfillmentStatus && (
+                                  <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                                    ord.isAlreadyFulfilled
+                                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60'
+                                      : 'bg-purple-950 text-purple-300 border border-purple-800/60'
+                                  }`}>
+                                    {ord.fulfillmentStatus}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-slate-400 truncate mt-0.5">
+                                {ord.customerName} • {ord.city || ord.state || 'India'} • {ord.products}
                               </span>
                             </div>
 
                             <div className="flex items-center gap-2">
                               {ord.isNew ? (
-                                ord.isEligibleActive ? (
+                                ord.isAlreadyFulfilled ? (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/60">
+                                    New → Fulfilled
+                                  </span>
+                                ) : ord.isEligibleActive ? (
                                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800/60">
                                     New → Active
-                                  </span>
-                                ) : ord.isAlreadyFulfilled ? (
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-800/60">
-                                    New → Tracking
                                   </span>
                                 ) : ord.isCancelled ? (
                                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-300 border border-rose-800/60">
@@ -429,7 +484,7 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
                                 )
                               ) : (
                                 <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-900 text-slate-400 border border-slate-800">
-                                  Existing Order
+                                  {ord.isAlreadyFulfilled ? 'Fulfilled Order' : 'Existing Order'}
                                 </span>
                               )}
                             </div>

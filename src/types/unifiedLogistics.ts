@@ -2,6 +2,7 @@ export type OrderSource = 'shopify' | 'upload' | 'dexie';
 
 export type LogisticsViewSection =
   | 'active'
+  | 'fulfilled'
   | 'prepare_dispatch'
   | 'dispatched'
   | 'tracking'
@@ -9,6 +10,7 @@ export type LogisticsViewSection =
 
 export type UnifiedWorkflowStage =
   | 'active'
+  | 'fulfilled'
   | 'pending'
   | 'prepare_dispatch'
   | 'dispatched'
@@ -87,6 +89,9 @@ export interface UnifiedLogisticsOrder {
   batchId?: string;
   batchName?: string;
   fulfillmentStatus?: string;
+  sourceFulfillmentStatus?: string;
+  fulfilledDate?: string;
+  isSourceFulfilled?: boolean;
   financialStatus?: string;
   stage: string;
   workflowStage: UnifiedWorkflowStage;
@@ -128,6 +133,7 @@ export interface UnifiedCustomer {
 
 export interface WorkflowStageCounts {
   active: number;
+  fulfilled: number;
   pending: number;
   prepareDispatch: number;
   dispatched: number;

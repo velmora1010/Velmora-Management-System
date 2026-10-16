@@ -30,7 +30,9 @@ export interface ParsedCustomerOrder {
   courier?: string;
   orderDate?: string;
   orderDateDisplay?: string;
+  fulfilledDate?: string;
   fulfillmentStatus?: string;
+  sourceFulfillmentStatus?: string;
   financialStatus?: string;
   isEligibleActive: boolean;
   isAlreadyFulfilled: boolean;
@@ -40,6 +42,7 @@ export interface ParsedCustomerOrder {
   isNew?: boolean;
   hasConflict?: boolean;
   conflictReason?: string;
+  lineItems?: Array<{ name: string; quantity: number; price?: number }>;
 }
 
 export interface ExistingOrderUpdatePlan {
@@ -61,8 +64,9 @@ export interface ImportValidationResult {
   // Counts
   newOrdersCount: number;
   eligibleActiveCount: number;
+  fulfilledCount: number;
   pendingCount: number;
-  alreadyFulfilledCount: number;
+  alreadyFulfilledCount: number; // Compatibility alias
   updateOrdersCount: number;
   unchangedCount: number;
   cancelledCount: number;
@@ -72,6 +76,8 @@ export interface ImportValidationResult {
 
   // Breakdown collections
   newOrders: ParsedCustomerOrder[];
+  fulfilledOrders: ParsedCustomerOrder[];
+  activeOrders: ParsedCustomerOrder[];
   updatePlans: ExistingOrderUpdatePlan[];
   unchangedOrders: ParsedCustomerOrder[];
   conflictingOrders: Array<{ orderId: string; reason: string }>;
@@ -85,12 +91,30 @@ export interface ImportCommitResult {
   unchanged: number;
   skipped: number;
   failed: number;
-  // Compatibility fields
+  // Category breakdowns
   insertedActive: number;
+  insertedFulfilled: number;
   insertedPending: number;
   insertedTracking: number;
   skippedDuplicates: number;
   skippedCancelled: number;
+  syncedSalesOrders?: number;
+}
+
+export interface LogisticsSalesReconciliationReport {
+  logisticsTotalOrders: number;
+  salesTotalOrders: number;
+  logisticsFulfilledCount: number;
+  salesFulfilledCount: number;
+  logisticsActiveCount: number;
+  salesUnfulfilledCount: number;
+  missingInSalesCount: number;
+  missingInLogisticsCount: number;
+  missingInSalesOrderIds: string[];
+  missingInLogisticsOrderIds: string[];
+  logisticsTotalRevenue: number;
+  salesTotalRevenue: number;
+  lastReconciledAt: string;
 }
 
 /**
@@ -276,17 +300,24 @@ export const parseAndValidateCustomerOrders = async (
 
     // Consolidate Products / Line Items from all grouped rows
     const productItems: string[] = [];
+    const lineItemDetails: Array<{ name: string; quantity: number; price?: number }> = [];
     let calculatedAmount = 0;
 
     rows.forEach(r => {
       const pName = findHeaderValue(r, ['Lineitem name', 'Lineitem title', 'Products', 'Item Name', 'Product Name', 'SKU']);
-      const pQty = findHeaderValue(r, ['Lineitem quantity', 'Quantity', 'Qty']) || 1;
+      const pQty = parseInt(String(findHeaderValue(r, ['Lineitem quantity', 'Quantity', 'Qty']) || '1'), 10) || 1;
       const rawPrice = findHeaderValue(r, ['Lineitem price', 'Price', 'Item Price', 'Unit Price']);
       const pPrice = parseOrderAmount(rawPrice) ?? 0;
 
       if (pName) {
-        productItems.push(`${String(pName).trim()} × ${pQty}`);
-        calculatedAmount += pPrice * Number(pQty);
+        const cleanName = String(pName).trim();
+        productItems.push(`${cleanName} × ${pQty}`);
+        calculatedAmount += pPrice * pQty;
+        lineItemDetails.push({
+          name: cleanName,
+          quantity: pQty,
+          price: pPrice > 0 ? pPrice : undefined
+        });
       }
     });
 
@@ -342,11 +373,24 @@ export const parseAndValidateCustomerOrders = async (
     const orderDate = parsedDate.isoDate || (rawDate ? String(rawDate).trim() : new Date().toISOString().slice(0, 10));
     const orderDateDisplay = parsedDate.displayDate || orderDate;
 
-    // Fulfillment Eligibility Analysis
+    // Fulfilled Date
+    const rawFulfilledDate = findHeaderValueFromRows(rows, [
+      'Fulfilled at', 'Fulfilled At', 'fulfilled_at', 'Shipped at', 'Processed at'
+    ]);
+    const parsedFulfilledDate = rawFulfilledDate ? (parseAndFormatLogisticsDate(rawFulfilledDate).displayDate || String(rawFulfilledDate).trim()) : undefined;
+
+    // Fulfillment Eligibility Analysis:
+    // Strictly classify by actual source status — NEVER infer fulfillment merely from tracking/AWB existence!
     let isCancelled = false;
     let isFulfilled = false;
     let isRefunded = false;
     let reviewReason = '';
+
+    const isSourceFulfilledStatus = (
+      fulfillmentStatusRaw === 'fulfilled' ||
+      fulfillmentStatusRaw === 'shipped' ||
+      fulfillmentStatusRaw === 'delivered'
+    );
 
     if (cancelledAt || fulfillmentStatusRaw.includes('cancelled') || fulfillmentStatusRaw.includes('canceled')) {
       isCancelled = true;
@@ -354,15 +398,9 @@ export const parseAndValidateCustomerOrders = async (
     } else if (financialStatusRaw === 'refunded' || financialStatusRaw === 'voided') {
       isRefunded = true;
       reviewReason = 'Payment refunded/voided';
-    } else if (
-      fulfillmentStatusRaw === 'fulfilled' ||
-      fulfillmentStatusRaw === 'shipped' ||
-      fulfillmentStatusRaw === 'delivered' ||
-      fulfillmentStatusRaw.includes('dispatched') ||
-      (rawAwb && String(rawAwb).trim().length > 0)
-    ) {
+    } else if (isSourceFulfilledStatus) {
       isFulfilled = true;
-      reviewReason = 'Already fulfilled or has AWB tracking';
+      reviewReason = 'Fulfilled by source';
     }
 
     // Has required info: name, 10-digit phone, and address or city/pincode
@@ -400,7 +438,9 @@ export const parseAndValidateCustomerOrders = async (
       courier,
       orderDate,
       orderDateDisplay,
-      fulfillmentStatus: fulfillmentStatusRaw || undefined,
+      fulfilledDate: parsedFulfilledDate || (isFulfilled ? orderDateDisplay : undefined),
+      fulfillmentStatus: fulfillmentStatusRaw || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
+      sourceFulfillmentStatus: fulfillmentStatusRaw || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
       financialStatus: financialStatusRaw || undefined,
       isEligibleActive,
       isAlreadyFulfilled: isFulfilled,
@@ -408,7 +448,8 @@ export const parseAndValidateCustomerOrders = async (
       hasRequiredInfo,
       reviewReason: reviewReason || undefined,
       hasConflict: hasFileConflict,
-      conflictReason: fileConflictReason || undefined
+      conflictReason: fileConflictReason || undefined,
+      lineItems: lineItemDetails
     };
 
     parsedOrders.push(parsedOrder);
@@ -467,11 +508,15 @@ export const parseAndValidateCustomerOrders = async (
     }
   }
 
+  const fulfilledOrders = parsedOrders.filter(o => o.isAlreadyFulfilled);
+  const activeOrders = parsedOrders.filter(o => o.isEligibleActive);
+
   return {
     totalRows: rawRows.length,
     totalUniqueOrders: groupedRows.size,
     newOrdersCount: newOrders.length,
     eligibleActiveCount,
+    fulfilledCount: alreadyFulfilledCount,
     pendingCount,
     alreadyFulfilledCount,
     updateOrdersCount: updatePlans.length,
@@ -481,6 +526,8 @@ export const parseAndValidateCustomerOrders = async (
     invalidCount: invalidRowsCount,
     conflictCount: conflictingOrders.length,
     newOrders,
+    fulfilledOrders,
+    activeOrders,
     updatePlans,
     unchangedOrders,
     conflictingOrders,
@@ -491,10 +538,10 @@ export const parseAndValidateCustomerOrders = async (
 
 /**
  * Commits parsed customer orders into Dexie database safely using an upsert-aware workflow.
- * - Inserts new eligible orders into Active (or Pending / Dispatched based on status)
+ * - Inserts new eligible orders into Active (or Fulfilled / Pending based on actual source status)
  * - Updates existing orders safely with valid incoming fields without wiping existing data
  * - Preserves existing workflow stages (Prepare Dispatch, Dispatched, Tracking)
- * - Synchronizes updated fields to Supabase sales_orders
+ * - Synchronizes orders to Supabase sales_orders & sales_order_items for Sales department integration
  */
 export const commitCustomerOrdersImport = async (
   orders: ParsedCustomerOrder[],
@@ -532,13 +579,17 @@ export const commitCustomerOrdersImport = async (
         newOrdersList.push(ord);
       }
     }
+    const fulfilledList = orders.filter(o => o.isAlreadyFulfilled);
+    const activeList = orders.filter(o => o.isEligibleActive);
+
     return {
       totalRows: orders.length,
       totalUniqueOrders: orders.length,
       newOrdersCount: newOrdersList.length,
-      eligibleActiveCount: newOrdersList.filter(o => o.isEligibleActive).length,
-      pendingCount: newOrdersList.filter(o => !o.isEligibleActive && !o.isAlreadyFulfilled && !o.isCancelled).length,
-      alreadyFulfilledCount: newOrdersList.filter(o => o.isAlreadyFulfilled).length,
+      eligibleActiveCount: activeList.length,
+      fulfilledCount: fulfilledList.length,
+      pendingCount: orders.filter(o => !o.isEligibleActive && !o.isAlreadyFulfilled && !o.isCancelled).length,
+      alreadyFulfilledCount: fulfilledList.length,
       updateOrdersCount: updatePlansList.length,
       unchangedCount: unchanged,
       cancelledCount: orders.filter(o => o.isCancelled).length,
@@ -546,6 +597,8 @@ export const commitCustomerOrdersImport = async (
       invalidCount: 0,
       conflictCount: 0,
       newOrders: newOrdersList,
+      fulfilledOrders: fulfilledList,
+      activeOrders: activeList,
       updatePlans: updatePlansList,
       unchangedOrders: [],
       conflictingOrders: [],
@@ -555,14 +608,15 @@ export const commitCustomerOrdersImport = async (
   })();
 
   let insertedActive = 0;
+  let insertedFulfilled = 0;
   let insertedPending = 0;
   let insertedTracking = 0;
   let updatedExisting = 0;
   let skippedCancelled = 0;
 
-  // Execute database transaction on Dexie
+  // 1. Execute database transaction on Dexie
   await db.transaction('rw', db.logistics_orders, async () => {
-    // 1. Process New Orders
+    // A. Process New Orders
     for (const order of result.newOrders) {
       if (order.isCancelled) {
         skippedCancelled++;
@@ -570,7 +624,7 @@ export const commitCustomerOrdersImport = async (
       }
 
       if (order.isAlreadyFulfilled) {
-        // Place already fulfilled / tracked orders into Dispatched & Tracking
+        // Place fulfilled orders into the dedicated Fulfilled section
         await db.logistics_orders.add({
           orderId: order.orderId,
           customerName: order.customerName,
@@ -584,15 +638,17 @@ export const commitCustomerOrdersImport = async (
           orderType: order.orderType,
           awbNumber: order.awbNumber,
           courier: order.courier,
-          stage: 'dispatched',
-          status: 'Awaiting Tracking Update',
+          stage: 'fulfilled',
+          status: 'Fulfilled',
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
           orderDateDisplay: order.orderDateDisplay,
-          fulfillmentStatus: order.fulfillmentStatus,
+          fulfilledDate: order.fulfilledDate || order.orderDate,
+          fulfillmentStatus: 'fulfilled',
+          sourceFulfillmentStatus: 'fulfilled',
           financialStatus: order.financialStatus
         });
-        insertedTracking++;
+        insertedFulfilled++;
       } else if (!order.hasRequiredInfo) {
         // Missing phone, customer name, or address -> Pending review
         await db.logistics_orders.add({
@@ -606,17 +662,20 @@ export const commitCustomerOrdersImport = async (
           products: order.products,
           amount: order.amount,
           orderType: order.orderType,
+          awbNumber: order.awbNumber,
+          courier: order.courier,
           stage: 'pending',
           status: 'Pending',
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
           orderDateDisplay: order.orderDateDisplay,
-          fulfillmentStatus: order.fulfillmentStatus,
+          fulfillmentStatus: order.fulfillmentStatus || 'unfulfilled',
+          sourceFulfillmentStatus: 'unfulfilled',
           financialStatus: order.financialStatus
         });
         insertedPending++;
       } else {
-        // Eligible unfulfilled order -> Active queue
+        // Eligible genuinely unfulfilled order -> Active queue
         await db.logistics_orders.add({
           orderId: order.orderId,
           customerName: order.customerName,
@@ -628,19 +687,22 @@ export const commitCustomerOrdersImport = async (
           products: order.products,
           amount: order.amount,
           orderType: order.orderType,
-          stage: 'order_data',
+          awbNumber: order.awbNumber,
+          courier: order.courier,
+          stage: 'active',
           status: 'Unfulfilled',
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
           orderDateDisplay: order.orderDateDisplay,
           fulfillmentStatus: order.fulfillmentStatus || 'unfulfilled',
+          sourceFulfillmentStatus: 'unfulfilled',
           financialStatus: order.financialStatus
         });
         insertedActive++;
       }
     }
 
-    // 2. Process Existing Orders that have safe updates
+    // B. Process Existing Orders that have safe updates
     for (const plan of result.updatePlans) {
       if (Object.keys(plan.patch).length > 0) {
         await db.logistics_orders.update(plan.existingId, {
@@ -652,27 +714,21 @@ export const commitCustomerOrdersImport = async (
     }
   });
 
-  // 3. Asynchronously sync updated fields to Supabase sales_orders
-  for (const plan of result.updatePlans) {
-    try {
-      const cleanId = cleanOrderId(plan.orderId);
-      const sbPatch: Record<string, any> = {};
-      if (plan.patch.customerName) sbPatch.customer_name = plan.patch.customerName;
-      if (plan.patch.phoneNumber) sbPatch.phone = plan.patch.phoneNumber;
-      if (plan.patch.state) sbPatch.state = plan.patch.state;
-      if (plan.patch.city) sbPatch.city = plan.patch.city;
-      if (plan.patch.pincode) sbPatch.pincode = plan.patch.pincode;
-      if (plan.patch.amount) sbPatch.order_total = Number(plan.patch.amount) || undefined;
-      if (Object.keys(sbPatch).length > 0) {
-        sbPatch.updated_at = new Date().toISOString();
-        await supabase.from('sales_orders').update(sbPatch).eq('order_id', cleanId);
-      }
-    } catch (e) {
-      // Non-blocking sync warning
+  // 2. Synchronize imported orders to Supabase Sales (sales_orders & sales_order_items)
+  let syncedSalesOrders = 0;
+  try {
+    const ordersToSync: ParsedCustomerOrder[] = [
+      ...result.newOrders.filter(o => !o.isCancelled),
+      ...result.updatePlans.map(p => p.incoming)
+    ];
+    if (ordersToSync.length > 0) {
+      syncedSalesOrders = await syncLogisticsOrdersToSupabaseSales(ordersToSync);
     }
+  } catch (syncErr) {
+    console.warn('[Logistics Import] Non-blocking sales sync warning:', syncErr);
   }
 
-  const inserted = insertedActive + insertedPending + insertedTracking;
+  const inserted = insertedActive + insertedFulfilled + insertedPending + insertedTracking;
   const updated = updatedExisting;
   const unchanged = result.unchangedCount;
   const skipped = skippedCancelled + result.invalidCount;
@@ -684,10 +740,342 @@ export const commitCustomerOrdersImport = async (
     skipped,
     failed: 0,
     insertedActive,
+    insertedFulfilled,
     insertedPending,
     insertedTracking,
     skippedDuplicates: unchanged,
-    skippedCancelled
+    skippedCancelled,
+    syncedSalesOrders
   };
+};
+
+/**
+ * Synchronizes Logistics orders into Supabase Sales tables (sales_orders and sales_order_items)
+ * - Channel is always 'WEBSITE'
+ * - Prevents duplicate primary key UUID collisions by querying existing (channel, order_id)
+ * - Accurately categorizes payment modes (PREPAID, COD, PARTIAL COD)
+ * - Accurately classifies order and dispatch status (FULFILLED, CONFIRMED, DISPATCHED)
+ * - Inserts item details into sales_order_items
+ */
+export const syncLogisticsOrdersToSupabaseSales = async (
+  ordersToSync: ParsedCustomerOrder[]
+): Promise<number> => {
+  if (ordersToSync.length === 0) return 0;
+
+  // 1. Ensure an upload batch exists in sales_uploads for Logistics imports
+  let batchId = 'logistics-import-batch';
+  try {
+    const { data: existingUploads } = await supabase
+      .from('sales_uploads')
+      .select('id')
+      .eq('channel', 'WEBSITE')
+      .eq('file_name', 'Logistics Order Import')
+      .limit(1);
+
+    if (existingUploads && existingUploads.length > 0) {
+      batchId = existingUploads[0].id;
+    } else {
+      const newId = crypto.randomUUID();
+      const today = new Date().toISOString().slice(0, 10);
+      await supabase.from('sales_uploads').insert([{
+        id: newId,
+        channel: 'WEBSITE',
+        file_name: 'Logistics Order Import',
+        file_type: 'xlsx',
+        uploaded_at: new Date().toISOString(),
+        uploaded_by: 'Logistics Department',
+        order_date_from: today,
+        order_date_to: today,
+        source_rows: ordersToSync.length,
+        unique_orders: ordersToSync.length,
+        duplicates_merged: 0,
+        status: 'COMPLETED'
+      }]);
+      batchId = newId;
+    }
+  } catch (err) {
+    console.warn('[Sales Sync] Warning getting/creating sales_upload batch:', err);
+  }
+
+  // 2. Fetch existing sales_orders to maintain stable UUIDs
+  const cleanIds = Array.from(new Set(ordersToSync.map(o => cleanOrderId(o.orderId)).filter(Boolean)));
+  const existingUuidMap = new Map<string, string>();
+
+  for (let i = 0; i < cleanIds.length; i += 500) {
+    const chunkIds = cleanIds.slice(i, i + 500);
+    const { data: existingRows } = await supabase
+      .from('sales_orders')
+      .select('id, order_id')
+      .eq('channel', 'WEBSITE')
+      .in('order_id', chunkIds);
+
+    if (existingRows) {
+      existingRows.forEach(r => existingUuidMap.set(String(r.order_id).toLowerCase(), r.id));
+    }
+  }
+
+  // 3. Build upsert payloads for sales_orders
+  const orderPayloads = ordersToSync.map(order => {
+    const cleanId = cleanOrderId(order.orderId);
+    const existingId = existingUuidMap.get(cleanId.toLowerCase());
+    const orderUuid = existingId || crypto.randomUUID();
+    existingUuidMap.set(cleanId.toLowerCase(), orderUuid);
+
+    const numericAmount = parseOrderAmount(order.amount) || 0;
+    const pType = (order.orderType || '').toLowerCase();
+    const fStatus = (order.financialStatus || '').toLowerCase();
+
+    // Categorize Payment Mode
+    let paymentMode: 'PREPAID' | 'COD' | 'PARTIAL COD' | 'UNKNOWN' = 'PREPAID';
+    if (pType.includes('partial') || (pType.includes('cod') && pType.includes('prepaid'))) {
+      paymentMode = 'PARTIAL COD';
+    } else if (pType.includes('cod') || fStatus === 'pending') {
+      paymentMode = 'COD';
+    } else if (pType.includes('prepaid') || fStatus === 'paid') {
+      paymentMode = 'PREPAID';
+    }
+
+    const advancePaid = paymentMode === 'PREPAID' 
+      ? numericAmount 
+      : (paymentMode === 'PARTIAL COD' ? Math.round(numericAmount * 0.2) : 0);
+    const remainingCod = paymentMode === 'PREPAID' ? 0 : Math.max(0, numericAmount - advancePaid);
+
+    const isFulfilled = order.isAlreadyFulfilled || (order.fulfillmentStatus || '').toLowerCase() === 'fulfilled';
+    const orderStatus = isFulfilled ? 'FULFILLED' : (order.isCancelled ? 'CANCELLED' : 'CONFIRMED');
+    const dispatchStatus = isFulfilled ? 'FULFILLED' : (order.awbNumber ? 'DISPATCHED' : 'UNFULFILLED');
+
+    const totalQty = order.lineItems && order.lineItems.length > 0
+      ? order.lineItems.reduce((acc, it) => acc + (it.quantity || 1), 0)
+      : 1;
+
+    return {
+      id: orderUuid,
+      upload_id: batchId,
+      channel: 'WEBSITE',
+      order_id: cleanId,
+      order_date: order.orderDate || new Date().toISOString().slice(0, 10),
+      customer_name: order.customerName || 'N/A',
+      phone: order.phoneNumber || '',
+      state: order.state || 'Unspecified',
+      city: order.city || 'Unspecified',
+      pincode: order.pincode || '',
+      offer: 'No Offer',
+      order_type: order.lineItems && order.lineItems.length > 1 ? 'Multi Product Order' : 'Single Product Order',
+      total_quantity: totalQty,
+      order_total: numericAmount,
+      payment_mode: paymentMode,
+      source_payment_method: order.orderType || 'Prepaid',
+      advance_paid: advancePaid,
+      remaining_cod: remainingCod,
+      order_status: orderStatus,
+      dispatch_status: dispatchStatus,
+      dispatch_date: order.fulfilledDate || order.orderDate || new Date().toISOString().slice(0, 10),
+      extra_data: {
+        address: order.address || '',
+        order_formatted: order.products || '',
+        product_name: order.products || '',
+        fulfillment_status: order.fulfillmentStatus || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
+        awb_number: order.awbNumber || '',
+        courier: order.courier || '',
+        source: 'logistics_import'
+      }
+    };
+  });
+
+  // 4. Batch upsert into sales_orders
+  let successCount = 0;
+  for (let i = 0; i < orderPayloads.length; i += 300) {
+    const chunk = orderPayloads.slice(i, i + 300);
+    const { error: upsertErr } = await supabase
+      .from('sales_orders')
+      .upsert(chunk, { onConflict: 'channel,order_id' });
+
+    if (upsertErr) {
+      console.error('[Sales Sync] Upsert failed for chunk:', upsertErr);
+    } else {
+      successCount += chunk.length;
+    }
+  }
+
+  // 5. Synchronize line items into sales_order_items
+  const itemPayloads: any[] = [];
+  ordersToSync.forEach(order => {
+    const cleanId = cleanOrderId(order.orderId);
+    const salesOrderId = existingUuidMap.get(cleanId.toLowerCase());
+    if (!salesOrderId) return;
+
+    if (order.lineItems && order.lineItems.length > 0) {
+      order.lineItems.forEach(it => {
+        itemPayloads.push({
+          id: crypto.randomUUID(),
+          sales_order_id: salesOrderId,
+          product_code: it.name,
+          product_name: it.name,
+          quantity: it.quantity || 1,
+          unit_price: it.price || 0,
+          line_total: (it.price || 0) * (it.quantity || 1),
+          item_data: {}
+        });
+      });
+    } else if (order.products) {
+      const numericAmount = parseOrderAmount(order.amount) || 0;
+      itemPayloads.push({
+        id: crypto.randomUUID(),
+        sales_order_id: salesOrderId,
+        product_code: order.products,
+        product_name: order.products,
+        quantity: 1,
+        unit_price: numericAmount,
+        line_total: numericAmount,
+        item_data: {}
+      });
+    }
+  });
+
+  if (itemPayloads.length > 0) {
+    const salesOrderIds = Array.from(existingUuidMap.values());
+    for (let i = 0; i < salesOrderIds.length; i += 300) {
+      const chunkIds = salesOrderIds.slice(i, i + 300);
+      await supabase.from('sales_order_items').delete().in('sales_order_id', chunkIds);
+    }
+
+    for (let i = 0; i < itemPayloads.length; i += 300) {
+      const chunkItems = itemPayloads.slice(i, i + 300);
+      await supabase.from('sales_order_items').insert(chunkItems);
+    }
+  }
+
+  return successCount;
+};
+
+/**
+ * Diagnostics and Data Reconciliation Report comparing Logistics and Sales
+ */
+export const reconcileLogisticsWithSales = async (): Promise<LogisticsSalesReconciliationReport> => {
+  const dexieOrders = await db.logistics_orders.toArray();
+  const validDexie = dexieOrders.filter(o => o.stage !== 'trash');
+
+  const logisticsTotalOrders = validDexie.length;
+  let logisticsFulfilledCount = 0;
+  let logisticsActiveCount = 0;
+  let logisticsTotalRevenue = 0;
+  const dexieIdSet = new Set<string>();
+
+  validDexie.forEach(o => {
+    const cId = cleanOrderId(o.orderId);
+    if (cId) dexieIdSet.add(cId.toLowerCase());
+    const amt = parseOrderAmount(o.amount) ?? 0;
+    logisticsTotalRevenue += amt;
+
+    const isFulfilled = (o.fulfillmentStatus || '').toLowerCase() === 'fulfilled' || o.stage === 'fulfilled';
+    if (isFulfilled) {
+      logisticsFulfilledCount++;
+    } else {
+      logisticsActiveCount++;
+    }
+  });
+
+  // Fetch from Supabase sales_orders
+  let salesOrders: any[] = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('sales_orders')
+      .select('order_id, order_total, payment_mode, order_status, dispatch_status')
+      .eq('channel', 'WEBSITE')
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error || !data) break;
+    salesOrders = salesOrders.concat(data);
+    if (data.length < pageSize) hasMore = false;
+    else page++;
+  }
+
+  const salesTotalOrders = salesOrders.length;
+  let salesFulfilledCount = 0;
+  let salesUnfulfilledCount = 0;
+  let salesTotalRevenue = 0;
+  const salesIdSet = new Set<string>();
+
+  salesOrders.forEach(o => {
+    const cId = cleanOrderId(o.order_id);
+    if (cId) salesIdSet.add(cId.toLowerCase());
+    salesTotalRevenue += Number(o.order_total) || 0;
+
+    const isFulfilled = (o.order_status || '').toLowerCase() === 'fulfilled' || (o.dispatch_status || '').toLowerCase() === 'fulfilled';
+    if (isFulfilled) {
+      salesFulfilledCount++;
+    } else {
+      salesUnfulfilledCount++;
+    }
+  });
+
+  const missingInSalesOrderIds: string[] = [];
+  dexieIdSet.forEach(id => {
+    if (!salesIdSet.has(id)) missingInSalesOrderIds.push(id);
+  });
+
+  const missingInLogisticsOrderIds: string[] = [];
+  salesIdSet.forEach(id => {
+    if (!dexieIdSet.has(id)) missingInLogisticsOrderIds.push(id);
+  });
+
+  return {
+    logisticsTotalOrders,
+    salesTotalOrders,
+    logisticsFulfilledCount,
+    salesFulfilledCount,
+    logisticsActiveCount,
+    salesUnfulfilledCount,
+    missingInSalesCount: missingInSalesOrderIds.length,
+    missingInLogisticsCount: missingInLogisticsOrderIds.length,
+    missingInSalesOrderIds: missingInSalesOrderIds.slice(0, 50),
+    missingInLogisticsOrderIds: missingInLogisticsOrderIds.slice(0, 50),
+    logisticsTotalRevenue: Math.round(logisticsTotalRevenue),
+    salesTotalRevenue: Math.round(salesTotalRevenue),
+    lastReconciledAt: new Date().toISOString()
+  };
+};
+
+/**
+ * Syncs all Dexie Logistics orders into Supabase sales_orders
+ */
+export const syncAllDexieOrdersToSales = async (): Promise<{ syncedCount: number; errors: string[] }> => {
+  const dexieOrders = await db.logistics_orders.toArray();
+  const validDexie = dexieOrders.filter(o => o.stage !== 'trash');
+
+  const parsedOrders: ParsedCustomerOrder[] = validDexie.map(o => {
+    const isFulfilled = (o.fulfillmentStatus || '').toLowerCase() === 'fulfilled' || o.stage === 'fulfilled';
+    return {
+      orderId: o.orderId,
+      customerName: o.customerName,
+      phoneNumber: o.phoneNumber,
+      address: o.address || '',
+      city: o.city || '',
+      state: o.state || '',
+      pincode: o.pincode || '',
+      products: o.products || 'Standard Products',
+      amount: String(o.amount || '0'),
+      orderType: o.orderType || 'Prepaid',
+      awbNumber: o.awbNumber,
+      courier: o.courier,
+      orderDate: o.orderDate,
+      orderDateDisplay: o.orderDateDisplay,
+      fulfilledDate: o.fulfilledDate || (isFulfilled ? o.orderDateDisplay : undefined),
+      fulfillmentStatus: o.fulfillmentStatus || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
+      sourceFulfillmentStatus: o.sourceFulfillmentStatus || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
+      financialStatus: o.financialStatus,
+      isEligibleActive: !isFulfilled,
+      isAlreadyFulfilled: isFulfilled,
+      isCancelled: false,
+      hasRequiredInfo: true
+    };
+  });
+
+  const syncedCount = await syncLogisticsOrdersToSupabaseSales(parsedOrders);
+  return { syncedCount, errors: [] };
 };
 

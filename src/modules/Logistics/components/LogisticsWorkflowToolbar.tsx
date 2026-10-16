@@ -10,7 +10,9 @@ import {
   UploadCloud,
   X,
   BarChart3,
-  Calendar
+  Calendar,
+  PackageCheck,
+  ArrowLeftRight
 } from 'lucide-react';
 import type { UnifiedWorkflowStage, WorkflowStageCounts } from '../../../types/unifiedLogistics';
 
@@ -30,6 +32,7 @@ export interface LogisticsWorkflowToolbarProps {
   isRefreshing?: boolean;
   onOpenImportModal: () => void;
   onOpenDateCalendar?: () => void;
+  onOpenReconcileModal?: () => void;
   activeDateRangeText?: string;
   isDateFilterActive?: boolean;
 }
@@ -47,10 +50,11 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
   isRefreshing = false,
   onOpenImportModal,
   onOpenDateCalendar,
+  onOpenReconcileModal,
   activeDateRangeText,
   isDateFilterActive = false
 }) => {
-  // Canonical workflow stages + Analytics in single evenly spaced navigation group
+  // Canonical workflow stages + Fulfilled + Analytics in single evenly spaced navigation group
   const workflowStages: Array<{
     id: UnifiedWorkflowStage;
     label: string;
@@ -63,7 +67,14 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
       label: 'Active',
       icon: <Users size={16} />,
       count: counts.active,
-      title: 'Active orders awaiting dispatch'
+      title: 'Active genuinely unfulfilled orders awaiting fulfillment'
+    },
+    {
+      id: 'fulfilled',
+      label: 'Fulfilled',
+      icon: <PackageCheck size={16} />,
+      count: counts.fulfilled,
+      title: 'Fulfilled orders (including external and completed fulfillment)'
     },
     {
       id: 'prepare_dispatch',
@@ -98,9 +109,9 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
   return (
     <div className="flex flex-col gap-2.5 w-full shrink-0 select-none">
       
-      {/* ROW 1: MAIN WORKFLOW NAVIGATION (Active, Prepare Dispatch, Dispatched, Tracking, Analytics) */}
+      {/* ROW 1: MAIN WORKFLOW NAVIGATION (Active, Fulfilled, Prepare Dispatch, Dispatched, Tracking, Analytics) */}
       <div className="bg-[#0b1220] border border-slate-800/90 p-1.5 sm:p-2 rounded-2xl shadow-xl w-full">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-2.5 w-full">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2.5 w-full">
           {workflowStages.map((stage) => {
             const isSelected = currentStage === stage.id;
 
@@ -208,6 +219,20 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
               </span>
             )}
           </button>
+
+          {/* Reconcile Diagnostics Button */}
+          {onOpenReconcileModal && (
+            <button
+              type="button"
+              onClick={onOpenReconcileModal}
+              className="h-10 px-3 sm:px-3.5 bg-[#0e1626] hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl transition-colors border border-slate-800 flex items-center gap-2 shrink-0 cursor-pointer"
+              title="Logistics ⇄ Sales Data Reconciliation & Diagnostics"
+              aria-label="Reconcile with Sales"
+            >
+              <ArrowLeftRight size={14} className="text-cyan-400" />
+              <span className="hidden xl:inline text-xs font-semibold">Reconcile</span>
+            </button>
+          )}
 
           {/* Refresh Button */}
           <button

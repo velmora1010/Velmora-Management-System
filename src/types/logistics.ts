@@ -35,12 +35,14 @@ export interface LogisticsOrder {
   awbNumber?: string;
   courier?: string;
   status?: string;
-  stage: 'active' | 'pending' | 'prepare_dispatch' | 'dispatched' | 'order_data' | 'tracking' | 'trash';
+  stage: 'active' | 'fulfilled' | 'pending' | 'prepare_dispatch' | 'dispatched' | 'order_data' | 'tracking' | 'trash';
   uploadedAt: string;
   syncedAt?: string;
   dispatchDate?: string;
   estimatedDeliveryDate?: string;
   deliveredDate?: string;
+  fulfilledDate?: string;
+  sourceFulfillmentStatus?: string;
   remarks?: string;
   trackingError?: string;
   lastFailedAt?: string;
