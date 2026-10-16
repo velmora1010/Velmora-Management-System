@@ -62,7 +62,7 @@ export const useCredits = () => {
         console.error('credits_row fetch error:', fetchError.message);
         throw fetchError;
       }
-      
+
       const activeCredits = (fetchResult || []).filter(e => e.status !== 'archived');
       setCredits(activeCredits);
     } catch (e: unknown) {
@@ -91,10 +91,21 @@ export const useCredits = () => {
       const { data, error: fetchError } = await supabase
         .from(SUPABASE_TABLES.creditImports)
         .select('*')
+        .neq('import_status', 'archived')
         .order('created_at', { ascending: false });
 
-      if (fetchError) throw fetchError;
-      setImports(data || []);
+      if (fetchError) {
+        const retry = await supabase
+          .from(SUPABASE_TABLES.creditImports)
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (retry.error) throw retry.error;
+        const activeOnly = (retry.data || []).filter((i: any) => i.import_status !== 'archived');
+        setImports(activeOnly);
+      } else {
+        const activeOnly = (data || []).filter((i: any) => i.import_status !== 'archived');
+        setImports(activeOnly);
+      }
     } catch (e: unknown) {
       console.error('Failed to load credit imports:', e);
     } finally {
@@ -152,21 +163,31 @@ export const useCredits = () => {
     }
   };
 
-  const deleteBatch = async (batch_id: string) => {
+  const deleteBatch = async (batch_id: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // For credit, deleting the import automatically cascades to credits_row
-      const { error: deleteImportError } = await supabase
+      // 1. Soft-delete the import tracking record by setting import_status = 'archived'
+      const { error: updateImportError } = await supabase
         .from(SUPABASE_TABLES.creditImports)
-        .delete()
+        .update({ import_status: 'archived' })
         .eq('batch_id', batch_id);
 
-      if (deleteImportError) throw deleteImportError;
+      if (updateImportError) throw updateImportError;
+
+      // 2. Also archive associated credit transactions so they don't remain active in View Credit
+      const { error: updateCreditsError } = await supabase
+        .from(SUPABASE_TABLES.creditsRow)
+        .update({ status: 'archived' })
+        .eq('import_batch_id', batch_id);
+
+      if (updateCreditsError) {
+        console.warn('Could not archive associated credit rows:', updateCreditsError);
+      }
 
       await fetchImports();
       await fetchCredits();
       return { success: true };
     } catch (e: unknown) {
-      console.error('Failed to delete batch:', e);
+      console.error('Failed to delete/archive batch:', e);
       return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
     }
   };
@@ -201,7 +222,7 @@ export const useCredits = () => {
     try {
       const { CreditRuleEngine } = await import('../../utils/rules/CreditRuleEngine');
       const rules = await CreditRuleEngine.fetchActiveRules();
-      
+
       const uncategorized = credits.filter(c => !c.main_category || c.main_category === 'Uncategorized');
       if (uncategorized.length === 0) return { success: true, processed: 0, matched: 0, remaining: 0 };
 
@@ -218,9 +239,9 @@ export const useCredits = () => {
           source: credit.source,
           payment_mode: credit.payment_mode
         };
-        
+
         const applied = CreditRuleEngine.applyCreditRules(tempTx, rules);
-        
+
         // If it got categorized
         if (applied.main_category && applied.main_category !== 'Uncategorized') {
           matchedCount++;
@@ -243,10 +264,10 @@ export const useCredits = () => {
         await Promise.all(promises);
         await fetchCredits();
       }
-      
-      return { 
-        success: true, 
-        processed: uncategorized.length, 
+
+      return {
+        success: true,
+        processed: uncategorized.length,
         matched: matchedCount,
         remaining: uncategorized.length - matchedCount
       };

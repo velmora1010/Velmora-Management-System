@@ -79,7 +79,7 @@ export const useExpenses = () => {
         console.error('expenses_row fetch error:', fetchError.message);
         throw fetchError;
       }
-      
+
       const activeExpenses = (data || []).filter(e => e.status !== 'archived');
       setExpenses(activeExpenses);
     } catch (e: unknown) {
@@ -116,7 +116,7 @@ export const useExpenses = () => {
         .insert([payload])
         .select()
         .single();
-        
+
       console.log('Supabase Error:', error);
       console.log('Supabase Data:', data);
 
@@ -183,10 +183,21 @@ export const useExpenses = () => {
       const { data, error: fetchError } = await supabase
         .from('expense_imports')
         .select('*')
+        .neq('status', 'archived')
         .order('imported_at', { ascending: false });
 
-      if (fetchError) throw fetchError;
-      setImports(data || []);
+      if (fetchError) {
+        const retry = await supabase
+          .from('expense_imports')
+          .select('*')
+          .order('imported_at', { ascending: false });
+        if (retry.error) throw retry.error;
+        const activeOnly = (retry.data || []).filter((i: any) => i.status !== 'archived');
+        setImports(activeOnly);
+      } else {
+        const activeOnly = (data || []).filter((i: any) => i.status !== 'archived');
+        setImports(activeOnly);
+      }
     } catch (e: unknown) {
       console.error('Failed to load expense imports:', e);
     } finally {
@@ -254,29 +265,31 @@ export const useExpenses = () => {
     }
   };
 
-  const deleteBatch = async (batch_id: string) => {
+  const deleteBatch = async (batch_id: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // 1. Delete associated expenses
-      const { error: deleteExpError } = await supabase
-        .from(SUPABASE_TABLES.expenses)
-        .delete()
-        .eq('import_batch_id', batch_id);
-
-      if (deleteExpError) throw deleteExpError;
-
-      // 2. Delete tracking record
+      // 1. Soft-delete tracking record by setting status = 'archived'
       const { error: deleteImportError } = await supabase
         .from('expense_imports')
-        .delete()
+        .update({ status: 'archived' })
         .eq('batch_id', batch_id);
 
       if (deleteImportError) throw deleteImportError;
+
+      // 2. Archive associated expenses
+      const { error: deleteExpError } = await supabase
+        .from(SUPABASE_TABLES.expenses)
+        .update({ status: 'archived' })
+        .eq('import_batch_id', batch_id);
+
+      if (deleteExpError) {
+        console.warn('Could not archive associated expenses:', deleteExpError);
+      }
 
       await fetchImports();
       await fetchExpenses();
       return { success: true };
     } catch (e: unknown) {
-      console.error('Failed to delete batch:', e);
+      console.error('Failed to delete/archive batch:', e);
       return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
     }
   };
