@@ -231,6 +231,11 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
             >
               <ArrowLeftRight size={14} className="text-cyan-400" />
               <span className="hidden xl:inline text-xs font-semibold">Reconcile</span>
+              {Boolean(counts.archived && counts.archived > 0) && (
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
+                  {counts.archived?.toLocaleString()}
+                </span>
+              )}
             </button>
           )}
 

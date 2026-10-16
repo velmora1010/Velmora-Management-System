@@ -104,10 +104,17 @@ export interface ImportCommitResult {
 export interface LogisticsSalesReconciliationReport {
   logisticsTotalOrders: number;
   salesTotalOrders: number;
+  matchedOrdersCount: number;
+  legacyUnmatchedCount: number;
   logisticsFulfilledCount: number;
   salesFulfilledCount: number;
   logisticsActiveCount: number;
   salesUnfulfilledCount: number;
+  dispatchedHistoricalCount: number;
+  prepareDispatchCount: number;
+  pendingCount: number;
+  archivedRecordsCount: number;
+  duplicateLogisticsCount: number;
   missingInSalesCount: number;
   missingInLogisticsCount: number;
   missingInSalesOrderIds: string[];
@@ -951,31 +958,60 @@ export const syncLogisticsOrdersToSupabaseSales = async (
 /**
  * Diagnostics and Data Reconciliation Report comparing Logistics and Sales
  */
+/**
+ * Diagnostics and Data Reconciliation Report comparing Logistics and Sales
+ */
 export const reconcileLogisticsWithSales = async (): Promise<LogisticsSalesReconciliationReport> => {
   const dexieOrders = await db.logistics_orders.toArray();
-  const validDexie = dexieOrders.filter(o => o.stage !== 'trash');
+  const nonTrashDexie = dexieOrders.filter(o => o.stage !== 'trash');
+  const validDexie = nonTrashDexie.filter(o => o.stage !== 'archived_legacy');
+  const archivedRecords = nonTrashDexie.filter(o => o.stage === 'archived_legacy');
 
   const logisticsTotalOrders = validDexie.length;
   let logisticsFulfilledCount = 0;
   let logisticsActiveCount = 0;
   let logisticsTotalRevenue = 0;
+  let dispatchedHistoricalCount = 0;
+  let prepareDispatchCount = 0;
+  let pendingCount = 0;
+
   const dexieIdSet = new Set<string>();
+  const seenIds = new Set<string>();
+  let duplicateLogisticsCount = 0;
 
   validDexie.forEach(o => {
     const cId = cleanOrderId(o.orderId);
-    if (cId) dexieIdSet.add(cId.toLowerCase());
+    if (cId) {
+      const lower = cId.toLowerCase();
+      if (seenIds.has(lower)) {
+        duplicateLogisticsCount++;
+      } else {
+        seenIds.add(lower);
+      }
+      dexieIdSet.add(lower);
+    }
+
     const amt = parseOrderAmount(o.amount) ?? 0;
     logisticsTotalRevenue += amt;
 
     const isFulfilled = (o.fulfillmentStatus || '').toLowerCase() === 'fulfilled' || o.stage === 'fulfilled';
     if (isFulfilled) {
       logisticsFulfilledCount++;
+    } else if (o.stage === 'prepare_dispatch') {
+      prepareDispatchCount++;
+      logisticsActiveCount++;
+    } else if (o.stage === 'pending') {
+      pendingCount++;
     } else {
       logisticsActiveCount++;
     }
+
+    if (isDispatchedOrder(o as any)) {
+      dispatchedHistoricalCount++;
+    }
   });
 
-  // Fetch from Supabase sales_orders
+  // Fetch active from Supabase sales_orders (excluding DELETED)
   let salesOrders: any[] = [];
   let page = 0;
   const pageSize = 1000;
@@ -986,6 +1022,7 @@ export const reconcileLogisticsWithSales = async (): Promise<LogisticsSalesRecon
       .from('sales_orders')
       .select('order_id, order_total, payment_mode, order_status, dispatch_status')
       .eq('channel', 'WEBSITE')
+      .neq('order_status', 'DELETED')
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error || !data) break;
@@ -1014,8 +1051,20 @@ export const reconcileLogisticsWithSales = async (): Promise<LogisticsSalesRecon
   });
 
   const missingInSalesOrderIds: string[] = [];
-  dexieIdSet.forEach(id => {
-    if (!salesIdSet.has(id)) missingInSalesOrderIds.push(id);
+  let matchedOrdersCount = 0;
+  let activeUnmatchedCount = 0;
+  let fulfilledUnmatchedCount = 0;
+
+  validDexie.forEach(o => {
+    const cId = cleanOrderId(o.orderId).toLowerCase();
+    if (salesIdSet.has(cId)) {
+      matchedOrdersCount++;
+    } else {
+      missingInSalesOrderIds.push(cleanOrderId(o.orderId));
+      const isFulfilled = (o.fulfillmentStatus || '').toLowerCase() === 'fulfilled' || o.stage === 'fulfilled';
+      if (isFulfilled) fulfilledUnmatchedCount++;
+      else activeUnmatchedCount++;
+    }
   });
 
   const missingInLogisticsOrderIds: string[] = [];
@@ -1026,10 +1075,17 @@ export const reconcileLogisticsWithSales = async (): Promise<LogisticsSalesRecon
   return {
     logisticsTotalOrders,
     salesTotalOrders,
+    matchedOrdersCount,
+    legacyUnmatchedCount: missingInSalesOrderIds.length,
     logisticsFulfilledCount,
     salesFulfilledCount,
     logisticsActiveCount,
     salesUnfulfilledCount,
+    dispatchedHistoricalCount,
+    prepareDispatchCount,
+    pendingCount,
+    archivedRecordsCount: archivedRecords.length,
+    duplicateLogisticsCount,
     missingInSalesCount: missingInSalesOrderIds.length,
     missingInLogisticsCount: missingInLogisticsOrderIds.length,
     missingInSalesOrderIds: missingInSalesOrderIds.slice(0, 50),
@@ -1041,11 +1097,149 @@ export const reconcileLogisticsWithSales = async (): Promise<LogisticsSalesRecon
 };
 
 /**
- * Syncs all Dexie Logistics orders into Supabase sales_orders
+ * Creates a complete JSON backup of all Dexie logistics orders before any archival or destructive change.
+ */
+export const createLogisticsBackup = async (): Promise<{ backupJson: string; recordCount: number }> => {
+  const allOrders = await db.logistics_orders.toArray();
+  const backupData = {
+    exportedAt: new Date().toISOString(),
+    system: 'Velmora Logistics Management',
+    totalOrders: allOrders.length,
+    activeOrders: allOrders.filter(o => o.stage === 'active').length,
+    fulfilledOrders: allOrders.filter(o => o.stage === 'fulfilled').length,
+    dispatchedOrders: allOrders.filter(o => o.stage === 'dispatched' || o.stage === 'tracking').length,
+    orders: allOrders
+  };
+  const jsonStr = JSON.stringify(backupData, null, 2);
+  return { backupJson: jsonStr, recordCount: allOrders.length };
+};
+
+/**
+ * Helper to trigger client-side download of the backup file in browser.
+ */
+export const downloadLogisticsBackup = (
+  jsonString: string, 
+  filename = `Velmora_Logistics_Backup_${new Date().toISOString().slice(0, 10)}.json`
+) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.warn('Backup download error:', err);
+  }
+};
+
+/**
+ * Safely archives unmatched legacy Logistics orders out of the active operational pipeline.
+ * Guarantees a reversible backup download first and stores snapshot in historical delivery data.
+ * Brings Logistics operational counts (Active, Fulfilled, Prepare Dispatch) strictly in line with Sales.
+ */
+export const archiveUnmatchedLogisticsOrders = async (): Promise<{ archivedCount: number; backupDownloaded: boolean }> => {
+  // 1. Fetch valid canonical Sales order IDs
+  let salesOrders: any[] = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('sales_orders')
+      .select('order_id')
+      .eq('channel', 'WEBSITE')
+      .neq('order_status', 'DELETED')
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error || !data) break;
+    salesOrders = salesOrders.concat(data);
+    if (data.length < pageSize) hasMore = false;
+    else page++;
+  }
+
+  const salesIdSet = new Set(salesOrders.map(so => cleanOrderId(so.order_id).toLowerCase()).filter(Boolean));
+
+  // 2. Generate and download complete backup before making changes
+  const { backupJson, recordCount } = await createLogisticsBackup();
+  downloadLogisticsBackup(backupJson);
+
+  // 3. Mark unmatched records in Dexie as 'archived_legacy'
+  const dexieOrders = await db.logistics_orders.toArray();
+  let archivedCount = 0;
+
+  await db.transaction('rw', db.logistics_orders, async () => {
+    for (const ord of dexieOrders) {
+      if (!ord.id || ord.stage === 'trash' || ord.stage === 'archived_legacy') continue;
+      const cId = cleanOrderId(ord.orderId).toLowerCase();
+
+      // If this order does not exist in Sales, safely archive it
+      if (!salesIdSet.has(cId)) {
+        await db.logistics_orders.update(ord.id, {
+          previousStage: ord.stage,
+          stage: 'archived_legacy' as any,
+          archivedAt: new Date().toISOString(),
+          archiveReason: 'Unmatched Legacy Logistics Record'
+        });
+        archivedCount++;
+      }
+    }
+  });
+
+  // 4. Dispatch event so all Logistics views and counts recalculate immediately
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('velmora:logistics_archived', {
+      detail: { archivedCount, timestamp: Date.now() }
+    }));
+  }
+
+  return { archivedCount, backupDownloaded: true };
+};
+
+/**
+ * Restores previously archived Logistics orders back into their previous operational stages.
+ */
+export const restoreArchivedLogisticsOrders = async (): Promise<number> => {
+  const dexieOrders = await db.logistics_orders.where('stage').equals('archived_legacy').toArray();
+  let restoredCount = 0;
+
+  await db.transaction('rw', db.logistics_orders, async () => {
+    for (const ord of dexieOrders) {
+      if (!ord.id) continue;
+      const targetStage = ord.previousStage || (
+        (ord.fulfillmentStatus || '').toLowerCase() === 'fulfilled' ? 'fulfilled' : 'active'
+      );
+      await db.logistics_orders.update(ord.id, {
+        stage: targetStage as any,
+        archivedAt: undefined,
+        archiveReason: undefined,
+        previousStage: undefined
+      });
+      restoredCount++;
+    }
+  });
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('velmora:logistics_restored', {
+      detail: { restoredCount, timestamp: Date.now() }
+    }));
+  }
+
+  return restoredCount;
+};
+
+/**
+ * Syncs all Dexie Logistics orders into Supabase sales_orders, creating a canonical
+ * Website Sales upload batch so Sales Files, Dashboard, and Analytics reflect all historical orders.
  */
 export const syncAllDexieOrdersToSales = async (): Promise<{ syncedCount: number; errors: string[] }> => {
   const dexieOrders = await db.logistics_orders.toArray();
-  const validDexie = dexieOrders.filter(o => o.stage !== 'trash');
+  const validDexie = dexieOrders.filter(o => o.stage !== 'trash' && o.stage !== 'archived_legacy');
 
   const parsedOrders: ParsedCustomerOrder[] = validDexie.map(o => {
     const isFulfilled = (o.fulfillmentStatus || '').toLowerCase() === 'fulfilled' || o.stage === 'fulfilled';
@@ -1076,6 +1270,14 @@ export const syncAllDexieOrdersToSales = async (): Promise<{ syncedCount: number
   });
 
   const syncedCount = await syncLogisticsOrdersToSupabaseSales(parsedOrders);
+
+  // Dispatch window event so Sales and Logistics views refresh immediately
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('velmora:sales_orders_synced', {
+      detail: { insertedCount: syncedCount, timestamp: Date.now() }
+    }));
+  }
+
   return { syncedCount, errors: [] };
 };
 

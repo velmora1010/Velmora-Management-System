@@ -106,6 +106,9 @@ export interface UnifiedLogisticsOrder {
   trackingError?: string;
   syncState?: 'queued' | 'checking' | 'retrying' | 'idle';
   deliveryDays?: number;
+  archivedAt?: string;
+  archiveReason?: string;
+  isArchived?: boolean;
 }
 
 export interface UnifiedCustomer {
@@ -141,6 +144,7 @@ export interface WorkflowStageCounts {
   totalOrders: number;
   totalCustomers: number;
   analytics?: number;
+  archived?: number;
 }
 
 export type LogisticsMainView = 'customers' | 'orders';

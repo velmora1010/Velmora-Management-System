@@ -17,7 +17,8 @@ import {
   SlidersHorizontal,
   Clock,
   BarChart3,
-  PackageCheck
+  PackageCheck,
+  Archive
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -146,36 +147,38 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Base shipments available in the current stage
   const stageShipments = useMemo(() => {
+    const operationalOrders = unifiedOrders.filter(o => o.stage !== 'archived_legacy');
+
     if (currentStage === 'analytics') {
-      return unifiedOrders;
+      return operationalOrders;
     }
     if (currentStage === 'fulfilled') {
-      return unifiedOrders.filter(o => 
+      return operationalOrders.filter(o => 
         o.workflowStage === 'fulfilled' || 
         o.sourceFulfillmentStatus === 'fulfilled' || 
         o.stage === 'fulfilled'
       );
     }
     if (currentStage === 'dispatched' || currentStage === 'tracking') {
-      return unifiedOrders.filter(o => isDispatchedOrder(o));
+      return operationalOrders.filter(o => isDispatchedOrder(o));
     }
     if (currentStage === 'prepare_dispatch') {
-      return unifiedOrders.filter(o => o.workflowStage === 'prepare_dispatch');
+      return operationalOrders.filter(o => o.workflowStage === 'prepare_dispatch');
     }
     if (currentStage === 'pending') {
-      return unifiedOrders.filter(o => o.workflowStage === 'pending');
+      return operationalOrders.filter(o => o.workflowStage === 'pending');
     }
     if (currentStage === 'active') {
       if (selectedStatusTab === 'Pending') {
-        return unifiedOrders.filter(o => o.workflowStage === 'pending');
+        return operationalOrders.filter(o => o.workflowStage === 'pending');
       }
-      return unifiedOrders.filter(o => 
+      return operationalOrders.filter(o => 
         o.workflowStage === 'active' && 
         o.stage !== 'fulfilled' && 
         o.sourceFulfillmentStatus !== 'fulfilled'
       );
     }
-    return unifiedOrders.filter(o => 
+    return operationalOrders.filter(o => 
       o.workflowStage === 'active' && 
       o.stage !== 'fulfilled' && 
       o.sourceFulfillmentStatus !== 'fulfilled'
@@ -307,14 +310,22 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       }
     };
 
+    const handleLogisticsArchivedOrRestored = () => {
+      setSelectedOrderIds(new Set());
+    };
+
     window.addEventListener('velmora:sales_orders_synced', handleSalesSynced);
     window.addEventListener('velmora:sales_order_deleted', handleSalesOrderDeleted);
     window.addEventListener('velmora:sales_batch_deleted', handleSalesBatchDeleted);
+    window.addEventListener('velmora:logistics_archived', handleLogisticsArchivedOrRestored);
+    window.addEventListener('velmora:logistics_restored', handleLogisticsArchivedOrRestored);
 
     return () => {
       window.removeEventListener('velmora:sales_orders_synced', handleSalesSynced);
       window.removeEventListener('velmora:sales_order_deleted', handleSalesOrderDeleted);
       window.removeEventListener('velmora:sales_batch_deleted', handleSalesBatchDeleted);
+      window.removeEventListener('velmora:logistics_archived', handleLogisticsArchivedOrRestored);
+      window.removeEventListener('velmora:logistics_restored', handleLogisticsArchivedOrRestored);
     };
   }, []);
 
@@ -749,6 +760,25 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         }
         isDateFilterActive={logisticsFilters.datePreset !== 'all' || !!logisticsFilters.startDate}
       />
+
+      {/* Safe Legacy Archive Notification Banner */}
+      {counts.archived && counts.archived > 0 ? (
+        <div className="bg-amber-950/30 border border-amber-800/50 rounded-2xl px-4 py-2.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-amber-200">
+          <div className="flex items-center gap-2.5">
+            <Archive size={16} className="text-amber-400 shrink-0" />
+            <span>
+              <strong>{counts.archived.toLocaleString()} legacy records</strong> are safely archived. They are isolated from operational workflows and counts.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsReconcileModalOpen(true)}
+            className="text-amber-400 hover:text-amber-300 font-semibold underline underline-offset-2 cursor-pointer shrink-0"
+          >
+            Review & Manage in Reconciliation
+          </button>
+        </div>
+      ) : null}
 
       {/* 3. ROW 3: CONTEXTUAL FILTERS AND SELECTION ACTIONS */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-1 shrink-0 w-full min-h-[40px]">
@@ -1518,6 +1548,9 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       <LogisticsReconciliationModal
         isOpen={isReconcileModalOpen}
         onClose={() => setIsReconcileModalOpen(false)}
+        onReconciliationCompleted={() => {
+          handleRefresh();
+        }}
       />
 
     </div>

@@ -307,7 +307,10 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     lastEvent: order.lastEvent,
     syncedAt: order.syncedAt,
     trackingError: order.trackingError,
-    syncState: order.syncState || 'idle'
+    syncState: order.syncState || 'idle',
+    archivedAt: order.archivedAt,
+    archiveReason: order.archiveReason,
+    isArchived: order.stage === 'archived_legacy'
   };
 };
 
@@ -448,9 +451,14 @@ export const calculateWorkflowCounts = (
   let prepareDispatch = 0;
   let dispatched = 0;
   let tracking = 0;
+  let archived = 0;
 
   for (const o of orders) {
     if (o.stage === 'trash') continue;
+    if (o.stage === 'archived_legacy') {
+      archived++;
+      continue;
+    }
 
     if (o.workflowStage === 'fulfilled' || o.sourceFulfillmentStatus === 'fulfilled' || o.stage === 'fulfilled') {
       fulfilled++;
@@ -469,6 +477,8 @@ export const calculateWorkflowCounts = (
     }
   }
 
+  const operationalCount = orders.filter(o => o.stage !== 'trash' && o.stage !== 'archived_legacy').length;
+
   return {
     active,
     fulfilled,
@@ -476,9 +486,10 @@ export const calculateWorkflowCounts = (
     prepareDispatch,
     dispatched,
     tracking,
-    totalOrders: orders.length,
+    archived,
+    totalOrders: operationalCount,
     totalCustomers: customers.length,
-    analytics: orders.length
+    analytics: operationalCount
   };
 };
 
