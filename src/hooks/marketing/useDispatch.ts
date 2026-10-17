@@ -51,17 +51,34 @@ export const useDispatch = () => {
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `dispatch/${fileName}`;
 
-      const { error } = await supabase.storage
-        .from('influencer-profiles')
-        .upload(filePath, file);
+      let uploadSuccess = false;
+      let lastErr: any = null;
 
-      if (error) throw error;
+      try {
+        const { error: adminErr } = await supabaseAdmin.storage
+          .from('influencer-profiles')
+          .upload(filePath, file, { cacheControl: '3600', upsert: true });
+        if (!adminErr) {
+          uploadSuccess = true;
+        } else {
+          lastErr = adminErr;
+        }
+      } catch (e) {
+        lastErr = e;
+      }
 
-      const { data: publicData } = supabase.storage
+      if (!uploadSuccess) {
+        const { error } = await supabase.storage
+          .from('influencer-profiles')
+          .upload(filePath, file, { cacheControl: '3600', upsert: true });
+        if (error) throw lastErr || error;
+      }
+
+      const { data: publicData } = supabaseAdmin.storage
         .from('influencer-profiles')
         .getPublicUrl(filePath);
 
-      return publicData.publicUrl;
+      return publicData?.publicUrl || null;
     } catch (err) {
       console.error('Error uploading dispatch photo:', err);
       throw err;
