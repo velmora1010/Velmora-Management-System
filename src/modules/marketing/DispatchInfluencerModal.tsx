@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
+import { MarketingUploadField } from '../../components/marketing/MarketingUploadField';
 import { getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
 import { 
   isInfluencerDispatched, 
@@ -165,10 +166,8 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   };
   
   // Photos
-  const [productPhotoFile, setProductPhotoFile] = useState<File | null>(null);
-  const [productPhotoPreview, setProductPhotoPreview] = useState<string | null>(dispatchDetails?.product_photo_url || null);
-  const [dispatchPhotoFile, setDispatchPhotoFile] = useState<File | null>(null);
-  const [dispatchPhotoPreview, setDispatchPhotoPreview] = useState<string | null>(dispatchDetails?.dispatch_photo_url || null);
+  const [productPhotoUrl, setProductPhotoUrl] = useState<string | null>(dispatchDetails?.product_photo_url || null);
+  const [dispatchPhotoUrl, setDispatchPhotoUrl] = useState<string | null>(dispatchDetails?.dispatch_photo_url || null);
 
   // Sync state if influencer prop changes (prevents stale data across different influencers)
   useEffect(() => {
@@ -199,13 +198,15 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       }
 
       if (d.total_weight) setTotalWeight(d.total_weight);
-      if (d.product_photo_url) setProductPhotoPreview(d.product_photo_url);
-      if (d.dispatch_photo_url) setDispatchPhotoPreview(d.dispatch_photo_url);
+      setProductPhotoUrl(d.product_photo_url || null);
+      setDispatchPhotoUrl(d.dispatch_photo_url || null);
     } else {
       const todayStr = getLocalDateKey();
       setDispatchDate(todayStr);
       setExpectedDeliveryDate(addDaysToDateString(todayStr, 4));
       setHasManuallyEditedDeliveryDate(false);
+      setProductPhotoUrl(null);
+      setDispatchPhotoUrl(null);
     }
   }, [influencer]);
 
@@ -221,20 +222,6 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     }, 0);
     setTotalValue(calculatedVal.toString());
   }, [selectedProducts]);
-
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'product' | 'dispatch') => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const preview = URL.createObjectURL(file);
-      if (type === 'product') {
-        setProductPhotoFile(file);
-        setProductPhotoPreview(preview);
-      } else {
-        setDispatchPhotoFile(file);
-        setDispatchPhotoPreview(preview);
-      }
-    }
-  };
 
   const isAlreadyDispatched = isInfluencerDispatched(influencer);
 
@@ -298,20 +285,25 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   const executeDispatch = async (status: 'Dispatched' | 'Pending Confirmation') => {
     if (isSubmitting) return;
 
-    const creatorName = influencer.influencer_name || influencer.name;
-    if (!creatorName || !creatorName.trim()) {
-      toast.error('Please fill in Creator Name.');
-      return;
-    }
+    const isConfirming = status === 'Dispatched';
+    const creatorName = influencer.influencer_name || influencer.name || '';
     
-    if (!dispatchDate) {
-      toast.error('Please enter a valid Dispatch Date.');
-      return;
-    }
-    
-    if (selectedProducts.length === 0) {
-      toast.error('No selected products found for this influencer.');
-      return;
+    // Genuinely required validation ONLY when officially confirming dispatch
+    if (isConfirming) {
+      if (!creatorName.trim()) {
+        toast.error('Please fill in Creator Name.');
+        return;
+      }
+      
+      if (!dispatchDate) {
+        toast.error('Please enter a valid Dispatch Date.');
+        return;
+      }
+      
+      if (selectedProducts.length === 0) {
+        toast.error('At least one product must be assigned to confirm dispatch.');
+        return;
+      }
     }
 
     const payload: DispatchPayload = {
@@ -331,11 +323,11 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       total_products: totalProducts,
       total_product_value: totalValue ? parseFloat(totalValue) : null,
       total_weight: totalWeight || null,
-      product_photo_url: productPhotoPreview?.startsWith('http') ? productPhotoPreview : null,
+      product_photo_url: productPhotoUrl || null,
       courier_partner: courierPartner || null,
-      dispatch_photo_url: dispatchPhotoPreview?.startsWith('http') ? dispatchPhotoPreview : null,
+      dispatch_photo_url: dispatchPhotoUrl || null,
       tracking_id: trackingId || null,
-      dispatch_date: dispatchDate,
+      dispatch_date: dispatchDate || getLocalDateKey(),
       expected_delivery_date: expectedDeliveryDate || null,
       dispatch_status: status,
       influencer_code: influencer.code || null,
@@ -343,7 +335,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       is_re_dispatch: isReDispatchMode
     };
 
-    const result = await dispatchInfluencer(payload, productPhotoFile, dispatchPhotoFile);
+    const result = await dispatchInfluencer(payload, null, null);
     if (result.success) {
       if (status === 'Dispatched') {
         toast.success('Influencer marked as Dispatched successfully!');
@@ -363,12 +355,16 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       return;
     }
     const creatorName = influencer.influencer_name || influencer.name;
-    if (!creatorName || !dispatchDate) {
-      toast.error('Please fill in Creator Name and Dispatch Date.');
+    if (!creatorName || !creatorName.trim()) {
+      toast.error('Please fill in Creator Name.');
+      return;
+    }
+    if (!dispatchDate) {
+      toast.error('Please enter a valid Dispatch Date.');
       return;
     }
     if (selectedProducts.length === 0) {
-      toast.error('No selected products found for this influencer.');
+      toast.error('At least one product must be assigned to confirm dispatch.');
       return;
     }
     setShowConfirmStep(true);
@@ -477,6 +473,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                         <User size={13} className="text-slate-400 shrink-0" />
                         <span>Creator Name</span>
+                        <span className="text-purple-400 font-bold ml-0.5" title="Required for dispatch">*</span>
                       </label>
                       <input 
                         type="text" 
@@ -717,49 +714,33 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 </div>
 
                 <div className="grid grid-cols-2 gap-3.5">
-                  {/* Pack Photo */}
-                  <div>
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-purple-400 mb-2">
-                      <ImageIcon size={13} />
-                      <span className="text-slate-300 font-medium">Product Photo</span>
-                    </div>
-                    <div className="border border-dashed border-slate-700/80 hover:border-purple-500/70 bg-[#0b101b]/60 rounded-xl p-3 text-center relative transition-colors group cursor-pointer min-h-[140px] flex items-center justify-center">
-                      {productPhotoPreview ? (
-                        <div className="relative w-full h-28">
-                          <img src={productPhotoPreview} alt="Product" className="w-full h-full object-contain rounded-lg" />
-                        </div>
-                      ) : (
-                        <div className="py-3 flex flex-col items-center justify-center">
-                          <UploadCloud className="text-purple-400/80 mb-2 group-hover:text-purple-300 transition-colors" size={26} />
-                          <span className="text-xs font-semibold text-slate-300">Click to upload</span>
-                          <span className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, WEBP (Max 5MB)</span>
-                        </div>
-                      )}
-                      <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'product')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                    </div>
-                  </div>
+                  {/* Product Photo */}
+                  <MarketingUploadField
+                    label="Product Photo"
+                    icon={<ImageIcon size={13} className="text-purple-400 shrink-0" />}
+                    value={productPhotoUrl}
+                    fileType="image"
+                    accept="image/*"
+                    storageFolder={`dispatch/campaigns/${campaign.id}/influencers/${influencer.id}`}
+                    filePrefix="product_photo"
+                    isRequired={false}
+                    disabled={isSubmitting}
+                    onChange={(url) => setProductPhotoUrl(url)}
+                  />
                   
-                  {/* Final Photo */}
-                  <div>
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-purple-400 mb-2">
-                      <ImageIcon size={13} />
-                      <span className="text-slate-300 font-medium">Dispatch Photo</span>
-                    </div>
-                    <div className="border border-dashed border-slate-700/80 hover:border-purple-500/70 bg-[#0b101b]/60 rounded-xl p-3 text-center relative transition-colors group cursor-pointer min-h-[140px] flex items-center justify-center">
-                      {dispatchPhotoPreview ? (
-                        <div className="relative w-full h-28">
-                          <img src={dispatchPhotoPreview} alt="Dispatch" className="w-full h-full object-contain rounded-lg" />
-                        </div>
-                      ) : (
-                        <div className="py-3 flex flex-col items-center justify-center">
-                          <UploadCloud className="text-purple-400/80 mb-2 group-hover:text-purple-300 transition-colors" size={26} />
-                          <span className="text-xs font-semibold text-slate-300">Click to upload</span>
-                          <span className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, WEBP (Max 5MB)</span>
-                        </div>
-                      )}
-                      <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'dispatch')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                    </div>
-                  </div>
+                  {/* Dispatch Photo */}
+                  <MarketingUploadField
+                    label="Dispatch Photo"
+                    icon={<ImageIcon size={13} className="text-purple-400 shrink-0" />}
+                    value={dispatchPhotoUrl}
+                    fileType="image"
+                    accept="image/*"
+                    storageFolder={`dispatch/campaigns/${campaign.id}/influencers/${influencer.id}`}
+                    filePrefix="dispatch_photo"
+                    isRequired={false}
+                    disabled={isSubmitting}
+                    onChange={(url) => setDispatchPhotoUrl(url)}
+                  />
                 </div>
               </div>
 
@@ -816,12 +797,12 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                         <Calendar size={13} className="text-slate-400 shrink-0" />
                         <span>Dispatch Date</span>
+                        <span className="text-purple-400 font-bold ml-0.5" title="Required for dispatch">*</span>
                       </label>
                       <input 
                         type="date" 
                         value={dispatchDate} 
                         onChange={e => handleDispatchDateChange(e.target.value)} 
-                        required 
                         className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark] transition-colors" 
                       />
                     </div>

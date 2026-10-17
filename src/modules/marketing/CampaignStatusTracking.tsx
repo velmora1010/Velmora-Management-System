@@ -13666,7 +13666,24 @@ const DraftForm: React.FC<DraftFormProps> = ({
                         <video src={reDraftOriginalUrl} className="w-full h-full object-cover" />
                       </div>
                       <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{reDraftOriginalFile?.name || 'Original Video'}</span>
-                      <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                      <div className="flex items-center gap-2">
+                        {reDraftOriginalFile?.size ? (
+                          <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(reDraftOriginalFile.size)}</span>
+                        ) : null}
+                        <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReDraftOriginalFile(null);
+                            setReDraftOriginalUrl('');
+                          }}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 underline font-medium cursor-pointer"
+                          title="Remove selected video"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <>
@@ -13717,7 +13734,24 @@ const DraftForm: React.FC<DraftFormProps> = ({
                           <video src={reDraftTamilUrl} className="w-full h-full object-cover" />
                         </div>
                         <span className="text-[11px] text-purple-300 font-medium truncate max-w-xs">{reDraftTamilFile?.name || 'Tamil Translated Video'}</span>
-                        <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                        <div className="flex items-center gap-2">
+                          {reDraftTamilFile?.size ? (
+                            <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(reDraftTamilFile.size)}</span>
+                          ) : null}
+                          <span className="text-[10px] text-slate-400 underline">Click to change</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReDraftTamilFile(null);
+                              setReDraftTamilUrl('');
+                            }}
+                            className="text-[10px] text-rose-400 hover:text-rose-300 underline font-medium cursor-pointer"
+                            title="Remove selected video"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <>
@@ -14533,6 +14567,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
                     </div>
                     <span className="text-[11px] text-blue-300 font-medium truncate max-w-xs">{initialOriginalFile?.name || 'Original Video'}</span>
                     <div className="flex items-center gap-2">
+                      {initialOriginalFile?.size ? (
+                        <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(initialOriginalFile.size)}</span>
+                      ) : null}
                       <span className="text-[10px] text-slate-400 underline">Click to change</span>
                       <button
                         type="button"
@@ -14541,7 +14578,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                           setInitialOriginalFile(null);
                           setInitialOriginalUrl('');
                         }}
-                        className="text-[10px] text-rose-400 hover:text-rose-300 underline font-medium"
+                        className="text-[10px] text-rose-400 hover:text-rose-300 underline font-medium cursor-pointer"
                         title="Remove selected video"
                       >
                         Remove
@@ -14598,6 +14635,9 @@ const DraftForm: React.FC<DraftFormProps> = ({
                       </div>
                       <span className="text-[11px] text-purple-300 font-medium truncate max-w-xs">{initialTamilFile?.name || 'Tamil Translated Video'}</span>
                       <div className="flex items-center gap-2">
+                        {initialTamilFile?.size ? (
+                          <span className="text-[10px] text-slate-400 font-mono">{formatFileSize(initialTamilFile.size)}</span>
+                        ) : null}
                         <span className="text-[10px] text-slate-400 underline">Click to change</span>
                         <button
                           type="button"
@@ -14606,7 +14646,7 @@ const DraftForm: React.FC<DraftFormProps> = ({
                             setInitialTamilFile(null);
                             setInitialTamilUrl('');
                           }}
-                          className="text-[10px] text-rose-400 hover:text-rose-300 underline font-medium"
+                          className="text-[10px] text-rose-400 hover:text-rose-300 underline font-medium cursor-pointer"
                           title="Remove selected video"
                         >
                           Remove
