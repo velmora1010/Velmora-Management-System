@@ -36,7 +36,7 @@ export const isInfluencerReDispatch = (
     return false;
   }
 
-  if (status === 're_dispatch' || status === 're-dispatch' || status === 'redispatch' || status.includes('re_dispatch') || status.includes('re-dispatch')) {
+  if (!status.includes('prepare') && (status === 're_dispatch' || status === 're-dispatch' || status === 'redispatch')) {
     return true;
   }
   if ((inf as any).is_redispatched === true || (inf as any).re_dispatch_required === true) {

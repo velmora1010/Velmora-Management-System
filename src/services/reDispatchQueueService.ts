@@ -883,8 +883,7 @@ export const reDispatchQueueService = {
           meta.re_dispatch_required === true ||
           rawStatus.includes('re-dispatch') ||
           rawStatus.includes('redispatch') ||
-          dispStatus.includes('re_dispatch') ||
-          dispStatus.includes('redispatch') ||
+          (!dispStatus.includes('prepare') && (dispStatus.includes('re_dispatch') || dispStatus.includes('redispatch'))) ||
           dispRemarks.includes('moved to active') ||
           dispRemarks.includes('issue reported') ||
           meta.shipment_issue ||

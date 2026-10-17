@@ -36,7 +36,8 @@ import {
 import { 
   shipmentAttemptService, 
   type ShipmentAttempt, 
-  generateReDispatchOrderId 
+  generateReDispatchOrderId,
+  cleanCodeRef
 } from '../../services/shipmentAttemptService';
 
 // Central Price Config Rules
@@ -242,23 +243,60 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     return () => { isMounted = false; };
   }, [campaign?.id, influencer?.id]);
 
-  const rawDispStatus = (influencer.dispatchDetails?.dispatch_status || (influencer as any).dispatch_status || '').toLowerCase();
-  const prevAttemptWithIssue = attempts.slice().reverse().find(a => a.issue_reported);
-  const activeReDispatchAttempt = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH');
-  const isReDispatchMode = rawDispStatus.includes('re_dispatch') || rawDispStatus.includes('re-dispatch') || Boolean(prevAttemptWithIssue) || Boolean(activeReDispatchAttempt);
+  const rawDispStatus = (influencer.dispatchDetails?.dispatch_status || (influencer as any).dispatch_status || '').toLowerCase().trim();
+  
+  // Guard against 'prepare_dispatch' matching 're_dispatch' substring
+  const isDraftOrPrepareStatus = 
+    rawDispStatus === 'prepare_dispatch' || 
+    rawDispStatus === 'pending_confirmation' || 
+    rawDispStatus === 'ready to dispatch' || 
+    rawDispStatus === 'draft' ||
+    rawDispStatus.includes('prepare');
 
-  // If there's already an active replacement attempt (e.g. Attempt 2), use its attempt number.
-  // Otherwise, if in re-dispatch mode without a replacement attempt yet, this will be Attempt N+1.
+  const prevAttemptWithIssue = attempts.slice().reverse().find(a => a.issue_reported === true);
+  const activeReDispatchAttempt = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH' && !a.issue_reported);
+
+  // Explicit re-dispatch status from database (must not be draft or prepare_dispatch)
+  const isExplicitReDispatchStatus = !isDraftOrPrepareStatus && (
+    rawDispStatus === 're_dispatch' ||
+    rawDispStatus === 're-dispatch' ||
+    rawDispStatus === 'redispatch' ||
+    rawDispStatus === 're-dispatch required' ||
+    rawDispStatus === 'issue reported'
+  );
+
+  // A genuine re-dispatch requires either:
+  // 1. A recorded shipment attempt with an issue reported, OR
+  // 2. An existing RE_DISPATCH shipment attempt, OR
+  // 3. An explicit re-dispatch status AND some prior dispatch history (attempts or tracking ID), OR
+  // 4. An explicit flag from notes indicating a re-dispatch is required
+  const hasPriorDispatchHistory = attempts.length > 0 || Boolean(influencer.dispatchDetails?.tracking_id);
+  const isReDispatchMode = Boolean(
+    prevAttemptWithIssue || 
+    activeReDispatchAttempt || 
+    (isExplicitReDispatchStatus && (hasPriorDispatchHistory || (influencer as any).re_dispatch_required === true))
+  );
+
+  // Attempt number calculation:
+  // - If active RE_DISPATCH attempt exists, use its attempt_number.
+  // - Otherwise, if previous attempt had an issue, this next attempt is previous + 1.
+  // - Otherwise, if genuine re-dispatch mode, attempt is 2.
+  // - Otherwise, this is First Dispatch (Attempt #1).
   const displayAttemptNumber = activeReDispatchAttempt
     ? activeReDispatchAttempt.attempt_number
-    : (prevAttemptWithIssue ? prevAttemptWithIssue.attempt_number + 1 : (isReDispatchMode ? 2 : 1));
+    : (prevAttemptWithIssue 
+        ? prevAttemptWithIssue.attempt_number + 1 
+        : (isReDispatchMode ? Math.max(attempts.length + 1, 2) : 1));
 
-  const reDispatchOrderId = activeReDispatchAttempt?.order_id || generateReDispatchOrderId(influencer.code, courierPartner, Math.max(displayAttemptNumber, 2));
+  const cleanInfluencerCode = cleanCodeRef(influencer.code || influencer.name || '');
+  const dynamicOrderId = isReDispatchMode
+    ? (activeReDispatchAttempt?.order_id || generateReDispatchOrderId(cleanInfluencerCode, courierPartner, Math.max(displayAttemptNumber, 2)))
+    : (attempts[0]?.order_id || (cleanInfluencerCode ? `#${cleanInfluencerCode}` : ''));
 
   // Synchronize form logistics details when attempts load or change in re-dispatch mode
   useEffect(() => {
     if (!attempts || attempts.length === 0) return;
-    const activeReDispatch = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH');
+    const activeReDispatch = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH' && !a.issue_reported);
     const hasIssue = attempts.some(a => a.issue_reported);
 
     if (activeReDispatch) {
@@ -331,7 +369,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       expected_delivery_date: expectedDeliveryDate || null,
       dispatch_status: status,
       influencer_code: influencer.code || null,
-      order_id: isReDispatchMode ? reDispatchOrderId : (attempts[0]?.order_id || null),
+      order_id: dynamicOrderId || null,
       is_re_dispatch: isReDispatchMode
     };
 
@@ -391,9 +429,17 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                     {batchInfo.batchName} · Influencer {batchInfo.current} of {batchInfo.total}
                   </span>
                 )}
-                {isAlreadyDispatched && (
+                {isAlreadyDispatched ? (
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 uppercase tracking-wider">
                     <CheckCircle size={12} /> Dispatched
+                  </span>
+                ) : isReDispatchMode ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 uppercase tracking-wider">
+                    <AlertTriangle size={12} /> Re-Dispatch (Attempt #{displayAttemptNumber})
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1 uppercase tracking-wider">
+                    <Package size={12} /> First Dispatch
                   </span>
                 )}
               </div>
@@ -415,8 +461,8 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
         {/* Scrollable Form Body */}
         <form onSubmit={handleFormSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/60 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600">
           
-          {/* Re-Dispatch Notice Banner */}
-          {isReDispatchMode && (
+          {/* Dispatch Notice Banner */}
+          {isReDispatchMode ? (
             <div className="mb-5 bg-amber-950/30 border border-amber-500/40 rounded-2xl p-4 flex items-start gap-3.5 shadow-lg shadow-amber-950/20 animate-fade-in">
               <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
                 <AlertTriangle size={20} />
@@ -442,7 +488,29 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <div className="mt-2 flex items-center gap-2 text-xs text-slate-300 font-mono">
                   <span>Dynamic Order ID:</span>
                   <span className="px-2 py-0.5 rounded bg-[#0b101b] border border-amber-500/40 text-amber-400 font-bold">
-                    {reDispatchOrderId}
+                    {dynamicOrderId}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-5 bg-blue-950/20 border border-blue-500/30 rounded-2xl p-4 flex items-start gap-3.5 shadow-md shadow-blue-950/10 animate-fade-in">
+              <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
+                <Package size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 bg-blue-500/20 border border-blue-500/35 text-blue-300 font-bold text-[11px] uppercase tracking-wider rounded">
+                    First Dispatch · Attempt #1
+                  </span>
+                  <span className="text-white font-bold text-sm">
+                    Initial Shipment for {influencer.code || influencer.name}
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center gap-2 text-xs text-slate-300 font-mono">
+                  <span>Dynamic Order ID:</span>
+                  <span className="px-2 py-0.5 rounded bg-[#0b101b] border border-blue-500/30 text-blue-300 font-bold">
+                    {dynamicOrderId}
                   </span>
                 </div>
               </div>
