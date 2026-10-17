@@ -63,9 +63,12 @@ export const LoginPage = () => {
           <form onSubmit={handleLogin} className="space-y-6">
             
             <div className="space-y-2">
-              <label className="text-sm font-medium text-white block">Email Address</label>
+              <label htmlFor="login-username" className="text-sm font-medium text-white block">Email Address</label>
               <input
                 type="email"
+                name="username"
+                id="login-username"
+                autoComplete="username"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -75,9 +78,12 @@ export const LoginPage = () => {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-white block">Password</label>
+              <label htmlFor="login-password" className="text-sm font-medium text-white block">Password</label>
               <input
                 type="password"
+                name="password"
+                id="login-password"
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
