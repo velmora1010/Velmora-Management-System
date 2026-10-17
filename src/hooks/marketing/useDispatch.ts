@@ -254,7 +254,7 @@ export const useDispatch = () => {
         // If the current latest attempt is already the replacement attempt (without an issue), update it.
         const shouldCreateNewAttempt = Boolean(prevAttempt && prevAttempt.issue_reported);
 
-        if (prevAttempt && shouldCreateNewAttempt) {
+        if (isDispatchConfirmed && prevAttempt && shouldCreateNewAttempt) {
           // A product issue was previously reported -> Create a replacement attempt (Attempt N+1, RE_DISPATCH)
           await shipmentAttemptService.createReDispatchAttempt({
             campaign_id: numericCampaignId,
@@ -266,7 +266,7 @@ export const useDispatch = () => {
             dispatch_date: normalizedDispatchDate,
             estimated_delivery_date: normalizedExpectedDate
           });
-        } else if (!prevAttempt) {
+        } else if (isDispatchConfirmed && !prevAttempt) {
           // Initial attempt
           await shipmentAttemptService.createInitialShipmentAttempt({
             campaign_id: numericCampaignId,
@@ -278,7 +278,7 @@ export const useDispatch = () => {
             dispatch_date: normalizedDispatchDate,
             estimated_delivery_date: normalizedExpectedDate
           });
-        } else {
+        } else if (prevAttempt && !prevAttempt.issue_reported) {
           // Update the current attempt's details (courier, awb, dispatch date)
           await supabaseAdmin
             .from(SUPABASE_TABLES.shipmentAttempts)
@@ -306,7 +306,7 @@ export const useDispatch = () => {
       }
 
       // When confirming dispatch for a re-dispatch influencer, ensure reDispatchQueueService transitions to Dispatched
-      if (isDispatchConfirmed && (payload.is_re_dispatch || payload.influencer_code)) {
+      if (isDispatchConfirmed && payload.is_re_dispatch) {
         try {
           await reDispatchQueueService.transitionReDispatchToDispatched(numericCampaignId, {
             influencer_id: numericInfluencerId,
