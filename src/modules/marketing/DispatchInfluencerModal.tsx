@@ -320,26 +320,41 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
 
   const [showConfirmStep, setShowConfirmStep] = useState(false);
 
+  const creatorName = (influencer.influencer_name || influencer.name || '').trim();
+  const isDispatchFormValid = Boolean(
+    creatorName && 
+    dispatchDate && 
+    dispatchDate.trim() && 
+    courierPartner && 
+    courierPartner.trim() && 
+    trackingId && 
+    trackingId.trim()
+  );
+
   const executeDispatch = async (status: 'Dispatched' | 'Pending Confirmation') => {
     if (isSubmitting) return;
 
     const isConfirming = status === 'Dispatched';
-    const creatorName = influencer.influencer_name || influencer.name || '';
     
     // Genuinely required validation ONLY when officially confirming dispatch
     if (isConfirming) {
-      if (!creatorName.trim()) {
+      if (!creatorName) {
         toast.error('Please fill in Creator Name.');
         return;
       }
       
-      if (!dispatchDate) {
+      if (!dispatchDate || !dispatchDate.trim()) {
         toast.error('Please enter a valid Dispatch Date.');
         return;
       }
-      
-      if (selectedProducts.length === 0) {
-        toast.error('At least one product must be assigned to confirm dispatch.');
+
+      if (!courierPartner || !courierPartner.trim()) {
+        toast.error('Please select a Courier Partner to confirm dispatch.');
+        return;
+      }
+
+      if (!trackingId || !trackingId.trim()) {
+        toast.error('Please enter a Tracking ID / AWB number to confirm dispatch.');
         return;
       }
     }
@@ -347,7 +362,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     const payload: DispatchPayload = {
       influencer_id: String(influencer.id),
       campaign_id: String(campaign.id),
-      creator_name: creatorName.trim(),
+      creator_name: creatorName,
       phone_number: phone || null,
       alternative_phone_number: altPhone || null,
       address: address || null,
@@ -356,10 +371,10 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       pincode: pincode || null,
       languages: language || null,
       campaign_name: campaign.campaign_name,
-      product_name: selectedProducts.map((p: any) => p.product_name).join(', ') || null,
-      selected_products: selectedProducts,
-      total_products: totalProducts,
-      total_product_value: totalValue ? parseFloat(totalValue) : null,
+      product_name: selectedProducts.length > 0 ? selectedProducts.map((p: any) => p.product_name).join(', ') : null,
+      selected_products: selectedProducts || [],
+      total_products: totalProducts || 0,
+      total_product_value: totalValue ? parseFloat(totalValue) : 0,
       total_weight: totalWeight || null,
       product_photo_url: productPhotoUrl || null,
       courier_partner: courierPartner || null,
@@ -388,23 +403,30 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
+    if (!creatorName) {
+      toast.error('Please fill in Creator Name.');
+      return;
+    }
+    if (!dispatchDate || !dispatchDate.trim()) {
+      toast.error('Please enter a valid Dispatch Date.');
+      return;
+    }
+    if (!courierPartner || !courierPartner.trim()) {
+      toast.error('Please select a Courier Partner to confirm dispatch.');
+      return;
+    }
+    if (!trackingId || !trackingId.trim()) {
+      toast.error('Please enter a Tracking ID / AWB number to confirm dispatch.');
+      return;
+    }
+
     if (isAlreadyDispatched) {
       executeDispatch('Dispatched');
       return;
     }
-    const creatorName = influencer.influencer_name || influencer.name;
-    if (!creatorName || !creatorName.trim()) {
-      toast.error('Please fill in Creator Name.');
-      return;
-    }
-    if (!dispatchDate) {
-      toast.error('Please enter a valid Dispatch Date.');
-      return;
-    }
-    if (selectedProducts.length === 0) {
-      toast.error('At least one product must be assigned to confirm dispatch.');
-      return;
-    }
+
     setShowConfirmStep(true);
   };
 
@@ -720,7 +742,10 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                         );
                       })
                     ) : (
-                      <p className="text-slate-500 text-xs text-center italic py-4">No products selected for this influencer.</p>
+                      <div className="py-4 px-3 rounded-xl bg-[#0b101b]/40 border border-slate-800/60 text-center">
+                        <p className="text-slate-300 text-xs font-medium">No campaign products assigned.</p>
+                        <p className="text-slate-500 text-[11px] mt-0.5">You can still confirm dispatch with courier and tracking details.</p>
+                      </div>
                     )}
                   </div>
                   
@@ -830,6 +855,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                         <Truck size={13} className="text-slate-400 shrink-0" />
                         <span>Courier Partner</span>
+                        <span className="text-purple-400 font-bold ml-0.5" title="Required to confirm dispatch">*</span>
                       </label>
                       <select 
                         value={courierPartner} 
@@ -845,19 +871,26 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                         <option value="IThink Amazon">IThink Amazon</option>
                         <option value="IThink Delhivery">IThink Delhivery</option>
                       </select>
+                      {!courierPartner && (
+                        <p className="text-[11px] text-slate-500 mt-1">Required to confirm dispatch</p>
+                      )}
                     </div>
                     <div>
                       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                         <Hash size={13} className="text-slate-400 shrink-0" />
                         <span>Tracking ID</span>
+                        <span className="text-purple-400 font-bold ml-0.5" title="Required to confirm dispatch">*</span>
                       </label>
                       <input 
                         type="text" 
                         value={trackingId} 
                         onChange={e => setTrackingId(e.target.value)} 
-                        placeholder="Tracking ID"
+                        placeholder="Tracking ID / AWB"
                         className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
+                      {!trackingId && (
+                        <p className="text-[11px] text-slate-500 mt-1">Required to confirm dispatch</p>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3.5">
@@ -900,7 +933,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <div>
                   <h4 className="text-sm font-bold text-white">Confirm Official Shipment Dispatch?</h4>
                   <p className="text-xs text-slate-300 mt-0.5">
-                    This will officially mark <span className="text-white font-semibold">{influencer.influencer_name || influencer.name}</span> as <strong className="text-emerald-400">Dispatched</strong> with {totalProducts} product(s) via {courierPartner || 'selected courier'}.
+                    This will officially mark <span className="text-white font-semibold">{influencer.influencer_name || influencer.name}</span> as <strong className="text-emerald-400">Dispatched</strong> {totalProducts > 0 ? `with ${totalProducts} product(s)` : '(without campaign products)'} via {courierPartner || 'selected courier'}.
                   </p>
                 </div>
               </div>
@@ -958,7 +991,18 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-3">
+            <div className="flex items-center justify-end gap-3 flex-wrap">
+              {!isDispatchFormValid && !isSubmitting && (
+                <span className="text-[11px] text-amber-400/90 flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg">
+                  <AlertCircle size={12} className="shrink-0" />
+                  {!courierPartner && !trackingId ? 'Enter courier partner and tracking ID to confirm dispatch' :
+                   !courierPartner ? 'Select courier partner to confirm dispatch' :
+                   !trackingId ? 'Enter tracking ID to confirm dispatch' :
+                   !dispatchDate ? 'Select dispatch date to confirm dispatch' :
+                   'Fill required dispatch details to confirm'}
+                </span>
+              )}
+
               <button 
                 type="button" 
                 onClick={onClose} 
@@ -972,7 +1016,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <button 
                   type="button" 
                   onClick={() => executeDispatch('Dispatched')}
-                  disabled={isSubmitting || selectedProducts.length === 0} 
+                  disabled={isSubmitting || !isDispatchFormValid} 
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isSubmitting ? (
@@ -991,7 +1035,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 !showConfirmStep && (
                   <button 
                     type="submit" 
-                    disabled={isSubmitting || selectedProducts.length === 0} 
+                    disabled={isSubmitting || !isDispatchFormValid} 
                     className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     {isSubmitting ? (
