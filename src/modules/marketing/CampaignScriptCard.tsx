@@ -16,19 +16,22 @@ import {
   X,
   AlertTriangle,
   Copy,
-  Check
+  Check,
+  Layers
 } from 'lucide-react';
 import type { CampaignScript } from '../../types';
 import { getScriptAudioUrl, getScriptVideoUrl } from '../../services/campaignScriptService';
 
 interface CampaignScriptCardProps {
   script: CampaignScript;
+  campaignName?: string;
   onEdit: (script: CampaignScript) => void;
   onDelete: (script: CampaignScript) => void;
 }
 
 export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
   script,
+  campaignName,
   onEdit,
   onDelete
 }) => {
@@ -132,6 +135,12 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
               <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
                 {script.language}
               </span>
+              {campaignName && (
+                <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 flex items-center gap-1.5" title={`Created in: ${campaignName}`}>
+                  <Layers size={11} className="text-indigo-400 shrink-0" />
+                  <span className="truncate max-w-[140px] sm:max-w-[180px]">{campaignName}</span>
+                </span>
+              )}
             </div>
 
             {/* Actions Menu */}

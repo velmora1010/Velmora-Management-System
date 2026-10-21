@@ -157,18 +157,45 @@ export async function deleteScriptVideoFile(filePath: string): Promise<void> {
 }
 
 /**
- * Fetch all scripts for a specific campaign
+ * Fetch all scripts across all campaigns
+ */
+export async function fetchAllCampaignScripts(): Promise<CampaignScript[]> {
+  try {
+    const client = supabaseAdmin || supabase;
+    const { data, error } = await client
+      .from(SUPABASE_TABLES.campaignScripts)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching all campaign scripts:', error);
+      throw error;
+    }
+
+    return (data || []) as CampaignScript[];
+  } catch (err) {
+    console.error('Exception in fetchAllCampaignScripts:', err);
+    throw err;
+  }
+}
+
+/**
+ * Fetch all scripts for a specific campaign or all campaigns
  */
 export async function fetchCampaignScripts(
-  campaignId: string | number
+  campaignId?: string | number | 'all'
 ): Promise<CampaignScript[]> {
+  if (!campaignId || campaignId === 'all') {
+    return fetchAllCampaignScripts();
+  }
+
   try {
     const client = supabaseAdmin || supabase;
     const cleanId = String(campaignId).trim();
     const { data, error } = await client
       .from(SUPABASE_TABLES.campaignScripts)
       .select('*')
-      .eq('campaign_id', cleanId)
+      .or(`campaign_id.eq.${cleanId},campaign_id.eq.global`)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -263,7 +290,7 @@ export async function createCampaignScript(
 
 export interface UpdateScriptParams {
   id: string;
-  campaign_id: string;
+  campaign_id?: string;
   product: string;
   language: string;
   model_script: string;
@@ -324,7 +351,7 @@ export async function updateCampaignScript(
       finalVideoPath = path;
     }
 
-    const payload = {
+    const payload: any = {
       product: params.product.trim(),
       language: params.language.trim(),
       model_script: params.model_script.trim(),
@@ -335,6 +362,9 @@ export async function updateCampaignScript(
       reference_video_file_path: finalVideoPath,
       updated_at: new Date().toISOString()
     };
+    if (params.campaign_id !== undefined) {
+      payload.campaign_id = String(params.campaign_id).trim();
+    }
 
     const { data, error } = await client
       .from(SUPABASE_TABLES.campaignScripts)

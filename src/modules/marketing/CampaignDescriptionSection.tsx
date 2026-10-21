@@ -7,14 +7,17 @@ import {
   Loader2, 
   SearchX, 
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Layers
 } from 'lucide-react';
 import type { Campaign, CampaignDescription } from '../../types';
 import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
 import { 
+  fetchAllCampaignDescriptions, 
   fetchCampaignDescriptions, 
   deleteCampaignDescription 
 } from '../../services/campaignDescriptionService';
+import { useCampaigns } from '../../hooks/marketing/useCampaigns';
 import { CampaignDescriptionModal } from './CampaignDescriptionModal';
 import { CampaignDescriptionCard } from './CampaignDescriptionCard';
 import toast from 'react-hot-toast';
@@ -28,12 +31,23 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
   campaign, 
   onBack 
 }) => {
+  const { campaigns } = useCampaigns();
   const [descriptions, setDescriptions] = useState<CampaignDescription[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Filters
+  // Filters: Campaign and Product
+  const [selectedCampaign, setSelectedCampaign] = useState<string>('All');
   const [selectedProduct, setSelectedProduct] = useState<string>('All');
+
+  // Campaign lookup map
+  const campaignMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (campaigns || []).forEach(c => map.set(String(c.id), c.campaign_name));
+    if (campaign?.id) map.set(String(campaign.id), campaign.campaign_name);
+    map.set('global', 'Global (Reusable)');
+    return map;
+  }, [campaigns, campaign]);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -44,7 +58,7 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
     setIsLoading(true);
     setFetchError(null);
     try {
-      const data = await fetchCampaignDescriptions(campaign.id);
+      const data = await fetchAllCampaignDescriptions();
       setDescriptions(data);
     } catch (err: any) {
       console.error('Error loading campaign descriptions:', err);
@@ -54,7 +68,7 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
     } finally {
       setIsLoading(false);
     }
-  }, [campaign.id]);
+  }, []);
 
   useEffect(() => {
     loadDescriptions();
@@ -100,10 +114,15 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
   // Filtered list
   const filteredDescriptions = useMemo(() => {
     return descriptions.filter(d => {
-      if (selectedProduct === 'All') return true;
-      return d.product.toLowerCase() === selectedProduct.toLowerCase();
+      const matchCampaign = selectedCampaign === 'All'
+        ? true
+        : selectedCampaign === 'global'
+          ? d.campaign_id === 'global'
+          : (String(d.campaign_id) === selectedCampaign || d.campaign_id === 'global');
+      const matchProduct = selectedProduct === 'All' || d.product.toLowerCase() === selectedProduct.toLowerCase();
+      return matchCampaign && matchProduct;
     });
-  }, [descriptions, selectedProduct]);
+  }, [descriptions, selectedCampaign, selectedProduct]);
 
   return (
     <div className="w-full space-y-5 animate-fade-in text-slate-200">
@@ -124,7 +143,7 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
             </div>
             <div>
               <h3 className="text-base font-bold text-white leading-tight">Description Management</h3>
-              <p className="text-xs text-slate-400 mt-0.5">{campaign.campaign_name}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{selectedCampaign === 'All' ? 'All Campaigns' : (campaignMap.get(selectedCampaign) || campaign.campaign_name)}</p>
             </div>
           </div>
         </div>
@@ -144,11 +163,34 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
 
       {/* Filters Bar & Results Summary */}
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-            <Filter size={13} className="text-purple-400" />
-            <span>Product:</span>
-          </span>
+        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+          {/* Filter 1: Campaign */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+              <Layers size={13} className="text-purple-400" />
+              <span>Campaign:</span>
+            </span>
+            <select
+              value={selectedCampaign}
+              onChange={(e) => setSelectedCampaign(e.target.value)}
+              className="bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer w-full sm:w-auto"
+            >
+              <option value="All">All Campaigns</option>
+              {(campaigns || []).map((c) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.campaign_name}
+                </option>
+              ))}
+              <option value="global">Global (Reusable)</option>
+            </select>
+          </div>
+
+          {/* Filter 2: Product */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+              <Filter size={13} className="text-purple-400" />
+              <span>Product:</span>
+            </span>
           <select
             value={selectedProduct}
             onChange={(e) => setSelectedProduct(e.target.value)}
@@ -162,6 +204,7 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
             ))}
           </select>
         </div>
+      </div>
 
         {/* Count & Refresh */}
         <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-400 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800">
@@ -233,6 +276,7 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
             <CampaignDescriptionCard
               key={desc.id}
               description={desc}
+              campaignName={campaignMap.get(String(desc.campaign_id)) || (desc.campaign_id === 'global' ? 'Global (Reusable)' : 'Global')}
               onEdit={handleOpenEdit}
               onDelete={handleDelete}
             />
@@ -248,6 +292,7 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
           setDescriptionToEdit(null);
         }}
         campaign={campaign}
+        campaigns={campaigns}
         descriptionToEdit={descriptionToEdit}
         onSuccess={handleModalSuccess}
       />
