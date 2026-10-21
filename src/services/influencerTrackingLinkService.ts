@@ -799,7 +799,7 @@ export async function batchGenerateInfluencerTrackingLinks(
       (l) =>
         String(l.campaign_id) === cleanCampaignId &&
         String(l.influencer_id) === String(inf.id) &&
-        l.product.trim().toLowerCase() === params.product.trim().toLowerCase() &&
+        isSameProduct(l.product, params.product) &&
         (
           (l.destination_type && l.destination_type.toLowerCase() === destination_type.toLowerCase()) ||
           (l.platform || '').trim().toLowerCase() === params.platform.trim().toLowerCase() ||
@@ -1352,6 +1352,44 @@ export function normalizeProductName(name?: string | null): string {
 }
 
 /**
+ * Maps product aliases to their canonical standard identity
+ */
+export function canonicalizeProductName(name?: string | null): string {
+  if (!name) return '';
+  const clean = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (clean.includes('detergent')) return 'diydetergentliquid';
+  if (clean.includes('dishwash')) return 'diydishwashliquid';
+  if (clean.includes('fabricconditioner') || clean.includes('comfort')) return 'diyfabricconditioner';
+  if (clean.includes('kitchentowel') || clean.includes('bambootowel') || clean.includes('bambookitchentowel')) return 'bambookitchentowel';
+  if (clean.includes('bbccleaner') || clean === 'bbc') return 'bbccleaner';
+  if (clean.includes('kitchencleaner')) return 'kitchencleaner';
+  if (clean.includes('glasscleaner')) return 'glasscleaner';
+  if (clean.includes('floorcleaner')) return 'floorcleaner';
+  if (clean.includes('carshampoo') || clean.includes('carwash')) return 'carshampoo';
+  if (clean.includes('bikeshampoo') || clean.includes('bikewash')) return 'bikeshampoo';
+  if (clean.includes('handwash')) return 'handwash';
+  if (clean.includes('snowfoam') || clean.includes('foamsprayer')) return 'snowfoamsprayer';
+  if (clean.includes('sponge')) return 'magicsponge';
+  return clean;
+}
+
+/**
+ * Checks if two product names represent the same product (accounting for aliases & updated names)
+ */
+export function isSameProduct(p1?: string | null, p2?: string | null): boolean {
+  if (!p1 || !p2) return false;
+  const s1 = p1.trim().toLowerCase();
+  const s2 = p2.trim().toLowerCase();
+  if (s1 === s2) return true;
+  const c1 = canonicalizeProductName(p1);
+  const c2 = canonicalizeProductName(p2);
+  if (c1 && c2 && c1 === c2) return true;
+  const n1 = normalizeProductName(p1);
+  const n2 = normalizeProductName(p2);
+  return n1.includes(n2) || n2.includes(n1);
+}
+
+/**
  * Resolves the matching Website tracking link for a status tracking deliverable.
  * In Marketing -> Campaign -> Status Tracking -> Post Date, the publishing platforms
  * (Instagram, Facebook, YouTube) strictly map to the single Website tracking link.
@@ -1398,13 +1436,11 @@ export function resolveWebsiteTrackingLink(
     ) || 1;
     if (linkVidInt !== targetVidNum) return false;
 
-    // Product match: normalized product name comparison
+    // Product match: robust product comparison
     if (targetNormProd && link.product) {
       const linkNormProd = normalizeProductName(link.product);
       if (!linkNormProd.startsWith('video')) {
-        const matchProd = linkNormProd === targetNormProd || 
-                          linkNormProd.includes(targetNormProd) || 
-                          targetNormProd.includes(linkNormProd);
+        const matchProd = isSameProduct(link.product, productName);
         if (!matchProd) return false;
       }
     }

@@ -44,6 +44,7 @@ import {
   TRACKING_PLATFORMS, 
   TRACKING_VIDEOS, 
   compareTrackingLinksByCodeAsc,
+  isSameProduct,
   type MarketplaceType
 } from '../../services/influencerTrackingLinkService';
 import { CampaignTrackingLinkModal } from './CampaignTrackingLinkModal';
@@ -429,7 +430,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     const filtered = activeEligibleLinks.filter(l => {
       // Product Filter
       const matchProduct = selectedProduct === 'All' || 
-        l.product.toLowerCase() === selectedProduct.toLowerCase();
+        l.product.toLowerCase() === selectedProduct.toLowerCase() ||
+        isSameProduct(l.product, selectedProduct);
 
       // Platform Filter
       const matchPlatform = selectedPlatform === 'All' || 
@@ -487,7 +489,13 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     const prodMap = new Map<string, InfluencerTrackingLink[]>();
 
     filteredLinks.forEach(link => {
-      const prodName = link.product || 'Unassigned Product';
+      let prodName = link.product || 'Unassigned Product';
+      if (selectedProduct !== 'All' && isSameProduct(link.product, selectedProduct)) {
+        prodName = selectedProduct;
+      } else {
+        const standardMatch = SCRIPT_PRODUCTS.find(sp => isSameProduct(sp, link.product));
+        if (standardMatch) prodName = standardMatch;
+      }
       if (!prodMap.has(prodName)) {
         prodMap.set(prodName, []);
       }
@@ -641,18 +649,23 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     const allProdNames = Array.from(new Set([
       ...SCRIPT_PRODUCTS,
       ...COMBO_PRODUCTS,
-      ...Array.from(countMap.keys())
+      ...Array.from(countMap.keys()).filter(dbProd => 
+        !SCRIPT_PRODUCTS.some(sp => isSameProduct(sp, dbProd)) &&
+        !COMBO_PRODUCTS.some(cp => isSameProduct(cp, dbProd))
+      )
     ]));
 
     return allProdNames.map(name => {
-      // Find matching case-insensitive entry if any
-      let matchedEntry = countMap.get(name);
-      if (!matchedEntry) {
-        for (const [key, val] of countMap.entries()) {
-          if (key.toLowerCase() === name.toLowerCase()) {
-            matchedEntry = val;
-            break;
-          }
+      // Find matching entry or rollup from alias-matched entries
+      let totalLinks = 0;
+      const platforms = new Set<string>();
+      const categories = new Set<string>();
+
+      for (const [key, val] of countMap.entries()) {
+        if (key.toLowerCase() === name.toLowerCase() || isSameProduct(key, name)) {
+          totalLinks += val.total;
+          val.platforms.forEach(p => platforms.add(p));
+          val.categories.forEach(c => categories.add(c));
         }
       }
 
@@ -661,9 +674,9 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       return {
         name,
         isCombo,
-        totalLinks: matchedEntry ? matchedEntry.total : 0,
-        platformsCount: matchedEntry ? matchedEntry.platforms.size : 0,
-        categoriesCount: matchedEntry ? matchedEntry.categories.size : 0
+        totalLinks,
+        platformsCount: platforms.size,
+        categoriesCount: categories.size
       };
     }).sort((a, b) => {
       // 1. Products with links first (descending)
@@ -686,7 +699,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     // Filter links for this product
     const prodLinks = links.filter(
       l => !eliminatedInfluencerIds.has(String(l.influencer_id)) &&
-           (l.product || '').toLowerCase() === selectedProduct.toLowerCase()
+           (
+             (l.product || '').toLowerCase() === selectedProduct.toLowerCase() ||
+             isSameProduct(l.product, selectedProduct)
+           )
     );
 
     const marketplaces: Array<{

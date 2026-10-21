@@ -10,11 +10,11 @@ export interface SKUMapping {
 export const SKU_MASTER: SKUMapping[] = [
   { code: '1B', name: 'Detergent', aliases: ['detergent', 'detergent liquid', 'diy detergent', 'diy detergent liquid'] },
   { code: '1Y', name: 'Dishwash', aliases: ['dishwash', 'dishwash liquid', 'diy dishwash', 'diy dishwash liquid'] },
-  { code: '1P', name: 'Fabric Conditioner', aliases: ['fabric conditioner', 'fabric softener', 'conditioner'] },
+  { code: '1P', name: 'Fabric Conditioner', aliases: ['fabric conditioner', 'fabric softener', 'conditioner', 'diy fabric conditioner'] },
   { code: '1S', name: 'Magic Sponge', aliases: ['magic sponge', 'sponge'] },
   { code: '1C', name: 'Car Shampoo', aliases: ['car shampoo', 'car wash'] },
   { code: '1BI', name: 'Bike Shampoo', aliases: ['bike shampoo', 'bike wash'] },
-  { code: '1BC', name: 'BBC Cleaner', aliases: ['bbc cleaner', 'bbc'] },
+  { code: '1BC', name: 'BBC Cleaner', aliases: ['bbc cleaner', 'bbc', 'bbc cleaner — brass, bronze & copper cleaner'] },
   { code: '1K', name: 'Kitchen Cleaner', aliases: ['kitchen cleaner', 'kitchen'] },
   { code: '1F', name: 'Floor Cleaner', aliases: ['floor cleaner', 'floor'] },
   { code: '1G', name: 'Glass Cleaner', aliases: ['glass cleaner', 'glass'] },

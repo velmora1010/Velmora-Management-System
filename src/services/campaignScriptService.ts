@@ -4,18 +4,18 @@ import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignScript } from '../types';
 
 export const SCRIPT_PRODUCTS = [
-  'Detergent',
-  'Dishwash',
-  'Fabric Conditioner',
-  'Handwash',
-  'Car Shampoo',
-  'Bike Shampoo',
-  'BBC Cleaner',
+  'DIY Detergent Liquid',
+  'DIY Dishwash Liquid',
+  'DIY Fabric Conditioner',
   'Kitchen Cleaner',
-  'Glass Cleaner',
+  'BBC Cleaner — Brass, Bronze & Copper Cleaner',
+  'Handwash',
   'Floor Cleaner',
-  'Magic Sponge',
-  'Bamboo Kitchen Towel'
+  'Glass Cleaner',
+  'Bike Shampoo',
+  'Car Shampoo',
+  'Bamboo Kitchen Towel',
+  'Snow Foam Sprayer — NEW PRODUCT'
 ] as const;
 
 export const COMBO_PRODUCTS = [
