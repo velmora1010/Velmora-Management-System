@@ -48,38 +48,63 @@ import {
 import { isActiveStatus } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
-const KNOWN_PRODUCT_SLUGS: Record<string, string> = {
-  'diy detergent liquid': 'detergent',
-  'detergent': 'detergent',
-  'diy dishwash liquid': 'dishwash',
-  'dishwash': 'dishwash',
-  'diy fabric conditioner': 'fabric-conditioner',
-  'fabric conditioner': 'fabric-conditioner',
+/**
+ * Verified Shopify handles from Justmixx store (https://www.justmixx.com/products.json)
+ */
+export const VERIFIED_SHOPIFY_HANDLES: Record<string, string> = {
+  // Standard 12 products
+  'diy detergent liquid': 'diy-detergent-liquid',
+  'detergent': 'diy-detergent-liquid',
+  'diy dishwash liquid': 'diy-dishwash-liquid',
+  'dishwash': 'diy-dishwash-liquid',
+  'diy fabric conditioner': 'diy-fabric-conditioner-liquid',
+  'diy fabric conditioner liquid': 'diy-fabric-conditioner-liquid',
+  'fabric conditioner': 'diy-fabric-conditioner-liquid',
+  'comfort': 'diy-fabric-conditioner-liquid',
   'kitchen cleaner': 'kitchen-cleaner',
-  'bbc cleaner — brass, bronze & copper cleaner': 'bbc-cleaner',
-  'bbc cleaner': 'bbc-cleaner',
+  'diy kitchen cleaner': 'kitchen-cleaner',
+  'bbc cleaner — brass, bronze & copper cleaner': 'bbc-cleaner-brass-bronze-copper-cleaner',
+  'bbc cleaner': 'bbc-cleaner-brass-bronze-copper-cleaner',
+  'diy bbc cleaner': 'bbc-cleaner-brass-bronze-copper-cleaner',
+  'diy bbc cleaner — brass, bronze & copper cleaner': 'bbc-cleaner-brass-bronze-copper-cleaner',
   'handwash': 'handwash',
+  'diy handwash liquid': 'handwash',
   'hand wash': 'handwash',
   'floor cleaner': 'floor-cleaner',
+  'diy floor cleaner': 'floor-cleaner',
   'glass cleaner': 'glass-cleaner',
+  'diy glass cleaner': 'glass-cleaner',
   'bike shampoo': 'bike-shampoo',
+  'diy bike shampoo': 'bike-shampoo',
   'car shampoo': 'car-shampoo',
-  'bamboo kitchen towel': 'bamboo-kitchen-towel'
+  'diy car shampoo': 'car-shampoo',
+  'bamboo kitchen towel': 'bamboo-kitchen-towel',
+  'snow foam sprayer — new product': 'snow-foam-sprayer',
+  'snow foam sprayer': 'snow-foam-sprayer'
 };
 
 export const getDefaultProductUrl = (prodName: string): string => {
   if (!prodName) return '';
   const clean = prodName.trim().toLowerCase();
 
-  // Snow Foam Sprayer: No verified mapping exists in system data; do not invent or fabricate a URL
-  if (clean.includes('snow foam') || clean.includes('foam sprayer')) {
-    return '';
+  const mappedHandle = VERIFIED_SHOPIFY_HANDLES[clean];
+  if (mappedHandle) {
+    return `https://www.justmixx.com/products/${mappedHandle}`;
   }
 
-  const mappedSlug = KNOWN_PRODUCT_SLUGS[clean];
-  if (mappedSlug) {
-    return `https://www.justmixx.com/products/${mappedSlug}`;
-  }
+  // Handle aliases & partial variations
+  if (clean.includes('detergent')) return 'https://www.justmixx.com/products/diy-detergent-liquid';
+  if (clean.includes('dishwash')) return 'https://www.justmixx.com/products/diy-dishwash-liquid';
+  if (clean.includes('fabric conditioner') || clean.includes('conditioner')) return 'https://www.justmixx.com/products/diy-fabric-conditioner-liquid';
+  if (clean.includes('kitchen towel') || clean.includes('bamboo')) return 'https://www.justmixx.com/products/bamboo-kitchen-towel';
+  if (clean.includes('bbc cleaner') || clean.includes('brass')) return 'https://www.justmixx.com/products/bbc-cleaner-brass-bronze-copper-cleaner';
+  if (clean.includes('kitchen cleaner')) return 'https://www.justmixx.com/products/kitchen-cleaner';
+  if (clean.includes('glass cleaner')) return 'https://www.justmixx.com/products/glass-cleaner';
+  if (clean.includes('floor cleaner')) return 'https://www.justmixx.com/products/floor-cleaner';
+  if (clean.includes('car shampoo')) return 'https://www.justmixx.com/products/car-shampoo';
+  if (clean.includes('bike shampoo')) return 'https://www.justmixx.com/products/bike-shampoo';
+  if (clean.includes('handwash')) return 'https://www.justmixx.com/products/handwash';
+  if (clean.includes('snow foam') || clean.includes('foam sprayer')) return 'https://www.justmixx.com/products/snow-foam-sprayer';
 
   const slug = clean.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `https://www.justmixx.com/products/${slug}`;
@@ -478,16 +503,11 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
 
   // Handle product change in batch form
   const handleProductChange = (newProd: string) => {
-    const prevDefault = getDefaultProductUrl(selectedProduct);
     setSelectedProduct(newProd);
     setValidationError(null);
 
-    // Update productUrl if Website is selected and URL was empty, previously default, or had an unencoded space
-    if (selectedMarketplace === 'website') {
-      if (!productUrl.trim() || productUrl.trim() === prevDefault || productUrl.includes('%20')) {
-        setProductUrl(getDefaultProductUrl(newProd));
-      }
-    }
+    // Automatically update the Website product URL to the newly selected product's verified Shopify URL
+    setProductUrl(getDefaultProductUrl(newProd));
   };
 
   // Active marketplace config
@@ -1006,10 +1026,10 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                       <span className="text-slate-300 font-mono truncate">{cleanBaseUrl}</span>
                     </div>
                   )}
-                  {selectedProduct.includes('Snow Foam Sprayer') && !productUrl.trim() && (
+                  {!productUrl.trim() && (
                     <div className="mt-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 flex items-center gap-1.5">
                       <AlertCircle size={13} className="shrink-0 text-amber-400" />
-                      <span>No default URL mapping configured for Snow Foam Sprayer. Please enter the verified product URL.</span>
+                      <span>Please enter a valid Shopify product URL.</span>
                     </div>
                   )}
                 </div>
