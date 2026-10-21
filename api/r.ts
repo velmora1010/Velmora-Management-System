@@ -161,9 +161,13 @@ export default async function handler(
     return;
   }
 
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || DEFAULT_UPSTASH_REDIS_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || DEFAULT_UPSTASH_REDIS_TOKEN;
-  const isRedisConfigured = Boolean(redisUrl && redisToken);
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '';
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '';
+  const isRedisConfigured = Boolean(
+    redisUrl && 
+    redisToken && 
+    !redisUrl.includes('still-griffon-217114.upstash.io')
+  );
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
   let canonicalLinkId = isUuid ? identifier : '';

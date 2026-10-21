@@ -50,7 +50,7 @@ import {
   type CampaignScript 
 } from '../../services/campaignScriptService';
 import { downloadMediaFile } from '../../utils/fileDownloadUtils';
-import { fetchInfluencerTrackingLinks } from '../../services/influencerTrackingLinkService';
+import { fetchInfluencerTrackingLinks, resolveDeliverableTrackingLink } from '../../services/influencerTrackingLinkService';
 import { fetchCampaignDescriptions } from '../../services/campaignDescriptionService';
 import { InfluencerConversationSelector } from '../../components/marketing/InfluencerConversationSelector';
 import { 
@@ -1092,6 +1092,8 @@ export interface PlatformDeliverableInfo {
   generated_at?: string;
   tracking_link_id?: string;
   description_id?: string;
+  is_manually_edited?: boolean;
+  selected_destination?: string;
 }
 
 export interface DraftAttempt {
@@ -15696,38 +15698,15 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
             continue;
           }
 
-          const matchedLink = allTrackingLinks.find(link => {
-            const linkInfId = String(link.influencer_id || '').trim();
-            const linkInfCode = (link.influencer_code || '').trim().toLowerCase().replace(/^#+/, '');
-            const linkCreatorCode = (link.creator_code || '').trim().toLowerCase().replace(/^#+/, '');
-            const matchInf = (linkInfId && currentInfId && linkInfId === currentInfId) ||
-              (rawCodeClean && (linkInfCode === rawCodeClean || linkCreatorCode === rawCodeClean));
-            if (!matchInf) return false;
-
-            const linkVidNum = (link.video_number || '').trim().toLowerCase();
-            const linkUtmContent = (link.utm_content || '').trim().toLowerCase();
-            const matchVideo =
-              linkVidNum === `video ${videoNumber}`.toLowerCase() ||
-              linkVidNum === String(videoNumber) ||
-              linkUtmContent === `v${videoNumber}`.toLowerCase() ||
-              (videoNumber === 1 && (!link.video_number || link.video_number === 'Video 1'));
-            if (!matchVideo) return false;
-
-            const linkPlat = (link.platform || '').trim().toLowerCase();
-            const linkUtmSource = (link.utm_source || '').trim().toLowerCase();
-            const matchPlat = linkPlat === normPlat || linkUtmSource === normPlat;
-            if (!matchPlat) return false;
-
-            if (normProd && link.product) {
-              const lp = link.product.trim().toLowerCase();
-              if (!lp.startsWith('video ')) {
-                const matchProd = lp === normProd || normalizeScriptMatch(lp) === normalizeScriptMatch(normProd);
-                if (!matchProd) return false;
-              }
-            }
-
-            return true;
-          });
+          const { matchedLink } = resolveDeliverableTrackingLink(
+            allTrackingLinks,
+            currentInfId,
+            rawCodeClean,
+            videoNumber,
+            prodName,
+            plat,
+            existing?.selected_destination
+          );
 
           const matchedDesc = allDescriptions.find(d => {
             const dp = (d.product || '').trim().toLowerCase();
@@ -15801,7 +15780,8 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         ...prev,
         [platId]: {
           ...existing,
-          [field]: val
+          [field]: val,
+          ...(field === 'final_post_link' ? { is_manually_edited: true } : {})
         }
       };
     });
@@ -15871,48 +15851,23 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       const currentInfId = String(record.influencer_id || '').trim();
 
       for (const plat of selectedPlatforms) {
-        const normPlat = plat.trim().toLowerCase();
+        const existingDeliverable = updatedDeliverables[plat];
+        const { matchedLink } = resolveDeliverableTrackingLink(
+          allTrackingLinks,
+          currentInfId,
+          rawCodeClean,
+          videoNumber,
+          prodName,
+          plat,
+          existingDeliverable?.selected_destination
+        );
 
-        // Exact lookup in Tracking Link department
-        const matchedLink = allTrackingLinks.find(link => {
-          // 1. Influencer matching
-          const linkInfId = String(link.influencer_id || '').trim();
-          const linkInfCode = (link.influencer_code || '').trim().toLowerCase().replace(/^#+/, '');
-          const linkCreatorCode = (link.creator_code || '').trim().toLowerCase().replace(/^#+/, '');
+        const isManuallyEdited = Boolean(existingDeliverable?.is_manually_edited && existingDeliverable.final_post_link);
+        const resolvedLink = isManuallyEdited 
+          ? existingDeliverable!.final_post_link 
+          : (matchedLink?.tracking_url || '');
 
-          const matchInf = (linkInfId && currentInfId && linkInfId === currentInfId) ||
-            (rawCodeClean && (linkInfCode === rawCodeClean || linkCreatorCode === rawCodeClean));
-          if (!matchInf) return false;
-
-          // 2. Video matching (v1 to v6)
-          const linkVidNum = (link.video_number || '').trim().toLowerCase();
-          const linkUtmContent = (link.utm_content || '').trim().toLowerCase();
-          const matchVideo =
-            linkVidNum === `video ${videoNumber}`.toLowerCase() ||
-            linkVidNum === String(videoNumber) ||
-            linkUtmContent === `v${videoNumber}`.toLowerCase() ||
-            (videoNumber === 1 && (!link.video_number || link.video_number === 'Video 1'));
-          if (!matchVideo) return false;
-
-          // 3. Platform matching
-          const linkPlat = (link.platform || '').trim().toLowerCase();
-          const linkUtmSource = (link.utm_source || '').trim().toLowerCase();
-          const matchPlat = linkPlat === normPlat || linkUtmSource === normPlat;
-          if (!matchPlat) return false;
-
-          // 4. Product matching (with legacy placeholder label protection)
-          if (normProd && link.product) {
-            const lp = link.product.trim().toLowerCase();
-            if (!lp.startsWith('video ')) {
-              const matchProd = lp === normProd || normalizeScriptMatch(lp) === normalizeScriptMatch(normProd);
-              if (!matchProd) return false;
-            }
-          }
-
-          return true;
-        });
-
-        const hasLink = Boolean(matchedLink?.tracking_url);
+        const hasLink = Boolean(resolvedLink);
         const hasDesc = Boolean(matchedDesc?.description);
 
         let status: PlatformDeliverableInfo['status'] = 'generated';
@@ -15929,14 +15884,18 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
           successCount++;
         }
 
+        const effectiveDest = matchedLink?.destination_type || matchedLink?.platform?.toLowerCase() || existingDeliverable?.selected_destination || 'website';
+
         updatedDeliverables[plat] = {
           platform: plat,
-          final_post_link: hasLink ? matchedLink!.tracking_url : (updatedDeliverables[plat]?.final_post_link || ''),
-          final_description: hasDesc ? matchedDesc!.description : (updatedDeliverables[plat]?.final_description || ''),
+          final_post_link: resolvedLink,
+          final_description: hasDesc ? matchedDesc!.description : (existingDeliverable?.final_description || ''),
           status,
           generated_at: new Date().toISOString(),
-          tracking_link_id: matchedLink?.id,
-          description_id: matchedDesc?.id
+          tracking_link_id: matchedLink?.id || existingDeliverable?.tracking_link_id,
+          description_id: matchedDesc?.id || existingDeliverable?.description_id,
+          is_manually_edited: isManuallyEdited,
+          selected_destination: effectiveDest
         };
       }
 
@@ -16426,9 +16385,16 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
                   {/* 1. FINAL PRODUCT LINK */}
                   <div className="w-full">
                     <div className="flex items-center justify-between mb-1.5">
-                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                        Final Product Link
-                      </label>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                          Final Product Link
+                        </label>
+                        {deliverable.is_manually_edited && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                            Custom Edit Preserved
+                          </span>
+                        )}
+                      </div>
                       {deliverable.final_post_link && (
                         <div className="flex items-center gap-2">
                           <button

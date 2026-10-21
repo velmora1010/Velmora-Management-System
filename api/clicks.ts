@@ -32,15 +32,19 @@ export default async function handler(
     return;
   }
 
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || DEFAULT_UPSTASH_REDIS_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || DEFAULT_UPSTASH_REDIS_TOKEN;
-  const isRedisConfigured = Boolean(redisUrl && redisToken);
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '';
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '';
+  const isRedisConfigured = Boolean(
+    redisUrl && 
+    redisToken && 
+    !redisUrl.includes('still-griffon-217114.upstash.io')
+  );
 
   if (!isRedisConfigured) {
     res.statusCode = 200;
     res.end(JSON.stringify({
       configured: false,
-      error: 'Redis tracking storage not configured. Please set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel.',
+      error: 'Redis click counter is not configured. Please set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel.',
       clicks: {}
     }));
     return;
@@ -132,11 +136,11 @@ export default async function handler(
       clicks: clicksMap
     }));
   } catch (err: any) {
-    console.error('[Clicks API] Error querying Redis counts:', err);
-    res.statusCode = 500;
+    console.warn('[Clicks API] Error querying Redis counts:', err?.message || err);
+    res.statusCode = 200;
     res.end(JSON.stringify({
-      configured: true,
-      error: err.message || 'Failed to fetch click counts from Redis',
+      configured: false,
+      error: 'Redis click tracking counter is currently unreachable. Please verify UPSTASH_REDIS_REST_URL in Vercel.',
       clicks: {}
     }));
   }

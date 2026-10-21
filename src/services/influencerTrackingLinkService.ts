@@ -794,14 +794,21 @@ export async function batchGenerateInfluencerTrackingLinks(
     const cleanCode = String(rawCode).replace(/^#+/, '').trim().toLowerCase();
     const displayCode = `#${cleanCode.toUpperCase()}`;
 
-    // Deduplication check: Match (campaign_id, influencer_id, product, platform, video_number)
+    // Deduplication check: Match (campaign_id, influencer_id, product, destination_type/platform, video_number)
     const existing = existingLinks.find(
       (l) =>
         String(l.campaign_id) === cleanCampaignId &&
         String(l.influencer_id) === String(inf.id) &&
         l.product.trim().toLowerCase() === params.product.trim().toLowerCase() &&
-        (l.platform || '').trim().toLowerCase() === params.platform.trim().toLowerCase() &&
-        (l.video_number || '').trim().toLowerCase() === params.video_number.trim().toLowerCase()
+        (
+          (l.destination_type && l.destination_type.toLowerCase() === destination_type.toLowerCase()) ||
+          (l.platform || '').trim().toLowerCase() === params.platform.trim().toLowerCase() ||
+          (l.utm_source || '').trim().toLowerCase() === params.utm_source.trim().toLowerCase()
+        ) &&
+        (
+          (l.video_number || '').trim().toLowerCase() === params.video_number.trim().toLowerCase() ||
+          (l.utm_content || '').trim().toLowerCase() === params.utm_content.trim().toLowerCase()
+        )
     );
 
     const recordId = existing?.id || (
@@ -1309,5 +1316,96 @@ export async function bulkDeleteInfluencerTrackingLinks(
     const updated = local.filter(l => !idSet.has(l.id));
     saveLocalTrackingLinks(cleanCampaignId, updated);
   }
+}
+
+/**
+ * Resolves the appropriate tracking link for a status tracking deliverable.
+ * Supports resolving publishing platforms (Instagram, YouTube, Facebook)
+ * to their destination links (Website, Amazon, Flipkart, Meesho).
+ */
+export function resolveDeliverableTrackingLink(
+  allTrackingLinks: InfluencerTrackingLink[],
+  influencerId: string | number,
+  influencerCode: string | null | undefined,
+  videoNumber: number | string,
+  productName: string,
+  platform: string,
+  preferredDestination?: string
+): {
+  matchedLink?: InfluencerTrackingLink;
+  candidateLinks: InfluencerTrackingLink[];
+} {
+  const normPlat = (platform || '').trim().toLowerCase();
+  const currentInfId = String(influencerId || '').trim();
+  const rawCodeClean = (influencerCode || '').trim().toLowerCase().replace(/^#+/, '');
+  const normProd = (productName || '').trim().toLowerCase();
+  const vidNumInt = parseInt(String(videoNumber).replace(/[^0-9]/g, ''), 10) || 1;
+
+  // 1. Filter candidate links for this influencer, video number, and product
+  const candidateLinks = allTrackingLinks.filter(link => {
+    // Influencer match
+    const linkInfId = String(link.influencer_id || '').trim();
+    const linkInfCode = (link.influencer_code || '').trim().toLowerCase().replace(/^#+/, '');
+    const linkCreatorCode = (link.creator_code || '').trim().toLowerCase().replace(/^#+/, '');
+
+    const matchInf = (linkInfId && currentInfId && linkInfId === currentInfId) ||
+      (rawCodeClean && (linkInfCode === rawCodeClean || linkCreatorCode === rawCodeClean));
+    if (!matchInf) return false;
+
+    // Video match (v1 to v6)
+    const linkVidNum = (link.video_number || '').trim().toLowerCase();
+    const linkUtmContent = (link.utm_content || '').trim().toLowerCase();
+    const matchVideo =
+      linkVidNum === `video ${vidNumInt}`.toLowerCase() ||
+      linkVidNum === String(vidNumInt) ||
+      linkUtmContent === `v${vidNumInt}`.toLowerCase() ||
+      (vidNumInt === 1 && (!link.video_number || link.video_number === 'Video 1'));
+    if (!matchVideo) return false;
+
+    // Product match
+    if (normProd && link.product) {
+      const lp = link.product.trim().toLowerCase();
+      if (!lp.startsWith('video ')) {
+        const matchProd = lp === normProd || lp.includes(normProd) || normProd.includes(lp);
+        if (!matchProd) return false;
+      }
+    }
+
+    return true;
+  });
+
+  // 2. Select matchedLink:
+  // Priority A: Direct link specifically targeting this platform (e.g. Instagram UTM or legacy Instagram platform)
+  let matched = candidateLinks.find(link => {
+    const lp = (link.platform || '').trim().toLowerCase();
+    const lu = (link.utm_source || '').trim().toLowerCase();
+    return lp === normPlat || lu === normPlat;
+  });
+
+  // Priority B: Matching preferred destination if specified (e.g. user selected 'amazon' or 'website')
+  if (!matched && preferredDestination) {
+    const pd = preferredDestination.toLowerCase();
+    matched = candidateLinks.find(link => {
+      const ld = (link.destination_type || '').toLowerCase();
+      const lp = (link.platform || '').toLowerCase();
+      return ld === pd || lp === pd;
+    });
+  }
+
+  // Priority C: Website / Shopify destination link
+  if (!matched) {
+    matched = candidateLinks.find(link => {
+      const ld = (link.destination_type || '').toLowerCase();
+      const lp = (link.platform || '').toLowerCase();
+      return ld === 'shopify' || ld === 'website' || lp === 'website';
+    });
+  }
+
+  // Priority D: Any candidate link with a valid tracking_url
+  if (!matched) {
+    matched = candidateLinks.find(link => Boolean(link.tracking_url));
+  }
+
+  return { matchedLink: matched, candidateLinks };
 }
 

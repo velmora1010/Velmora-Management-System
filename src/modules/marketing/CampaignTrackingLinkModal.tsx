@@ -307,6 +307,7 @@ interface CampaignTrackingLinkModalProps {
   influencers: CampaignInfluencer[];
   linkToEdit?: InfluencerTrackingLink | null;
   defaultProduct?: string;
+  defaultMarketplace?: MarketplaceType;
   onSuccess: (savedLinks: InfluencerTrackingLink[]) => void;
 }
 
@@ -317,6 +318,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   influencers,
   linkToEdit,
   defaultProduct,
+  defaultMarketplace,
   onSuccess
 }) => {
   // Modal State
@@ -427,20 +429,21 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
         setSelectedVideoId(linkToEdit.video_number || 'Video 1');
       } else {
         // Defaults for batch generation
-        setSelectedMarketplace('website');
+        const initialMarketplace = defaultMarketplace || 'website';
+        setSelectedMarketplace(initialMarketplace);
         setCustomSlug('');
         const initialProd = (defaultProduct && defaultProduct !== 'All')
           ? defaultProduct
           : 'Kitchen Cleaner';
         setSelectedProduct(initialProd);
-        setProductUrl(getDefaultProductUrl(initialProd));
+        setProductUrl(initialMarketplace === 'website' ? getDefaultProductUrl(initialProd) : '');
         setDestinationUrl('');
         setSelectedVideoId('Video 1');
         setEditTrackingUrl('');
         setEditNotes('');
       }
     }
-  }, [isOpen, linkToEdit, defaultProduct]);
+  }, [isOpen, linkToEdit, defaultProduct, defaultMarketplace]);
 
   // Handle product change in batch form
   const handleProductChange = (newProd: string) => {
