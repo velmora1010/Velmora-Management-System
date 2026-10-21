@@ -132,10 +132,6 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
 const DEFAULT_SUPABASE_URL = 'https://utusdosvijjuxtowzhta.supabase.co';
 const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0dXNkb3N2aWpqdXh0b3d6aHRhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjA4NDE5MiwiZXhwIjoyMDk3NjYwMTkyfQ.U2lv4o8wF1G56B_WoXQADqRTuJEjdYSKXPDQMlJHHA4';
 
-// Default Upstash Redis credentials (fallback for persistent atomic click counter)
-const DEFAULT_UPSTASH_REDIS_URL = 'https://still-griffon-217114.upstash.io';
-const DEFAULT_UPSTASH_REDIS_TOKEN = 'gQAAAAAAA1AaAQIgcDE4N2EzMzUyNWVhNzQ0MjZiOWEyOTk2YTU5M2IxMmFlOA';
-
 export default async function handler(
   req: IncomingMessage & { query?: Record<string, string> },
   res: ServerResponse

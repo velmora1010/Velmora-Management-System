@@ -278,6 +278,13 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       const res = await fetchTrackingLinkClicks(idsToQuery);
       setIsClicksConfigured(res.configured);
 
+      if (!res.configured) {
+        const errorText = res.error || 'Redis click counter is not configured';
+        setClicksError(errorText);
+        toast.error(errorText);
+        return;
+      }
+
       if (res.isError) {
         const errorText = res.error || 'Failed to refresh click counts';
         setClicksError(errorText);
@@ -1097,14 +1104,26 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           </div>
         </div>
       ) : clicksError ? (
-        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-rose-200">
-          <AlertCircle size={18} className="shrink-0 text-rose-400 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-bold text-rose-300">Unable to Load Click Counts</span>
-            <p className="text-slate-300 text-[11px] leading-relaxed">
-              {clicksError}
-            </p>
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-rose-200">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={18} className="shrink-0 text-rose-400 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-rose-300">Unable to Load Click Counts</span>
+              <p className="text-slate-300 text-[11px] leading-relaxed">
+                {clicksError}
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => handleRefreshClickCounts(links)}
+            disabled={isRefreshingClicks}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-all cursor-pointer font-semibold text-xs shrink-0 disabled:opacity-50 self-start sm:self-auto"
+            title="Retry loading click counts from Redis"
+          >
+            <RefreshCw size={12} className={isRefreshingClicks ? 'animate-spin' : ''} />
+            <span>{isRefreshingClicks ? 'Retrying...' : 'Retry'}</span>
+          </button>
         </div>
       ) : null}
 

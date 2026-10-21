@@ -451,7 +451,7 @@ export async function fetchTrackingLinkClicks(linkIds: string[]): Promise<FetchC
             configured: data.configured !== false,
             clicks: data.clicks || {},
             error: data.error,
-            isError: false
+            isError: Boolean(data.error)
           };
         } catch (fetchErr: any) {
           return {
@@ -482,7 +482,7 @@ export async function fetchTrackingLinkClicks(linkIds: string[]): Promise<FetchC
       configured: isConfigured,
       clicks: mergedClicks,
       error: !isConfigured ? errorMsg : (hasBatchError ? errorMsg : undefined),
-      isError: hasBatchError
+      isError: !isConfigured ? false : hasBatchError
     };
   } catch (err: any) {
     console.warn('Failed to fetch tracking clicks from API:', err);
