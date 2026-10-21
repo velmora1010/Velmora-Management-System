@@ -488,7 +488,7 @@ export const useCampaignStatusTracking = (campaignId?: string) => {
           },
           pricing: {
             final_price: pricing.final_price,
-            total_videos: pricing.total_videos !== undefined ? pricing.total_videos : 1,
+            total_videos: (pricing.total_videos !== undefined && Number(pricing.total_videos) > 0) ? Number(pricing.total_videos) : 1,
             product_pricing: pricing.product_pricing
           },
           videoScripts: videoScriptsByInfluencer[String(info.id)] || [],

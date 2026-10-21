@@ -610,11 +610,9 @@ export const getInfluencerAssignedVideos = (record: StatusTrackingRecord): numbe
     }
   } catch (e) {}
 
+  // If count is not specified or 0, default to at least 1 video for any active campaign influencer
   if (count <= 0) {
-    if (typeof record === 'object' && record !== null) {
-      assignedVideosCache.set(record, []);
-    }
-    return [];
+    count = 1;
   }
 
   const result: number[] = [];
