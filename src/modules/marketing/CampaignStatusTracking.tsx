@@ -50,8 +50,14 @@ import {
   type CampaignScript 
 } from '../../services/campaignScriptService';
 import { downloadMediaFile } from '../../utils/fileDownloadUtils';
-import { fetchInfluencerTrackingLinks, resolveDeliverableTrackingLink } from '../../services/influencerTrackingLinkService';
-import { fetchCampaignDescriptions } from '../../services/campaignDescriptionService';
+import { 
+  fetchInfluencerTrackingLinks, 
+  resolveDeliverableTrackingLink, 
+  resolveWebsiteTrackingLink, 
+  isWebsiteTrackingLink, 
+  type InfluencerTrackingLink 
+} from '../../services/influencerTrackingLinkService';
+import { fetchCampaignDescriptions, type CampaignDescription } from '../../services/campaignDescriptionService';
 import { InfluencerConversationSelector } from '../../components/marketing/InfluencerConversationSelector';
 import { 
   StatusTrackingDateRangeModal, 
@@ -89,6 +95,7 @@ import {
 interface CampaignStatusTrackingProps {
   campaign: Campaign;
   onBack: () => void;
+  onNavigateToTrackingLinks?: (product?: string) => void;
 }
 
 // Configurable default videos count for this campaign
@@ -4916,7 +4923,7 @@ export const ViewAllWorkflowStepsModal: React.FC<ViewAllWorkflowStepsModalProps>
   );
 };
 
-export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack }) => {
+export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ campaign, onBack, onNavigateToTrackingLinks }) => {
   const { 
     trackingRecords, 
     isLoading, 
@@ -7009,6 +7016,7 @@ export const CampaignStatusTracking: React.FC<CampaignStatusTrackingProps> = ({ 
                 return next;
               }, { replace: true });
             }}
+            onNavigateToTrackingLinks={onNavigateToTrackingLinks}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center min-h-[400px] text-slate-400">
@@ -8202,6 +8210,7 @@ interface VideoDetailViewProps {
   onSwitchVideo: (num: number) => void;
   onSaveStep: (stepId: string, data: any, completed: boolean, isSkipped?: boolean) => Promise<{ success: boolean; error?: any } | void>;
   onStepChange?: (stepId: string) => void;
+  onNavigateToTrackingLinks?: (product?: string) => void;
 }
 
 const VideoDetailView: React.FC<VideoDetailViewProps> = ({
@@ -8214,7 +8223,8 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
   onBack,
   onSwitchVideo,
   onSaveStep,
-  onStepChange
+  onStepChange,
+  onNavigateToTrackingLinks
 }) => {
   const dispatch = record.dispatch || ({} as any);
   const rawCode = dispatch.influencer_code || record.influencer_id;
@@ -8744,6 +8754,7 @@ const VideoDetailView: React.FC<VideoDetailViewProps> = ({
                 setSelectedVideoStepId('before_post');
                 onStepChange?.('before_post');
               }}
+              onNavigateToTrackingLinks={onNavigateToTrackingLinks}
             />
           )}
 
@@ -15461,9 +15472,35 @@ const DraftForm: React.FC<DraftFormProps> = ({
 };
 
 // --- STEP: Post Date (For Any Video 1 to 6 - Manual Post Date, Multi-Platform Selection & Upload Thumbnail) ---
-const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvanceStep }: any) => {
+const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvanceStep, onNavigateToTrackingLinks }: any) => {
   const isDraftApproved = isInfluencerDraftApproved(record, videoNumber);
   const isPaymentCompleted = isInfluencerPaymentCompleted(record, videoNumber);
+
+  // Cached campaign tracking links and descriptions for instantaneous resolution
+  const [campaignTrackingLinks, setCampaignTrackingLinks] = useState<InfluencerTrackingLink[]>([]);
+  const [campaignDescriptions, setCampaignDescriptions] = useState<CampaignDescription[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadCampaignData = async () => {
+      const campaignId = record.campaign_id;
+      if (!campaignId) return;
+      try {
+        const [links, descs] = await Promise.all([
+          fetchInfluencerTrackingLinks(campaignId),
+          fetchCampaignDescriptions(campaignId)
+        ]);
+        if (isMounted) {
+          setCampaignTrackingLinks(links);
+          setCampaignDescriptions(descs);
+        }
+      } catch (err) {
+        console.error('Error fetching tracking links/descriptions in VideoPostForm:', err);
+      }
+    };
+    loadCampaignData();
+    return () => { isMounted = false; };
+  }, [record.campaign_id]);
 
   // Strict match for Video N from record.postDates or existingData
   const scheduleEntry = (record.postDates || []).find(
@@ -15681,6 +15718,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
 
         if (!isMounted) return;
 
+        // Keep state cached
+        setCampaignTrackingLinks(allTrackingLinks);
+        setCampaignDescriptions(allDescriptions);
+
         const prodName = assignedProductName.trim();
         const normProd = prodName.toLowerCase();
 
@@ -15688,25 +15729,23 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         const rawCodeClean = currentInfCode.replace(/^#+/, '');
         const currentInfId = String(record.influencer_id || '').trim();
 
+        // Single authentic Website tracking link lookup for this video & product
+        const { matchedLink: websiteLink } = resolveWebsiteTrackingLink(
+          allTrackingLinks,
+          currentInfId,
+          rawCodeClean,
+          videoNumber,
+          prodName
+        );
+
         let hasNewData = false;
         const updated = { ...platformDeliverables };
 
         for (const plat of selectedPlatforms) {
-          const normPlat = plat.trim().toLowerCase();
           const existing = updated[plat];
           if (existing && existing.final_post_link && existing.final_description) {
             continue;
           }
-
-          const { matchedLink } = resolveDeliverableTrackingLink(
-            allTrackingLinks,
-            currentInfId,
-            rawCodeClean,
-            videoNumber,
-            prodName,
-            plat,
-            existing?.selected_destination
-          );
 
           const matchedDesc = allDescriptions.find(d => {
             const dp = (d.product || '').trim().toLowerCase();
@@ -15722,7 +15761,8 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
             return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
           });
 
-          const finalLink = existing?.final_post_link || matchedLink?.tracking_url || '';
+          const isManuallyEdited = Boolean(existing?.is_manually_edited && existing.final_post_link);
+          const finalLink = isManuallyEdited ? existing!.final_post_link : (existing?.final_post_link || websiteLink?.tracking_url || '');
           const finalDesc = existing?.final_description || matchedDesc?.description || '';
 
           if (finalLink || finalDesc) {
@@ -15738,8 +15778,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
               final_description: finalDesc,
               status,
               generated_at: existing?.generated_at || new Date().toISOString(),
-              tracking_link_id: existing?.tracking_link_id || matchedLink?.id,
-              description_id: existing?.description_id || matchedDesc?.id
+              tracking_link_id: existing?.tracking_link_id || websiteLink?.id,
+              description_id: existing?.description_id || matchedDesc?.id,
+              is_manually_edited: isManuallyEdited,
+              selected_destination: 'website'
             };
           }
         }
@@ -15760,11 +15802,69 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
 
   const handleTogglePlatform = (platform: string) => {
     setSelectedPlatforms(prev => {
-      if (prev.includes(platform)) {
-        return prev.filter(p => p !== platform);
-      } else {
-        return [...prev, platform];
+      const isAdding = !prev.includes(platform);
+      const nextPlatforms = isAdding ? [...prev, platform] : prev.filter(p => p !== platform);
+
+      if (isAdding) {
+        setPlatformDeliverables(prevDelivs => {
+          const existing = prevDelivs[platform];
+          if (existing?.final_post_link && existing?.final_description) {
+            return prevDelivs;
+          }
+
+          const prodName = assignedProductName.trim();
+          const currentInfCode = (record.dispatch?.influencer_code || record.influencer?.code || (record as any).code || '').trim().toLowerCase();
+          const rawCodeClean = currentInfCode.replace(/^#+/, '');
+          const currentInfId = String(record.influencer_id || '').trim();
+
+          const { matchedLink: websiteLink } = resolveWebsiteTrackingLink(
+            campaignTrackingLinks,
+            currentInfId,
+            rawCodeClean,
+            videoNumber,
+            prodName
+          );
+
+          const normProd = prodName.toLowerCase();
+          const matchedDesc = campaignDescriptions.find(d => {
+            const dp = (d.product || '').trim().toLowerCase();
+            const dVid = (d as any).video || (d as any).video_number;
+            if (dVid) {
+              const normDVid = String(dVid).toLowerCase();
+              const matchesVid = normDVid === `video ${videoNumber}`.toLowerCase() || normDVid === String(videoNumber) || normDVid === `v${videoNumber}`;
+              if (!matchesVid) return false;
+            }
+            return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
+          }) || campaignDescriptions.find(d => {
+            const dp = (d.product || '').trim().toLowerCase();
+            return dp === normProd || normalizeScriptMatch(dp) === normalizeScriptMatch(normProd);
+          });
+
+          const finalLink = existing?.final_post_link || websiteLink?.tracking_url || '';
+          const finalDesc = existing?.final_description || matchedDesc?.description || '';
+
+          let status: PlatformDeliverableInfo['status'] = 'generated';
+          if (!finalLink && !finalDesc) status = 'missing';
+          else if (!finalLink) status = 'link_missing';
+          else if (!finalDesc) status = 'desc_missing';
+
+          return {
+            ...prevDelivs,
+            [platform]: {
+              platform,
+              final_post_link: finalLink,
+              final_description: finalDesc,
+              status,
+              generated_at: existing?.generated_at || (finalLink || finalDesc ? new Date().toISOString() : undefined),
+              tracking_link_id: existing?.tracking_link_id || websiteLink?.id,
+              description_id: existing?.description_id || matchedDesc?.id,
+              selected_destination: 'website'
+            }
+          };
+        });
       }
+
+      return nextPlatforms;
     });
   };
 
@@ -15824,10 +15924,14 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         fetchCampaignDescriptions(campaignId)
       ]);
 
+      // Keep cache updated
+      setCampaignTrackingLinks(allTrackingLinks);
+      setCampaignDescriptions(allDescriptions);
+
       const prodName = assignedProductName.trim();
       const normProd = prodName.toLowerCase();
 
-      // Find matching description for this product from Description Management
+      // Find matching description for this product and video from Description Management
       const matchedDesc = allDescriptions.find(d => {
         const dp = (d.product || '').trim().toLowerCase();
         const dVid = (d as any).video || (d as any).video_number;
@@ -15850,22 +15954,21 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       const rawCodeClean = currentInfCode.replace(/^#+/, '');
       const currentInfId = String(record.influencer_id || '').trim();
 
+      // Resolve matching Website tracking link for this video & product once
+      const { matchedLink: websiteLink } = resolveWebsiteTrackingLink(
+        allTrackingLinks,
+        currentInfId,
+        rawCodeClean,
+        videoNumber,
+        prodName
+      );
+
       for (const plat of selectedPlatforms) {
         const existingDeliverable = updatedDeliverables[plat];
-        const { matchedLink } = resolveDeliverableTrackingLink(
-          allTrackingLinks,
-          currentInfId,
-          rawCodeClean,
-          videoNumber,
-          prodName,
-          plat,
-          existingDeliverable?.selected_destination
-        );
-
         const isManuallyEdited = Boolean(existingDeliverable?.is_manually_edited && existingDeliverable.final_post_link);
         const resolvedLink = isManuallyEdited 
           ? existingDeliverable!.final_post_link 
-          : (matchedLink?.tracking_url || '');
+          : (websiteLink?.tracking_url || '');
 
         const hasLink = Boolean(resolvedLink);
         const hasDesc = Boolean(matchedDesc?.description);
@@ -15873,10 +15976,10 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
         let status: PlatformDeliverableInfo['status'] = 'generated';
         if (!hasLink && !hasDesc) {
           status = 'missing';
-          missingWarnings.push(`${plat}: Tracking Link and Description missing`);
+          missingWarnings.push(`${plat}: Website Tracking Link and Description missing`);
         } else if (!hasLink) {
           status = 'link_missing';
-          missingWarnings.push(`${plat}: Tracking Link missing`);
+          missingWarnings.push(`${plat}: Website Tracking Link missing for Video ${videoNumber}`);
         } else if (!hasDesc) {
           status = 'desc_missing';
           missingWarnings.push(`${plat}: Description missing for "${prodName || 'assigned product'}"`);
@@ -15884,18 +15987,16 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
           successCount++;
         }
 
-        const effectiveDest = matchedLink?.destination_type || matchedLink?.platform?.toLowerCase() || existingDeliverable?.selected_destination || 'website';
-
         updatedDeliverables[plat] = {
           platform: plat,
           final_post_link: resolvedLink,
           final_description: hasDesc ? matchedDesc!.description : (existingDeliverable?.final_description || ''),
           status,
           generated_at: new Date().toISOString(),
-          tracking_link_id: matchedLink?.id || existingDeliverable?.tracking_link_id,
+          tracking_link_id: websiteLink?.id || existingDeliverable?.tracking_link_id,
           description_id: matchedDesc?.id || existingDeliverable?.description_id,
           is_manually_edited: isManuallyEdited,
-          selected_destination: effectiveDest
+          selected_destination: 'website'
         };
       }
 
@@ -15928,7 +16029,7 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
       } else if (successCount > 0) {
         toast.success(`Generated for ${successCount} platform(s). Check notices below.`);
       } else {
-        toast.error('Cannot generate final post information. Missing required data in Tracking Links or Description Management.');
+        toast.error(`Website tracking link missing for Video ${videoNumber} (${prodName || 'assigned product'}). Create it in Influencer Tracking Link.`);
       }
     } catch (err: any) {
       console.error('Error generating link and description:', err);
@@ -16356,9 +16457,20 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
                     <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <AlertTriangle size={14} className="shrink-0" />
-                        <span>Tracking link not found for <strong>{platId}</strong> (Video {videoNumber}, {assignedProductName || 'assigned product'}).</span>
+                        <span>Website tracking link not found for <strong>Video {videoNumber}</strong> ({assignedProductName || 'assigned product'}).</span>
                       </div>
-                      <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Influencer Tracking Link</span>
+                      {onNavigateToTrackingLinks ? (
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToTrackingLinks(assignedProductName)}
+                          className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 underline underline-offset-2 shrink-0 cursor-pointer flex items-center gap-1"
+                        >
+                          <span>Open Influencer Tracking Link</span>
+                          <ExternalLink size={12} />
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-amber-400/80 italic shrink-0">Create it in Influencer Tracking Link</span>
+                      )}
                     </div>
                   )}
                   {deliverable.status === 'desc_missing' && (
@@ -16372,12 +16484,24 @@ const VideoPostForm = ({ videoNumber, record, existingData = {}, onSave, onAdvan
                   )}
                   {deliverable.status === 'missing' && (
                     <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs space-y-1">
-                      <div className="flex items-center gap-2">
-                        <AlertTriangle size={14} className="shrink-0" />
-                        <span>Cannot generate complete information. Both tracking link and product description are missing.</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle size={14} className="shrink-0" />
+                          <span>Website tracking link and product description are missing for <strong>Video {videoNumber}</strong> ({assignedProductName || 'assigned product'}).</span>
+                        </div>
+                        {onNavigateToTrackingLinks && (
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToTrackingLinks(assignedProductName)}
+                            className="text-[11px] font-semibold text-rose-300 hover:text-rose-200 underline underline-offset-2 shrink-0 cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Open Influencer Tracking Link</span>
+                            <ExternalLink size={12} />
+                          </button>
+                        )}
                       </div>
                       <p className="text-[11px] text-rose-400/80 pl-5">
-                        Please ensure tracking link exists in Tracking Links and product description exists in Description Management.
+                        Please ensure Website tracking link exists in Influencer Tracking Link and product description exists in Description Management.
                       </p>
                     </div>
                   )}

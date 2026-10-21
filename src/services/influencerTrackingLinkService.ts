@@ -1319,9 +1319,108 @@ export async function bulkDeleteInfluencerTrackingLinks(
 }
 
 /**
+ * Determines whether a tracking link represents the Website (Shopify with UTMs) channel.
+ * Strictly excludes marketplace redirect channels (Amazon, Flipkart, Meesho).
+ */
+export function isWebsiteTrackingLink(link: InfluencerTrackingLink): boolean {
+  if (!link) return false;
+  const dest = (link.destination_type || '').toLowerCase();
+  const plat = (link.platform || '').toLowerCase();
+  const utm = (link.utm_source || '').toLowerCase();
+
+  // Exclude marketplace redirects
+  if (dest === 'amazon' || dest === 'flipkart' || dest === 'meesho') return false;
+  if (plat === 'amazon' || plat === 'flipkart' || plat === 'meesho') return false;
+  if (utm === 'amazon' || utm === 'flipkart' || utm === 'meesho') return false;
+  if (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('/api/r'))) return false;
+
+  // Accept website / shopify destination or platform
+  return (
+    dest === 'shopify' ||
+    dest === 'website' ||
+    plat === 'website' ||
+    utm === 'website' ||
+    (!dest && !plat && !utm)
+  );
+}
+
+/**
+ * Normalizes a product name for reliable matching
+ */
+export function normalizeProductName(name?: string | null): string {
+  return (name || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Resolves the matching Website tracking link for a status tracking deliverable.
+ * In Marketing -> Campaign -> Status Tracking -> Post Date, the publishing platforms
+ * (Instagram, Facebook, YouTube) strictly map to the single Website tracking link.
+ */
+export function resolveWebsiteTrackingLink(
+  allTrackingLinks: InfluencerTrackingLink[],
+  influencerId: string | number,
+  influencerCode: string | null | undefined,
+  videoNumber: number | string,
+  productName: string
+): {
+  matchedLink?: InfluencerTrackingLink;
+  allCandidateLinks: InfluencerTrackingLink[];
+} {
+  const currentInfId = String(influencerId || '').trim();
+  const rawCodeClean = (influencerCode || '').trim().toLowerCase().replace(/^#+/, '');
+  const targetVidNum = parseInt(String(videoNumber).replace(/[^0-9]/g, ''), 10) || 1;
+  const targetNormProd = normalizeProductName(productName);
+
+  // 1. Filter links belonging to this influencer and channel = Website
+  const websiteLinksForInfluencer = allTrackingLinks.filter(link => {
+    // Must be Website link
+    if (!isWebsiteTrackingLink(link)) return false;
+
+    // Influencer match: ID or Creator Code
+    const linkInfId = String(link.influencer_id || '').trim();
+    const linkInfCode = (link.influencer_code || '').trim().toLowerCase().replace(/^#+/, '');
+    const linkCreatorCode = (link.creator_code || '').trim().toLowerCase().replace(/^#+/, '');
+
+    const matchInf = (linkInfId && currentInfId && linkInfId === currentInfId) ||
+      (rawCodeClean && (linkInfCode === rawCodeClean || linkCreatorCode === rawCodeClean)) ||
+      (rawCodeClean && extractCodeNumber(linkInfCode) > 0 && extractCodeNumber(linkInfCode) === extractCodeNumber(rawCodeClean));
+
+    return matchInf;
+  });
+
+  // 2. From these Website links, match Video Number and Product
+  const matched = websiteLinksForInfluencer.find(link => {
+    // Video match: exact numeric video matching (v1=1, v2=2, etc.)
+    const linkVidInt = parseInt(
+      (link.video_number || '').replace(/[^0-9]/g, '') ||
+      (link.utm_content || '').replace(/[^0-9]/g, ''),
+      10
+    ) || 1;
+    if (linkVidInt !== targetVidNum) return false;
+
+    // Product match: normalized product name comparison
+    if (targetNormProd && link.product) {
+      const linkNormProd = normalizeProductName(link.product);
+      if (!linkNormProd.startsWith('video')) {
+        const matchProd = linkNormProd === targetNormProd || 
+                          linkNormProd.includes(targetNormProd) || 
+                          targetNormProd.includes(linkNormProd);
+        if (!matchProd) return false;
+      }
+    }
+
+    return true;
+  });
+
+  return {
+    matchedLink: matched,
+    allCandidateLinks: websiteLinksForInfluencer
+  };
+}
+
+/**
  * Resolves the appropriate tracking link for a status tracking deliverable.
- * Supports resolving publishing platforms (Instagram, YouTube, Facebook)
- * to their destination links (Website, Amazon, Flipkart, Meesho).
+ * Publishing platforms (Instagram, YouTube, Facebook) map strictly to Website tracking links.
  */
 export function resolveDeliverableTrackingLink(
   allTrackingLinks: InfluencerTrackingLink[],
@@ -1336,76 +1435,34 @@ export function resolveDeliverableTrackingLink(
   candidateLinks: InfluencerTrackingLink[];
 } {
   const normPlat = (platform || '').trim().toLowerCase();
-  const currentInfId = String(influencerId || '').trim();
-  const rawCodeClean = (influencerCode || '').trim().toLowerCase().replace(/^#+/, '');
-  const normProd = (productName || '').trim().toLowerCase();
-  const vidNumInt = parseInt(String(videoNumber).replace(/[^0-9]/g, ''), 10) || 1;
 
-  // 1. Filter candidate links for this influencer, video number, and product
-  const candidateLinks = allTrackingLinks.filter(link => {
-    // Influencer match
-    const linkInfId = String(link.influencer_id || '').trim();
-    const linkInfCode = (link.influencer_code || '').trim().toLowerCase().replace(/^#+/, '');
-    const linkCreatorCode = (link.creator_code || '').trim().toLowerCase().replace(/^#+/, '');
-
-    const matchInf = (linkInfId && currentInfId && linkInfId === currentInfId) ||
-      (rawCodeClean && (linkInfCode === rawCodeClean || linkCreatorCode === rawCodeClean));
-    if (!matchInf) return false;
-
-    // Video match (v1 to v6)
-    const linkVidNum = (link.video_number || '').trim().toLowerCase();
-    const linkUtmContent = (link.utm_content || '').trim().toLowerCase();
-    const matchVideo =
-      linkVidNum === `video ${vidNumInt}`.toLowerCase() ||
-      linkVidNum === String(vidNumInt) ||
-      linkUtmContent === `v${vidNumInt}`.toLowerCase() ||
-      (vidNumInt === 1 && (!link.video_number || link.video_number === 'Video 1'));
-    if (!matchVideo) return false;
-
-    // Product match
-    if (normProd && link.product) {
-      const lp = link.product.trim().toLowerCase();
-      if (!lp.startsWith('video ')) {
-        const matchProd = lp === normProd || lp.includes(normProd) || normProd.includes(lp);
-        if (!matchProd) return false;
-      }
-    }
-
-    return true;
-  });
-
-  // 2. Select matchedLink:
-  // Priority A: Direct link specifically targeting this platform (e.g. Instagram UTM or legacy Instagram platform)
-  let matched = candidateLinks.find(link => {
-    const lp = (link.platform || '').trim().toLowerCase();
-    const lu = (link.utm_source || '').trim().toLowerCase();
-    return lp === normPlat || lu === normPlat;
-  });
-
-  // Priority B: Matching preferred destination if specified (e.g. user selected 'amazon' or 'website')
-  if (!matched && preferredDestination) {
-    const pd = preferredDestination.toLowerCase();
-    matched = candidateLinks.find(link => {
-      const ld = (link.destination_type || '').toLowerCase();
-      const lp = (link.platform || '').toLowerCase();
-      return ld === pd || lp === pd;
-    });
+  // Social publishing platforms (Instagram, Facebook, YouTube) map to Website tracking link
+  if (normPlat === 'instagram' || normPlat === 'facebook' || normPlat === 'youtube') {
+    const res = resolveWebsiteTrackingLink(
+      allTrackingLinks,
+      influencerId,
+      influencerCode,
+      videoNumber,
+      productName
+    );
+    return {
+      matchedLink: res.matchedLink,
+      candidateLinks: res.allCandidateLinks
+    };
   }
 
-  // Priority C: Website / Shopify destination link
-  if (!matched) {
-    matched = candidateLinks.find(link => {
-      const ld = (link.destination_type || '').toLowerCase();
-      const lp = (link.platform || '').toLowerCase();
-      return ld === 'shopify' || ld === 'website' || lp === 'website';
-    });
-  }
-
-  // Priority D: Any candidate link with a valid tracking_url
-  if (!matched) {
-    matched = candidateLinks.find(link => Boolean(link.tracking_url));
-  }
-
-  return { matchedLink: matched, candidateLinks };
+  // Fallback for non-standard platforms
+  const res = resolveWebsiteTrackingLink(
+    allTrackingLinks,
+    influencerId,
+    influencerCode,
+    videoNumber,
+    productName
+  );
+  return {
+    matchedLink: res.matchedLink,
+    candidateLinks: res.allCandidateLinks
+  };
 }
+
 
