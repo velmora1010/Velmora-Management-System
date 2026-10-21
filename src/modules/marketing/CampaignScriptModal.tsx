@@ -12,6 +12,7 @@ interface CampaignScriptModalProps {
   isOpen: boolean;
   onClose: () => void;
   campaign: Campaign;
+  campaigns?: Campaign[];
   scriptToEdit?: CampaignScript | null;
   onSuccess: (savedScript: CampaignScript) => void;
 }
@@ -25,10 +26,12 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
   isOpen,
   onClose,
   campaign,
+  campaigns,
   scriptToEdit,
   onSuccess
 }) => {
   // Form state
+  const [targetCampaignId, setTargetCampaignId] = useState<string>(String(campaign.id));
   const [product, setProduct] = useState('');
   const [language, setLanguage] = useState('');
   const [modelScript, setModelScript] = useState('');
@@ -75,6 +78,7 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
     if (!isOpen) return;
 
     if (scriptToEdit) {
+      setTargetCampaignId(scriptToEdit.campaign_id || String(campaign.id));
       setProduct(scriptToEdit.product || '');
       setLanguage(scriptToEdit.language || '');
       setModelScript(scriptToEdit.model_script || '');
@@ -82,6 +86,7 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
       setAudioUrl(scriptToEdit.reference_audio_url || '');
       setVideoUrl(scriptToEdit.reference_video_url || '');
     } else {
+      setTargetCampaignId(String(campaign.id));
       setProduct('');
       // Default to first target language of campaign if available
       setLanguage(availableLanguages[0] || '');
@@ -213,6 +218,32 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
               <span>{submitError}</span>
             </div>
           )}
+
+          {/* Campaign / Scope Selection */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+              Campaign / Scope <span className="text-purple-400">*</span>
+            </label>
+            <select
+              value={targetCampaignId}
+              onChange={(e) => setTargetCampaignId(e.target.value)}
+              disabled={isSubmitting}
+              className="w-full bg-slate-900 border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <option value={String(campaign.id)}>Current: {campaign.campaign_name}</option>
+              <option value="global">Global (Reusable across all campaigns)</option>
+              {(campaigns || [])
+                .filter(c => String(c.id) !== String(campaign.id))
+                .map(c => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.campaign_name}
+                  </option>
+                ))}
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Associate this script with {campaign.campaign_name}, another campaign, or save as global reusable.
+            </p>
+          </div>
 
           {/* Row 1: Product & Language */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

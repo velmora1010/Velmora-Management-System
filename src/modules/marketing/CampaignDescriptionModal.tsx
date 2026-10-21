@@ -12,6 +12,7 @@ interface CampaignDescriptionModalProps {
   isOpen: boolean;
   onClose: () => void;
   campaign: Campaign;
+  campaigns?: Campaign[];
   descriptionToEdit?: CampaignDescription | null;
   onSuccess: (savedDescription: CampaignDescription) => void;
 }
@@ -20,9 +21,11 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
   isOpen,
   onClose,
   campaign,
+  campaigns,
   descriptionToEdit,
   onSuccess
 }) => {
+  const [targetCampaignId, setTargetCampaignId] = useState<string>(String(campaign.id));
   const [product, setProduct] = useState<string>('');
   const [descriptionText, setDescriptionText] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,9 +36,11 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
   useEffect(() => {
     if (isOpen) {
       if (descriptionToEdit) {
+        setTargetCampaignId(descriptionToEdit.campaign_id || String(campaign.id));
         setProduct(descriptionToEdit.product || '');
         setDescriptionText(descriptionToEdit.description || '');
       } else {
+        setTargetCampaignId(String(campaign.id));
         setProduct('');
         setDescriptionText('');
       }
@@ -70,14 +75,15 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
     try {
       let saved: CampaignDescription;
       if (isEditMode && descriptionToEdit) {
-        saved = await updateCampaignDescription(descriptionToEdit.id, campaign.id, {
+        saved = await updateCampaignDescription(descriptionToEdit.id, targetCampaignId, {
+          campaign_id: targetCampaignId,
           product,
           description: descriptionText
         });
         toast.success('Description updated successfully', { id: toastId });
       } else {
         saved = await createCampaignDescription({
-          campaign_id: campaign.id,
+          campaign_id: targetCampaignId,
           product,
           description: descriptionText
         });
@@ -123,6 +129,32 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Campaign / Scope Selection */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+              Campaign / Scope <span className="text-purple-400">*</span>
+            </label>
+            <select
+              value={targetCampaignId}
+              onChange={(e) => setTargetCampaignId(e.target.value)}
+              disabled={isSubmitting}
+              className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <option value={String(campaign.id)}>Current: {campaign.campaign_name}</option>
+              <option value="global">Global (Reusable across all campaigns)</option>
+              {(campaigns || [])
+                .filter(c => String(c.id) !== String(campaign.id))
+                .map(c => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.campaign_name}
+                  </option>
+                ))}
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Associate this description with {campaign.campaign_name}, another campaign, or save as global reusable.
+            </p>
+          </div>
+
           {/* Product Title dropdown */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">

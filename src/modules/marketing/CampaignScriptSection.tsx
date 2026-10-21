@@ -7,14 +7,17 @@ import {
   Loader2, 
   SearchX, 
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Layers
 } from 'lucide-react';
 import type { Campaign, CampaignScript } from '../../types';
 import { 
   SCRIPT_PRODUCTS, 
+  fetchAllCampaignScripts, 
   fetchCampaignScripts, 
   deleteCampaignScript 
 } from '../../services/campaignScriptService';
+import { useCampaigns } from '../../hooks/marketing/useCampaigns';
 import { CampaignScriptModal } from './CampaignScriptModal';
 import { CampaignScriptCard } from './CampaignScriptCard';
 import toast from 'react-hot-toast';
@@ -25,13 +28,24 @@ interface CampaignScriptSectionProps {
 }
 
 export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ campaign, onBack }) => {
+  const { campaigns } = useCampaigns();
   const [scripts, setScripts] = useState<CampaignScript[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Filters: Exactly two dropdown filters
+  // Filters: Campaign, Product, and Language
+  const [selectedCampaign, setSelectedCampaign] = useState<string>('All');
   const [selectedProduct, setSelectedProduct] = useState<string>('All');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('All');
+
+  // Campaign lookup map
+  const campaignMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (campaigns || []).forEach(c => map.set(String(c.id), c.campaign_name));
+    if (campaign?.id) map.set(String(campaign.id), campaign.campaign_name);
+    map.set('global', 'Global (Reusable)');
+    return map;
+  }, [campaigns, campaign]);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -65,17 +79,17 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
     setIsLoading(true);
     setFetchError(null);
     try {
-      const data = await fetchCampaignScripts(campaign.id);
+      const data = await fetchAllCampaignScripts();
       setScripts(data);
     } catch (err: any) {
-      console.error('Error loading campaign scripts:', err);
-      const msg = err?.message || 'Failed to load campaign scripts from Supabase.';
+      console.error('Error loading scripts:', err);
+      const msg = err?.message || 'Failed to load scripts from Supabase.';
       setFetchError(msg);
       toast.error(msg);
     } finally {
       setIsLoading(false);
     }
-  }, [campaign.id]);
+  }, []);
 
   useEffect(() => {
     loadScripts();
@@ -119,11 +133,16 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
   // Filter scripts
   const filteredScripts = useMemo(() => {
     return scripts.filter(s => {
+      const matchCampaign = selectedCampaign === 'All'
+        ? true
+        : selectedCampaign === 'global'
+          ? s.campaign_id === 'global'
+          : (String(s.campaign_id) === selectedCampaign || s.campaign_id === 'global');
       const matchProduct = selectedProduct === 'All' || s.product.toLowerCase() === selectedProduct.toLowerCase();
       const matchLanguage = selectedLanguage === 'All' || s.language.toLowerCase() === selectedLanguage.toLowerCase();
-      return matchProduct && matchLanguage;
+      return matchCampaign && matchProduct && matchLanguage;
     });
-  }, [scripts, selectedProduct, selectedLanguage]);
+  }, [scripts, selectedCampaign, selectedProduct, selectedLanguage]);
 
   return (
     <div className="w-full space-y-5 animate-fade-in text-slate-200">
@@ -144,7 +163,7 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
             </div>
             <div>
               <h3 className="text-base font-bold text-white leading-tight">Script Management</h3>
-              <p className="text-xs text-slate-400 mt-0.5">{campaign.campaign_name}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{selectedCampaign === 'All' ? 'All Campaigns' : (campaignMap.get(selectedCampaign) || campaign.campaign_name)}</p>
             </div>
           </div>
         </div>
@@ -164,8 +183,29 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
 
       {/* Filters Bar & Results Summary */}
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
-          {/* Filter 1: Title (Product) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto flex-wrap">
+          {/* Filter 1: Campaign */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+              <Layers size={13} className="text-purple-400" />
+              <span>Campaign:</span>
+            </span>
+            <select
+              value={selectedCampaign}
+              onChange={(e) => setSelectedCampaign(e.target.value)}
+              className="bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer w-full sm:w-auto"
+            >
+              <option value="All">All Campaigns</option>
+              {(campaigns || []).map((c) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.campaign_name}
+                </option>
+              ))}
+              <option value="global">Global (Reusable)</option>
+            </select>
+          </div>
+
+          {/* Filter 2: Title (Product) */}
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
               <Filter size={13} className="text-purple-400" />
@@ -274,6 +314,7 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
             <CampaignScriptCard
               key={script.id}
               script={script}
+              campaignName={campaignMap.get(String(script.campaign_id)) || (script.campaign_id === 'global' ? 'Global (Reusable)' : 'Global')}
               onEdit={handleOpenEdit}
               onDelete={handleDelete}
             />
@@ -289,6 +330,7 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
           setScriptToEdit(null);
         }}
         campaign={campaign}
+        campaigns={campaigns}
         scriptToEdit={scriptToEdit}
         onSuccess={handleModalSuccess}
       />

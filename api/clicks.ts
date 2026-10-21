@@ -14,9 +14,6 @@ const getBody = (req: IncomingMessage & { body?: any }): Promise<any> => {
   });
 };
 
-const DEFAULT_UPSTASH_REDIS_URL = 'https://still-griffon-217114.upstash.io';
-const DEFAULT_UPSTASH_REDIS_TOKEN = 'gQAAAAAAA1AaAQIgcDE4N2EzMzUyNWVhNzQ0MjZiOWEyOTk2YTU5M2IxMmFlOA';
-
 export default async function handler(
   req: IncomingMessage & { query?: Record<string, string>; body?: any },
   res: ServerResponse
@@ -32,15 +29,19 @@ export default async function handler(
     return;
   }
 
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || DEFAULT_UPSTASH_REDIS_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || DEFAULT_UPSTASH_REDIS_TOKEN;
-  const isRedisConfigured = Boolean(redisUrl && redisToken);
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '';
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '';
+  const isRedisConfigured = Boolean(
+    redisUrl && 
+    redisToken && 
+    !redisUrl.includes('still-griffon-217114.upstash.io')
+  );
 
   if (!isRedisConfigured) {
     res.statusCode = 200;
     res.end(JSON.stringify({
       configured: false,
-      error: 'Redis tracking storage not configured. Please set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel.',
+      error: 'Redis click counter is not configured. Please set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN in Vercel.',
       clicks: {}
     }));
     return;
@@ -57,18 +58,24 @@ export default async function handler(
       if (parsed.action === 'set_slug' && parsed.slug && parsed.link_id) {
         const cleanSlug = String(parsed.slug).trim().toLowerCase();
         const cleanLinkId = String(parsed.link_id).trim();
-        const setRes = await fetch(redisUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${redisToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(['SET', `slug:${cleanSlug}`, cleanLinkId])
-        });
-        const isOk = setRes.ok;
-        res.statusCode = isOk ? 200 : 500;
-        res.end(JSON.stringify({ success: isOk, slug: cleanSlug, link_id: cleanLinkId }));
-        return;
+        try {
+          const setRes = await fetch(redisUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${redisToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(['SET', `slug:${cleanSlug}`, cleanLinkId])
+          });
+          const isOk = setRes.ok;
+          res.statusCode = isOk ? 200 : 502;
+          res.end(JSON.stringify({ success: isOk, slug: cleanSlug, link_id: cleanLinkId }));
+          return;
+        } catch {
+          res.statusCode = 502;
+          res.end(JSON.stringify({ success: false, error: 'Redis service unreachable', slug: cleanSlug, link_id: cleanLinkId }));
+          return;
+        }
       }
 
       if (Array.isArray(parsed.ids)) {
@@ -114,11 +121,35 @@ export default async function handler(
     });
 
     if (!redisRes.ok) {
-      throw new Error(`Upstash Redis MGET failed with HTTP ${redisRes.status}`);
+      if (redisRes.status === 401 || redisRes.status === 403) {
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          configured: true,
+          error: 'Redis authentication failed: UPSTASH_REDIS_REST_TOKEN is invalid or expired.',
+          clicks: {}
+        }));
+        return;
+      }
+      if (redisRes.status === 429) {
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+          configured: true,
+          error: 'Redis rate limit exceeded. Please try again shortly.',
+          clicks: {}
+        }));
+        return;
+      }
+      res.statusCode = 200;
+      res.end(JSON.stringify({
+        configured: true,
+        error: `Redis service returned HTTP error (${redisRes.status}).`,
+        clicks: {}
+      }));
+      return;
     }
 
     const redisData = await redisRes.json();
-    const rawResults = Array.isArray(redisData.result) ? redisData.result : [];
+    const rawResults = Array.isArray(redisData?.result) ? redisData.result : [];
 
     const clicksMap: Record<string, number> = {};
     requestedIds.forEach((id, idx) => {
@@ -132,11 +163,11 @@ export default async function handler(
       clicks: clicksMap
     }));
   } catch (err: any) {
-    console.error('[Clicks API] Error querying Redis counts:', err);
-    res.statusCode = 500;
+    console.warn('[Clicks API] Error querying Redis counts:', err?.message || err);
+    res.statusCode = 200;
     res.end(JSON.stringify({
       configured: true,
-      error: err.message || 'Failed to fetch click counts from Redis',
+      error: 'Redis click counter is unreachable. Please verify UPSTASH_REDIS_REST_URL host connectivity.',
       clicks: {}
     }));
   }

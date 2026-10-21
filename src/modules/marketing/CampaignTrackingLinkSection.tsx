@@ -43,7 +43,9 @@ import {
   fetchTrackingLinkClicks,
   TRACKING_PLATFORMS, 
   TRACKING_VIDEOS, 
-  compareTrackingLinksByCodeAsc 
+  compareTrackingLinksByCodeAsc,
+  isSameProduct,
+  type MarketplaceType
 } from '../../services/influencerTrackingLinkService';
 import { CampaignTrackingLinkModal } from './CampaignTrackingLinkModal';
 import { CampaignTrackingLinkCard } from './CampaignTrackingLinkCard';
@@ -164,6 +166,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [linkToEdit, setLinkToEdit] = useState<InfluencerTrackingLink | null>(null);
   const [createProductDefault, setCreateProductDefault] = useState<string | undefined>(undefined);
+  const [modalDefaultMarketplace, setModalDefaultMarketplace] = useState<MarketplaceType | undefined>(undefined);
 
   // Delete modal state
   const [linkToDelete, setLinkToDelete] = useState<InfluencerTrackingLink | null>(null);
@@ -275,6 +278,13 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       const res = await fetchTrackingLinkClicks(idsToQuery);
       setIsClicksConfigured(res.configured);
 
+      if (!res.configured) {
+        const errorText = res.error || 'Redis click counter is not configured';
+        setClicksError(errorText);
+        toast.error(errorText);
+        return;
+      }
+
       if (res.isError) {
         const errorText = res.error || 'Failed to refresh click counts';
         setClicksError(errorText);
@@ -300,9 +310,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   }, [isRefreshingClicks]);
 
   // Open Create Modal
-  const handleOpenCreate = (preselectedProduct?: string) => {
+  const handleOpenCreate = (preselectedProduct?: string, preselectedMarketplace?: MarketplaceType) => {
     setLinkToEdit(null);
     setCreateProductDefault(preselectedProduct);
+    setModalDefaultMarketplace(preselectedMarketplace);
     setIsModalOpen(true);
   };
 
@@ -310,6 +321,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const handleOpenEdit = (link: InfluencerTrackingLink) => {
     setLinkToEdit(link);
     setCreateProductDefault(link.product);
+    setModalDefaultMarketplace(undefined);
     setIsModalOpen(true);
   };
 
@@ -425,7 +437,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     const filtered = activeEligibleLinks.filter(l => {
       // Product Filter
       const matchProduct = selectedProduct === 'All' || 
-        l.product.toLowerCase() === selectedProduct.toLowerCase();
+        l.product.toLowerCase() === selectedProduct.toLowerCase() ||
+        isSameProduct(l.product, selectedProduct);
 
       // Platform Filter
       const matchPlatform = selectedPlatform === 'All' || 
@@ -438,9 +451,28 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         (l.utm_content && l.utm_content.toLowerCase() === selectedVideo.toLowerCase());
 
       // Dedicated Selected Marketplace Filter (Drill-down level)
-      const matchMarketplace = !selectedMarketplace ||
-        (l.platform && l.platform.toLowerCase() === selectedMarketplace.toLowerCase()) ||
-        (l.utm_source && l.utm_source.toLowerCase() === selectedMarketplace.toLowerCase());
+      const matchMarketplace = !selectedMarketplace || (() => {
+        const sm = selectedMarketplace.toLowerCase();
+        const dest = (l.destination_type || '').toLowerCase();
+        const plat = (l.platform || '').toLowerCase();
+        const utm = (l.utm_source || '').toLowerCase();
+        if (sm === 'website') {
+          return (
+            dest === 'shopify' ||
+            dest === 'website' ||
+            plat === 'website' ||
+            plat === 'instagram' ||
+            plat === 'youtube' ||
+            plat === 'facebook' ||
+            utm === 'website' ||
+            utm === 'instagram' ||
+            utm === 'youtube' ||
+            utm === 'facebook' ||
+            (!dest && plat !== 'amazon' && plat !== 'flipkart' && plat !== 'meesho')
+          );
+        }
+        return dest === sm || plat === sm || utm === sm;
+      })();
 
       // Search Query
       const q = searchQuery.trim().toLowerCase();
@@ -464,7 +496,13 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     const prodMap = new Map<string, InfluencerTrackingLink[]>();
 
     filteredLinks.forEach(link => {
-      const prodName = link.product || 'Unassigned Product';
+      let prodName = link.product || 'Unassigned Product';
+      if (selectedProduct !== 'All' && isSameProduct(link.product, selectedProduct)) {
+        prodName = selectedProduct;
+      } else {
+        const standardMatch = SCRIPT_PRODUCTS.find(sp => isSameProduct(sp, link.product));
+        if (standardMatch) prodName = standardMatch;
+      }
       if (!prodMap.has(prodName)) {
         prodMap.set(prodName, []);
       }
@@ -514,8 +552,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
 
         // Preferred canonical platform order
         const preferredPlatforms = catName === 'WEBSITE'
-          ? ['Instagram', 'YouTube', 'Facebook']
-          : ['Flipkart', 'Amazon', 'Meesho'];
+          ? ['Website', 'Instagram', 'YouTube', 'Facebook']
+          : ['Amazon', 'Flipkart', 'Meesho'];
 
         // Add preferred platforms first if present
         preferredPlatforms.forEach(pName => {
@@ -618,18 +656,23 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     const allProdNames = Array.from(new Set([
       ...SCRIPT_PRODUCTS,
       ...COMBO_PRODUCTS,
-      ...Array.from(countMap.keys())
+      ...Array.from(countMap.keys()).filter(dbProd => 
+        !SCRIPT_PRODUCTS.some(sp => isSameProduct(sp, dbProd)) &&
+        !COMBO_PRODUCTS.some(cp => isSameProduct(cp, dbProd))
+      )
     ]));
 
     return allProdNames.map(name => {
-      // Find matching case-insensitive entry if any
-      let matchedEntry = countMap.get(name);
-      if (!matchedEntry) {
-        for (const [key, val] of countMap.entries()) {
-          if (key.toLowerCase() === name.toLowerCase()) {
-            matchedEntry = val;
-            break;
-          }
+      // Find matching entry or rollup from alias-matched entries
+      let totalLinks = 0;
+      const platforms = new Set<string>();
+      const categories = new Set<string>();
+
+      for (const [key, val] of countMap.entries()) {
+        if (key.toLowerCase() === name.toLowerCase() || isSameProduct(key, name)) {
+          totalLinks += val.total;
+          val.platforms.forEach(p => platforms.add(p));
+          val.categories.forEach(c => categories.add(c));
         }
       }
 
@@ -638,9 +681,9 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       return {
         name,
         isCombo,
-        totalLinks: matchedEntry ? matchedEntry.total : 0,
-        platformsCount: matchedEntry ? matchedEntry.platforms.size : 0,
-        categoriesCount: matchedEntry ? matchedEntry.categories.size : 0
+        totalLinks,
+        platformsCount: platforms.size,
+        categoriesCount: categories.size
       };
     }).sort((a, b) => {
       // 1. Products with links first (descending)
@@ -656,76 +699,78 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
     });
   }, [links, eliminatedInfluencerIds]);
 
-  // Marketplaces and platforms summaries specifically for the currently selected product
+  // Marketplaces summaries specifically for the currently selected product (4 canonical marketplaces)
   const selectedProductMarketplaces = useMemo(() => {
     if (selectedProduct === 'All') return [];
 
     // Filter links for this product
     const prodLinks = links.filter(
       l => !eliminatedInfluencerIds.has(String(l.influencer_id)) &&
-           (l.product || '').toLowerCase() === selectedProduct.toLowerCase()
+           (
+             (l.product || '').toLowerCase() === selectedProduct.toLowerCase() ||
+             isSameProduct(l.product, selectedProduct)
+           )
     );
 
-    // Group by platform name
-    const platMap = new Map<string, {
-      name: string;
-      category: 'MARKETPLACE' | 'WEBSITE' | string;
-      count: number;
+    const marketplaces: Array<{
+      id: MarketplaceType;
+      name: 'Website' | 'Amazon' | 'Flipkart' | 'Meesho';
+      category: 'WEBSITE' | 'MARKETPLACE';
       brandColor: string;
       description: string;
-    }>();
-
-    // Default channels to display for easy link creation/viewing
-    const defaultChannels = [
-      { name: 'Website', category: 'WEBSITE', brandColor: '#8B5CF6', description: 'Direct brand store links with influencer UTM parameters' },
-      { name: 'Amazon', category: 'MARKETPLACE', brandColor: '#FF9900', description: 'Amazon short links redirecting to product ASINs' },
-      { name: 'Flipkart', category: 'MARKETPLACE', brandColor: '#2874F0', description: 'Flipkart marketplace influencer tracking' },
-      { name: 'Meesho', category: 'MARKETPLACE', brandColor: '#F43397', description: 'Meesho reseller & influencer campaign links' },
-      { name: 'Instagram', category: 'WEBSITE', brandColor: '#E1306C', description: 'Instagram bio and story UTM campaign links' },
-      { name: 'YouTube', category: 'WEBSITE', brandColor: '#FF0000', description: 'YouTube video description and pinned comment links' }
+      count: number;
+    }> = [
+      {
+        id: 'website',
+        name: 'Website',
+        category: 'WEBSITE',
+        brandColor: '#8B5CF6',
+        description: 'Direct Shopify product URL with influencer UTM tracking.',
+        count: 0
+      },
+      {
+        id: 'amazon',
+        name: 'Amazon',
+        category: 'MARKETPLACE',
+        brandColor: '#FF9900',
+        description: 'Amazon destination URL or product URL, using the existing redirect and click-tracking system where supported.',
+        count: 0
+      },
+      {
+        id: 'flipkart',
+        name: 'Flipkart',
+        category: 'MARKETPLACE',
+        brandColor: '#2874F0',
+        description: 'Flipkart product destination URL with its own tracking link.',
+        count: 0
+      },
+      {
+        id: 'meesho',
+        name: 'Meesho',
+        category: 'MARKETPLACE',
+        brandColor: '#F43397',
+        description: 'Meesho product destination URL with its own tracking link.',
+        count: 0
+      }
     ];
 
-    defaultChannels.forEach(c => {
-      platMap.set(c.name.toLowerCase(), {
-        name: c.name,
-        category: c.category,
-        count: 0,
-        brandColor: c.brandColor,
-        description: c.description
-      });
-    });
-
-    // Populate actual counts
     prodLinks.forEach(l => {
-      const pName = (l.platform || l.utm_source || 'Amazon').trim();
-      const matched = TRACKING_PLATFORMS.find(
-        p => p.name.toLowerCase() === pName.toLowerCase() ||
-             p.utmSource.toLowerCase() === pName.toLowerCase() ||
-             p.id.toLowerCase() === pName.toLowerCase()
-      );
-      const canonical = matched?.name || pName;
-      const key = canonical.toLowerCase();
+      const dest = (l.destination_type || '').toLowerCase();
+      const plat = (l.platform || '').toLowerCase();
+      const utm = (l.utm_source || '').toLowerCase();
 
-      if (!platMap.has(key)) {
-        platMap.set(key, {
-          name: canonical,
-          category: l.platform_category || matched?.category || 'MARKETPLACE',
-          count: 0,
-          brandColor: matched?.brandColor || '#A855F7',
-          description: `${canonical} campaign tracking links`
-        });
+      if (dest === 'amazon' || plat === 'amazon' || utm === 'amazon') {
+        marketplaces[1].count += 1;
+      } else if (dest === 'flipkart' || plat === 'flipkart' || utm === 'flipkart') {
+        marketplaces[2].count += 1;
+      } else if (dest === 'meesho' || plat === 'meesho' || utm === 'meesho') {
+        marketplaces[3].count += 1;
+      } else {
+        marketplaces[0].count += 1;
       }
-
-      platMap.get(key)!.count += 1;
     });
 
-    // Return list sorted: Marketplaces with links first, then marketplaces, then websites
-    return Array.from(platMap.values()).sort((a, b) => {
-      if (b.count !== a.count) return b.count - a.count;
-      if (a.category === 'MARKETPLACE' && b.category !== 'MARKETPLACE') return -1;
-      if (b.category === 'MARKETPLACE' && a.category !== 'MARKETPLACE') return 1;
-      return a.name.localeCompare(b.name);
-    });
+    return marketplaces;
   }, [links, eliminatedInfluencerIds, selectedProduct]);
 
   // Toggle handlers for collapsible sections
@@ -1059,14 +1104,26 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           </div>
         </div>
       ) : clicksError ? (
-        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-rose-200">
-          <AlertCircle size={18} className="shrink-0 text-rose-400 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-bold text-rose-300">Unable to Load Click Counts</span>
-            <p className="text-slate-300 text-[11px] leading-relaxed">
-              {clicksError}
-            </p>
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-rose-200">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={18} className="shrink-0 text-rose-400 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-rose-300">Unable to Load Click Counts</span>
+              <p className="text-slate-300 text-[11px] leading-relaxed">
+                {clicksError}
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => handleRefreshClickCounts(links)}
+            disabled={isRefreshingClicks}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-all cursor-pointer font-semibold text-xs shrink-0 disabled:opacity-50 self-start sm:self-auto"
+            title="Retry loading click counts from Redis"
+          >
+            <RefreshCw size={12} className={isRefreshingClicks ? 'animate-spin' : ''} />
+            <span>{isRefreshingClicks ? 'Retrying...' : 'Retry'}</span>
+          </button>
         </div>
       ) : null}
 
@@ -1364,33 +1421,42 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                 <div>
                   <h4 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
                     <ShoppingBag size={15} className="text-amber-400" />
-                    <span>Select Marketplace / Channel</span>
+                    <span>Select Marketplace</span>
                   </h4>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Choose a marketplace card below to view, manage, and bulk delete its tracking links
                   </p>
                 </div>
                 <span className="text-xs font-semibold text-slate-400 bg-[#070c18] border border-slate-800 px-3 py-1 rounded-xl">
-                  {selectedProductMarketplaces.length} Channels Available
+                  {selectedProductMarketplaces.length} Marketplaces Available
                 </span>
               </div>
 
-              {/* 3 cards/row desktop (lg:grid-cols-3), 2 tablet (sm:grid-cols-2), 1 mobile (grid-cols-1) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {/* 4 cards/row desktop (lg:grid-cols-4), 2 tablet (sm:grid-cols-2), 1 mobile (grid-cols-1) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {selectedProductMarketplaces.map((mkt) => {
                   const hasLinks = mkt.count > 0;
-                  const isAmazon = mkt.name.toLowerCase() === 'amazon';
 
                   return (
                     <div
                       key={mkt.name}
                       role="button"
                       tabIndex={0}
-                      onClick={() => setSelectedMarketplace(mkt.name)}
+                      onClick={() => {
+                        if (hasLinks) {
+                          setSelectedMarketplace(mkt.name);
+                        } else {
+                          handleOpenCreate(selectedProduct, mkt.id);
+                        }
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
-                          setSelectedMarketplace(mkt.name);
+                          if (hasLinks) {
+                            setSelectedMarketplace(mkt.name);
+                          } else {
+                            handleOpenCreate(selectedProduct, mkt.id);
+                          }
                         }
                       }}
                       className="group relative flex flex-col justify-between bg-[#0b1329] hover:bg-[#0f1938] border border-slate-800/90 hover:border-purple-500/50 rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-purple-950/20 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
@@ -1406,9 +1472,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                           <span
                             className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
                               hasLinks
-                                ? isAmazon
-                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 group-hover:bg-amber-500/30'
-                                  : 'bg-purple-500/20 text-purple-300 border-purple-500/30 group-hover:bg-purple-500/30'
+                                ? 'bg-purple-500/20 text-purple-300 border-purple-500/30 group-hover:bg-purple-500/30'
                                 : 'bg-slate-800/60 text-slate-500 border-slate-700/40'
                             }`}
                           >
@@ -1420,7 +1484,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                           <h5 className="text-base font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors">
                             {mkt.name}
                           </h5>
-                          <p className="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                          <p className="text-xs text-slate-400 mt-1 line-clamp-3 leading-relaxed">
                             {mkt.description}
                           </p>
                         </div>
@@ -2099,11 +2163,13 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           setIsModalOpen(false);
           setLinkToEdit(null);
           setCreateProductDefault(undefined);
+          setModalDefaultMarketplace(undefined);
         }}
         campaign={campaign}
         influencers={influencers}
         linkToEdit={linkToEdit}
         defaultProduct={createProductDefault}
+        defaultMarketplace={modalDefaultMarketplace}
         onSuccess={handleModalSuccess}
       />
     </div>
