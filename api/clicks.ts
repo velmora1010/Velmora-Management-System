@@ -14,6 +14,25 @@ const getBody = (req: IncomingMessage & { body?: any }): Promise<any> => {
   });
 };
 
+/**
+ * Shared canonical Tracking Slug Normalization
+ */
+function normalizeTrackingSlug(input?: string | null): string {
+  if (!input) return '';
+  let str = String(input).trim();
+  if (str.includes('/')) {
+    const cleanPath = str.split('?')[0].split('#')[0];
+    const parts = cleanPath.split('/').filter(Boolean);
+    str = parts[parts.length - 1] || '';
+  }
+  return str.replace(/^#+/, '').trim().toLowerCase();
+}
+
+function buildClickKey(slugOrId?: string | null): string {
+  const norm = normalizeTrackingSlug(slugOrId);
+  return norm ? `click:${norm}` : '';
+}
+
 const DEFAULT_SUPABASE_URL = 'https://utusdosvijjuxtowzhta.supabase.co';
 const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0dXNkb3N2aWpqdXh0b3d6aHRhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjA4NDE5MiwiZXhwIjoyMDk3NjYwMTkyfQ.U2lv4o8wF1G56B_WoXQADqRTuJEjdYSKXPDQMlJHHA4';
 
@@ -86,7 +105,7 @@ export default async function handler(
 
       // Support persistent slug mapping registration if Redis is active
       if (parsed.action === 'set_slug' && parsed.slug && parsed.link_id) {
-        const cleanSlug = String(parsed.slug).trim().toLowerCase();
+        const cleanSlug = normalizeTrackingSlug(parsed.slug);
         const cleanLinkId = String(parsed.link_id).trim();
         if (isRedisConfigured) {
           try {
@@ -144,14 +163,14 @@ export default async function handler(
   }
 
   try {
-    // 1. Fetch Supabase persistent counts (always configured and available)
+    // 1. Fetch Supabase persistent counts (source of truth & sync store)
     const supabaseCounts = await fetchSupabaseCounts();
 
     // 2. Fetch Redis counts if Redis is configured
     let redisResults: any[] = [];
     if (isRedisConfigured) {
       try {
-        const redisKeys = requestedIds.map(id => `click:${id}`);
+        const redisKeys = requestedIds.map(id => buildClickKey(id));
         const redisRes = await fetch(redisUrl, {
           method: 'POST',
           headers: {
@@ -170,17 +189,21 @@ export default async function handler(
       }
     }
 
-    // 3. Merge counts accurately
+    // 3. Accurately map counts to each requested identifier
     const clicksMap: Record<string, number> = {};
     requestedIds.forEach((id, idx) => {
       const cleanId = String(id).trim();
-      const lowerId = cleanId.toLowerCase();
+      const normSlug = normalizeTrackingSlug(cleanId);
       
-      const supaVal = Number(supabaseCounts[cleanId] ?? supabaseCounts[lowerId] ?? 0);
+      const supaVal = Number(supabaseCounts[normSlug] ?? supabaseCounts[cleanId] ?? 0);
       const redisVal = redisResults[idx] !== null && redisResults[idx] !== undefined ? Number(redisResults[idx]) || 0 : 0;
       
-      // Take the highest verified recorded count between Supabase and Redis
-      clicksMap[cleanId] = Math.max(supaVal, redisVal);
+      // Highest verified recorded count between Supabase and Redis
+      const finalCount = Math.max(supaVal, redisVal);
+      clicksMap[cleanId] = finalCount;
+      if (normSlug && normSlug !== cleanId) {
+        clicksMap[normSlug] = finalCount;
+      }
     });
 
     res.statusCode = 200;

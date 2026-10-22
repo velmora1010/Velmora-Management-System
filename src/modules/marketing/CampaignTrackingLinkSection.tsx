@@ -270,8 +270,9 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
 
       const linkIds: string[] = [];
       data.forEach(l => {
+        const extractedSlug = l.custom_slug || (l.tracking_url?.includes('/r/') ? l.tracking_url.split('/r/')[1]?.split('?')[0]?.split('#')[0] : undefined);
         if (l.id) linkIds.push(String(l.id));
-        if (l.custom_slug) linkIds.push(String(l.custom_slug).toLowerCase());
+        if (extractedSlug) linkIds.push(String(extractedSlug).toLowerCase());
       });
       if (linkIds.length > 0) {
         setIsLoadingClicks(true);
@@ -313,8 +314,9 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
 
     const idsToQuery: string[] = [];
     targetLinks.forEach(l => {
+      const extractedSlug = l.custom_slug || (l.tracking_url?.includes('/r/') ? l.tracking_url.split('/r/')[1]?.split('?')[0]?.split('#')[0] : undefined);
       if (l.id) idsToQuery.push(String(l.id));
-      if (l.custom_slug) idsToQuery.push(String(l.custom_slug).toLowerCase());
+      if (extractedSlug) idsToQuery.push(String(extractedSlug).toLowerCase());
     });
     if (idsToQuery.length === 0) {
       toast('No tracking links to refresh for current view', { icon: 'ℹ️' });
@@ -1913,9 +1915,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                           );
                                                         }
 
+                                                        const extractedSlug = link.custom_slug || (link.tracking_url?.includes('/r/') ? link.tracking_url.split('/r/')[1]?.split('?')[0]?.split('#')[0] : undefined);
                                                         const count = Math.max(
                                                           clicksMap[link.id] ?? 0,
-                                                          (link.custom_slug ? clicksMap[link.custom_slug.toLowerCase()] : 0) ?? 0
+                                                          (extractedSlug ? clicksMap[extractedSlug.toLowerCase()] : 0) ?? 0
                                                         );
                                                         return (
                                                           <span

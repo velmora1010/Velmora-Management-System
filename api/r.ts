@@ -1,3 +1,14 @@
+
+function normalizeTrackingSlug(input?: string | null): string {
+  if (!input) return '';
+  let str = String(input).trim();
+  if (str.includes('/')) {
+    const cleanPath = str.split('?')[0].split('#')[0];
+    const parts = cleanPath.split('/').filter(Boolean);
+    str = parts[parts.length - 1] || '';
+  }
+  return str.replace(/^#+/, '').trim().toLowerCase();
+}
 import type { IncomingMessage, ServerResponse } from 'http';
 
 // Allowed marketplace domains to prevent open-redirect vulnerabilities
