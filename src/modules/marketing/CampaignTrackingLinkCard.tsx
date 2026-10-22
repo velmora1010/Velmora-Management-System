@@ -266,11 +266,11 @@ export const CampaignTrackingLinkCard: React.FC<CampaignTrackingLinkCardProps> =
             if (!isClicksConfigured) {
               return (
                 <div
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] bg-amber-950/30 border-amber-500/30 text-amber-300"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[11px] bg-slate-900/90 border-slate-800 text-slate-400"
                   title={clicksError || 'Redis click tracking not configured on server'}
                 >
-                  <AlertTriangle size={11} className="text-amber-400" />
-                  <span>Clicks: Unconfigured</span>
+                  <AlertTriangle size={11} className="text-slate-500" />
+                  <span>Clicks: Unavailable</span>
                 </div>
               );
             }
