@@ -63,7 +63,7 @@ export async function fetchCampaignDescriptions(
     const { data, error } = await client
       .from(SUPABASE_TABLES.campaignDescriptions)
       .select('*')
-      .or(`campaign_id.eq.${cleanId},campaign_id.eq.global`)
+      .eq('campaign_id', cleanId)
       .order('created_at', { ascending: false });
 
     if (error) {

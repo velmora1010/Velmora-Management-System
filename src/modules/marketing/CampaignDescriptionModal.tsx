@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, Loader2, FileText, Check } from 'lucide-react';
+import { X, AlertCircle, Loader2, FileText } from 'lucide-react';
 import type { Campaign, CampaignDescription } from '../../types';
 import { SCRIPT_PRODUCTS } from '../../services/campaignScriptService';
 import { 
@@ -12,7 +12,6 @@ interface CampaignDescriptionModalProps {
   isOpen: boolean;
   onClose: () => void;
   campaign: Campaign;
-  campaigns?: Campaign[];
   descriptionToEdit?: CampaignDescription | null;
   onSuccess: (savedDescription: CampaignDescription) => void;
 }
@@ -21,11 +20,9 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
   isOpen,
   onClose,
   campaign,
-  campaigns,
   descriptionToEdit,
   onSuccess
 }) => {
-  const [targetCampaignId, setTargetCampaignId] = useState<string>(String(campaign.id));
   const [product, setProduct] = useState<string>('');
   const [descriptionText, setDescriptionText] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -36,11 +33,9 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
   useEffect(() => {
     if (isOpen) {
       if (descriptionToEdit) {
-        setTargetCampaignId(descriptionToEdit.campaign_id || String(campaign.id));
         setProduct(descriptionToEdit.product || '');
         setDescriptionText(descriptionToEdit.description || '');
       } else {
-        setTargetCampaignId(String(campaign.id));
         setProduct('');
         setDescriptionText('');
       }
@@ -75,15 +70,15 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
     try {
       let saved: CampaignDescription;
       if (isEditMode && descriptionToEdit) {
-        saved = await updateCampaignDescription(descriptionToEdit.id, targetCampaignId, {
-          campaign_id: targetCampaignId,
+        saved = await updateCampaignDescription(descriptionToEdit.id, campaign.id, {
+          campaign_id: String(campaign.id),
           product,
           description: descriptionText
         });
         toast.success('Description updated successfully', { id: toastId });
       } else {
         saved = await createCampaignDescription({
-          campaign_id: targetCampaignId,
+          campaign_id: String(campaign.id),
           product,
           description: descriptionText
         });
@@ -115,7 +110,9 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
               <h3 className="text-base sm:text-lg font-bold text-white uppercase tracking-wider">
                 {isEditMode ? 'Edit Description' : 'Create Description'}
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">{campaign.campaign_name}</p>
+              <p className="text-xs text-purple-300 font-medium mt-0.5">
+                Campaign: {campaign.campaign_name}
+              </p>
             </div>
           </div>
           <button
@@ -129,48 +126,22 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Campaign / Scope Selection */}
+          {/* Title (Product) Selection */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Campaign / Scope <span className="text-purple-400">*</span>
-            </label>
-            <select
-              value={targetCampaignId}
-              onChange={(e) => setTargetCampaignId(e.target.value)}
-              disabled={isSubmitting}
-              className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <option value={String(campaign.id)}>Current: {campaign.campaign_name}</option>
-              <option value="global">Global (Reusable across all campaigns)</option>
-              {(campaigns || [])
-                .filter(c => String(c.id) !== String(campaign.id))
-                .map(c => (
-                  <option key={c.id} value={String(c.id)}>
-                    {c.campaign_name}
-                  </option>
-                ))}
-            </select>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Associate this description with {campaign.campaign_name}, another campaign, or save as global reusable.
-            </p>
-          </div>
-
-          {/* Product Title dropdown */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Product Title <span className="text-purple-400">*</span>
+              Title (Product) <span className="text-purple-400">*</span>
             </label>
             <select
               value={product}
               onChange={(e) => {
                 setProduct(e.target.value);
-                if (errors.product) setErrors(prev => ({ ...prev, product: '' }));
+                if (errors.product) setErrors(prev => ({ ...prev, product: undefined }));
               }}
-              className={`w-full bg-[#070c18] border ${
-                errors.product ? 'border-red-500' : 'border-slate-700/80 focus:border-purple-500'
-              } rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer`}
+              className={`w-full bg-[#070c18] border rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer ${
+                errors.product ? 'border-red-500/80 focus:border-red-500' : 'border-slate-700/80 focus:border-purple-500'
+              }`}
             >
-              <option value="" disabled>Select Product</option>
+              <option value="">Select a product...</option>
               {SCRIPT_PRODUCTS.map((prod) => (
                 <option key={prod} value={prod}>
                   {prod}
@@ -178,68 +149,65 @@ export const CampaignDescriptionModal: React.FC<CampaignDescriptionModalProps> =
               ))}
             </select>
             {errors.product && (
-              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                <AlertCircle size={12} /> {errors.product}
+              <p className="text-[11px] text-red-400 mt-1 flex items-center gap-1 font-medium">
+                <AlertCircle size={12} />
+                {errors.product}
               </p>
             )}
           </div>
 
-          {/* Description Textarea */}
+          {/* Description Text */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Description <span className="text-purple-400">*</span>
+                Product Description <span className="text-purple-400">*</span>
               </label>
-              <span className="text-[11px] text-slate-500">Multiline supported & line-breaks preserved</span>
+              <span className="text-[11px] text-slate-500">
+                {descriptionText.length} characters
+              </span>
             </div>
             <textarea
-              rows={8}
+              rows={6}
               value={descriptionText}
               onChange={(e) => {
                 setDescriptionText(e.target.value);
-                if (errors.description) setErrors(prev => ({ ...prev, description: '' }));
+                if (errors.description) setErrors(prev => ({ ...prev, description: undefined }));
               }}
-              placeholder="Enter the product description here... e.g., features, usage directions, offers, hashtags"
-              className={`w-full bg-[#070c18] border ${
-                errors.description ? 'border-red-500' : 'border-slate-700/80 focus:border-purple-500'
-              } rounded-xl p-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors min-h-[180px] resize-y leading-relaxed whitespace-pre-wrap break-words`}
+              placeholder="Enter product description, key highlights, hashtags, or call to actions..."
+              className={`w-full bg-[#070c18] border rounded-xl p-3.5 text-xs sm:text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors resize-y leading-relaxed font-sans ${
+                errors.description ? 'border-red-500/80 focus:border-red-500' : 'border-slate-700/80 focus:border-purple-500'
+              }`}
             />
             {errors.description && (
-              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                <AlertCircle size={12} /> {errors.description}
+              <p className="text-[11px] text-red-400 mt-1 flex items-center gap-1 font-medium">
+                <AlertCircle size={12} />
+                {errors.description}
               </p>
             )}
           </div>
 
-          {/* Footer Action Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+          {/* Modal Actions */}
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={!isFormValid || isSubmitting}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md cursor-pointer ${
-                isFormValid && !isSubmitting
-                  ? 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white shadow-purple-900/25'
-                  : 'bg-purple-600/50 text-purple-200/50 cursor-not-allowed shadow-none'
-              }`}
+              disabled={isSubmitting || !isFormValid}
+              className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 active:bg-purple-800 transition-all shadow-md shadow-purple-900/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? (
                 <>
-                  <Loader2 size={16} className="animate-spin" />
+                  <Loader2 size={14} className="animate-spin" />
                   <span>Saving...</span>
                 </>
               ) : (
-                <>
-                  <Check size={16} />
-                  <span>{isEditMode ? 'Update Description' : 'Save Description'}</span>
-                </>
+                <span>{isEditMode ? 'Update Description' : 'Save Description'}</span>
               )}
             </button>
           </div>

@@ -7,17 +7,14 @@ import {
   Loader2, 
   SearchX, 
   AlertCircle,
-  RefreshCw,
-  Layers
+  RefreshCw
 } from 'lucide-react';
 import type { Campaign, CampaignScript } from '../../types';
 import { 
   SCRIPT_PRODUCTS, 
-  fetchAllCampaignScripts, 
   fetchCampaignScripts, 
   deleteCampaignScript 
 } from '../../services/campaignScriptService';
-import { useCampaigns } from '../../hooks/marketing/useCampaigns';
 import { CampaignScriptModal } from './CampaignScriptModal';
 import { CampaignScriptCard } from './CampaignScriptCard';
 import toast from 'react-hot-toast';
@@ -28,24 +25,13 @@ interface CampaignScriptSectionProps {
 }
 
 export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ campaign, onBack }) => {
-  const { campaigns } = useCampaigns();
   const [scripts, setScripts] = useState<CampaignScript[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Filters: Campaign, Product, and Language
-  const [selectedCampaign, setSelectedCampaign] = useState<string>('All');
+  // Filters strictly within this campaign
   const [selectedProduct, setSelectedProduct] = useState<string>('All');
   const [selectedLanguage, setSelectedLanguage] = useState<string>('All');
-
-  // Campaign lookup map
-  const campaignMap = useMemo(() => {
-    const map = new Map<string, string>();
-    (campaigns || []).forEach(c => map.set(String(c.id), c.campaign_name));
-    if (campaign?.id) map.set(String(campaign.id), campaign.campaign_name);
-    map.set('global', 'Global (Reusable)');
-    return map;
-  }, [campaigns, campaign]);
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,13 +60,15 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
     return Array.from(set).sort();
   }, [campaign.target_languages, scripts]);
 
-  // Load scripts from Supabase
+  // Load scripts strictly for this campaign
   const loadScripts = useCallback(async () => {
     setIsLoading(true);
     setFetchError(null);
     try {
-      const data = await fetchAllCampaignScripts();
-      setScripts(data);
+      const data = await fetchCampaignScripts(campaign.id);
+      // Strict guard: only keep scripts matching this campaign's ID
+      const isolated = data.filter(s => String(s.campaign_id) === String(campaign.id));
+      setScripts(isolated);
     } catch (err: any) {
       console.error('Error loading scripts:', err);
       const msg = err?.message || 'Failed to load scripts from Supabase.';
@@ -89,7 +77,7 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [campaign.id]);
 
   useEffect(() => {
     loadScripts();
@@ -130,19 +118,17 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
     }
   };
 
-  // Filter scripts
+  // Filter scripts by product and language
   const filteredScripts = useMemo(() => {
     return scripts.filter(s => {
-      const matchCampaign = selectedCampaign === 'All'
-        ? true
-        : selectedCampaign === 'global'
-          ? s.campaign_id === 'global'
-          : (String(s.campaign_id) === selectedCampaign || s.campaign_id === 'global');
-      const matchProduct = selectedProduct === 'All' || s.product.toLowerCase() === selectedProduct.toLowerCase();
+      const matchProduct = selectedProduct === 'All' 
+        ? true 
+        : s.product.toLowerCase().includes(selectedProduct.toLowerCase()) || 
+          selectedProduct.toLowerCase().includes(s.product.toLowerCase());
       const matchLanguage = selectedLanguage === 'All' || s.language.toLowerCase() === selectedLanguage.toLowerCase();
-      return matchCampaign && matchProduct && matchLanguage;
+      return matchProduct && matchLanguage;
     });
-  }, [scripts, selectedCampaign, selectedProduct, selectedLanguage]);
+  }, [scripts, selectedProduct, selectedLanguage]);
 
   return (
     <div className="w-full space-y-5 animate-fade-in text-slate-200">
@@ -163,7 +149,7 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
             </div>
             <div>
               <h3 className="text-base font-bold text-white leading-tight">Script Management</h3>
-              <p className="text-xs text-slate-400 mt-0.5">{selectedCampaign === 'All' ? 'All Campaigns' : (campaignMap.get(selectedCampaign) || campaign.campaign_name)}</p>
+              <p className="text-xs text-purple-300 font-medium mt-0.5">{campaign.campaign_name}</p>
             </div>
           </div>
         </div>
@@ -184,28 +170,7 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
       {/* Filters Bar & Results Summary */}
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto flex-wrap">
-          {/* Filter 1: Campaign */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-              <Layers size={13} className="text-purple-400" />
-              <span>Campaign:</span>
-            </span>
-            <select
-              value={selectedCampaign}
-              onChange={(e) => setSelectedCampaign(e.target.value)}
-              className="bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer w-full sm:w-auto"
-            >
-              <option value="All">All Campaigns</option>
-              {(campaigns || []).map((c) => (
-                <option key={c.id} value={String(c.id)}>
-                  {c.campaign_name}
-                </option>
-              ))}
-              <option value="global">Global (Reusable)</option>
-            </select>
-          </div>
-
-          {/* Filter 2: Title (Product) */}
+          {/* Filter 1: Title (Product) */}
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
               <Filter size={13} className="text-purple-400" />
@@ -266,7 +231,7 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
       {isLoading ? (
         <div className="bg-[#0b1329]/60 border border-slate-800/90 rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-sm">
           <Loader2 size={32} className="animate-spin text-purple-400 mb-3" />
-          <h4 className="text-sm font-semibold text-slate-300">Loading campaign scripts...</h4>
+          <h4 className="text-sm font-semibold text-slate-300">Loading scripts...</h4>
           <p className="text-xs text-slate-500 mt-1">Connecting to Supabase</p>
         </div>
       ) : fetchError ? (
@@ -279,42 +244,53 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
           <button
             type="button"
             onClick={loadScripts}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 cursor-pointer"
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition-colors cursor-pointer"
           >
             Try Again
           </button>
         </div>
       ) : filteredScripts.length === 0 ? (
-        /* Empty State */
-        <div className="bg-[#0b1329]/60 border border-slate-800/90 rounded-2xl p-12 sm:p-16 flex flex-col items-center justify-center text-center shadow-sm">
-          <div className="w-16 h-16 rounded-2xl bg-purple-600/10 border border-purple-500/30 text-purple-400 flex items-center justify-center mb-4 shadow-inner">
-            {scripts.length === 0 ? <FileText size={32} /> : <SearchX size={32} />}
+        <div className="bg-[#0b1329]/60 border border-slate-800/80 rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-purple-600/10 border border-purple-500/20 text-purple-400 flex items-center justify-center mb-4">
+            {scripts.length === 0 ? <FileText size={24} /> : <SearchX size={24} />}
           </div>
-          <h4 className="text-base sm:text-lg font-bold text-white mb-1.5">
-            {scripts.length === 0 ? 'No scripts created yet' : 'No scripts found'}
+          <h4 className="text-base font-bold text-slate-200">
+            {scripts.length === 0 ? 'No scripts found for this campaign' : 'No matching scripts'}
           </h4>
-          <p className="text-xs sm:text-sm text-slate-400 max-w-md mb-6 leading-relaxed">
-            {scripts.length === 0
-              ? `Get started by creating your first model script and key points for ${campaign.campaign_name}.`
-              : 'No scripts match the selected product and language filters. Try adjusting your filters or create a new script.'}
+          <p className="text-xs text-slate-400 max-w-sm mt-1.5 mb-5">
+            {scripts.length === 0 
+              ? 'Scripts created here will be saved specifically for this campaign.' 
+              : 'Try adjusting your product or language filters to find what you are looking for.'}
           </p>
-          <button
-            type="button"
-            onClick={handleOpenCreate}
-            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md shadow-purple-900/25 cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>Create Script</span>
-          </button>
+          {scripts.length === 0 ? (
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-900/20 cursor-pointer"
+            >
+              <Plus size={15} />
+              <span>Create First Script</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedProduct('All');
+                setSelectedLanguage('All');
+              }}
+              className="text-xs text-purple-400 hover:text-purple-300 font-semibold underline underline-offset-2 cursor-pointer"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
       ) : (
-        /* Cards Grid */
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredScripts.map((script) => (
             <CampaignScriptCard
               key={script.id}
               script={script}
-              campaignName={campaignMap.get(String(script.campaign_id)) || (script.campaign_id === 'global' ? 'Global (Reusable)' : 'Global')}
+              campaignName={campaign.campaign_name}
               onEdit={handleOpenEdit}
               onDelete={handleDelete}
             />
@@ -323,17 +299,15 @@ export const CampaignScriptSection: React.FC<CampaignScriptSectionProps> = ({ ca
       )}
 
       {/* Create / Edit Modal */}
-      <CampaignScriptModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          setScriptToEdit(null);
-        }}
-        campaign={campaign}
-        campaigns={campaigns}
-        scriptToEdit={scriptToEdit}
-        onSuccess={handleModalSuccess}
-      />
+      {isModalOpen && (
+        <CampaignScriptModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          campaign={campaign}
+          scriptToEdit={scriptToEdit}
+          onSuccess={handleModalSuccess}
+        />
+      )}
     </div>
   );
 };

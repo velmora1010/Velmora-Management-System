@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Link2, 
   ArrowLeft, 
@@ -27,7 +27,8 @@ import {
   ChevronsUpDown,
   MousePointerClick,
   Clock,
-  Package
+  Package,
+  X
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
 import { 
@@ -159,6 +160,43 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [selectedVideo, setSelectedVideo] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  // Filter Popover state
+  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+  const filterPopoverRef = useRef<HTMLDivElement>(null);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (selectedProduct !== 'All') count++;
+    if (selectedPlatform !== 'All') count++;
+    if (selectedVideo !== 'All') count++;
+    return count;
+  }, [selectedProduct, selectedPlatform, selectedVideo]);
+
+  const handleResetFilters = useCallback(() => {
+    setSelectedProduct('All');
+    setSelectedPlatform('All');
+    setSelectedVideo('All');
+  }, []);
+
+  // Close filter popover on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        filterPopoverRef.current &&
+        !filterPopoverRef.current.contains(event.target as Node)
+      ) {
+        setIsFilterPopoverOpen(false);
+      }
+    };
+
+    if (isFilterPopoverOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isFilterPopoverOpen]);
+
   // View Mode: 'table' or 'grid'
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
 
@@ -230,7 +268,12 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       const data = await fetchInfluencerTrackingLinks(campaign.id);
       setLinks(data);
 
-      const linkIds = data.map(l => String(l.id));
+      const linkIds: string[] = [];
+      data.forEach(l => {
+        const extractedSlug = l.custom_slug || (l.tracking_url?.includes('/r/') ? l.tracking_url.split('/r/')[1]?.split('?')[0]?.split('#')[0] : undefined);
+        if (l.id) linkIds.push(String(l.id));
+        if (extractedSlug) linkIds.push(String(extractedSlug).toLowerCase());
+      });
       if (linkIds.length > 0) {
         setIsLoadingClicks(true);
         try {
@@ -238,7 +281,9 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           setIsClicksConfigured(res.configured);
           setClicksError(res.error || null);
           setClicksMap(prev => ({ ...prev, ...(res.clicks || {}) }));
-          setLastClicksUpdated(new Date());
+          if (res.configured && !res.isError) {
+            setLastClicksUpdated(new Date());
+          }
         } catch (e: any) {
           console.warn('Failed to fetch clicks:', e);
           setClicksError(e?.message || 'Failed to connect to clicks service');
@@ -267,7 +312,12 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const handleRefreshClickCounts = useCallback(async (targetLinks: InfluencerTrackingLink[]) => {
     if (isRefreshingClicks) return;
 
-    const idsToQuery = targetLinks.map(l => String(l.id)).filter(Boolean);
+    const idsToQuery: string[] = [];
+    targetLinks.forEach(l => {
+      const extractedSlug = l.custom_slug || (l.tracking_url?.includes('/r/') ? l.tracking_url.split('/r/')[1]?.split('?')[0]?.split('#')[0] : undefined);
+      if (l.id) idsToQuery.push(String(l.id));
+      if (extractedSlug) idsToQuery.push(String(extractedSlug).toLowerCase());
+    });
     if (idsToQuery.length === 0) {
       toast('No tracking links to refresh for current view', { icon: 'ℹ️' });
       return;
@@ -340,7 +390,11 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       return copy.sort(compareTrackingLinksByCodeAsc);
     });
 
-    const savedIds = savedLinks.map(l => String(l.id));
+    const savedIds: string[] = [];
+    savedLinks.forEach(l => {
+      if (l.id) savedIds.push(String(l.id));
+      if (l.custom_slug) savedIds.push(String(l.custom_slug).toLowerCase());
+    });
     if (savedIds.length > 0) {
       fetchTrackingLinkClicks(savedIds).then(res => {
         setIsClicksConfigured(res.configured);
@@ -917,92 +971,164 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         </div>
       </div>
 
-      {/* Filters Bar & Controls */}
-      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 space-y-3.5 shadow-sm">
-        {/* Row 1: PRODUCT, PLATFORM, VIDEO Filters in clean 3-column layout */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Filter 1: Product */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-              <Filter size={12} className="text-purple-400" />
-              <span>Product:</span>
-            </span>
-            <select
-              value={selectedProduct}
-              onChange={(e) => setSelectedProduct(e.target.value)}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer w-full truncate"
-            >
-              <option value="All" className="bg-slate-900 font-semibold">All Products ({allProductSummaries.length})</option>
-              <optgroup label="Standard Products" className="bg-slate-900 text-slate-400 font-semibold">
-                {SCRIPT_PRODUCTS.map((prod) => (
-                  <option key={prod} value={prod} className="bg-slate-900 text-slate-200">
-                    {prod}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Combo Products" className="bg-slate-900 text-purple-400 font-semibold">
-                {COMBO_PRODUCTS.map((combo) => (
-                  <option key={combo} value={combo} className="bg-slate-900 text-slate-200">
-                    {combo}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </div>
+      {/* Controls Bar: Search, Compact Filter Popover, Count, Expand All, & View Mode */}
+      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Left: Quick Search & Filter Popover Button */}
+          <div className="flex items-center gap-2 flex-1 max-w-md">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-2.5 text-slate-500" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search creator, #code, product, URL..."
+                className="w-full bg-[#070c18] border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+              />
+            </div>
 
-          {/* Filter 2: Platform */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-              <Globe size={12} className="text-purple-400" />
-              <span>Platform:</span>
-            </span>
-            <select
-              value={selectedPlatform}
-              onChange={(e) => setSelectedPlatform(e.target.value)}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer w-full truncate"
-            >
-              <option value="All" className="bg-slate-900">All Platforms</option>
-              {TRACKING_PLATFORMS.map((plat) => (
-                <option key={plat.id} value={plat.name} className="bg-slate-900">
-                  {plat.name} ({plat.category})
-                </option>
-              ))}
-            </select>
-          </div>
+            {/* Compact Filter Icon Button & Popover */}
+            <div className="relative shrink-0" ref={filterPopoverRef}>
+              <button
+                type="button"
+                onClick={() => setIsFilterPopoverOpen((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                  activeFilterCount > 0
+                    ? 'bg-purple-600/20 border-purple-500/50 text-purple-300 hover:bg-purple-600/30'
+                    : 'bg-[#070c18] hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-white'
+                }`}
+                title="Filter tracking links"
+                aria-label="Filter tracking links"
+              >
+                <Filter size={13} className={activeFilterCount > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                <span className="hidden xs:inline">Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-purple-600 text-white text-[10px] font-bold flex items-center justify-center">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
 
-          {/* Filter 3: Video */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-              <Video size={12} className="text-purple-400" />
-              <span>Video:</span>
-            </span>
-            <select
-              value={selectedVideo}
-              onChange={(e) => setSelectedVideo(e.target.value)}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer w-full truncate"
-            >
-              <option value="All" className="bg-slate-900">All Videos</option>
-              {TRACKING_VIDEOS.map((vid) => (
-                <option key={vid.id} value={vid.name} className="bg-slate-900">
-                  {vid.name} ({vid.utmContent})
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+              {isFilterPopoverOpen && (
+                <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-72 sm:w-80 bg-[#0b1329] border border-slate-700/80 rounded-2xl p-4 shadow-2xl z-40 space-y-3.5 backdrop-blur-md">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Filter size={14} className="text-purple-400" />
+                      <span className="text-xs font-bold text-white uppercase tracking-wider">Filters</span>
+                      {activeFilterCount > 0 && (
+                        <span className="text-[10px] font-semibold bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded-md border border-purple-500/30">
+                          {activeFilterCount} active
+                        </span>
+                      )}
+                    </div>
+                    {activeFilterCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleResetFilters}
+                        className="text-[11px] text-slate-400 hover:text-rose-400 transition-colors font-medium cursor-pointer"
+                      >
+                        Reset All
+                      </button>
+                    )}
+                  </div>
 
-        {/* Row 2: Search, Count, Expand All, & View Mode Toggle */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
-          {/* Quick Search */}
-          <div className="relative flex-1 max-w-sm">
-            <Search size={14} className="absolute left-3 top-2.5 text-slate-500" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by creator name, #code, product, or URL..."
-              className="w-full bg-[#070c18] border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
-            />
+                  {/* Filter 1: Product */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Product</span>
+                      {selectedProduct !== 'All' && (
+                        <span className="text-[10px] text-purple-400 font-normal">Active</span>
+                      )}
+                    </label>
+                    <select
+                      value={selectedProduct}
+                      onChange={(e) => setSelectedProduct(e.target.value)}
+                      className="w-full bg-[#070c18] border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      <option value="All" className="bg-slate-900 font-semibold">All Products ({allProductSummaries.length})</option>
+                      <optgroup label="Standard Products" className="bg-slate-900 text-slate-400 font-semibold">
+                        {SCRIPT_PRODUCTS.map((prod) => (
+                          <option key={prod} value={prod} className="bg-slate-900 text-slate-200">
+                            {prod}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Combo Products" className="bg-slate-900 text-purple-400 font-semibold">
+                        {COMBO_PRODUCTS.map((combo) => (
+                          <option key={combo} value={combo} className="bg-slate-900 text-slate-200">
+                            {combo}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  {/* Filter 2: Platform */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Platform</span>
+                      {selectedPlatform !== 'All' && (
+                        <span className="text-[10px] text-purple-400 font-normal">Active</span>
+                      )}
+                    </label>
+                    <select
+                      value={selectedPlatform}
+                      onChange={(e) => setSelectedPlatform(e.target.value)}
+                      className="w-full bg-[#070c18] border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      <option value="All" className="bg-slate-900">All Platforms</option>
+                      {TRACKING_PLATFORMS.map((plat) => (
+                        <option key={plat.id} value={plat.name} className="bg-slate-900">
+                          {plat.name} ({plat.category})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filter 3: Video */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Video</span>
+                      {selectedVideo !== 'All' && (
+                        <span className="text-[10px] text-purple-400 font-normal">Active</span>
+                      )}
+                    </label>
+                    <select
+                      value={selectedVideo}
+                      onChange={(e) => setSelectedVideo(e.target.value)}
+                      className="w-full bg-[#070c18] border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      <option value="All" className="bg-slate-900">All Videos</option>
+                      {TRACKING_VIDEOS.map((vid) => (
+                        <option key={vid.id} value={vid.name} className="bg-slate-900">
+                          {vid.name} ({vid.utmContent})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Popover Actions */}
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                    {activeFilterCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleResetFilters}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsFilterPopoverOpen(false)}
+                      className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Right Controls: Count, Expand/Collapse All, View Mode, Refresh */}
@@ -1070,63 +1196,6 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         </div>
       </div>
 
-      {/* Notice Banners */}
-      <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-emerald-200">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shrink-0">
-            <Globe size={16} />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-bold text-white">Active Tracking Endpoint:</span>
-              <span className="font-mono text-emerald-300 font-semibold bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/30">
-                velmora-management-system.vercel.app/r
-              </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                Live & Verified
-              </span>
-            </div>
-            <p className="text-slate-400 text-[11px] mt-0.5 truncate">
-              Amazon tracking links resolve directly via the production Vercel endpoint (e.g. <span className="font-mono text-emerald-300">velmora-management-system.vercel.app/r/his4-v1</span>) without third-party DNS dependency.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {!isClicksConfigured ? (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-200">
-          <AlertTriangle size={18} className="shrink-0 text-amber-400 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-bold text-amber-300">Click Tracking Not Configured</span>
-            <p className="text-slate-300 text-[11px] leading-relaxed">
-              {clicksError || 'The persistent Redis click tracking counter is currently unconfigured. Clicks on Amazon links will redirect visitors, but counts will display as unconfigured until UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set in Vercel.'}
-            </p>
-          </div>
-        </div>
-      ) : clicksError ? (
-        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-rose-200">
-          <div className="flex items-start gap-3">
-            <AlertCircle size={18} className="shrink-0 text-rose-400 mt-0.5" />
-            <div className="space-y-1">
-              <span className="font-bold text-rose-300">Unable to Load Click Counts</span>
-              <p className="text-slate-300 text-[11px] leading-relaxed">
-                {clicksError}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleRefreshClickCounts(links)}
-            disabled={isRefreshingClicks}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-all cursor-pointer font-semibold text-xs shrink-0 disabled:opacity-50 self-start sm:self-auto"
-            title="Retry loading click counts from Redis"
-          >
-            <RefreshCw size={12} className={isRefreshingClicks ? 'animate-spin' : ''} />
-            <span>{isRefreshingClicks ? 'Retrying...' : 'Retry'}</span>
-          </button>
-        </div>
-      ) : null}
-
       {/* Main Content Area */}
       {isLoading ? (
         <div className="bg-[#0b1329]/60 border border-slate-800/90 rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-sm">
@@ -1169,7 +1238,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5">
             {allProductSummaries.map((pSummary) => {
               const hasLinks = pSummary.totalLinks > 0;
               const isCombo = isComboProduct(pSummary.name);
@@ -1186,51 +1255,51 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                       setSelectedProduct(pSummary.name);
                     }
                   }}
-                  className={`group relative flex flex-col justify-between h-full min-h-[195px] bg-[#0b1329] hover:bg-[#0f1938] border ${
+                  className={`group relative flex flex-col justify-between bg-[#0b1329] hover:bg-[#0f1938] border ${
                     isCombo 
                       ? 'border-purple-900/60 hover:border-purple-500/60' 
                       : 'border-slate-800/90 hover:border-purple-500/50'
-                  } rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-purple-950/25 focus:outline-none focus:ring-2 focus:ring-purple-500/50`}
+                  } rounded-xl p-3.5 sm:p-4 transition-all duration-150 cursor-pointer shadow-xs hover:shadow-md hover:shadow-purple-950/20 focus:outline-none focus:ring-2 focus:ring-purple-500/40`}
                 >
-                  <div className="space-y-3.5">
-                    <div className="flex items-start justify-between gap-2.5">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-all shadow-sm ${
+                  <div className="space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 group-hover:scale-105 transition-all shadow-xs ${
                         isCombo
                           ? 'bg-gradient-to-br from-purple-600/25 to-indigo-600/25 border border-purple-500/40 text-purple-300'
-                          : 'bg-purple-600/15 border border-purple-500/30 text-purple-300 text-2xl'
+                          : 'bg-purple-600/15 border border-purple-500/30 text-purple-300 text-base'
                       }`}>
                         {isCombo ? (
-                          <Package size={22} className="text-purple-300" />
+                          <Package size={15} className="text-purple-300" />
                         ) : (
                           <span>🧴</span>
                         )}
                       </div>
-                      <div className="flex flex-col items-end gap-1.5">
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {isCombo && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                            COMBO
+                          </span>
+                        )}
                         <span
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors ${
                             hasLinks
                               ? 'bg-purple-500/20 text-purple-300 border-purple-500/30 group-hover:bg-purple-500/30'
-                              : 'bg-slate-800/60 text-slate-500 border-slate-700/40'
+                              : 'bg-slate-900 text-slate-500 border-slate-800'
                           }`}
                         >
                           {pSummary.totalLinks} {pSummary.totalLinks === 1 ? 'Link' : 'Links'}
                         </span>
-                        {isCombo && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/15 text-purple-300 border border-purple-500/30">
-                            COMBO
-                          </span>
-                        )}
                       </div>
                     </div>
 
                     <div>
                       <h5 
-                        className="text-sm font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors leading-snug line-clamp-2 min-h-[2.5rem]"
+                        className="text-xs font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors leading-snug line-clamp-2 min-h-[2rem]"
                         title={pSummary.name}
                       >
                         {pSummary.name}
                       </h5>
-                      <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">
+                      <p className="text-[10px] text-slate-400 mt-0.5 truncate">
                         {hasLinks
                           ? `${pSummary.categoriesCount} channel category • ${pSummary.platformsCount} platforms`
                           : 'No tracking links generated yet'}
@@ -1238,8 +1307,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 group-hover:text-purple-300 transition-colors">
-                    <span className="font-medium text-[11px]">
+                  <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-purple-300 transition-colors">
+                    <span className="font-medium text-[10px]">
                       {hasLinks ? 'Open tracking table' : 'Create tracking link'}
                     </span>
                     <div 
@@ -1252,12 +1321,12 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                           handleOpenCreate(pSummary.name);
                         }
                       }}
-                      className="w-6 h-6 rounded-lg bg-slate-900 border border-slate-800 group-hover:border-purple-500/40 flex items-center justify-center text-slate-400 group-hover:text-purple-300 transition-colors cursor-pointer"
+                      className="w-5 h-5 rounded-md bg-slate-900 border border-slate-800 group-hover:border-purple-500/40 flex items-center justify-center text-slate-400 group-hover:text-purple-300 transition-colors cursor-pointer"
                     >
                       {hasLinks ? (
-                        <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                        <ChevronRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
                       ) : (
-                        <Plus size={14} className="group-hover:scale-110 transition-transform text-purple-400" />
+                        <Plus size={12} className="group-hover:scale-110 transition-transform text-purple-400" />
                       )}
                     </div>
                   </div>
@@ -1312,10 +1381,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
            2. DEDICATED SELECTED PRODUCT VIEW / SEARCH RESULTS VIEW
            ========================================================================= */
         <div className="space-y-5">
-          {/* Top Breadcrumb & Product Scope Header */}
+          {/* Top Compact Page Header: Back, Product, Marketplace, Count */}
           {selectedProduct !== 'All' && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0b1329] border border-slate-800 p-3.5 sm:p-4 rounded-2xl shadow-sm">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-[#0b1329] border border-slate-800 p-2.5 sm:p-3 rounded-xl shadow-xs">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <button
                   type="button"
                   onClick={() => {
@@ -1325,21 +1394,21 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                       setSelectedProduct('All');
                     }
                   }}
-                  className="flex items-center gap-2 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-purple-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm"
+                  className="flex items-center gap-1.5 bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-purple-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs"
                 >
-                  <ArrowLeft size={15} />
+                  <ArrowLeft size={13} />
                   <span>{selectedMarketplace ? 'Back to Marketplaces' : 'Back to Products'}</span>
                 </button>
-                <div className="h-5 w-[1px] bg-slate-800 hidden sm:block" />
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-slate-400 font-medium">Product:</span>
-                  <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wide px-2.5 py-0.5 rounded-lg bg-purple-600/20 border border-purple-500/40 text-purple-300">
+                <div className="h-4 w-[1px] bg-slate-800 hidden sm:block" />
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-slate-400 font-medium">Product:</span>
+                  <span className="text-xs font-bold text-white uppercase tracking-wide px-2 py-0.5 rounded-md bg-purple-600/20 border border-purple-500/40 text-purple-300">
                     {selectedProduct}
                   </span>
                   {selectedMarketplace && (
                     <>
-                      <ChevronRight size={14} className="text-slate-600" />
-                      <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wide px-2.5 py-0.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-amber-300">
+                      <ChevronRight size={13} className="text-slate-600" />
+                      <span className="text-xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/80 text-amber-300">
                         {selectedMarketplace}
                       </span>
                     </>
@@ -1347,15 +1416,15 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 self-end sm:self-auto text-xs text-slate-400">
-                <span className="font-semibold text-slate-300">
+              <div className="flex items-center gap-2.5 self-end sm:self-auto text-xs text-slate-400">
+                <span className="font-semibold text-slate-300 bg-[#070c18] border border-slate-800 px-2 py-0.5 rounded-md text-[11px]">
                   {filteredLinks.length} {filteredLinks.length === 1 ? 'Tracking Link' : 'Tracking Links'}
                 </span>
                 {selectedMarketplace && (
                   <button
                     type="button"
                     onClick={() => setSelectedMarketplace(null)}
-                    className="text-[11px] font-semibold text-purple-400 hover:text-purple-300 underline cursor-pointer"
+                    className="text-[10px] font-semibold text-purple-400 hover:text-purple-300 underline cursor-pointer"
                   >
                     View All Channels
                   </button>
@@ -1433,7 +1502,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
               </div>
 
               {/* 4 cards/row desktop (lg:grid-cols-4), 2 tablet (sm:grid-cols-2), 1 mobile (grid-cols-1) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5">
                 {selectedProductMarketplaces.map((mkt) => {
                   const hasLinks = mkt.count > 0;
 
@@ -1459,21 +1528,21 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                           }
                         }
                       }}
-                      className="group relative flex flex-col justify-between bg-[#0b1329] hover:bg-[#0f1938] border border-slate-800/90 hover:border-purple-500/50 rounded-2xl p-5 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-lg hover:shadow-purple-950/20 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                      className="group relative flex flex-col justify-between bg-[#0b1329] hover:bg-[#0f1938] border border-slate-800/90 hover:border-purple-500/50 rounded-xl p-3.5 sm:p-4 transition-all duration-150 cursor-pointer shadow-xs hover:shadow-md hover:shadow-purple-950/20 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
                     >
-                      <div className="space-y-3.5">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-2.5">
+                      <div className="space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
                             <PlatformBrandIcon platform={mkt.name} color={mkt.brandColor} />
-                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-400">
+                            <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
                               {mkt.category}
                             </span>
                           </div>
                           <span
-                            className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors ${
                               hasLinks
                                 ? 'bg-purple-500/20 text-purple-300 border-purple-500/30 group-hover:bg-purple-500/30'
-                                : 'bg-slate-800/60 text-slate-500 border-slate-700/40'
+                                : 'bg-slate-900 text-slate-500 border-slate-800'
                             }`}
                           >
                             {mkt.count} {mkt.count === 1 ? 'Link' : 'Links'}
@@ -1481,22 +1550,22 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                         </div>
 
                         <div>
-                          <h5 className="text-base font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors">
+                          <h5 className="text-xs font-bold text-white uppercase tracking-wide group-hover:text-purple-300 transition-colors">
                             {mkt.name}
                           </h5>
-                          <p className="text-xs text-slate-400 mt-1 line-clamp-3 leading-relaxed">
+                          <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-2 leading-relaxed">
                             {mkt.description}
                           </p>
                         </div>
                       </div>
 
-                      <div className="mt-5 pt-3.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 group-hover:text-purple-300 transition-colors">
-                        <span className="font-semibold text-xs">
+                      <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 group-hover:text-purple-300 transition-colors">
+                        <span className="font-semibold text-[10px]">
                           {hasLinks ? 'View Links' : 'Generate Links'}
                         </span>
-                        <div className="flex items-center gap-1 font-bold text-xs text-purple-400 group-hover:text-purple-300">
+                        <div className="flex items-center gap-1 font-bold text-[11px] text-purple-400 group-hover:text-purple-300">
                           <span>Open</span>
-                          <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                          <ChevronRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
                         </div>
                       </div>
                     </div>
@@ -1508,67 +1577,54 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
 
           {/* LEVEL 3: TRACKING LINKS TABLE / LIST (When marketplace is chosen, or during search/multi-product mode) */}
           {((selectedProduct !== 'All' && selectedMarketplace) || (selectedProduct === 'All') || isSearching) && (
-            <div className="space-y-5 animate-fade-in">
+            <div className="space-y-4 animate-fade-in">
               {productGroups.map((productGroup) => (
                 <div 
                   key={productGroup.product}
-                  className="bg-[#0b1329] border border-slate-800/90 rounded-2xl overflow-hidden shadow-sm transition-all duration-200"
+                  className={selectedMarketplace ? 'space-y-3' : 'bg-[#0b1329] border border-slate-800/90 rounded-xl overflow-hidden shadow-xs transition-all duration-200'}
                 >
-                  {/* Clean Product Header */}
-                  <div className="p-4 sm:p-5 bg-gradient-to-r from-[#0e1733] to-[#0b1329] border-b border-slate-800/80 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-purple-600/15 border border-purple-500/30 text-purple-300 flex items-center justify-center text-xl shrink-0 shadow-sm">
-                        🧴
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <h4 className="text-base sm:text-lg font-bold text-white tracking-wide uppercase truncate">
-                            {productGroup.product}
-                          </h4>
-                          {selectedMarketplace && (
-                            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                              {selectedMarketplace}
-                            </span>
-                          )}
-                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
-                            {productGroup.totalLinks} {productGroup.totalLinks === 1 ? 'Link' : 'Links'}
-                          </span>
+                  {/* Clean Product Header (Only when viewing multiple products or general list, omitted when single marketplace is opened) */}
+                  {!selectedMarketplace && (
+                    <div className="p-3 sm:p-4 bg-gradient-to-r from-[#0e1733] to-[#0b1329] border-b border-slate-800/80 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-purple-600/15 border border-purple-500/30 text-purple-300 flex items-center justify-center text-base shrink-0 shadow-xs">
+                          🧴
                         </div>
-                        <p className="text-xs text-slate-400 mt-0.5">Influencer Tracking Table</p>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-sm font-bold text-white tracking-wide uppercase truncate">
+                              {productGroup.product}
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
+                              {productGroup.totalLinks} {productGroup.totalLinks === 1 ? 'Link' : 'Links'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     </div>
-
-                    {selectedMarketplace && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedMarketplace(null)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
-                      >
-                        <ArrowLeft size={13} />
-                        <span>All Marketplaces</span>
-                      </button>
-                    )}
-                  </div>
+                  )}
 
                   {/* Product Body: Categories & Platform Tables */}
-                  <div className="p-4 sm:p-5 space-y-6 bg-[#080d1c]/40">
+                  <div className={selectedMarketplace ? 'space-y-3' : 'p-3 sm:p-4 space-y-4 bg-[#080d1c]/40'}>
                     {productGroup.categories.map((catGroup) => (
-                      <div key={catGroup.category} className="space-y-3">
-                        {/* Category Label with Divider */}
-                        <div className="flex items-center gap-2.5 pb-1">
-                          <div className="flex items-center gap-1.5 text-xs font-bold tracking-wider uppercase text-slate-400">
-                            {catGroup.category === 'WEBSITE' ? (
-                              <Globe size={13} className="text-purple-400" />
-                            ) : (
-                              <ShoppingBag size={13} className="text-amber-400" />
-                            )}
-                            <span className="text-slate-300">{catGroup.category}</span>
+                      <div key={catGroup.category} className="space-y-2.5">
+                        {/* Category Label with Divider (Omitted when drilled into a single marketplace) */}
+                        {!selectedMarketplace && (
+                          <div className="flex items-center gap-2 pb-1">
+                            <div className="flex items-center gap-1.5 text-[11px] font-bold tracking-wider uppercase text-slate-400">
+                              {catGroup.category === 'WEBSITE' ? (
+                                <Globe size={12} className="text-purple-400" />
+                              ) : (
+                                <ShoppingBag size={12} className="text-amber-400" />
+                              )}
+                              <span className="text-slate-300">{catGroup.category}</span>
+                            </div>
+                            <div className="h-[1px] flex-1 bg-slate-800/80" />
+                            <span className="text-[10px] font-semibold text-slate-500">
+                              {catGroup.totalLinks} {catGroup.totalLinks === 1 ? 'Link' : 'Links'}
+                            </span>
                           </div>
-                          <div className="h-[1px] flex-1 bg-slate-800/80" />
-                          <span className="text-[11px] font-semibold text-slate-500">
-                            {catGroup.totalLinks} {catGroup.totalLinks === 1 ? 'Link' : 'Links'}
-                          </span>
-                        </div>
+                        )}
 
                         {/* Platform Groups */}
                         <div className="space-y-4">
@@ -1586,8 +1642,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                 className="border border-slate-800 rounded-xl overflow-hidden bg-[#070c18] shadow-sm transition-all"
                               >
                                 {/* Platform Header Bar */}
-                                <div className="w-full flex items-center justify-between px-4 py-3 bg-[#0a1124] hover:bg-[#0f1730] transition-colors border-b border-slate-800/60">
-                                  <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-full flex items-center justify-between px-3.5 py-2.5 bg-[#0a1124] hover:bg-[#0f1730] transition-colors border-b border-slate-800/60">
+                                  <div className="flex items-center gap-2.5 min-w-0">
                                     {/* Platform Select All Checkbox */}
                                     <input
                                       type="checkbox"
@@ -1603,16 +1659,16 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                     <button
                                       type="button"
                                       onClick={() => togglePlatform(productGroup.product, platformGroup.platformName)}
-                                      className="flex items-center gap-2.5 min-w-0 text-left cursor-pointer"
+                                      className="flex items-center gap-2 min-w-0 text-left cursor-pointer"
                                     >
                                       <PlatformBrandIcon
                                         platform={platformGroup.platformName}
                                         color={platformGroup.brandColor}
                                       />
-                                      <span className="text-sm font-bold text-white tracking-wide truncate">
+                                      <span className="text-xs sm:text-sm font-bold text-white tracking-wide truncate">
                                         {platformGroup.platformName.toUpperCase()}
                                       </span>
-                                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-800/90 text-slate-300 border border-slate-700/60 shrink-0">
+                                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800/90 text-slate-300 border border-slate-700/60 shrink-0">
                                         {platformGroup.links.length}{' '}
                                         {platformGroup.links.length === 1 ? 'Link' : 'Links'}
                                       </span>
@@ -1625,7 +1681,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                       onClick={() => togglePlatform(productGroup.product, platformGroup.platformName)}
                                       className="w-6 h-6 rounded-md bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white cursor-pointer"
                                     >
-                                      {isPlatformExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                      {isPlatformExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                                     </button>
                                   </div>
                                 </div>
@@ -1671,16 +1727,16 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                   return (
                                     <div className="border-t border-slate-800/80 bg-[#070c18]">
                                       {/* Sub-toolbar: Refresh Click Counts & Selection stats */}
-                                      <div className="px-4 py-2.5 bg-[#090f21] border-b border-slate-800/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                      <div className="px-3.5 py-2 bg-[#090f21] border-b border-slate-800/60 flex flex-wrap items-center justify-between gap-2.5 text-xs">
                                         <div className="flex items-center gap-2.5 flex-wrap">
                                           <button
                                             type="button"
                                             onClick={() => handleRefreshClickCounts(platformGroup.links)}
                                             disabled={isRefreshingClicks}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/40 text-purple-300 hover:text-white transition-all cursor-pointer disabled:opacity-50 font-semibold"
+                                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-600/15 hover:bg-purple-600/25 border border-purple-500/40 text-purple-300 hover:text-white transition-all cursor-pointer disabled:opacity-50 font-semibold text-xs"
                                             title="Refresh Click Counts for all links in this channel from Redis"
                                           >
-                                            <RefreshCw size={13} className={isRefreshingClicks ? 'animate-spin text-purple-400' : 'text-purple-400'} />
+                                            <RefreshCw size={12} className={isRefreshingClicks ? 'animate-spin text-purple-400' : 'text-purple-400'} />
                                             <span>{isRefreshingClicks ? 'Refreshing...' : 'Refresh Click Counts'}</span>
                                           </button>
 
@@ -1718,10 +1774,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                       {viewMode === 'table' ? (
                                         /* 7-Column Clean Table: Checkbox, Influencer, Creator Code, Video, Tracking Link, Clicks, Actions */
                                         <div className="overflow-x-auto">
-                                          <table className="w-full text-left text-xs text-slate-300">
+                                          <table className="w-full text-left text-xs text-slate-300 border-collapse">
                                             <thead className="bg-[#050914] border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                                               <tr>
-                                                <th scope="col" className="w-10 px-3 py-3 text-center">
+                                                <th scope="col" className="w-10 px-3 py-2.5 text-center align-middle shrink-0">
                                                   <input
                                                     type="checkbox"
                                                     checked={allInPageSelected}
@@ -1729,19 +1785,26 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                       if (el) el.indeterminate = !allInPageSelected && someInPageSelected;
                                                     }}
                                                     onChange={handleToggleSelectPage}
-                                                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                                                    className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
                                                     title={allInPageSelected ? 'Deselect all rows on this page' : 'Select all rows on this page'}
                                                   />
                                                 </th>
-                                                <th scope="col" className="px-4 py-3 min-w-[170px]">Influencer</th>
-                                                <th scope="col" className="px-4 py-3 min-w-[110px]">Creator Code</th>
-                                                <th scope="col" className="px-4 py-3 min-w-[90px]">Video</th>
-                                                <th scope="col" className="px-4 py-3 min-w-[280px]">Tracking Link</th>
-                                                <th scope="col" className="px-4 py-3 text-center min-w-[100px]">Clicks</th>
-                                                <th scope="col" className="px-4 py-3 text-right min-w-[140px]">Actions</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left align-middle min-w-[160px]">Influencer</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left align-middle min-w-[110px]">Creator Code</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left align-middle min-w-[90px]">Video</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left align-middle min-w-[300px]">Tracking Link</th>
+                                                <th scope="col" className="px-3 py-2.5 text-center align-middle min-w-[95px]">Clicks</th>
+                                                <th scope="col" className="px-3 py-2.5 text-right align-middle min-w-[140px]">Actions</th>
                                               </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-800/60">
+                                              {paginatedLinks.length === 0 && (
+                                                <tr>
+                                                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-xs">
+                                                    No tracking links found matching the current filters.
+                                                  </td>
+                                                </tr>
+                                              )}
                                               {paginatedLinks.map((link) => {
                                                 const isCopied = copiedId === link.id;
                                                 const isSelected = selectedLinkIds.has(link.id);
@@ -1754,32 +1817,32 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                       isSelected ? 'bg-purple-950/25 hover:bg-purple-950/35' : 'hover:bg-slate-900/50'
                                                     }`}
                                                   >
-                                                    {/* 0. Row Selection Checkbox */}
-                                                    <td className="w-10 px-3 py-2.5 text-center">
+                                                    {/* 1. Checkbox */}
+                                                    <td className="w-10 px-3 py-2 text-center align-middle shrink-0">
                                                       <input
                                                         type="checkbox"
                                                         checked={isSelected}
                                                         onChange={() => handleToggleSelectLink(link.id)}
-                                                        className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                                                        className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
                                                         title={`Select ${link.influencer_name || link.creator_code || 'link'}`}
                                                       />
                                                     </td>
 
                                                     {/* 1. Influencer */}
-                                                    <td className="px-4 py-2.5 font-semibold text-white whitespace-nowrap">
+                                                    <td className="px-3 py-2 text-left align-middle font-semibold text-white whitespace-nowrap min-w-[160px]">
                                                       <div className="flex items-center gap-2">
-                                                        <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-[11px] font-bold shrink-0">
+                                                        <div className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-[10px] font-bold shrink-0">
                                                           {(link.influencer_name || 'U').charAt(0).toUpperCase()}
                                                         </div>
-                                                        <span className="truncate max-w-[170px]">
+                                                        <span className="truncate max-w-[160px] text-xs">
                                                           {link.influencer_name || 'Influencer'}
                                                         </span>
                                                       </div>
                                                     </td>
 
                                                     {/* 2. Creator Code (Ascending Numerical Order preserved) */}
-                                                    <td className="px-4 py-2.5 whitespace-nowrap">
-                                                      <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 font-mono font-bold text-[11px] border border-purple-500/30">
+                                                    <td className="px-3 py-2 text-left align-middle whitespace-nowrap min-w-[110px]">
+                                                      <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 font-mono font-bold text-[10px] border border-purple-500/30">
                                                         {link.influencer_code || link.creator_code
                                                           ? `#${(link.creator_code || link.influencer_code || '').replace(/^#+/, '').toUpperCase()}`
                                                           : '-'}
@@ -1787,16 +1850,16 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </td>
 
                                                     {/* 3. Video */}
-                                                    <td className="px-4 py-2.5 whitespace-nowrap">
-                                                      <span className="px-2 py-0.5 rounded-lg bg-purple-950/40 border border-purple-500/30 text-purple-300 font-bold text-[11px]">
+                                                    <td className="px-3 py-2 text-left align-middle whitespace-nowrap min-w-[90px]">
+                                                      <span className="px-1.5 py-0.5 rounded-md bg-purple-950/40 border border-purple-500/30 text-purple-300 font-bold text-[10px]">
                                                         {videoText}
                                                       </span>
                                                     </td>
 
                                                     {/* 4. Tracking Link */}
-                                                    <td className="px-4 py-2.5 font-mono text-[11px]">
+                                                    <td className="px-3 py-2 text-left align-middle font-mono text-[11px] min-w-[300px]">
                                                       <div
-                                                        className="max-w-md truncate text-purple-300 bg-purple-950/20 px-2 py-1 rounded-lg border border-purple-500/20 select-all cursor-pointer hover:text-purple-200 transition-colors"
+                                                        className="max-w-md truncate text-purple-300 bg-purple-950/20 px-2 py-0.5 rounded border border-purple-500/20 select-all cursor-pointer hover:text-purple-200 transition-colors"
                                                         title={link.tracking_url}
                                                         onClick={() => handleCopyLink(link)}
                                                       >
@@ -1805,7 +1868,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </td>
 
                                                     {/* 5. Clicks (Atomic server-side counter) */}
-                                                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                                                    <td className="px-3 py-2 text-center align-middle whitespace-nowrap min-w-[95px]">
                                                       {(() => {
                                                         const isRedirectLink =
                                                           link.destination_type === 'amazon' ||
@@ -1836,34 +1899,32 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                           );
                                                         }
 
-                                                        if (!isClicksConfigured) {
+                                                        if (!isClicksConfigured || clicksError) {
                                                           return (
                                                             <span
-                                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-950/40 text-amber-300 border border-amber-500/30"
-                                                              title={clicksError || 'Redis click counter not configured on server'}
-                                                            >
-                                                              Unconfigured
-                                                            </span>
-                                                          );
-                                                        }
-
-                                                        if (clicksError) {
-                                                          return (
-                                                            <span
-                                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-950/40 text-rose-300 border border-rose-500/30"
-                                                              title={`Unable to load click counts: ${clicksError}`}
+                                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-900 border border-slate-800 text-slate-400 hover:text-purple-300 hover:border-purple-500/40 cursor-pointer transition-colors"
+                                                              title={clicksError || 'Click count unavailable (Redis click tracking not configured in Vercel). Click to retry.'}
+                                                              onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRefreshClickCounts([link]);
+                                                              }}
+                                                              role="button"
                                                             >
                                                               Unavailable
                                                             </span>
                                                           );
                                                         }
 
-                                                        const count = clicksMap[link.id] ?? 0;
+                                                        const extractedSlug = link.custom_slug || (link.tracking_url?.includes('/r/') ? link.tracking_url.split('/r/')[1]?.split('?')[0]?.split('#')[0] : undefined);
+                                                        const count = Math.max(
+                                                          clicksMap[link.id] ?? 0,
+                                                          (extractedSlug ? clicksMap[extractedSlug.toLowerCase()] : 0) ?? 0
+                                                        );
                                                         return (
                                                           <span
-                                                            className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold border ${
+                                                            className={`inline-flex items-center justify-center min-w-[32px] px-2 py-0.5 rounded-md text-xs font-mono font-bold border ${
                                                               count > 0
-                                                                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm'
+                                                                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-xs'
                                                                 : 'bg-slate-900 border-slate-800 text-slate-400'
                                                             }`}
                                                             title={`${count} recorded clicks`}
@@ -1875,12 +1936,12 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </td>
 
                                                     {/* 6. Actions (Copy, Open, Edit, Delete) */}
-                                                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                                                    <td className="px-3 py-2 text-right align-middle whitespace-nowrap min-w-[140px]">
                                                       <div className="flex items-center justify-end gap-1.5">
                                                         <button
                                                           type="button"
                                                           onClick={() => handleCopyLink(link)}
-                                                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                                                          className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
                                                             isCopied
                                                               ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                                                               : 'bg-purple-600/10 hover:bg-purple-600/20 text-purple-300 border-purple-500/30'
@@ -1888,11 +1949,16 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                           title="Copy complete tracking link"
                                                         >
                                                           {isCopied ? (
-                                                            <Check size={12} className="text-emerald-400" />
+                                                            <>
+                                                              <Check size={12} className="text-emerald-400" />
+                                                              <span className="text-[10px]">Copied</span>
+                                                            </>
                                                           ) : (
-                                                            <Copy size={12} />
+                                                            <>
+                                                              <Copy size={12} />
+                                                              <span className="text-[10px]">Copy</span>
+                                                            </>
                                                           )}
-                                                          <span>{isCopied ? 'Copied!' : 'Copy'}</span>
                                                         </button>
 
                                                         <button
@@ -1936,7 +2002,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                             <CampaignTrackingLinkCard
                                               key={link.id}
                                               link={link}
-                                              clicks={clicksMap[link.id] ?? 0}
+                                              clicks={Math.max(
+                                                clicksMap[link.id] ?? 0,
+                                                (link.custom_slug ? clicksMap[link.custom_slug.toLowerCase()] : 0) ?? 0
+                                              )}
                                               isClicksConfigured={isClicksConfigured}
                                               clicksError={clicksError}
                                               isLoadingClicks={isLoadingClicks || isRefreshingClicks}
