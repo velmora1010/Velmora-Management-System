@@ -1772,22 +1772,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                       {viewMode === 'table' ? (
                                         /* 7-Column Clean Table: Checkbox, Influencer, Creator Code, Video, Tracking Link, Clicks, Actions */
                                         <div className="overflow-x-auto">
-                                          <table className="w-full text-left text-xs text-slate-300">
+                                          <table className="w-full text-left text-xs text-slate-300 border-collapse">
                                             <thead className="bg-[#050914] border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                                               <tr>
-                                                <th scope="col" className="w-10 px-3 py-3 text-center">
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={allInPageSelected}
-                                                    ref={(el) => {
-                                                      if (el) el.indeterminate = !allInPageSelected && someInPageSelected;
-                                                    }}
-                                                    onChange={handleToggleSelectPage}
-                                                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-purple-500 focus:ring-offset-0 cursor-pointer accent-purple-600"
-                                                    title={allInPageSelected ? 'Deselect all rows on this page' : 'Select all rows on this page'}
-                                                  />
-                                                </th>
-                                                <th scope="col" className="w-9 px-2.5 py-2 text-center">
+                                                <th scope="col" className="w-10 px-3 py-2.5 text-center align-middle shrink-0">
                                                   <input
                                                     type="checkbox"
                                                     checked={allInPageSelected}
@@ -1799,15 +1787,22 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     title={allInPageSelected ? 'Deselect all rows on this page' : 'Select all rows on this page'}
                                                   />
                                                 </th>
-                                                <th scope="col" className="px-3 py-2 min-w-[150px]">Influencer</th>
-                                                <th scope="col" className="px-3 py-2 min-w-[100px]">Creator Code</th>
-                                                <th scope="col" className="px-3 py-2 min-w-[80px]">Video</th>
-                                                <th scope="col" className="px-3 py-2 min-w-[240px]">Tracking Link</th>
-                                                <th scope="col" className="px-3 py-2 text-center min-w-[90px]">Clicks</th>
-                                                <th scope="col" className="px-3 py-2 text-right min-w-[120px]">Actions</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left align-middle min-w-[160px]">Influencer</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left align-middle min-w-[110px]">Creator Code</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left align-middle min-w-[90px]">Video</th>
+                                                <th scope="col" className="px-3 py-2.5 text-left align-middle min-w-[300px]">Tracking Link</th>
+                                                <th scope="col" className="px-3 py-2.5 text-center align-middle min-w-[95px]">Clicks</th>
+                                                <th scope="col" className="px-3 py-2.5 text-right align-middle min-w-[140px]">Actions</th>
                                               </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-800/60">
+                                              {paginatedLinks.length === 0 && (
+                                                <tr>
+                                                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-xs">
+                                                    No tracking links found matching the current filters.
+                                                  </td>
+                                                </tr>
+                                              )}
                                               {paginatedLinks.map((link) => {
                                                 const isCopied = copiedId === link.id;
                                                 const isSelected = selectedLinkIds.has(link.id);
@@ -1820,8 +1815,8 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                       isSelected ? 'bg-purple-950/25 hover:bg-purple-950/35' : 'hover:bg-slate-900/50'
                                                     }`}
                                                   >
-                                                    {/* 0. Row Selection Checkbox */}
-                                                    <td className="w-9 px-2.5 py-1.5 text-center">
+                                                    {/* 1. Checkbox */}
+                                                    <td className="w-10 px-3 py-2 text-center align-middle shrink-0">
                                                       <input
                                                         type="checkbox"
                                                         checked={isSelected}
@@ -1832,7 +1827,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </td>
 
                                                     {/* 1. Influencer */}
-                                                    <td className="px-3 py-1.5 font-semibold text-white whitespace-nowrap">
+                                                    <td className="px-3 py-2 text-left align-middle font-semibold text-white whitespace-nowrap min-w-[160px]">
                                                       <div className="flex items-center gap-2">
                                                         <div className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-[10px] font-bold shrink-0">
                                                           {(link.influencer_name || 'U').charAt(0).toUpperCase()}
@@ -1844,7 +1839,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </td>
 
                                                     {/* 2. Creator Code (Ascending Numerical Order preserved) */}
-                                                    <td className="px-3 py-1.5 whitespace-nowrap">
+                                                    <td className="px-3 py-2 text-left align-middle whitespace-nowrap min-w-[110px]">
                                                       <span className="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 font-mono font-bold text-[10px] border border-purple-500/30">
                                                         {link.influencer_code || link.creator_code
                                                           ? `#${(link.creator_code || link.influencer_code || '').replace(/^#+/, '').toUpperCase()}`
@@ -1853,14 +1848,14 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </td>
 
                                                     {/* 3. Video */}
-                                                    <td className="px-3 py-1.5 whitespace-nowrap">
+                                                    <td className="px-3 py-2 text-left align-middle whitespace-nowrap min-w-[90px]">
                                                       <span className="px-1.5 py-0.5 rounded-md bg-purple-950/40 border border-purple-500/30 text-purple-300 font-bold text-[10px]">
                                                         {videoText}
                                                       </span>
                                                     </td>
 
                                                     {/* 4. Tracking Link */}
-                                                    <td className="px-3 py-1.5 font-mono text-[11px]">
+                                                    <td className="px-3 py-2 text-left align-middle font-mono text-[11px] min-w-[300px]">
                                                       <div
                                                         className="max-w-md truncate text-purple-300 bg-purple-950/20 px-2 py-0.5 rounded border border-purple-500/20 select-all cursor-pointer hover:text-purple-200 transition-colors"
                                                         title={link.tracking_url}
@@ -1871,7 +1866,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </td>
 
                                                     {/* 5. Clicks (Atomic server-side counter) */}
-                                                    <td className="px-3 py-1.5 text-center whitespace-nowrap">
+                                                    <td className="px-3 py-2 text-center align-middle whitespace-nowrap min-w-[95px]">
                                                       {(() => {
                                                         const isRedirectLink =
                                                           link.destination_type === 'amazon' ||
@@ -1938,7 +1933,7 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                     </td>
 
                                                     {/* 6. Actions (Copy, Open, Edit, Delete) */}
-                                                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                                                    <td className="px-3 py-2 text-right align-middle whitespace-nowrap min-w-[140px]">
                                                       <div className="flex items-center justify-end gap-1.5">
                                                         <button
                                                           type="button"
