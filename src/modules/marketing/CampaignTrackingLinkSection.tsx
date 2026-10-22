@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Link2, 
   ArrowLeft, 
@@ -27,7 +27,8 @@ import {
   ChevronsUpDown,
   MousePointerClick,
   Clock,
-  Package
+  Package,
+  X
 } from 'lucide-react';
 import type { Campaign, CampaignInfluencer, InfluencerTrackingLink } from '../../types';
 import { 
@@ -158,6 +159,43 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const [selectedPlatform, setSelectedPlatform] = useState<string>('All');
   const [selectedVideo, setSelectedVideo] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Filter Popover state
+  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+  const filterPopoverRef = useRef<HTMLDivElement>(null);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (selectedProduct !== 'All') count++;
+    if (selectedPlatform !== 'All') count++;
+    if (selectedVideo !== 'All') count++;
+    return count;
+  }, [selectedProduct, selectedPlatform, selectedVideo]);
+
+  const handleResetFilters = useCallback(() => {
+    setSelectedProduct('All');
+    setSelectedPlatform('All');
+    setSelectedVideo('All');
+  }, []);
+
+  // Close filter popover on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        filterPopoverRef.current &&
+        !filterPopoverRef.current.contains(event.target as Node)
+      ) {
+        setIsFilterPopoverOpen(false);
+      }
+    };
+
+    if (isFilterPopoverOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isFilterPopoverOpen]);
 
   // View Mode: 'table' or 'grid'
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
@@ -929,92 +967,164 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
         </div>
       </div>
 
-      {/* Filters Bar & Controls */}
-      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 space-y-3.5 shadow-sm">
-        {/* Row 1: PRODUCT, PLATFORM, VIDEO Filters in clean 3-column layout */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Filter 1: Product */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-              <Filter size={12} className="text-purple-400" />
-              <span>Product:</span>
-            </span>
-            <select
-              value={selectedProduct}
-              onChange={(e) => setSelectedProduct(e.target.value)}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer w-full truncate"
-            >
-              <option value="All" className="bg-slate-900 font-semibold">All Products ({allProductSummaries.length})</option>
-              <optgroup label="Standard Products" className="bg-slate-900 text-slate-400 font-semibold">
-                {SCRIPT_PRODUCTS.map((prod) => (
-                  <option key={prod} value={prod} className="bg-slate-900 text-slate-200">
-                    {prod}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Combo Products" className="bg-slate-900 text-purple-400 font-semibold">
-                {COMBO_PRODUCTS.map((combo) => (
-                  <option key={combo} value={combo} className="bg-slate-900 text-slate-200">
-                    {combo}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </div>
+      {/* Controls Bar: Search, Compact Filter Popover, Count, Expand All, & View Mode */}
+      <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Left: Quick Search & Filter Popover Button */}
+          <div className="flex items-center gap-2 flex-1 max-w-md">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-2.5 text-slate-500" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search creator, #code, product, URL..."
+                className="w-full bg-[#070c18] border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
+              />
+            </div>
 
-          {/* Filter 2: Platform */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-              <Globe size={12} className="text-purple-400" />
-              <span>Platform:</span>
-            </span>
-            <select
-              value={selectedPlatform}
-              onChange={(e) => setSelectedPlatform(e.target.value)}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer w-full truncate"
-            >
-              <option value="All" className="bg-slate-900">All Platforms</option>
-              {TRACKING_PLATFORMS.map((plat) => (
-                <option key={plat.id} value={plat.name} className="bg-slate-900">
-                  {plat.name} ({plat.category})
-                </option>
-              ))}
-            </select>
-          </div>
+            {/* Compact Filter Icon Button & Popover */}
+            <div className="relative shrink-0" ref={filterPopoverRef}>
+              <button
+                type="button"
+                onClick={() => setIsFilterPopoverOpen((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                  activeFilterCount > 0
+                    ? 'bg-purple-600/20 border-purple-500/50 text-purple-300 hover:bg-purple-600/30'
+                    : 'bg-[#070c18] hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-white'
+                }`}
+                title="Filter tracking links"
+                aria-label="Filter tracking links"
+              >
+                <Filter size={13} className={activeFilterCount > 0 ? 'text-purple-400' : 'text-slate-400'} />
+                <span className="hidden xs:inline">Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-purple-600 text-white text-[10px] font-bold flex items-center justify-center">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
 
-          {/* Filter 3: Video */}
-          <div className="flex items-center gap-2 bg-[#070c18] border border-slate-800 rounded-xl px-3 py-2">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-              <Video size={12} className="text-purple-400" />
-              <span>Video:</span>
-            </span>
-            <select
-              value={selectedVideo}
-              onChange={(e) => setSelectedVideo(e.target.value)}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer w-full truncate"
-            >
-              <option value="All" className="bg-slate-900">All Videos</option>
-              {TRACKING_VIDEOS.map((vid) => (
-                <option key={vid.id} value={vid.name} className="bg-slate-900">
-                  {vid.name} ({vid.utmContent})
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+              {isFilterPopoverOpen && (
+                <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-72 sm:w-80 bg-[#0b1329] border border-slate-700/80 rounded-2xl p-4 shadow-2xl z-40 space-y-3.5 backdrop-blur-md">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Filter size={14} className="text-purple-400" />
+                      <span className="text-xs font-bold text-white uppercase tracking-wider">Filters</span>
+                      {activeFilterCount > 0 && (
+                        <span className="text-[10px] font-semibold bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded-md border border-purple-500/30">
+                          {activeFilterCount} active
+                        </span>
+                      )}
+                    </div>
+                    {activeFilterCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleResetFilters}
+                        className="text-[11px] text-slate-400 hover:text-rose-400 transition-colors font-medium cursor-pointer"
+                      >
+                        Reset All
+                      </button>
+                    )}
+                  </div>
 
-        {/* Row 2: Search, Count, Expand All, & View Mode Toggle */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
-          {/* Quick Search */}
-          <div className="relative flex-1 max-w-sm">
-            <Search size={14} className="absolute left-3 top-2.5 text-slate-500" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by creator name, #code, product, or URL..."
-              className="w-full bg-[#070c18] border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors"
-            />
+                  {/* Filter 1: Product */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Product</span>
+                      {selectedProduct !== 'All' && (
+                        <span className="text-[10px] text-purple-400 font-normal">Active</span>
+                      )}
+                    </label>
+                    <select
+                      value={selectedProduct}
+                      onChange={(e) => setSelectedProduct(e.target.value)}
+                      className="w-full bg-[#070c18] border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      <option value="All" className="bg-slate-900 font-semibold">All Products ({allProductSummaries.length})</option>
+                      <optgroup label="Standard Products" className="bg-slate-900 text-slate-400 font-semibold">
+                        {SCRIPT_PRODUCTS.map((prod) => (
+                          <option key={prod} value={prod} className="bg-slate-900 text-slate-200">
+                            {prod}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Combo Products" className="bg-slate-900 text-purple-400 font-semibold">
+                        {COMBO_PRODUCTS.map((combo) => (
+                          <option key={combo} value={combo} className="bg-slate-900 text-slate-200">
+                            {combo}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+
+                  {/* Filter 2: Platform */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Platform</span>
+                      {selectedPlatform !== 'All' && (
+                        <span className="text-[10px] text-purple-400 font-normal">Active</span>
+                      )}
+                    </label>
+                    <select
+                      value={selectedPlatform}
+                      onChange={(e) => setSelectedPlatform(e.target.value)}
+                      className="w-full bg-[#070c18] border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      <option value="All" className="bg-slate-900">All Platforms</option>
+                      {TRACKING_PLATFORMS.map((plat) => (
+                        <option key={plat.id} value={plat.name} className="bg-slate-900">
+                          {plat.name} ({plat.category})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filter 3: Video */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Video</span>
+                      {selectedVideo !== 'All' && (
+                        <span className="text-[10px] text-purple-400 font-normal">Active</span>
+                      )}
+                    </label>
+                    <select
+                      value={selectedVideo}
+                      onChange={(e) => setSelectedVideo(e.target.value)}
+                      className="w-full bg-[#070c18] border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none cursor-pointer"
+                    >
+                      <option value="All" className="bg-slate-900">All Videos</option>
+                      {TRACKING_VIDEOS.map((vid) => (
+                        <option key={vid.id} value={vid.name} className="bg-slate-900">
+                          {vid.name} ({vid.utmContent})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Popover Actions */}
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                    {activeFilterCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleResetFilters}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsFilterPopoverOpen(false)}
+                      className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Right Controls: Count, Expand/Collapse All, View Mode, Refresh */}
@@ -1081,63 +1191,6 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
           </div>
         </div>
       </div>
-
-      {/* Notice Banners */}
-      <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-emerald-200">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-emerald-600/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shrink-0">
-            <Globe size={16} />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-bold text-white">Active Tracking Endpoint:</span>
-              <span className="font-mono text-emerald-300 font-semibold bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/30">
-                velmora-management-system.vercel.app/r
-              </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                Live & Verified
-              </span>
-            </div>
-            <p className="text-slate-400 text-[11px] mt-0.5 truncate">
-              Amazon tracking links resolve directly via the production Vercel endpoint (e.g. <span className="font-mono text-emerald-300">velmora-management-system.vercel.app/r/his4-v1</span>) without third-party DNS dependency.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {!isClicksConfigured ? (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-200">
-          <AlertTriangle size={18} className="shrink-0 text-amber-400 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-bold text-amber-300">Click Tracking Not Configured</span>
-            <p className="text-slate-300 text-[11px] leading-relaxed">
-              {clicksError || 'The persistent Redis click tracking counter is currently unconfigured. Clicks on Amazon links will redirect visitors, but counts will display as unconfigured until UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set in Vercel.'}
-            </p>
-          </div>
-        </div>
-      ) : clicksError ? (
-        <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-rose-200">
-          <div className="flex items-start gap-3">
-            <AlertCircle size={18} className="shrink-0 text-rose-400 mt-0.5" />
-            <div className="space-y-1">
-              <span className="font-bold text-rose-300">Unable to Load Click Counts</span>
-              <p className="text-slate-300 text-[11px] leading-relaxed">
-                {clicksError}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleRefreshClickCounts(links)}
-            disabled={isRefreshingClicks}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-all cursor-pointer font-semibold text-xs shrink-0 disabled:opacity-50 self-start sm:self-auto"
-            title="Retry loading click counts from Redis"
-          >
-            <RefreshCw size={12} className={isRefreshingClicks ? 'animate-spin' : ''} />
-            <span>{isRefreshingClicks ? 'Retrying...' : 'Retry'}</span>
-          </button>
-        </div>
-      ) : null}
 
       {/* Main Content Area */}
       {isLoading ? (
