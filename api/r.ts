@@ -157,8 +157,11 @@ export default async function handler(
     return;
   }
 
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '';
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '';
+  let redisUrl = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || '').trim();
+  const redisToken = (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || '').trim();
+  if (redisUrl && !redisUrl.startsWith('http://') && !redisUrl.startsWith('https://')) {
+    redisUrl = `https://${redisUrl}`;
+  }
   const isRedisConfigured = Boolean(
     redisUrl && 
     redisToken && 
