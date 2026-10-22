@@ -359,31 +359,83 @@ export default async function handler(
   const isDuplicateClick = Boolean(cookies[dedupeCookieKey]);
   const isBotRequest = isBot(userAgent);
 
-  // 7. Increment persistent atomic counter in Redis if genuine visitor
+  // 7. Increment persistent atomic counter if genuine visitor
   // Atomically increments counter for both the specific slug (e.g. his1-v2) and canonical ID (UUID)
-  if (isRedisConfigured && !isBotRequest && !isDuplicateClick) {
-    try {
-      const keysToIncr = Array.from(new Set([
-        identifier ? `click:${identifier}` : null,
-        canonicalLinkId ? `click:${canonicalLinkId}` : null
-      ].filter(Boolean))) as string[];
+  if (!isBotRequest && !isDuplicateClick) {
+    const rawKeys = Array.from(new Set([
+      identifier ? identifier.toLowerCase() : null,
+      canonicalLinkId ? String(canonicalLinkId).trim() : null
+    ].filter(Boolean))) as string[];
 
-      await Promise.all(
-        keysToIncr.map(key =>
-          fetch(redisUrl, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${redisToken}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(['INCR', key])
-          })
+    const incrementTasks: Promise<any>[] = [];
+
+    // Upstash / KV Redis increment (if configured)
+    if (isRedisConfigured) {
+      incrementTasks.push(
+        Promise.all(
+          rawKeys.map(key =>
+            fetch(redisUrl, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${redisToken}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(['INCR', `click:${key}`])
+            }).then(r => r.json()).then(d => {
+              console.log(`[Tracking Redirect] Redis incremented click:${key} ->`, d?.result);
+            }).catch(err => {
+              console.warn(`[Tracking Redirect] Redis INCR failed for ${key}:`, err?.message || err);
+            })
+          )
         )
       );
-      console.log(`[Tracking Redirect] Incremented atomic clicks for keys: ${keysToIncr.join(', ')}`);
-    } catch (err) {
-      console.error('[Tracking Redirect] Failed to increment click counter in Redis:', err);
     }
+
+    // Supabase persistent counter increment (always active fallback & primary sync)
+    incrementTasks.push(
+      (async () => {
+        try {
+          const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+          const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
+
+          const getRes = await fetch(`${supabaseUrl}/rest/v1/system_settings?setting_key=eq.tracking_link_clicks&select=setting_value`, {
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          });
+
+          let currentCounts: Record<string, number> = {};
+          if (getRes.ok) {
+            const data = await getRes.json();
+            currentCounts = (data && data[0]?.setting_value) || {};
+          }
+
+          rawKeys.forEach(key => {
+            currentCounts[key] = (Number(currentCounts[key]) || 0) + 1;
+          });
+
+          await fetch(`${supabaseUrl}/rest/v1/system_settings?setting_key=eq.tracking_link_clicks`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              setting_value: currentCounts,
+              updated_at: new Date().toISOString()
+            })
+          });
+          console.log(`[Tracking Redirect] Supabase incremented clicks for keys: ${rawKeys.join(', ')}`);
+        } catch (supaErr: any) {
+          console.error('[Tracking Redirect] Supabase click increment error:', supaErr?.message || supaErr);
+        }
+      })()
+    );
+
+    // CRITICAL: Await all increment promises before redirecting
+    await Promise.all(incrementTasks);
   }
 
   // 8. Set short deduplication cookie to protect against double counting from fast page refreshes
