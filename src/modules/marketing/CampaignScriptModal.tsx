@@ -9,13 +9,11 @@ import {
   Trash2, 
   Search, 
   Check, 
-  Layers,
   ChevronDown
 } from 'lucide-react';
 import type { Campaign, CampaignScript } from '../../types';
 import { 
   SCRIPT_PRODUCTS_CATALOG, 
-  SCRIPT_PRODUCTS,
   formatCombinedProductTitle,
   resolveCatalogProduct,
   parseScriptContent,
@@ -50,11 +48,9 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Active product tab when editing multiple products
-  const [activeProductId, setActiveProductId] = useState<string>('');
-
-  // Per-product model script and key points content
-  const [productContents, setProductContents] = useState<Record<string, { model_script: string; key_points: string }>>({});
+  // Single shared Model Script and Key Points fields
+  const [modelScript, setModelScript] = useState('');
+  const [keyPoints, setKeyPoints] = useState('');
 
   // Common script fields
   const [language, setLanguage] = useState('');
@@ -118,24 +114,15 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
     if (scriptToEdit) {
       const parsed = parseScriptContent(scriptToEdit);
       setSelectedProductIds(parsed.productIds);
-      setActiveProductId(parsed.productIds[0] || '');
-
-      const initialContents: Record<string, { model_script: string; key_points: string }> = {};
-      parsed.productIds.forEach(pid => {
-        initialContents[pid] = {
-          model_script: parsed.productScripts[pid]?.model_script || '',
-          key_points: parsed.productScripts[pid]?.key_points || ''
-        };
-      });
-      setProductContents(initialContents);
-
+      setModelScript(parsed.modelScript || '');
+      setKeyPoints(parsed.keyPoints || '');
       setLanguage(scriptToEdit.language || '');
       setAudioUrl(scriptToEdit.reference_audio_url || '');
       setVideoUrl(scriptToEdit.reference_video_url || '');
     } else {
       setSelectedProductIds([]);
-      setActiveProductId('');
-      setProductContents({});
+      setModelScript('');
+      setKeyPoints('');
       setLanguage(availableLanguages[0] || 'Tamil');
       setAudioUrl('');
       setVideoUrl('');
@@ -175,22 +162,6 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
         });
       }
 
-      // Initialize content for newly selected product if missing
-      setProductContents(currContents => {
-        const next = { ...currContents };
-        if (!prev.includes(productId) && !next[productId]) {
-          next[productId] = { model_script: '', key_points: '' };
-        }
-        return next;
-      });
-
-      // Update active tab
-      if (updated.length > 0 && (!activeProductId || !updated.includes(activeProductId))) {
-        setActiveProductId(updated[0]);
-      } else if (updated.length === 0) {
-        setActiveProductId('');
-      }
-
       if (errors.product) setErrors(e => ({ ...e, product: '' }));
       return updated;
     });
@@ -206,40 +177,6 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
   const handleClearAllProducts = (e: React.MouseEvent) => {
     e.stopPropagation();
     setSelectedProductIds([]);
-    setActiveProductId('');
-    setProductContents({});
-  };
-
-  // Active product being edited
-  const currentActiveCatalogProduct = useMemo(() => {
-    return SCRIPT_PRODUCTS_CATALOG.find(p => p.id === activeProductId);
-  }, [activeProductId]);
-
-  const activeModelScript = activeProductId ? (productContents[activeProductId]?.model_script || '') : '';
-  const activeKeyPoints = activeProductId ? (productContents[activeProductId]?.key_points || '') : '';
-
-  const handleActiveModelScriptChange = (val: string) => {
-    if (!activeProductId) return;
-    setProductContents(prev => ({
-      ...prev,
-      [activeProductId]: {
-        ...(prev[activeProductId] || { key_points: '' }),
-        model_script: val
-      }
-    }));
-    if (errors.modelScript) setErrors(e => ({ ...e, modelScript: '' }));
-  };
-
-  const handleActiveKeyPointsChange = (val: string) => {
-    if (!activeProductId) return;
-    setProductContents(prev => ({
-      ...prev,
-      [activeProductId]: {
-        ...(prev[activeProductId] || { model_script: '' }),
-        key_points: val
-      }
-    }));
-    if (errors.keyPoints) setErrors(e => ({ ...e, keyPoints: '' }));
   };
 
   if (!isOpen) return null;
@@ -255,21 +192,12 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
       newErrors.language = 'Language is required.';
     }
 
-    // Check that at least the active product has content, and no selected product is completely empty
-    if (selectedProductIds.length > 0) {
-      const emptyProducts: string[] = [];
-      selectedProductIds.forEach(pid => {
-        const item = SCRIPT_PRODUCTS_CATALOG.find(p => p.id === pid);
-        const content = productContents[pid];
-        if (!content?.model_script?.trim() && !content?.key_points?.trim()) {
-          emptyProducts.push(item?.name || pid);
-        }
-      });
+    if (!modelScript.trim()) {
+      newErrors.modelScript = 'Model script is required.';
+    }
 
-      if (emptyProducts.length === selectedProductIds.length) {
-        newErrors.modelScript = 'Please enter a Model Script for the selected product(s).';
-        newErrors.keyPoints = 'Please enter Key Points for the selected product(s).';
-      }
+    if (!keyPoints.trim()) {
+      newErrors.keyPoints = 'Key points are required.';
     }
 
     setErrors(newErrors);
@@ -285,10 +213,6 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      const primaryContent = activeProductId ? productContents[activeProductId] : Object.values(productContents)[0];
-      const fallbackScript = primaryContent?.model_script || '';
-      const fallbackKeyPoints = primaryContent?.key_points || '';
-
       if (scriptToEdit) {
         // Edit existing script
         const updated = await updateCampaignScript({
@@ -296,10 +220,9 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
           campaign_id: String(campaign.id),
           product: combinedProductTitle,
           product_ids: selectedProductIds,
-          product_scripts: productContents,
           language,
-          model_script: fallbackScript,
-          key_points: fallbackKeyPoints,
+          model_script: modelScript.trim(),
+          key_points: keyPoints.trim(),
           reference_audio_url: audioUrl,
           reference_video_url: videoUrl,
           audioFile,
@@ -318,10 +241,9 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
           campaign_id: String(campaign.id),
           product: combinedProductTitle,
           product_ids: selectedProductIds,
-          product_scripts: productContents,
           language,
-          model_script: fallbackScript,
-          key_points: fallbackKeyPoints,
+          model_script: modelScript.trim(),
+          key_points: keyPoints.trim(),
           reference_audio_url: audioUrl,
           reference_video_url: videoUrl,
           audioFile,
@@ -376,7 +298,7 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
             </div>
           )}
 
-          {/* Row 1: Searchable Multi-Select Product Dropdown */}
+          {/* Row 1: Searchable Multi-Select Product Dropdown with Combined Title Display */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
@@ -399,42 +321,39 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
                 onClick={() => setIsDropdownOpen(prev => !prev)}
                 className={`w-full bg-[#070c18] border ${
                   errors.product ? 'border-red-500/80' : 'border-slate-700/80 focus-within:border-purple-500'
-                } rounded-xl p-2 min-h-[46px] flex flex-wrap items-center gap-1.5 cursor-pointer transition-colors`}
+                } rounded-xl px-3.5 py-2.5 min-h-[46px] flex items-center justify-between gap-2 cursor-pointer transition-colors shadow-inner`}
               >
-                {selectedProductIds.length === 0 ? (
-                  <span className="text-xs sm:text-sm text-slate-500 px-2 py-1">
-                    Select one or more products...
-                  </span>
-                ) : (
-                  selectedProductIds.map(pid => {
-                    const item = SCRIPT_PRODUCTS_CATALOG.find(p => p.id === pid);
-                    return (
-                      <span
-                        key={pid}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-500/20 text-purple-200 border border-purple-500/40 shrink-0"
-                      >
-                        <span>{item?.name || pid}</span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => handleRemoveProductChip(pid, e)}
-                          className="hover:bg-purple-500/40 rounded p-0.5 text-purple-300 hover:text-white transition-colors cursor-pointer"
-                          title="Remove product"
-                        >
-                          <X size={12} />
-                        </span>
-                      </span>
-                    );
-                  })
-                )}
-                <div className="ml-auto pr-1 shrink-0 text-slate-400">
-                  <ChevronDown size={16} className={`transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {selectedProductIds.length === 0 ? (
+                    <span className="text-xs sm:text-sm text-slate-500 select-none">
+                      Select one or more products...
+                    </span>
+                  ) : (
+                    <span
+                      className="text-xs sm:text-sm font-semibold text-purple-200 truncate select-none"
+                      title={combinedProductTitle}
+                    >
+                      {combinedProductTitle}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0 text-slate-400">
+                  {selectedProductIds.length > 1 && (
+                    <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded font-bold">
+                      {selectedProductIds.length} Products
+                    </span>
+                  )}
+                  <ChevronDown
+                    size={16}
+                    className={`transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-purple-400' : ''}`}
+                  />
                 </div>
               </div>
 
-              {/* Dropdown Menu */}
+              {/* Dropdown Menu when Expanded */}
               {isDropdownOpen && (
-                <div className="absolute left-0 right-0 top-full mt-1.5 bg-[#0b1329] border border-slate-700 rounded-xl shadow-2xl z-30 max-h-64 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
+                <div className="absolute left-0 right-0 top-full mt-1.5 bg-[#0b1329] border border-slate-700 rounded-xl shadow-2xl z-40 max-h-72 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
                   {/* Search Bar inside dropdown */}
                   <div className="p-2.5 border-b border-slate-800 bg-[#070c18]">
                     <div className="relative">
@@ -451,7 +370,44 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Product List */}
+                  {/* Selected Products Chips with Remove Buttons */}
+                  {selectedProductIds.length > 0 && (
+                    <div className="p-2 border-b border-slate-800 bg-[#070c18]/70">
+                      <div className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider mb-1.5 flex items-center justify-between">
+                        <span>Selected Products ({selectedProductIds.length}):</span>
+                        <button
+                          type="button"
+                          onClick={handleClearAllProducts}
+                          className="text-[10px] text-purple-400 hover:text-purple-300 font-semibold cursor-pointer"
+                        >
+                          Clear All
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                        {selectedProductIds.map(pid => {
+                          const item = resolveCatalogProduct(pid);
+                          return (
+                            <span
+                              key={pid}
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-500/20 text-purple-200 border border-purple-500/40"
+                            >
+                              <span>{item?.name || pid}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => handleRemoveProductChip(pid, e)}
+                                className="hover:bg-purple-500/40 rounded p-0.5 text-purple-300 hover:text-white transition-colors cursor-pointer"
+                                title="Remove product"
+                              >
+                                <X size={11} />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Product Catalog List with Checkboxes */}
                   <div className="overflow-y-auto divide-y divide-slate-800/60 p-1">
                     {filteredCatalogProducts.length === 0 ? (
                       <div className="p-4 text-center text-xs text-slate-500">
@@ -502,16 +458,6 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
                 <AlertCircle size={12} /> {errors.product}
               </p>
             )}
-
-            {/* Combined Title Display Preview */}
-            {selectedProductIds.length > 0 && (
-              <div className="pt-1 text-xs">
-                <span className="text-slate-400 font-medium">Combined Product Title: </span>
-                <span className="font-bold text-purple-300 bg-purple-950/40 px-2 py-0.5 rounded-md border border-purple-500/30">
-                  {combinedProductTitle}
-                </span>
-              </div>
-            )}
           </div>
 
           {/* Row 2: Language Selection */}
@@ -543,78 +489,29 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
             )}
           </div>
 
-          {/* Product-Specific Content Tabs (when multiple products selected) */}
-          {selectedProductIds.length > 1 && (
-            <div className="pt-2 border-t border-slate-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <Layers size={13} className="text-purple-400" />
-                  <span>Product-Specific Scripts & Key Points</span>
-                </span>
-                <span className="text-[11px] text-slate-400">
-                  Select a product to edit its script:
-                </span>
-              </div>
-
-              {/* Product Tabs */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                {selectedProductIds.map(pid => {
-                  const item = SCRIPT_PRODUCTS_CATALOG.find(p => p.id === pid);
-                  const isCurrent = activeProductId === pid;
-                  const hasContent = Boolean(productContents[pid]?.model_script || productContents[pid]?.key_points);
-                  return (
-                    <button
-                      key={pid}
-                      type="button"
-                      onClick={() => setActiveProductId(pid)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 border ${
-                        isCurrent
-                          ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-900/30'
-                          : 'bg-[#070c18] text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white'
-                      }`}
-                    >
-                      <span>{item?.name || pid}</span>
-                      {hasContent && (
-                        <span className={`w-1.5 h-1.5 rounded-full ${isCurrent ? 'bg-emerald-300' : 'bg-emerald-400'}`} />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {currentActiveCatalogProduct && (
-                <p className="text-[11px] text-purple-300 font-medium">
-                  Currently editing for: <span className="font-bold underline">{currentActiveCatalogProduct.name}</span>
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Model Script Textarea */}
+          {/* Single Shared Model Script Field */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Model Script {currentActiveCatalogProduct ? `(${currentActiveCatalogProduct.name})` : ''} <span className="text-purple-400">*</span>
+                Model Script <span className="text-purple-400">*</span>
               </label>
-              {activeModelScript && (
+              {modelScript && (
                 <span className="text-[11px] text-slate-500">
-                  {activeModelScript.length} characters
+                  {modelScript.length} characters
                 </span>
               )}
             </div>
             <textarea
-              rows={4}
-              value={activeModelScript}
-              onChange={(e) => handleActiveModelScriptChange(e.target.value)}
-              disabled={selectedProductIds.length === 0}
-              placeholder={
-                selectedProductIds.length === 0
-                  ? 'Please select a product first above...'
-                  : `Enter model script dialogue, hook, body, and CTA for ${currentActiveCatalogProduct?.name || 'this product'}...`
-              }
+              rows={5}
+              value={modelScript}
+              onChange={(e) => {
+                setModelScript(e.target.value);
+                if (errors.modelScript) setErrors(prev => ({ ...prev, modelScript: '' }));
+              }}
+              placeholder="Enter or paste complete model script dialogue, hook, body, and CTA covering the selected product(s)..."
               className={`w-full bg-[#070c18] border ${
                 errors.modelScript ? 'border-red-500' : 'border-slate-700/80 focus:border-purple-500'
-              } rounded-xl p-3.5 text-xs sm:text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors resize-y leading-relaxed disabled:opacity-50`}
+              } rounded-xl p-3.5 text-xs sm:text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors resize-y leading-relaxed`}
             />
             {errors.modelScript && (
               <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
@@ -623,31 +520,29 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
             )}
           </div>
 
-          {/* Key Points Textarea */}
+          {/* Single Shared Key Points Field */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Key Points {currentActiveCatalogProduct ? `(${currentActiveCatalogProduct.name})` : ''} <span className="text-purple-400">*</span>
+                Key Points <span className="text-purple-400">*</span>
               </label>
-              {activeKeyPoints && (
+              {keyPoints && (
                 <span className="text-[11px] text-slate-500">
-                  {activeKeyPoints.length} characters
+                  {keyPoints.length} characters
                 </span>
               )}
             </div>
             <textarea
-              rows={3}
-              value={activeKeyPoints}
-              onChange={(e) => handleActiveKeyPointsChange(e.target.value)}
-              disabled={selectedProductIds.length === 0}
-              placeholder={
-                selectedProductIds.length === 0
-                  ? 'Please select a product first above...'
-                  : `1. 1 Bottle makes 5 Litres\n2. Eco-friendly formula\n3. Non-irritating...`
-              }
+              rows={4}
+              value={keyPoints}
+              onChange={(e) => {
+                setKeyPoints(e.target.value);
+                if (errors.keyPoints) setErrors(prev => ({ ...prev, keyPoints: '' }));
+              }}
+              placeholder="1. 1 Bottle makes 5 Litres&#10;2. Eco-friendly formula&#10;3. Non-irritating... (Enter key points for the selected product(s))"
               className={`w-full bg-[#070c18] border ${
                 errors.keyPoints ? 'border-red-500' : 'border-slate-700/80 focus:border-purple-500'
-              } rounded-xl p-3.5 text-xs sm:text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors resize-y leading-relaxed disabled:opacity-50`}
+              } rounded-xl p-3.5 text-xs sm:text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors resize-y leading-relaxed`}
             />
             {errors.keyPoints && (
               <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
@@ -700,9 +595,16 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
                   </span>
                 </button>
                 {audioFile && (
-                  <p className="text-[11px] text-emerald-400 mt-1 truncate">
-                    Selected: {audioFile.name} ({(audioFile.size / 1024 / 1024).toFixed(2)} MB)
-                  </p>
+                  <div className="mt-1.5 flex items-center justify-between text-[11px] text-purple-300 px-1">
+                    <span className="truncate max-w-[200px]">{audioFile.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setAudioFile(null)}
+                      className="text-red-400 hover:text-red-300 cursor-pointer ml-2"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -712,7 +614,7 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
                   value={audioUrl}
                   onChange={(e) => setAudioUrl(e.target.value)}
                   placeholder="Or paste external Audio Link..."
-                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
                 />
               </div>
             </div>
@@ -758,13 +660,20 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
                 >
                   <Upload size={14} />
                   <span className="truncate">
-                    {videoFile ? videoFile.name : 'Upload Video File (.mp4)'}
+                    {videoFile ? videoFile.name : 'Upload Video File (.mp4, .mov)'}
                   </span>
                 </button>
                 {videoFile && (
-                  <p className="text-[11px] text-emerald-400 mt-1 truncate">
-                    Selected: {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(2)} MB)
-                  </p>
+                  <div className="mt-1.5 flex items-center justify-between text-[11px] text-purple-300 px-1">
+                    <span className="truncate max-w-[200px]">{videoFile.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setVideoFile(null)}
+                      className="text-red-400 hover:text-red-300 cursor-pointer ml-2"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -773,35 +682,35 @@ export const CampaignScriptModal: React.FC<CampaignScriptModalProps> = ({
                   type="url"
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
-                  placeholder="Or paste external Video URL..."
-                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
+                  placeholder="Or paste external Video Link..."
+                  className="w-full bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors"
                 />
               </div>
             </div>
           </div>
 
           {/* Modal Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+          <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+              className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-slate-300 hover:text-white bg-[#070c18] hover:bg-slate-800 border border-slate-700/80 transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || selectedProductIds.length === 0}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 active:bg-purple-800 transition-all shadow-md shadow-purple-900/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-white bg-purple-600 hover:bg-purple-700 active:bg-purple-800 transition-all flex items-center gap-2 shadow-lg shadow-purple-900/30 cursor-pointer disabled:opacity-50"
             >
               {isSubmitting ? (
                 <>
-                  <Loader2 size={14} className="animate-spin" />
+                  <Loader2 size={16} className="animate-spin" />
                   <span>Saving...</span>
                 </>
               ) : (
-                <span>{scriptToEdit ? 'Update Script' : 'Create Script'}</span>
+                <span>{scriptToEdit ? 'Save Changes' : 'Create Script'}</span>
               )}
             </button>
           </div>

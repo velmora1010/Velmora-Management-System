@@ -61,7 +61,7 @@ export function isComboProduct(productName?: string | null): boolean {
 }
 
 /**
- * Resolves any product name or alias to its standard catalog item
+ * Resolves any product name, id, or alias to its standard catalog item
  */
 export function resolveCatalogProduct(ident?: string | null): ScriptProductItem | undefined {
   if (!ident || typeof ident !== 'string') return undefined;
@@ -73,9 +73,9 @@ export function resolveCatalogProduct(ident?: string | null): ScriptProductItem 
 
 /**
  * Deterministically formats product names with " + " in standard catalog order.
- * If 1 product: returns its standard display name.
- * If 2 products: "DIY Detergent Liquid + DIY Dishwash Liquid"
- * If 3 products: "DIY Detergent Liquid + DIY Dishwash Liquid + DIY Fabric Conditioner"
+ * If 1 product: returns its standard display name (e.g. "DIY Detergent Liquid").
+ * If 2 products: "DIY Detergent Liquid + DIY Dishwash Liquid".
+ * If 3 products: "DIY Detergent Liquid + DIY Dishwash Liquid + DIY Fabric Conditioner".
  */
 export function formatCombinedProductTitle(productIdentifiers: string[]): string {
   if (!Array.isArray(productIdentifiers) || productIdentifiers.length === 0) return '';
@@ -101,7 +101,7 @@ export function formatCombinedProductTitle(productIdentifiers: string[]): string
   // Sort matched in stable catalog order
   matched.sort((a, b) => {
     const idxA = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === a.id);
-    const idxB = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === b.id);
+    const idxB = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === b);
     return idxA - idxB;
   });
 
@@ -109,15 +109,31 @@ export function formatCombinedProductTitle(productIdentifiers: string[]): string
   return allNames.join(' + ');
 }
 
-export interface MultiProductScriptPayload {
-  __multiProduct: true;
-  product_ids: string[];
-  products: Record<string, {
-    product_id: string;
-    product_name: string;
-    model_script: string;
-    key_points: string;
-  }>;
+/**
+ * Extracts individual product IDs from a title string (e.g. "DIY Detergent Liquid + DIY Dishwash Liquid").
+ */
+export function extractProductIdsFromTitle(title?: string | null): string[] {
+  if (!title || typeof title !== 'string') return [];
+  const parts = title.split(' + ').map(s => s.trim()).filter(Boolean);
+  const ids: string[] = [];
+
+  parts.forEach(part => {
+    const item = resolveCatalogProduct(part);
+    const pid = item ? item.id : part.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    if (!ids.includes(pid)) {
+      ids.push(pid);
+    }
+  });
+
+  // Return sorted according to catalog order
+  return ids.sort((a, b) => {
+    const idxA = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === a);
+    const idxB = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === b);
+    if (idxA === -1 && idxB === -1) return 0;
+    if (idxA === -1) return 1;
+    if (idxB === -1) return -1;
+    return idxA - idxB;
+  });
 }
 
 export interface ParsedScriptData {
@@ -125,86 +141,59 @@ export interface ParsedScriptData {
   productIds: string[];
   productTitles: string[];
   combinedTitle: string;
-  productScripts: Record<string, {
-    product_id: string;
-    product_name: string;
-    model_script: string;
-    key_points: string;
-  }>;
+  modelScript: string;
+  keyPoints: string;
 }
 
 /**
- * Parses script content into structured multi-product data or backward-compatible single product.
+ * Parses script content, extracting product IDs, combined title, and shared model script / key points.
+ * Fully backwards-compatible with legacy JSON envelopes and standard single-product text rows.
  */
 export function parseScriptContent(script: CampaignScript): ParsedScriptData {
-  // 1. Check if model_script contains multi-product JSON envelope
+  // 1. Check if model_script contains legacy multi-product JSON envelope
   if (script.model_script && typeof script.model_script === 'string' && script.model_script.startsWith('{"__multiProduct":')) {
     try {
-      const parsed = JSON.parse(script.model_script) as MultiProductScriptPayload;
+      const parsed = JSON.parse(script.model_script);
       if (parsed.__multiProduct && Array.isArray(parsed.product_ids) && parsed.products) {
-        const productTitles = parsed.product_ids.map(id => parsed.products[id]?.product_name || id);
+        const productIds: string[] = parsed.product_ids;
+        const productTitles = productIds.map(id => parsed.products[id]?.product_name || id);
+        
+        // Extract texts from first available entry or combined
+        const scriptsList = productIds
+          .map(id => parsed.products[id]?.model_script?.trim())
+          .filter(Boolean);
+        const combinedScript = scriptsList.join('\n\n---\n\n');
+
+        const pointsList = productIds
+          .map(id => parsed.products[id]?.key_points?.trim())
+          .filter(Boolean);
+        const combinedPoints = pointsList.join('\n\n---\n\n');
+
         return {
-          isMultiProduct: parsed.product_ids.length > 1,
-          productIds: parsed.product_ids,
+          isMultiProduct: productIds.length > 1,
+          productIds,
           productTitles,
-          combinedTitle: formatCombinedProductTitle(parsed.product_ids) || script.product,
-          productScripts: parsed.products
+          combinedTitle: formatCombinedProductTitle(productIds) || script.product,
+          modelScript: combinedScript || script.model_script || '',
+          keyPoints: combinedPoints || script.key_points || ''
         };
       }
     } catch {
-      // Fallback to text parsing
+      // Fallback
     }
   }
 
-  // 2. Check if product title contains " + "
-  if (script.product && script.product.includes(' + ')) {
-    const parts = script.product.split(' + ').map(p => p.trim()).filter(Boolean);
-    const productIds: string[] = [];
-    const productScripts: Record<string, {
-      product_id: string;
-      product_name: string;
-      model_script: string;
-      key_points: string;
-    }> = {};
-
-    parts.forEach(part => {
-      const cat = resolveCatalogProduct(part);
-      const pid = cat?.id || part.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      productIds.push(pid);
-      productScripts[pid] = {
-        product_id: pid,
-        product_name: cat?.name || part,
-        model_script: script.model_script || '',
-        key_points: script.key_points || ''
-      };
-    });
-
-    return {
-      isMultiProduct: productIds.length > 1,
-      productIds,
-      productTitles: parts,
-      combinedTitle: script.product,
-      productScripts
-    };
-  }
-
-  // 3. Single product script (historical or standard single)
-  const cat = resolveCatalogProduct(script.product);
-  const pid = cat?.id || script.product.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  // 2. Extract product IDs from combined product title
+  const productIds = extractProductIdsFromTitle(script.product);
+  const productTitles = productIds.map(id => resolveCatalogProduct(id)?.name || id);
 
   return {
-    isMultiProduct: false,
-    productIds: [pid],
-    productTitles: [script.product],
-    combinedTitle: script.product,
-    productScripts: {
-      [pid]: {
-        product_id: pid,
-        product_name: script.product,
-        model_script: script.model_script || '',
-        key_points: script.key_points || ''
-      }
-    }
+    isMultiProduct: productIds.length > 1,
+    productIds,
+    productTitles,
+    combinedTitle: script.product || '',
+    modelScript: script.model_script || '',
+    keyPoints: script.key_points || ''
   };
 }
 
@@ -317,15 +306,16 @@ export async function deleteScriptVideoFile(filePath: string): Promise<void> {
 }
 
 /**
- * Hydrates script record with parsed multi-product data
+ * Hydrates script record with parsed product_ids and clean model_script/key_points
  */
 function hydrateScript(raw: any): CampaignScript {
-  const script = raw as CampaignScript;
-  const parsed = parseScriptContent(script);
+  const parsed = parseScriptContent(raw as CampaignScript);
   return {
-    ...script,
+    ...raw,
+    product: parsed.combinedTitle || raw.product,
     product_ids: parsed.productIds,
-    product_scripts: parsed.productScripts
+    model_script: parsed.modelScript,
+    key_points: parsed.keyPoints
   };
 }
 
@@ -388,11 +378,10 @@ export async function fetchCampaignScripts(
 export interface CreateScriptParams {
   campaign_id: string;
   product: string;          // Combined title or single product name
-  product_ids?: string[];   // Specific selected product IDs
-  product_scripts?: Record<string, { model_script: string; key_points: string }>;
+  product_ids?: string[];   // Selected product IDs
   language: string;
-  model_script: string;
-  key_points: string;
+  model_script: string;     // Single shared model script for all selected products
+  key_points: string;       // Single shared key points for all selected products
   reference_audio_url?: string | null;
   reference_video_url?: string | null;
   audioFile?: File | null;
@@ -400,7 +389,8 @@ export interface CreateScriptParams {
 }
 
 /**
- * Create a new script in Supabase and upload any attached audio/video files
+ * Create a new script in Supabase and upload any attached audio/video files.
+ * Saves the combined product title, single shared model script, and single shared key points.
  */
 export async function createCampaignScript(
   params: CreateScriptParams
@@ -431,56 +421,19 @@ export async function createCampaignScript(
       uploadedVideoPath = path;
     }
 
-    // 3. Determine if multi-product
-    const isMultiProduct = Array.isArray(params.product_ids) && params.product_ids.length > 1;
-    let finalModelScript = params.model_script.trim();
-    let finalKeyPoints = params.key_points.trim();
+    // 3. Compute deterministic combined title
     let finalProductTitle = params.product.trim();
-
-    if (isMultiProduct && params.product_ids && params.product_scripts) {
-      // Deterministically sort product IDs according to catalog order
-      const sortedProductIds = [...params.product_ids].sort((a, b) => {
-        const idxA = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === a);
-        const idxB = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === b);
-        return idxA - idxB;
-      });
-
-      finalProductTitle = formatCombinedProductTitle(sortedProductIds);
-
-      const multiProductsObj: Record<string, { product_id: string; product_name: string; model_script: string; key_points: string }> = {};
-      sortedProductIds.forEach(pid => {
-        const cat = resolveCatalogProduct(pid);
-        const entry = params.product_scripts?.[pid];
-        multiProductsObj[pid] = {
-          product_id: pid,
-          product_name: cat?.name || pid,
-          model_script: entry?.model_script?.trim() || '',
-          key_points: entry?.key_points?.trim() || ''
-        };
-      });
-
-      const multiPayload: MultiProductScriptPayload = {
-        __multiProduct: true,
-        product_ids: sortedProductIds,
-        products: multiProductsObj
-      };
-
-      finalModelScript = JSON.stringify(multiPayload);
-      
-      // Store human-readable key points summary in key_points column
-      const keyPointsSummary = sortedProductIds
-        .map(pid => `[${multiProductsObj[pid].product_name}]\n${multiProductsObj[pid].key_points}`)
-        .join('\n\n');
-      finalKeyPoints = keyPointsSummary || params.key_points.trim();
+    if (Array.isArray(params.product_ids) && params.product_ids.length > 0) {
+      finalProductTitle = formatCombinedProductTitle(params.product_ids);
     }
 
-    // 4. Insert record into database
+    // 4. Insert record into database using standard columns
     const payload = {
       campaign_id: String(params.campaign_id).trim(),
       product: finalProductTitle,
       language: params.language.trim(),
-      model_script: finalModelScript,
-      key_points: finalKeyPoints,
+      model_script: params.model_script.trim(),
+      key_points: params.key_points.trim(),
       reference_audio_url: params.reference_audio_url?.trim() || null,
       reference_audio_file_path: uploadedAudioPath,
       reference_video_url: params.reference_video_url?.trim() || null,
@@ -511,7 +464,6 @@ export interface UpdateScriptParams {
   campaign_id?: string;
   product: string;
   product_ids?: string[];
-  product_scripts?: Record<string, { model_script: string; key_points: string }>;
   language: string;
   model_script: string;
   key_points: string;
@@ -526,7 +478,8 @@ export interface UpdateScriptParams {
 }
 
 /**
- * Update an existing script in Supabase, managing storage replacements/cleanups
+ * Update an existing script in Supabase, managing storage replacements/cleanups.
+ * Saves the combined product title, single shared model script, and single shared key points.
  */
 export async function updateCampaignScript(
   params: UpdateScriptParams
@@ -568,58 +521,25 @@ export async function updateCampaignScript(
       finalVideoPath = path;
     }
 
-    const isMultiProduct = Array.isArray(params.product_ids) && params.product_ids.length > 1;
-    let finalModelScript = params.model_script.trim();
-    let finalKeyPoints = params.key_points.trim();
+    // Determine deterministic combined product title
     let finalProductTitle = params.product.trim();
-
-    if (isMultiProduct && params.product_ids && params.product_scripts) {
-      const sortedProductIds = [...params.product_ids].sort((a, b) => {
-        const idxA = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === a);
-        const idxB = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === b);
-        return idxA - idxB;
-      });
-
-      finalProductTitle = formatCombinedProductTitle(sortedProductIds);
-
-      const multiProductsObj: Record<string, { product_id: string; product_name: string; model_script: string; key_points: string }> = {};
-      sortedProductIds.forEach(pid => {
-        const cat = resolveCatalogProduct(pid);
-        const entry = params.product_scripts?.[pid];
-        multiProductsObj[pid] = {
-          product_id: pid,
-          product_name: cat?.name || pid,
-          model_script: entry?.model_script?.trim() || '',
-          key_points: entry?.key_points?.trim() || ''
-        };
-      });
-
-      const multiPayload: MultiProductScriptPayload = {
-        __multiProduct: true,
-        product_ids: sortedProductIds,
-        products: multiProductsObj
-      };
-
-      finalModelScript = JSON.stringify(multiPayload);
-
-      const keyPointsSummary = sortedProductIds
-        .map(pid => `[${multiProductsObj[pid].product_name}]\n${multiProductsObj[pid].key_points}`)
-        .join('\n\n');
-      finalKeyPoints = keyPointsSummary || params.key_points.trim();
+    if (Array.isArray(params.product_ids) && params.product_ids.length > 0) {
+      finalProductTitle = formatCombinedProductTitle(params.product_ids);
     }
 
     const payload: any = {
       product: finalProductTitle,
       language: params.language.trim(),
-      model_script: finalModelScript,
-      key_points: finalKeyPoints,
+      model_script: params.model_script.trim(),
+      key_points: params.key_points.trim(),
       reference_audio_url: params.reference_audio_url?.trim() || null,
       reference_audio_file_path: finalAudioPath,
       reference_video_url: params.reference_video_url?.trim() || null,
       reference_video_file_path: finalVideoPath,
       updated_at: new Date().toISOString()
     };
-    if (params.campaign_id !== undefined) {
+
+    if (params.campaign_id) {
       payload.campaign_id = String(params.campaign_id).trim();
     }
 
@@ -631,6 +551,7 @@ export async function updateCampaignScript(
       .single();
 
     if (error) {
+      console.error('Error updating campaign script:', error);
       throw error;
     }
 
@@ -642,7 +563,7 @@ export async function updateCampaignScript(
 }
 
 /**
- * Delete a script and clean up any uploaded files from storage
+ * Delete a script record from Supabase and any associated audio/video storage files
  */
 export async function deleteCampaignScript(script: CampaignScript): Promise<boolean> {
   const client = supabaseAdmin || supabase;
@@ -653,7 +574,7 @@ export async function deleteCampaignScript(script: CampaignScript): Promise<bool
       .eq('id', script.id);
 
     if (error) {
-      console.error('Error deleting script record:', error);
+      console.error('Error deleting campaign script:', error);
       throw error;
     }
 

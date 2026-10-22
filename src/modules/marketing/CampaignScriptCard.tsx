@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { 
   FileText, 
   Music, 
@@ -9,9 +9,6 @@ import {
   Trash2, 
   ChevronDown, 
   ChevronUp, 
-  Play, 
-  Pause, 
-  Volume2, 
   Eye, 
   X, 
   AlertTriangle, 
@@ -22,8 +19,7 @@ import {
 import type { CampaignScript } from '../../types';
 import { 
   getScriptAudioUrl, 
-  getScriptVideoUrl, 
-  parseScriptContent 
+  getScriptVideoUrl 
 } from '../../services/campaignScriptService';
 
 interface CampaignScriptCardProps {
@@ -44,29 +40,6 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
   const [isExpandedKeyPoints, setIsExpandedKeyPoints] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Parse multi-product structured data
-  const parsed = useMemo(() => parseScriptContent(script), [script]);
-  const [activeProductId, setActiveProductId] = useState<string>(parsed.productIds[0] || '');
-
-  // Keep activeProductId valid if script changes
-  React.useEffect(() => {
-    if (!parsed.productIds.includes(activeProductId)) {
-      setActiveProductId(parsed.productIds[0] || '');
-    }
-  }, [parsed, activeProductId]);
-
-  const activeContent = useMemo(() => {
-    if (parsed.isMultiProduct && activeProductId && parsed.productScripts[activeProductId]) {
-      return parsed.productScripts[activeProductId];
-    }
-    return {
-      product_id: parsed.productIds[0] || '',
-      product_name: script.product,
-      model_script: script.model_script || '',
-      key_points: script.key_points || ''
-    };
-  }, [parsed, activeProductId, script]);
-
   // Copy to clipboard states
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedKeyPoints, setCopiedKeyPoints] = useState(false);
@@ -81,7 +54,7 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
   }, []);
 
   const handleCopyScript = async () => {
-    const textToCopy = activeContent.model_script || '';
+    const textToCopy = script.model_script || '';
     try {
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(textToCopy);
@@ -104,7 +77,7 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
   };
 
   const handleCopyKeyPoints = async () => {
-    const textToCopy = activeContent.key_points || '';
+    const textToCopy = script.key_points || '';
     try {
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(textToCopy);
@@ -137,7 +110,7 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
     ? getScriptAudioUrl(script.reference_audio_file_path)
     : null;
 
-  const videoStorageUrl = script.reference_video_file_path
+  const videoStorageUrl = script.reference_video_file_path 
     ? getScriptVideoUrl(script.reference_video_file_path)
     : null;
 
@@ -146,16 +119,16 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
   const hasVideoFile = !!script.reference_video_file_path;
   const hasVideoLink = !!script.reference_video_url;
 
-  const currentScriptText = activeContent.model_script || '';
-  const currentKeyPointsText = activeContent.key_points || '';
-  const isScriptLong = currentScriptText.length > 220;
-  const isKeyPointsLong = currentKeyPointsText.length > 180;
+  const scriptText = script.model_script || '';
+  const keyPointsText = script.key_points || '';
+  const isScriptLong = scriptText.length > 220;
+  const isKeyPointsLong = keyPointsText.length > 180;
 
   return (
     <>
       <div className="bg-[#0b1329] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-5 flex flex-col justify-between transition-all duration-200 shadow-sm hover:shadow-md relative group">
         <div>
-          {/* Header Row: Product Title, Language, Actions Menu */}
+          {/* Header Row: Combined Product Title, Language, Campaign Badge, Actions Menu */}
           <div className="flex items-start justify-between gap-3 mb-3">
             <div className="flex flex-wrap items-center gap-2 min-w-0">
               <span 
@@ -221,46 +194,12 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
             </div>
           </div>
 
-          {/* Multi-Product Selector Pills (if script has multiple products) */}
-          {parsed.isMultiProduct && (
-            <div className="mb-3.5 p-2 rounded-xl bg-[#070c18] border border-slate-800/80">
-              <div className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider mb-1.5 flex items-center gap-1">
-                <Layers size={11} className="text-purple-400" />
-                <span>Product Scripts ({parsed.productIds.length}):</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {parsed.productIds.map(pid => {
-                  const isCurrent = activeProductId === pid;
-                  const name = parsed.productScripts[pid]?.product_name || pid;
-                  return (
-                    <button
-                      key={pid}
-                      type="button"
-                      onClick={() => {
-                        setActiveProductId(pid);
-                        setIsExpandedScript(false);
-                        setIsExpandedKeyPoints(false);
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
-                        isCurrent
-                          ? 'bg-purple-600 text-white border-purple-500 shadow-sm shadow-purple-900/30'
-                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800'
-                      }`}
-                    >
-                      {name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {/* Model Script Section */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-1.5">
               <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                 <FileText size={12} className="text-purple-400" />
-                <span>Model Script {parsed.isMultiProduct ? `(${activeContent.product_name})` : ''}</span>
+                <span>Model Script</span>
               </div>
               <button
                 type="button"
@@ -287,7 +226,7 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
             </div>
             <div className="bg-[#070c18] border border-slate-800/80 rounded-xl p-3 text-xs text-slate-300 leading-relaxed relative">
               <p className={!isExpandedScript && isScriptLong ? 'line-clamp-4 whitespace-pre-line' : 'whitespace-pre-line'}>
-                {currentScriptText || <span className="text-slate-600 italic">No model script provided</span>}
+                {scriptText || <span className="text-slate-600 italic">No model script provided</span>}
               </p>
               {isScriptLong && (
                 <button
@@ -307,7 +246,7 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
             <div className="flex items-center justify-between mb-1.5">
               <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                 <FileText size={12} className="text-purple-400" />
-                <span>Key Points {parsed.isMultiProduct ? `(${activeContent.product_name})` : ''}</span>
+                <span>Key Points</span>
               </div>
               <button
                 type="button"
@@ -332,9 +271,9 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
                 )}
               </button>
             </div>
-            <div className="bg-[#070c18] border border-slate-800/80 rounded-xl p-3 text-xs text-slate-300 leading-relaxed relative">
+            <div className="bg-[#070c18] border border-slate-800/80 rounded-xl p-3 text-xs text-slate-300 leading-relaxed">
               <p className={!isExpandedKeyPoints && isKeyPointsLong ? 'line-clamp-3 whitespace-pre-line' : 'whitespace-pre-line'}>
-                {currentKeyPointsText || <span className="text-slate-600 italic">No key points provided</span>}
+                {keyPointsText || <span className="text-slate-600 italic">No key points provided</span>}
               </p>
               {isKeyPointsLong && (
                 <button
@@ -350,15 +289,11 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
           </div>
         </div>
 
-        {/* Reference Media Row */}
-        <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-          {/* Audio Reference */}
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500 text-[11px] flex items-center gap-1">
-              <Music size={12} />
-              <span>Reference Audio:</span>
-            </span>
-            {hasAudioFile && audioStorageUrl ? (
+        {/* Footer: Reference Media Actions */}
+        {(hasAudioFile || hasAudioLink || hasVideoFile || hasVideoLink) && (
+          <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center gap-2">
+            {/* Audio: Storage File Preview */}
+            {hasAudioFile && audioStorageUrl && (
               <button
                 type="button"
                 onClick={() => setActiveMediaModal({
@@ -366,33 +301,28 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
                   url: audioStorageUrl,
                   title: `${script.product} - Reference Audio`
                 })}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 text-[11px] font-medium transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-600/20 text-purple-300 border border-purple-500/30 hover:bg-purple-600/30 transition-colors cursor-pointer"
               >
-                <Play size={10} />
+                <Music size={13} />
                 <span>Play Audio</span>
               </button>
-            ) : hasAudioLink ? (
+            )}
+
+            {/* Audio: External Link */}
+            {hasAudioLink && script.reference_audio_url && (
               <a
-                href={script.reference_audio_url || '#'}
+                href={script.reference_audio_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition-colors"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
               >
-                <ExternalLink size={10} />
+                <ExternalLink size={12} />
                 <span>Audio Link</span>
               </a>
-            ) : (
-              <span className="text-slate-600 italic text-[11px]">No reference audio</span>
             )}
-          </div>
 
-          {/* Video Reference */}
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500 text-[11px] flex items-center gap-1">
-              <Video size={12} />
-              <span>Reference Video:</span>
-            </span>
-            {hasVideoFile && videoStorageUrl ? (
+            {/* Video: Storage File Preview */}
+            {hasVideoFile && videoStorageUrl && (
               <button
                 type="button"
                 onClick={() => setActiveMediaModal({
@@ -400,46 +330,50 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
                   url: videoStorageUrl,
                   title: `${script.product} - Reference Video`
                 })}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-[11px] font-medium transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 transition-colors cursor-pointer"
               >
-                <Eye size={10} />
+                <Video size={13} />
                 <span>Watch Video</span>
               </button>
-            ) : hasVideoLink ? (
+            )}
+
+            {/* Video: External Link */}
+            {hasVideoLink && script.reference_video_url && (
               <a
-                href={script.reference_video_url || '#'}
+                href={script.reference_video_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition-colors"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
               >
-                <ExternalLink size={10} />
+                <ExternalLink size={12} />
                 <span>Video Link</span>
               </a>
-            ) : (
-              <span className="text-slate-600 italic text-[11px]">No reference video</span>
             )}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
-            <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 flex items-center justify-center">
-              <AlertTriangle size={20} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+            <div className="flex items-center gap-3 mb-3 text-red-400">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white">Delete Script?</h4>
+                <p className="text-xs text-slate-400">This action cannot be undone.</p>
+              </div>
             </div>
-            <div>
-              <h4 className="text-base font-bold text-white">Delete Script?</h4>
-              <p className="text-xs text-slate-400 mt-1">
-                Are you sure you want to delete the script for <span className="text-white font-semibold">{script.product}</span> ({script.language})? This action cannot be undone.
-              </p>
-            </div>
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <p className="text-xs text-slate-300 mb-4 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+              Are you sure you want to delete the script for <span className="font-semibold text-white">{script.product}</span> ({script.language})?
+            </p>
+            <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(false)}
-                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -449,7 +383,7 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
                   setShowDeleteConfirm(false);
                   onDelete(script);
                 }}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 transition-colors cursor-pointer shadow-md shadow-red-950/40"
+                className="px-3.5 py-2 text-xs font-bold rounded-xl text-white bg-red-600 hover:bg-red-700 transition-colors cursor-pointer"
               >
                 Delete Script
               </button>
@@ -460,18 +394,18 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
 
       {/* Media Player Modal */}
       {activeMediaModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-[#0f172a] border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-[#0b1329]">
               <div className="flex items-center gap-2">
                 {activeMediaModal.type === 'audio' ? (
-                  <Volume2 size={16} className="text-purple-400" />
+                  <Music size={16} className="text-purple-400" />
                 ) : (
                   <Video size={16} className="text-purple-400" />
                 )}
-                <h4 className="text-sm font-bold text-white truncate max-w-[340px]">
+                <span className="text-xs font-bold text-white truncate max-w-[300px]">
                   {activeMediaModal.title}
-                </h4>
+                </span>
               </div>
               <button
                 type="button"
@@ -481,17 +415,24 @@ export const CampaignScriptCard: React.FC<CampaignScriptCardProps> = ({
                 <X size={16} />
               </button>
             </div>
-
-            <div className="flex justify-center p-2">
+            <div className="p-4 bg-[#070c18] flex items-center justify-center">
               {activeMediaModal.type === 'audio' ? (
-                <audio controls autoPlay className="w-full">
-                  <source src={activeMediaModal.url} />
+                <audio
+                  controls
+                  autoPlay
+                  src={activeMediaModal.url}
+                  className="w-full"
+                >
                   Your browser does not support the audio element.
                 </audio>
               ) : (
-                <video controls autoPlay className="w-full max-h-80 rounded-xl bg-black">
-                  <source src={activeMediaModal.url} />
-                  Your browser does not support the video element.
+                <video
+                  controls
+                  autoPlay
+                  src={activeMediaModal.url}
+                  className="w-full max-h-[60vh] rounded-lg"
+                >
+                  Your browser does not support the video tag.
                 </video>
               )}
             </div>
