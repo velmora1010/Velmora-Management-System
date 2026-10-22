@@ -230,7 +230,11 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       const data = await fetchInfluencerTrackingLinks(campaign.id);
       setLinks(data);
 
-      const linkIds = data.map(l => String(l.id));
+      const linkIds: string[] = [];
+      data.forEach(l => {
+        if (l.id) linkIds.push(String(l.id));
+        if (l.custom_slug) linkIds.push(String(l.custom_slug).toLowerCase());
+      });
       if (linkIds.length > 0) {
         setIsLoadingClicks(true);
         try {
@@ -267,7 +271,11 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
   const handleRefreshClickCounts = useCallback(async (targetLinks: InfluencerTrackingLink[]) => {
     if (isRefreshingClicks) return;
 
-    const idsToQuery = targetLinks.map(l => String(l.id)).filter(Boolean);
+    const idsToQuery: string[] = [];
+    targetLinks.forEach(l => {
+      if (l.id) idsToQuery.push(String(l.id));
+      if (l.custom_slug) idsToQuery.push(String(l.custom_slug).toLowerCase());
+    });
     if (idsToQuery.length === 0) {
       toast('No tracking links to refresh for current view', { icon: 'ℹ️' });
       return;
@@ -340,7 +348,11 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
       return copy.sort(compareTrackingLinksByCodeAsc);
     });
 
-    const savedIds = savedLinks.map(l => String(l.id));
+    const savedIds: string[] = [];
+    savedLinks.forEach(l => {
+      if (l.id) savedIds.push(String(l.id));
+      if (l.custom_slug) savedIds.push(String(l.custom_slug).toLowerCase());
+    });
     if (savedIds.length > 0) {
       fetchTrackingLinkClicks(savedIds).then(res => {
         setIsClicksConfigured(res.configured);
@@ -1858,7 +1870,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                                           );
                                                         }
 
-                                                        const count = clicksMap[link.id] ?? 0;
+                                                        const count = Math.max(
+                                                          clicksMap[link.id] ?? 0,
+                                                          (link.custom_slug ? clicksMap[link.custom_slug.toLowerCase()] : 0) ?? 0
+                                                        );
                                                         return (
                                                           <span
                                                             className={`inline-flex items-center justify-center min-w-[36px] px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold border ${
@@ -1936,7 +1951,10 @@ export const CampaignTrackingLinkSection: React.FC<CampaignTrackingLinkSectionPr
                                             <CampaignTrackingLinkCard
                                               key={link.id}
                                               link={link}
-                                              clicks={clicksMap[link.id] ?? 0}
+                                              clicks={Math.max(
+                                                clicksMap[link.id] ?? 0,
+                                                (link.custom_slug ? clicksMap[link.custom_slug.toLowerCase()] : 0) ?? 0
+                                              )}
                                               isClicksConfigured={isClicksConfigured}
                                               clicksError={clicksError}
                                               isLoadingClicks={isLoadingClicks || isRefreshingClicks}

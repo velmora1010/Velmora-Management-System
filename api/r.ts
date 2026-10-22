@@ -345,20 +345,27 @@ export default async function handler(
   const isBotRequest = isBot(userAgent);
 
   // 7. Increment persistent atomic counter in Redis if genuine visitor
+  // Atomically increments counter for both the specific slug (e.g. his1-v2) and canonical ID (UUID)
   if (isRedisConfigured && !isBotRequest && !isDuplicateClick) {
     try {
-      const incrRes = await fetch(redisUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${redisToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(['INCR', `click:${canonicalLinkId}`])
-      });
-      if (incrRes.ok) {
-        const data = await incrRes.json();
-        console.log(`[Tracking Redirect] Incremented click for ${canonicalLinkId} (via ${identifier}), new count: ${data?.result}`);
-      }
+      const keysToIncr = Array.from(new Set([
+        identifier ? `click:${identifier}` : null,
+        canonicalLinkId ? `click:${canonicalLinkId}` : null
+      ].filter(Boolean))) as string[];
+
+      await Promise.all(
+        keysToIncr.map(key =>
+          fetch(redisUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${redisToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(['INCR', key])
+          })
+        )
+      );
+      console.log(`[Tracking Redirect] Incremented atomic clicks for keys: ${keysToIncr.join(', ')}`);
     } catch (err) {
       console.error('[Tracking Redirect] Failed to increment click counter in Redis:', err);
     }
