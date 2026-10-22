@@ -3,20 +3,32 @@ import { supabase } from '../lib/supabase';
 import { SUPABASE_TABLES } from '../config/supabaseTables';
 import type { CampaignScript } from '../types';
 
-export const SCRIPT_PRODUCTS = [
-  'DIY Detergent Liquid',
-  'DIY Dishwash Liquid',
-  'DIY Fabric Conditioner',
-  'Kitchen Cleaner',
-  'BBC Cleaner — Brass, Bronze & Copper Cleaner',
-  'Handwash',
-  'Floor Cleaner',
-  'Glass Cleaner',
-  'Bike Shampoo',
-  'Car Shampoo',
-  'Bamboo Kitchen Towel',
-  'Snow Foam Sprayer — NEW PRODUCT'
-] as const;
+export interface ScriptProductItem {
+  id: string;
+  name: string;
+  aliases: string[];
+}
+
+/**
+ * Standard 12 products with verified IDs, display names, and matching aliases.
+ * The catalog array defines the stable, deterministic ordering.
+ */
+export const SCRIPT_PRODUCTS_CATALOG: ScriptProductItem[] = [
+  { id: 'diy-detergent-liquid', name: 'DIY Detergent Liquid', aliases: ['diy detergent liquid', 'detergent', 'diy detergent'] },
+  { id: 'diy-dishwash-liquid', name: 'DIY Dishwash Liquid', aliases: ['diy dishwash liquid', 'dishwash', 'diy dishwash'] },
+  { id: 'diy-fabric-conditioner', name: 'DIY Fabric Conditioner', aliases: ['diy fabric conditioner', 'fabric conditioner', 'conditioner'] },
+  { id: 'kitchen-cleaner', name: 'Kitchen Cleaner', aliases: ['kitchen cleaner', 'kitchen'] },
+  { id: 'bbc-cleaner', name: 'BBC Cleaner — Brass, Bronze & Copper Cleaner', aliases: ['bbc cleaner', 'brass, bronze & copper cleaner', 'bbc cleaner — brass, bronze & copper cleaner', 'diy bbc cleaner'] },
+  { id: 'handwash', name: 'Handwash', aliases: ['handwash', 'hand wash'] },
+  { id: 'floor-cleaner', name: 'Floor Cleaner', aliases: ['floor cleaner', 'floor'] },
+  { id: 'glass-cleaner', name: 'Glass Cleaner', aliases: ['glass cleaner', 'glass'] },
+  { id: 'bike-shampoo', name: 'Bike Shampoo', aliases: ['bike shampoo', 'bike wash'] },
+  { id: 'car-shampoo', name: 'Car Shampoo', aliases: ['car shampoo', 'car wash'] },
+  { id: 'bamboo-kitchen-towel', name: 'Bamboo Kitchen Towel', aliases: ['bamboo kitchen towel', 'bamboo towel', 'kitchen towel'] },
+  { id: 'snow-foam-sprayer', name: 'Snow Foam Sprayer', aliases: ['snow foam sprayer', 'snow foam sprayer — new product', 'foam sprayer'] }
+];
+
+export const SCRIPT_PRODUCTS = SCRIPT_PRODUCTS_CATALOG.map(p => p.name);
 
 export const COMBO_PRODUCTS = [
   'DIY Home Care Combo',
@@ -46,6 +58,154 @@ export function isComboProduct(productName?: string | null): boolean {
     COMBO_PRODUCTS.some(c => c.toLowerCase() === clean) ||
     clean.includes('combo')
   );
+}
+
+/**
+ * Resolves any product name or alias to its standard catalog item
+ */
+export function resolveCatalogProduct(ident?: string | null): ScriptProductItem | undefined {
+  if (!ident || typeof ident !== 'string') return undefined;
+  const clean = ident.trim().toLowerCase();
+  return SCRIPT_PRODUCTS_CATALOG.find(
+    p => p.id === clean || p.name.toLowerCase() === clean || p.aliases.some(a => a.toLowerCase() === clean)
+  );
+}
+
+/**
+ * Deterministically formats product names with " + " in standard catalog order.
+ * If 1 product: returns its standard display name.
+ * If 2 products: "DIY Detergent Liquid + DIY Dishwash Liquid"
+ * If 3 products: "DIY Detergent Liquid + DIY Dishwash Liquid + DIY Fabric Conditioner"
+ */
+export function formatCombinedProductTitle(productIdentifiers: string[]): string {
+  if (!Array.isArray(productIdentifiers) || productIdentifiers.length === 0) return '';
+
+  const matched: ScriptProductItem[] = [];
+  const unmatched: string[] = [];
+
+  productIdentifiers.forEach(ident => {
+    if (!ident || typeof ident !== 'string') return;
+    const item = resolveCatalogProduct(ident);
+    if (item) {
+      if (!matched.some(m => m.id === item.id)) {
+        matched.push(item);
+      }
+    } else {
+      const clean = ident.trim();
+      if (clean && !unmatched.includes(clean)) {
+        unmatched.push(clean);
+      }
+    }
+  });
+
+  // Sort matched in stable catalog order
+  matched.sort((a, b) => {
+    const idxA = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === a.id);
+    const idxB = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === b.id);
+    return idxA - idxB;
+  });
+
+  const allNames = [...matched.map(m => m.name), ...unmatched];
+  return allNames.join(' + ');
+}
+
+export interface MultiProductScriptPayload {
+  __multiProduct: true;
+  product_ids: string[];
+  products: Record<string, {
+    product_id: string;
+    product_name: string;
+    model_script: string;
+    key_points: string;
+  }>;
+}
+
+export interface ParsedScriptData {
+  isMultiProduct: boolean;
+  productIds: string[];
+  productTitles: string[];
+  combinedTitle: string;
+  productScripts: Record<string, {
+    product_id: string;
+    product_name: string;
+    model_script: string;
+    key_points: string;
+  }>;
+}
+
+/**
+ * Parses script content into structured multi-product data or backward-compatible single product.
+ */
+export function parseScriptContent(script: CampaignScript): ParsedScriptData {
+  // 1. Check if model_script contains multi-product JSON envelope
+  if (script.model_script && typeof script.model_script === 'string' && script.model_script.startsWith('{"__multiProduct":')) {
+    try {
+      const parsed = JSON.parse(script.model_script) as MultiProductScriptPayload;
+      if (parsed.__multiProduct && Array.isArray(parsed.product_ids) && parsed.products) {
+        const productTitles = parsed.product_ids.map(id => parsed.products[id]?.product_name || id);
+        return {
+          isMultiProduct: parsed.product_ids.length > 1,
+          productIds: parsed.product_ids,
+          productTitles,
+          combinedTitle: formatCombinedProductTitle(parsed.product_ids) || script.product,
+          productScripts: parsed.products
+        };
+      }
+    } catch {
+      // Fallback to text parsing
+    }
+  }
+
+  // 2. Check if product title contains " + "
+  if (script.product && script.product.includes(' + ')) {
+    const parts = script.product.split(' + ').map(p => p.trim()).filter(Boolean);
+    const productIds: string[] = [];
+    const productScripts: Record<string, {
+      product_id: string;
+      product_name: string;
+      model_script: string;
+      key_points: string;
+    }> = {};
+
+    parts.forEach(part => {
+      const cat = resolveCatalogProduct(part);
+      const pid = cat?.id || part.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      productIds.push(pid);
+      productScripts[pid] = {
+        product_id: pid,
+        product_name: cat?.name || part,
+        model_script: script.model_script || '',
+        key_points: script.key_points || ''
+      };
+    });
+
+    return {
+      isMultiProduct: productIds.length > 1,
+      productIds,
+      productTitles: parts,
+      combinedTitle: script.product,
+      productScripts
+    };
+  }
+
+  // 3. Single product script (historical or standard single)
+  const cat = resolveCatalogProduct(script.product);
+  const pid = cat?.id || script.product.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+  return {
+    isMultiProduct: false,
+    productIds: [pid],
+    productTitles: [script.product],
+    combinedTitle: script.product,
+    productScripts: {
+      [pid]: {
+        product_id: pid,
+        product_name: script.product,
+        model_script: script.model_script || '',
+        key_points: script.key_points || ''
+      }
+    }
+  };
 }
 
 /**
@@ -157,6 +317,19 @@ export async function deleteScriptVideoFile(filePath: string): Promise<void> {
 }
 
 /**
+ * Hydrates script record with parsed multi-product data
+ */
+function hydrateScript(raw: any): CampaignScript {
+  const script = raw as CampaignScript;
+  const parsed = parseScriptContent(script);
+  return {
+    ...script,
+    product_ids: parsed.productIds,
+    product_scripts: parsed.productScripts
+  };
+}
+
+/**
  * Fetch all scripts across all campaigns
  */
 export async function fetchAllCampaignScripts(): Promise<CampaignScript[]> {
@@ -172,7 +345,7 @@ export async function fetchAllCampaignScripts(): Promise<CampaignScript[]> {
       throw error;
     }
 
-    return (data || []) as CampaignScript[];
+    return (data || []).map(hydrateScript);
   } catch (err) {
     console.error('Exception in fetchAllCampaignScripts:', err);
     throw err;
@@ -180,10 +353,12 @@ export async function fetchAllCampaignScripts(): Promise<CampaignScript[]> {
 }
 
 /**
- * Fetch all scripts for a specific campaign or all campaigns
+ * Fetch all scripts for a specific campaign.
+ * STRICT CAMPAIGN ISOLATION: Queries strictly by campaign_id.
+ * Scripts from Campaign A never leak into Campaign B.
  */
 export async function fetchCampaignScripts(
-  campaignId?: string | number | 'all'
+  campaignId: string | number
 ): Promise<CampaignScript[]> {
   if (!campaignId || campaignId === 'all') {
     return fetchAllCampaignScripts();
@@ -195,7 +370,7 @@ export async function fetchCampaignScripts(
     const { data, error } = await client
       .from(SUPABASE_TABLES.campaignScripts)
       .select('*')
-      .or(`campaign_id.eq.${cleanId},campaign_id.eq.global`)
+      .eq('campaign_id', cleanId)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -203,7 +378,7 @@ export async function fetchCampaignScripts(
       throw error;
     }
 
-    return (data || []) as CampaignScript[];
+    return (data || []).map(hydrateScript);
   } catch (err) {
     console.error('Exception in fetchCampaignScripts:', err);
     throw err;
@@ -212,7 +387,9 @@ export async function fetchCampaignScripts(
 
 export interface CreateScriptParams {
   campaign_id: string;
-  product: string;
+  product: string;          // Combined title or single product name
+  product_ids?: string[];   // Specific selected product IDs
+  product_scripts?: Record<string, { model_script: string; key_points: string }>;
   language: string;
   model_script: string;
   key_points: string;
@@ -248,20 +425,62 @@ export async function createCampaignScript(
     if (params.videoFile) {
       const { path, error } = await uploadScriptVideo(params.campaign_id, tempScriptId, params.videoFile);
       if (error) {
-        // Rollback uploaded audio if video fails
         if (uploadedAudioPath) await deleteScriptAudioFile(uploadedAudioPath);
         throw new Error(`Failed to upload video file: ${error.message || 'Storage error'}`);
       }
       uploadedVideoPath = path;
     }
 
-    // 3. Insert record into database
+    // 3. Determine if multi-product
+    const isMultiProduct = Array.isArray(params.product_ids) && params.product_ids.length > 1;
+    let finalModelScript = params.model_script.trim();
+    let finalKeyPoints = params.key_points.trim();
+    let finalProductTitle = params.product.trim();
+
+    if (isMultiProduct && params.product_ids && params.product_scripts) {
+      // Deterministically sort product IDs according to catalog order
+      const sortedProductIds = [...params.product_ids].sort((a, b) => {
+        const idxA = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === a);
+        const idxB = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === b);
+        return idxA - idxB;
+      });
+
+      finalProductTitle = formatCombinedProductTitle(sortedProductIds);
+
+      const multiProductsObj: Record<string, { product_id: string; product_name: string; model_script: string; key_points: string }> = {};
+      sortedProductIds.forEach(pid => {
+        const cat = resolveCatalogProduct(pid);
+        const entry = params.product_scripts?.[pid];
+        multiProductsObj[pid] = {
+          product_id: pid,
+          product_name: cat?.name || pid,
+          model_script: entry?.model_script?.trim() || '',
+          key_points: entry?.key_points?.trim() || ''
+        };
+      });
+
+      const multiPayload: MultiProductScriptPayload = {
+        __multiProduct: true,
+        product_ids: sortedProductIds,
+        products: multiProductsObj
+      };
+
+      finalModelScript = JSON.stringify(multiPayload);
+      
+      // Store human-readable key points summary in key_points column
+      const keyPointsSummary = sortedProductIds
+        .map(pid => `[${multiProductsObj[pid].product_name}]\n${multiProductsObj[pid].key_points}`)
+        .join('\n\n');
+      finalKeyPoints = keyPointsSummary || params.key_points.trim();
+    }
+
+    // 4. Insert record into database
     const payload = {
       campaign_id: String(params.campaign_id).trim(),
-      product: params.product.trim(),
+      product: finalProductTitle,
       language: params.language.trim(),
-      model_script: params.model_script.trim(),
-      key_points: params.key_points.trim(),
+      model_script: finalModelScript,
+      key_points: finalKeyPoints,
       reference_audio_url: params.reference_audio_url?.trim() || null,
       reference_audio_file_path: uploadedAudioPath,
       reference_video_url: params.reference_video_url?.trim() || null,
@@ -275,13 +494,12 @@ export async function createCampaignScript(
       .single();
 
     if (error) {
-      // Rollback uploaded files if DB insert fails
       if (uploadedAudioPath) await deleteScriptAudioFile(uploadedAudioPath);
       if (uploadedVideoPath) await deleteScriptVideoFile(uploadedVideoPath);
       throw error;
     }
 
-    return data as CampaignScript;
+    return hydrateScript(data);
   } catch (err) {
     console.error('Exception in createCampaignScript:', err);
     throw err;
@@ -292,6 +510,8 @@ export interface UpdateScriptParams {
   id: string;
   campaign_id?: string;
   product: string;
+  product_ids?: string[];
+  product_scripts?: Record<string, { model_script: string; key_points: string }>;
   language: string;
   model_script: string;
   key_points: string;
@@ -316,32 +536,29 @@ export async function updateCampaignScript(
   let finalVideoPath = params.existingVideoFilePath || null;
 
   try {
-    // Audio removal or replacement
     if (params.removeAudioFile && finalAudioPath) {
       await deleteScriptAudioFile(finalAudioPath);
       finalAudioPath = null;
     }
 
     if (params.audioFile) {
-      const { path, error } = await uploadScriptAudio(params.campaign_id, params.id, params.audioFile);
+      const { path, error } = await uploadScriptAudio(params.campaign_id || 'script', params.id, params.audioFile);
       if (error) {
         throw new Error(`Failed to upload replacement audio: ${error.message || 'Storage error'}`);
       }
-      // If previous file existed and is different, remove it
       if (finalAudioPath && finalAudioPath !== path) {
         await deleteScriptAudioFile(finalAudioPath);
       }
       finalAudioPath = path;
     }
 
-    // Video removal or replacement
     if (params.removeVideoFile && finalVideoPath) {
       await deleteScriptVideoFile(finalVideoPath);
       finalVideoPath = null;
     }
 
     if (params.videoFile) {
-      const { path, error } = await uploadScriptVideo(params.campaign_id, params.id, params.videoFile);
+      const { path, error } = await uploadScriptVideo(params.campaign_id || 'script', params.id, params.videoFile);
       if (error) {
         throw new Error(`Failed to upload replacement video: ${error.message || 'Storage error'}`);
       }
@@ -351,11 +568,51 @@ export async function updateCampaignScript(
       finalVideoPath = path;
     }
 
+    const isMultiProduct = Array.isArray(params.product_ids) && params.product_ids.length > 1;
+    let finalModelScript = params.model_script.trim();
+    let finalKeyPoints = params.key_points.trim();
+    let finalProductTitle = params.product.trim();
+
+    if (isMultiProduct && params.product_ids && params.product_scripts) {
+      const sortedProductIds = [...params.product_ids].sort((a, b) => {
+        const idxA = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === a);
+        const idxB = SCRIPT_PRODUCTS_CATALOG.findIndex(p => p.id === b);
+        return idxA - idxB;
+      });
+
+      finalProductTitle = formatCombinedProductTitle(sortedProductIds);
+
+      const multiProductsObj: Record<string, { product_id: string; product_name: string; model_script: string; key_points: string }> = {};
+      sortedProductIds.forEach(pid => {
+        const cat = resolveCatalogProduct(pid);
+        const entry = params.product_scripts?.[pid];
+        multiProductsObj[pid] = {
+          product_id: pid,
+          product_name: cat?.name || pid,
+          model_script: entry?.model_script?.trim() || '',
+          key_points: entry?.key_points?.trim() || ''
+        };
+      });
+
+      const multiPayload: MultiProductScriptPayload = {
+        __multiProduct: true,
+        product_ids: sortedProductIds,
+        products: multiProductsObj
+      };
+
+      finalModelScript = JSON.stringify(multiPayload);
+
+      const keyPointsSummary = sortedProductIds
+        .map(pid => `[${multiProductsObj[pid].product_name}]\n${multiProductsObj[pid].key_points}`)
+        .join('\n\n');
+      finalKeyPoints = keyPointsSummary || params.key_points.trim();
+    }
+
     const payload: any = {
-      product: params.product.trim(),
+      product: finalProductTitle,
       language: params.language.trim(),
-      model_script: params.model_script.trim(),
-      key_points: params.key_points.trim(),
+      model_script: finalModelScript,
+      key_points: finalKeyPoints,
       reference_audio_url: params.reference_audio_url?.trim() || null,
       reference_audio_file_path: finalAudioPath,
       reference_video_url: params.reference_video_url?.trim() || null,
@@ -377,7 +634,7 @@ export async function updateCampaignScript(
       throw error;
     }
 
-    return data as CampaignScript;
+    return hydrateScript(data);
   } catch (err) {
     console.error('Exception in updateCampaignScript:', err);
     throw err;
@@ -390,7 +647,6 @@ export async function updateCampaignScript(
 export async function deleteCampaignScript(script: CampaignScript): Promise<boolean> {
   const client = supabaseAdmin || supabase;
   try {
-    // 1. Delete DB record first
     const { error } = await client
       .from(SUPABASE_TABLES.campaignScripts)
       .delete()
@@ -401,7 +657,6 @@ export async function deleteCampaignScript(script: CampaignScript): Promise<bool
       throw error;
     }
 
-    // 2. Delete storage files if any exist
     if (script.reference_audio_file_path) {
       await deleteScriptAudioFile(script.reference_audio_file_path);
     }
