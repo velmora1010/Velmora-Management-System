@@ -986,8 +986,8 @@ export const WebsiteDashboard: React.FC = () => {
             <p className="text-xs text-slate-400">Order date and upload timestamp audit records</p>
           </div>
           <button
-            onClick={() => navigate('/sales/website/upload')}
-            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
+            onClick={() => window.dispatchEvent(new CustomEvent('velmora:open_website_upload_modal'))}
+            className="px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium text-xs rounded-xl shadow-purple-600/20 transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
           >
             <UploadCloud size={14} /> Upload Orders
           </button>

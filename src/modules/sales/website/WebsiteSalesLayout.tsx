@@ -1,10 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, Routes, Route, Navigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
   LayoutDashboard, 
   UploadCloud, 
-  FolderOpen,
   BarChart3 
 } from 'lucide-react';
 import { WebsiteDashboard } from './WebsiteDashboard';
@@ -12,17 +11,25 @@ import { WebsiteUpload } from './WebsiteUpload';
 import { WebsiteFiles } from './WebsiteFiles';
 import { WebsiteAnalytics } from './WebsiteAnalytics';
 import { WebsiteSalesDateRangeProvider } from './context/WebsiteSalesDateRangeContext';
+import { WebsiteOrderFilesModal } from './components/WebsiteOrderFilesModal';
 
 export const WebsiteSalesLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
+  // Simplified navigation: Only Dashboard and Analytics tabs
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', path: '/sales/website/dashboard', icon: LayoutDashboard },
-    { id: 'upload', label: 'Upload Orders', path: '/sales/website/upload', icon: UploadCloud },
-    { id: 'files', label: 'Files', path: '/sales/website/files', icon: FolderOpen },
     { id: 'analytics', label: 'Analytics', path: '/sales/website/analytics', icon: BarChart3 }
   ];
+
+  // Global listener to open upload modal from dashboard or anywhere in website sales
+  useEffect(() => {
+    const handleOpenModal = () => setIsUploadModalOpen(true);
+    window.addEventListener('velmora:open_website_upload_modal', handleOpenModal);
+    return () => window.removeEventListener('velmora:open_website_upload_modal', handleOpenModal);
+  }, []);
 
   // Active tab matching
   const currentPath = location.pathname;
@@ -34,33 +41,44 @@ export const WebsiteSalesLayout: React.FC = () => {
     <WebsiteSalesDateRangeProvider>
       <div className="w-full max-w-[1650px] mx-auto space-y-5 p-3 md:p-5 lg:p-6 animate-in fade-in duration-300 pb-16">
         {/* COMPACT SINGLE-ROW MODULE HEADER */}
-        <div className="flex items-center justify-between gap-4 py-1 pb-3.5 border-b border-slate-800/80">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 py-1 pb-3.5 border-b border-slate-800/80">
+          <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap">
             <button
               onClick={() => navigate('/sales')}
-              className="w-9 h-9 bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 hover:text-white rounded-xl border border-slate-700/80 transition-all cursor-pointer flex items-center justify-center"
+              className="w-9 h-9 bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 hover:text-white rounded-xl border border-slate-700/80 transition-all cursor-pointer flex items-center justify-center shrink-0"
               title="Back to Sales"
               aria-label="Back to Sales"
             >
               <ArrowLeft size={18} />
             </button>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               <h1 className="text-lg font-bold text-white tracking-tight">Website Sales</h1>
-              <span className="text-sm text-slate-400 font-medium border-l border-slate-700/80 pl-3">
+              <span className="hidden sm:inline-block text-sm text-slate-400 font-medium border-l border-slate-700/80 pl-3">
                 Direct Channel
               </span>
             </div>
+
+            {/* TOP-LEFT UPLOAD BUTTON: Distinct purple styling with cloud icon */}
+            <button
+              type="button"
+              onClick={() => setIsUploadModalOpen(true)}
+              className="ml-1 sm:ml-2 px-3.5 py-1.5 sm:px-4 sm:py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-purple-600/30 border border-purple-400/30 transition-all flex items-center gap-2 cursor-pointer shrink-0 active:scale-95"
+              title="Upload Website Order Files"
+            >
+              <UploadCloud size={16} className="text-purple-100" />
+              <span>Upload</span>
+            </button>
           </div>
 
           <button
             onClick={() => navigate('/sales')}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-slate-700/80 transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+            className="px-3.5 py-1.5 sm:px-4 sm:py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs rounded-xl border border-slate-700/80 transition-all flex items-center gap-2 cursor-pointer shadow-sm ml-auto sm:ml-0"
           >
             <ArrowLeft size={15} /> Back to Sales
           </button>
         </div>
 
-        {/* TOP NAVIGATION TABS (DASHBOARD | UPLOAD ORDERS | FILES | ANALYTICS) */}
+        {/* TOP NAVIGATION TABS (DASHBOARD | ANALYTICS ONLY) */}
         <div className="flex items-center gap-3 overflow-x-auto py-1">
           {tabs.map(tab => {
             const Icon = tab.icon;
@@ -93,6 +111,15 @@ export const WebsiteSalesLayout: React.FC = () => {
           <Route path="analytics" element={<WebsiteAnalytics />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Routes>
+
+        {/* UNIFIED ORDER FILES MODAL */}
+        <WebsiteOrderFilesModal
+          isOpen={isUploadModalOpen}
+          onClose={() => setIsUploadModalOpen(false)}
+          onUploadSuccess={(orderDate) => {
+            navigate(`/sales/website/dashboard?date=${orderDate}`);
+          }}
+        />
       </div>
     </WebsiteSalesDateRangeProvider>
   );
